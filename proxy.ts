@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isValidSession, sessionCookie } from "@/lib/auth";
 
-export function proxy(request: NextRequest) {
-  if (!process.env.LUMEN_PASSWORD || request.nextUrl.pathname.startsWith("/api/cron")) return NextResponse.next();
-  const auth = request.headers.get("authorization");
-  if (auth?.startsWith("Basic ")) {
-    const decoded = atob(auth.slice(6));
-    const separator = decoded.indexOf(":");
-    const username = separator >= 0 ? decoded.slice(0, separator) : "";
-    const password = separator >= 0 ? decoded.slice(separator + 1) : "";
-    if (username === (process.env.LUMEN_USERNAME || "rasul") && password === process.env.LUMEN_PASSWORD) return NextResponse.next();
-  }
-  return new NextResponse("Lumen is private. Sign in with your dashboard credentials.", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Lumen"' } });
+export async function proxy(request: NextRequest) {
+  const path = request.nextUrl.pathname;
+  if (!process.env.LUMEN_PASSWORD || path === "/login" || path.startsWith("/api/auth") || path.startsWith("/_next/") || path === "/favicon.ico" || path.startsWith("/api/cron")) return NextResponse.next();
+  const username = process.env.LUMEN_USERNAME || "rasul";
+  if (await isValidSession(request.cookies.get(sessionCookie)?.value, username, process.env.LUMEN_PASSWORD)) return NextResponse.next();
+  if (path.startsWith("/api/")) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+  return NextResponse.redirect(new URL("/login", request.url));
 }
-
 export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };

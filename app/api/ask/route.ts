@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import library from "@/data/library-context.json";
 import sourceCatalog from "@/data/library-sources.json";
+import repositories from "@/data/repository-context.json";
 
 function cleanAnswer(value: string) {
   return value.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/\*/g, "").replace(/[—–]/g, " - ").replace(/\n{3,}/g, "\n\n").trim();
@@ -13,7 +14,7 @@ export async function POST(request: Request) {
     const body = await request.json() as { prompt?: string; context?: string; history?: { role: "user" | "assistant"; content: string }[] };
     if (!body.prompt?.trim()) return NextResponse.json({ error: "Ask a question first." }, { status: 400 });
     const messages = [
-      { role: "system", content: `You are Lumen, a concise Senior FDE learning guide. Explain concepts plainly, connect them to production systems and FDE interviews, and finish with one practical next step. Use the plan and library map as supporting context; do not invent progress. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. The learner's indexed learning map is:\n${JSON.stringify(library)}\n\nThe local source catalog (metadata and chapter map only) is:\n${JSON.stringify(sourceCatalog)}` },
+      { role: "system", content: `You are Lumen, a concise Senior FDE learning guide. Explain concepts plainly, connect them to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. The learner's indexed learning map is:\n${JSON.stringify(library)}\n\nThe local source catalog (metadata and chapter map only) is:\n${JSON.stringify(sourceCatalog)}\n\nThe public repository map is:\n${JSON.stringify(repositories)}` },
       ...(body.history || []).slice(-8),
       { role: "user", content: `Plan context:\n${body.context || "No topic filter is active."}\n\nQuestion:\n${body.prompt}` },
     ];
