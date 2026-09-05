@@ -31,6 +31,8 @@ For a remote MCP client, use the Render `/mcp` URL with an `Authorization: Beare
 
 The MCP is intentionally protected and rate-limited to 30 requests per minute per client. Mutating study actions create an audit record. The quick check has deterministic answer keys; weekly, monthly, and quarterly assessments accept rubric ratings and return weighted scores with next-step guidance. Progress is append-only in GitHub and can be read through `get_progress_history` and `get_progress_analytics`.
 
+`ask_lumen` calls the protected Vercel Ask route through `LUMEN_ASK_URL` and `LUMEN_INTERNAL_API_KEY`, so the MiniMax key remains only on Vercel. It falls back to a direct Render-side MiniMax call only when the Vercel bridge variables are absent.
+
 Claude and Codex can also work with the same context through the repository files, GitHub MCP or CLI access, and the Vercel API when those tools are configured in the client.
 
 The daily Vercel cron requires `MINIMAX_API_KEY`, `CRON_SECRET`, `RESEND_API_KEY`, and a verified `RESEND_FROM_EMAIL`.
