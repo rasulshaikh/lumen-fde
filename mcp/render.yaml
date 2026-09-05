@@ -7,3 +7,10 @@ services:
     startCommand: npm start
     healthCheckPath: /healthz
     plan: free
+    # server.js reads ../data/*.json, which sits outside rootDir. Without this
+    # filter Render only redeploys on mcp/** changes, so plan edits never reach
+    # the live MCP and it silently serves stale rows.
+    buildFilter:
+      paths:
+        - mcp/**
+        - data/**
