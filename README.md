@@ -25,9 +25,11 @@ git pull origin main
 rg --files reports/asks
 ```
 
-Render hosts the protected Lumen MCP bridge at `https://lumen-mcp.onrender.com/mcp` after the service is created. It exposes `get_plan`, `get_learning_context`, `semantic_search`, Ask report access, study notes, progress history, and a connection map. GitHub is the durable source for reports, notes, and progress events; Vercel is the dashboard and MiniMax-backed Ask UI.
+Render hosts the protected Lumen MCP bridge at `https://lumen-fde.onrender.com/mcp`. The Render service is named `lumen-mcp`; its URL slug remains `lumen-fde`. It exposes plan and library context, direct MiniMax Ask, SurfSense semantic search, Ask report access, study notes, progress history, assessment scoring, analytics, audit logs, and a connection map. GitHub is the durable source for reports, notes, progress events, and durable audit records; Vercel is the dashboard and MiniMax-backed Ask UI.
 
-For a remote MCP client, use the Render `/mcp` URL with an `Authorization: Bearer <MCP_API_KEY>` header. The same service also provides `GET /healthz`. `EXA_API_KEY` enables wider neural web search; without it, semantic search safely falls back to repository search.
+For a remote MCP client, use the Render `/mcp` URL with an `Authorization: Bearer <MCP_API_KEY>` header. The same service also provides `GET /healthz`. Add `SURFSENSE_API_KEY`, `SURFSENSE_WORKSPACE_ID`, and optionally `SURFSENSE_API_URL` on Render to enable live Google Search and other SurfSense connectors; without them, semantic search safely falls back to GitHub repository search.
+
+The MCP is intentionally protected and rate-limited to 30 requests per minute per client. Mutating study actions create an audit record. The quick check has deterministic answer keys; weekly, monthly, and quarterly assessments accept rubric ratings and return weighted scores with next-step guidance. Progress is append-only in GitHub and can be read through `get_progress_history` and `get_progress_analytics`.
 
 Claude and Codex can also work with the same context through the repository files, GitHub MCP or CLI access, and the Vercel API when those tools are configured in the client.
 
