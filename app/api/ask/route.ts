@@ -3,8 +3,21 @@ import library from "@/data/library-context.json";
 import sourceCatalog from "@/data/library-sources.json";
 import repositories from "@/data/repository-context.json";
 import lesson from "@/data/lesson-context.json";
+import curriculum from "@/data/curriculum.json";
 
 export const maxDuration = 60;
+
+type Syllabus = { topic: string; why: string; prerequisites: string[]; subtopics: { name: string; learn: string }[]; outcomes: string[]; failureModes: string[] };
+// A compact rendering of one topic's deep syllabus, so answers are grounded in what the plan
+// actually asks the learner to know. Capped so it cannot crowd out the question.
+function syllabusContext(index: number | undefined) {
+  if (index === undefined || index === null) return "";
+  const s = (curriculum as { topics: Record<string, Syllabus> }).topics[String(index)];
+  if (!s) return "";
+  const parts = s.subtopics.map((x, i) => `${i + 1}. ${x.name}: ${x.learn}`).join("\n");
+  const text = `Deep syllabus for "${s.topic}":\nWhy: ${s.why}\nPrerequisites: ${s.prerequisites.join("; ")}\nParts:\n${parts}\nOutcomes: ${s.outcomes.join(" | ")}\nProduction failure modes: ${s.failureModes.join(" | ")}`;
+  return text.length > 7000 ? `${text.slice(0, 7000)}…` : text;
+}
 
 function cleanAnswer(value: string) {
   return value.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/\*/g, "").replace(/[—–]/g, " - ").replace(/\n{3,}/g, "\n\n").trim();
@@ -28,12 +41,13 @@ export async function POST(request: Request) {
   const apiKey = process.env.MINIMAX_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "MiniMax is not configured yet. Add MINIMAX_API_KEY in Vercel project settings." }, { status: 503 });
   try {
-    const body = await request.json() as { prompt?: string; context?: string; history?: { role: "user" | "assistant"; content: string }[] };
+    const body = await request.json() as { prompt?: string; context?: string; topicIndex?: number; history?: { role: "user" | "assistant"; content: string }[] };
     if (!body.prompt?.trim()) return NextResponse.json({ error: "Ask a question first." }, { status: 400 });
+    const deep = syllabusContext(body.topicIndex);
     const messages = [
       { role: "system", content: `You are Lumen, a concise Senior FDE learning guide. Explain every idea in fifth-grade reading language while keeping the technical meaning exact. Use short sentences, define jargon immediately, give one concrete technical example, connect it to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. The learner's indexed learning map is:\n${JSON.stringify(library)}\n\nThe local source catalog (metadata and chapter map only) is:\n${JSON.stringify(sourceCatalog)}\n\nThe public repository map is:\n${JSON.stringify(repositories)}` },
       ...(body.history || []).slice(-8),
-      { role: "user", content: `Plan context:\n${body.context || "No topic filter is active."}\n\nQuestion:\n${body.prompt}` },
+      { role: "user", content: `Plan context:\n${body.context || "No topic filter is active."}${deep ? `\n\n${deep}` : ""}\n\nQuestion:\n${body.prompt}` },
     ];
     const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, messages, temperature: 0.4, max_completion_tokens: 1600, stream: false }), signal: AbortSignal.timeout(55000) });
     const raw = await response.text();
