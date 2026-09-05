@@ -68,3 +68,35 @@ a.resource-link{min-height:24px;align-items:center;padding:4px 2px}
    clicks. Make it a height-capped bottom sheet instead, so the covered region is obvious
    and the top ~40% of the page stays fully interactive. */
 @media(min-width:769px) and (max-width:1200px){.ask-panel{left:24px;right:24px;width:auto;max-height:min(58svh,560px)}}
+
+/* --- deep syllabus (Plan row expansion + Curriculum tab) --- */
+.topic-toggle{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;width:100%;border:0;background:none;padding:0;text-align:left;color:var(--ink);cursor:pointer;font:inherit}
+.topic-toggle strong{display:block;font-size:13px;line-height:1.35;margin:0}
+.topic-toggle:hover strong{color:var(--primary)}
+.topic-toggle:focus-visible{outline:2px solid var(--primary);outline-offset:3px;border-radius:4px}
+.topic-toggle .chev{flex:none;width:20px;height:20px;border-radius:5px;background:var(--surface-strong);color:var(--muted);display:grid;place-items:center;font-size:14px;line-height:1}
+td .topic-toggle{margin-bottom:6px}
+.syllabus-row td{background:var(--surface);padding:18px 16px 22px;border-top:0}
+.syllabus{display:grid;gap:18px;max-width:1100px}
+.syllabus-why{margin:0;color:var(--ink);font-size:13px;line-height:1.55}
+.syllabus h4{margin:0 0 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--primary);display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.syllabus h4 span{color:var(--muted);text-transform:none;letter-spacing:0;font-weight:500}
+.syllabus ul,.syllabus ol{margin:0;padding-left:18px;color:var(--muted);font-size:12px;line-height:1.5}
+.syllabus li{margin:0 0 5px}
+.syllabus-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.syllabus-subtopics ol{list-style:none;padding:0;display:grid;gap:8px;counter-reset:part}
+.syllabus-subtopics li{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px 12px;counter-increment:part}
+.sub-head{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.sub-head strong{color:var(--ink);font-size:12.5px}
+.sub-head strong:before{content:counter(part,decimal-leading-zero) "  ";color:var(--primary);font-weight:700;font-size:11px}
+.sub-head span{color:var(--muted);font-size:11px;white-space:nowrap}
+.syllabus-subtopics p{margin:5px 0 7px;color:var(--muted);font-size:12px;line-height:1.5}
+.syllabus-proof p{margin:0;color:var(--muted);font-size:12px;line-height:1.55}
+.syllabus-empty{margin:0;color:var(--muted);font-size:12px}
+.cur-track{margin-top:26px}
+.cur-track-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding-bottom:8px;margin-bottom:10px;border-bottom:1px solid var(--line)}
+.cur-track-head h3{font-size:14px;margin:0}
+.cur-topic{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:8px}
+.cur-topic .topic-toggle span:not(.chev){color:var(--muted);font-size:11px;font-weight:500;white-space:nowrap;margin-left:auto}
+.cur-topic .syllabus{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+@media(max-width:850px){.syllabus-grid{grid-template-columns:1fr}.cur-topic .topic-toggle{flex-wrap:wrap}.cur-topic .topic-toggle span:not(.chev){margin-left:0;flex-basis:100%}}
