@@ -16,3 +16,14 @@ export async function isValidSession(token: string | undefined, username: string
 }
 export const sessionCookie = "lumen_session";
 export const sessionTtl = SESSION_TTL_SECONDS;
+
+// Best effort only: this map lives in one serverless instance's memory, so it slows a
+// brute force rather than stopping one, and it resets on cold start. Proportionate for a
+// single-user dashboard; swap for a shared store if this ever has more than one user.
+const LOGIN_LIMIT = 8;
+const LOGIN_WINDOW_MS = 10 * 60 * 1000;
+const loginAttempts = new Map<string, number[]>();
+function recentAttempts(key: string) { const now = Date.now(); const recent = (loginAttempts.get(key) || []).filter((at) => now - at < LOGIN_WINDOW_MS); if (recent.length) loginAttempts.set(key, recent); else loginAttempts.delete(key); return recent; }
+export function loginBlockedFor(key: string) { const recent = recentAttempts(key); return recent.length < LOGIN_LIMIT ? 0 : Math.max(1, Math.ceil((LOGIN_WINDOW_MS - (Date.now() - recent[0])) / 1000)); }
+export function recordLoginFailure(key: string) { const recent = recentAttempts(key); recent.push(Date.now()); loginAttempts.set(key, recent); }
+export function clearLoginFailures(key: string) { loginAttempts.delete(key); }
