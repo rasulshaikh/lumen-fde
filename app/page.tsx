@@ -46,7 +46,7 @@ export default function Home() {
   };
 
   return <main className="shell">
-    <header className="topbar"><div className="brand"><div className="brand-mark">LU</div><div><div className="brand-name">Lumen</div><div className="brand-sub">Rasul · 9-month operating view</div></div></div><div className="top-actions"><span className="sync-dot" /> Workbook snapshot · Sep 2026 <button className="ask-trigger" onClick={() => setAskOpen(true)}>✦ Ask Lumen</button><button className="ghost-button">↗ Share</button></div></header>
+    <header className="topbar"><a className="brand brand-link" href="/" aria-label="Return to Lumen home"><div className="brand-mark">LU</div><div><div className="brand-name">Lumen</div><div className="brand-sub">Rasul · 9-month operating view</div></div></a><div className="top-actions"><span className="sync-dot" /> Workbook snapshot · 16 books · 2 repos <button className="ask-trigger" onClick={() => setAskOpen(true)}>✦ Ask Lumen</button><button className="ghost-button">↗ Share</button></div></header>
     <section className="hero"><div><p className="kicker">Preparation command center</p><h1>Build proof, not just knowledge.</h1><p className="hero-copy">Your 612-hour Senior FDE plan, reduced to the pace, practice, and proof that matter this week.</p></div><div className="hero-note"><span className="note-pin">●</span><div><strong>Current focus</strong><p>Month 1 · foundations and production fluency</p></div></div></section>
     <nav className="tabs" aria-label="Workbook views">{["Overview", "Plan", "Mocks", "Roadmaps", "Library", "Comp reality"].map((item) => <button key={item} className={tab === item ? "tab active" : "tab"} onClick={() => setView(item)}>{item}</button>)}</nav>
     {tab === "Overview" && <>
