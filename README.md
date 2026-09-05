@@ -10,7 +10,7 @@ A Vercel-ready command center built from `Rasul's Senior FDE Plan.xlsx`.
 
 The final URL depends on the Vercel account/team slug and availability. GitHub Actions runs a production build on pushes and pull requests.
 
-The workbook is normalized into `data/workbook.json`; replace that snapshot from the source workbook when the plan changes. The original workbook is retained at `data/source.xlsx`.
+`data/workbook.json` is the source of truth for the plan. Edit it directly; do not regenerate it from the spreadsheet. `data/source.xlsx` is a frozen snapshot of the original workbook and is now behind — an `openpyxl` round-trip drops the five embedded drawing XMLs, so the xlsx is kept for history only.
 
 The private study library is represented by `data/library-context.json`; source PDFs stay on the local machine. Repository learning references are summarized in `data/repository-context.json`, and the Shell Mastery lesson is in `data/lesson-context.json`. The Ask Lumen route sends the active plan context plus these indexed maps to MiniMax. When `GITHUB_TOKEN` is configured, every successful Ask response is saved as a Markdown file under `reports/asks/` through the GitHub Contents API. Claude and Codex can then read the reports after `git pull`.
 
