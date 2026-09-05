@@ -18,7 +18,7 @@ export async function POST(request: Request) {
       ...(body.history || []).slice(-8),
       { role: "user", content: `Plan context:\n${body.context || "No topic filter is active."}\n\nQuestion:\n${body.prompt}` },
     ];
-    const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", messages, temperature: 0.4, max_completion_tokens: 900 }), signal: AbortSignal.timeout(25000) });
+    const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", messages, temperature: 0.4, max_tokens: 900, stream: false }), signal: AbortSignal.timeout(25000) });
     const raw = await response.text();
     let data: { choices?: { message?: { content?: string } }[]; base_resp?: { status_msg?: string } } = {};
     try { data = JSON.parse(raw); } catch { console.error("[api/ask] MiniMax returned non-JSON", { status: response.status }); }
