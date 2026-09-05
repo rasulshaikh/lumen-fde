@@ -1,0 +1,16 @@
+{
+  "title": "Shell Mastery and Scripting",
+  "level": "Senior FDE foundations",
+  "teachingRule": "Explain in fifth-grade reading language, keep technical details exact, define jargon immediately, and connect every idea to production and interviews.",
+  "coreIdeas": [
+    "Use set -euo pipefail so scripts stop on errors, reject missing variables, and fail when any pipeline step fails.",
+    "Use EXIT traps to clean temporary files, containers, locks, and partial state.",
+    "Use getopts for standard command-line flags such as -n and -d.",
+    "Use timestamped logs so a future operator can understand what happened.",
+    "Use small tests with fake input and expected output before trusting a script in production."
+  ],
+  "buildExercise": "Build safe-rotate.sh, a 200-line log rotation tool. It should keep the last five copies, gzip older copies, refuse to run as root, use set -euo pipefail, an EXIT trap, getopts, timestamped logs, and tests/test_rotate.sh.",
+  "steps": ["Write the strict header and empty main", "Parse -n and -d with getopts", "Create and clean a staging file", "Rotate, truncate, shift, delete, and gzip safely", "Log every important step", "Test with a temporary directory and fake logs"],
+  "interviewAngle": "A senior FDE should explain failure modes, cleanup, observability, idempotency, and evidence, not only Bash syntax.",
+  "nextStep": "Read chapters 4 through 6 of The Linux Command Line, then convert one daily task into a tested Bash script."
+}

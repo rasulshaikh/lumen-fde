@@ -48,7 +48,7 @@ export default function Home() {
   const [statuses, setStatuses] = useState<Record<string, string>>({});
   const [askOpen, setAskOpen] = useState(false);
   const [askText, setAskText] = useState("");
-  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string; reportUrl?: string }[]>([]);
   const [asking, setAsking] = useState(false);
   useEffect(() => { try { setStatuses(JSON.parse(localStorage.getItem("lumen-statuses") || "{}")); } catch {} }, []);
   const setStatus = (r: Row, status: string) => { const next = { ...statuses, [topicKey(r)]: status }; setStatuses(next); localStorage.setItem("lumen-statuses", JSON.stringify(next)); };
@@ -64,7 +64,7 @@ export default function Home() {
     if (!prompt.trim() || asking) return;
     const context = filtered.slice(0, 8).map((r) => `${r[0]} | ${r[2]} | ${r[3]} | resources: ${r[4]}, ${r[7]}, ${r[10]}`).join("\n");
     setMessages((m) => [...m, { role: "user", content: prompt }]); setAskText(""); setAsking(true);
-    try { const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, context, history: messages }) }); const data = await res.json(); setMessages((m) => [...m, { role: "assistant", content: data.answer || data.error || "Lumen could not answer right now." }]); } catch { setMessages((m) => [...m, { role: "assistant", content: "Lumen is unavailable. Add MINIMAX_API_KEY in Vercel project settings and try again." }]); } finally { setAsking(false); }
+    try { const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, context, history: messages }) }); const data = await res.json(); setMessages((m) => [...m, { role: "assistant", content: data.answer || data.error || "Lumen could not answer right now.", reportUrl: data.reportUrl || undefined }]); } catch { setMessages((m) => [...m, { role: "assistant", content: "Lumen is unavailable. Add MINIMAX_API_KEY in Vercel project settings and try again." }]); } finally { setAsking(false); }
   };
 
   return <main className="shell">
