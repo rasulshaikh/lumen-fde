@@ -4,6 +4,8 @@ import sourceCatalog from "@/data/library-sources.json";
 import repositories from "@/data/repository-context.json";
 import lesson from "@/data/lesson-context.json";
 
+export const maxDuration = 60;
+
 function cleanAnswer(value: string) {
   return value.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/\*/g, "").replace(/[—–]/g, " - ").replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -33,7 +35,7 @@ export async function POST(request: Request) {
       ...(body.history || []).slice(-8),
       { role: "user", content: `Plan context:\n${body.context || "No topic filter is active."}\n\nQuestion:\n${body.prompt}` },
     ];
-    const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, messages, temperature: 0.4, max_completion_tokens: 1600, stream: false }), signal: AbortSignal.timeout(25000) });
+    const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, messages, temperature: 0.4, max_completion_tokens: 1600, stream: false }), signal: AbortSignal.timeout(55000) });
     const raw = await response.text();
     let data: { choices?: { message?: { content?: string } }[]; base_resp?: { status_msg?: string } } = {};
     try { data = JSON.parse(raw); } catch { console.error("[api/ask] MiniMax returned non-JSON", { status: response.status }); }
@@ -43,5 +45,5 @@ export async function POST(request: Request) {
     let reportUrl: string | null = null;
     try { reportUrl = await saveAskReport(body.prompt, body.context || "", answer); } catch (error) { console.error("[api/ask] GitHub report save exception", { error: String(error) }); }
     return NextResponse.json({ answer, reportUrl });
-  } catch (error) { console.error("[api/ask] request failed", { error: String(error) }); return NextResponse.json({ error: "Lumen could not reach the learning guide. Try again in a moment." }, { status: 500 }); }
+  } catch (error) { const message = String(error); console.error("[api/ask] request failed", { error: message }); if (message.includes("TimeoutError") || message.includes("timed out")) return NextResponse.json({ error: "Lumen is taking longer than expected. Try the question again with a shorter prompt." }, { status: 504 }); return NextResponse.json({ error: "Lumen could not reach the learning guide. Try again in a moment." }, { status: 500 }); }
 }
