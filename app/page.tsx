@@ -1,0 +1,47 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import workbook from "@/data/workbook.json";
+
+type Row = (string | number | null)[];
+const planRows = workbook.Plan.slice(1) as Row[];
+const mockRows = workbook.Mocks.slice(1) as Row[];
+const roadmapRows = workbook.Roadmaps.slice(1) as Row[];
+const compRows = workbook.CompReality.slice(1) as Row[];
+const tracks = Array.from(new Set(planRows.map((r) => String(r[0]))));
+const months = Array.from(new Set(planRows.map((r) => Number(r[1])))).sort((a, b) => a - b);
+const pct = (done: number, total: number) => total ? Math.round((done / total) * 100) : 0;
+
+function Link({ href, children }: { href: string; children: React.ReactNode }) { return <a className="resource-link" href={href} target="_blank" rel="noreferrer">{children}<span>↗</span></a>; }
+function Metric({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: string }) { return <div className={`metric ${tone}`}><span className="metric-label">{label}</span><strong>{value}</strong><span className="metric-detail">{detail}</span></div>; }
+
+export default function Home() {
+  const [tab, setTab] = useState("Overview");
+  const [track, setTrack] = useState("All tracks");
+  const [month, setMonth] = useState("All months");
+  const [query, setQuery] = useState("");
+  const filtered = useMemo(() => planRows.filter((r) => (track === "All tracks" || r[0] === track) && (month === "All months" || String(r[1]) === month) && String(r[2]).toLowerCase().includes(query.toLowerCase())), [track, month, query]);
+  const done = planRows.filter((r) => r[15] === "Done").length;
+  const skipped = planRows.filter((r) => r[15] === "Skipped").length;
+  const hours = planRows.reduce((n, r) => n + Number(r[13] || 0), 0);
+  const doneHours = planRows.filter((r) => r[15] === "Done").reduce((n, r) => n + Number(r[13] || 0), 0);
+  const monthHours = months.map((m) => ({ month: m, hours: planRows.filter((r) => Number(r[1]) === m).reduce((n, r) => n + Number(r[13] || 0), 0) }));
+  const maxMonthHours = Math.max(...monthHours.map((x) => x.hours));
+  const setView = (name: string) => { setTab(name); window.scrollTo({ top: 0, behavior: "smooth" }); };
+
+  return <main className="shell">
+    <header className="topbar"><div className="brand"><div className="brand-mark">SF</div><div><div className="brand-name">Senior FDE Plan</div><div className="brand-sub">Rasul · 9-month operating view</div></div></div><div className="top-actions"><span className="sync-dot" /> Workbook snapshot · Sep 2026 <button className="ghost-button">↗ Share</button></div></header>
+    <section className="hero"><div><p className="kicker">Preparation command center</p><h1>Build proof, not just knowledge.</h1><p className="hero-copy">Your 612-hour Senior FDE plan, reduced to the pace, practice, and proof that matter this week.</p></div><div className="hero-note"><span className="note-pin">●</span><div><strong>Current focus</strong><p>Month 1 · foundations and production fluency</p></div></div></section>
+    <nav className="tabs" aria-label="Workbook views">{["Overview", "Plan", "Mocks", "Roadmaps", "Comp reality"].map((item) => <button key={item} className={tab === item ? "tab active" : "tab"} onClick={() => setView(item)}>{item}</button>)}</nav>
+    {tab === "Overview" && <>
+      <section className="metric-grid"><Metric label="Plan progress" value={`${pct(done, planRows.length - skipped)}%`} detail={`${done} of ${planRows.length - skipped} non-skipped topics`} tone="rose" /><Metric label="Hours remaining" value={`${Math.max(hours - doneHours, 0)}`} detail={`of ${hours} planned hours`} tone="teal" /><Metric label="Weekly commitment" value="16h" detail="38.3 weeks at this pace" tone="brass" /><Metric label="Mocks" value={`${mockRows.reduce((n, r) => n + Number(r[6] || 0), 0)} / ${mockRows.reduce((n, r) => n + Number(r[1] || 0), 0)}`} detail="completed / target" tone="ink" /></section>
+      <section className="content-grid"><div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Pace map</p><h2>Where the hours go</h2></div><span className="panel-meta">612h · 12 tracks</span></div><div className="bar-chart">{monthHours.map((item) => <div className="bar-item" key={item.month}><div className="bar-value">{item.hours}h</div><div className="bar-track"><div className="bar-fill" style={{ height: `${Math.max(12, item.hours / maxMonthHours * 100)}%` }} /></div><div className="bar-label">M{item.month}</div></div>)}</div><div className="chart-foot"><span><i className="legend-dot rose" /> planned hours</span><span>Peak: Month 2 · 79h</span></div></div><div className="panel"><div className="panel-head"><div><p className="eyebrow">Next action</p><h2>Start here</h2></div><span className="priority">P1</span></div><div className="next-action"><div className="action-index">01</div><div><h3>{String(planRows[0][2])}</h3><p>{String(planRows[0][3]).slice(0, 118)}…</p><Link href={String(planRows[0][5])}>Open reading</Link></div></div><button className="primary-button" onClick={() => setView("Plan")}>Open the plan <span>→</span></button></div></section>
+      <section className="content-grid lower"><div className="panel wide"><div className="panel-head"><div><p className="eyebrow">By track</p><h2>Coverage at a glance</h2></div><button className="text-button" onClick={() => setView("Plan")}>View all →</button></div><div className="track-list">{tracks.map((name) => { const rows = planRows.filter((r) => r[0] === name); const h = rows.reduce((n, r) => n + Number(r[13] || 0), 0); return <button className="track-row" key={name} onClick={() => { setTrack(name); setView("Plan"); }}><span className="track-name">{name}</span><span className="track-count">{rows.length} topics</span><span className="track-progress"><span style={{ width: `${pct(rows.filter((r) => r[15] === "Done").length, rows.length)}%` }} /></span><span className="track-hours">{h}h</span></button>; })}</div></div><div className="panel reality"><p className="eyebrow">Reality check</p><h2>Target calibration</h2><p>“$250K” is a 2–3 year target from Pune, not a 9-month promise. The nearer proof point is a strong global-remote India role.</p><button className="text-button" onClick={() => setView("Comp reality")}>Read the assumptions →</button></div></section>
+    </>}
+    {tab === "Plan" && <section className="panel full-panel"><div className="panel-head plan-head"><div><p className="eyebrow">81 topics · three resources each</p><h2>Plan explorer</h2></div><div className="filters"><input aria-label="Search topics" placeholder="Search topics…" value={query} onChange={(e) => setQuery(e.target.value)} /><select value={track} onChange={(e) => setTrack(e.target.value)}><option>All tracks</option>{tracks.map((t) => <option key={t}>{t}</option>)}</select><select value={month} onChange={(e) => setMonth(e.target.value)}><option>All months</option>{months.map((m) => <option key={m}>{m}</option>)}</select></div></div><div className="table-wrap"><table><thead><tr><th>Topic</th><th>Track</th><th>Month</th><th>Hours</th><th>Depth target</th><th>Resources</th></tr></thead><tbody>{filtered.map((r, i) => <tr key={`${r[0]}-${r[2]}-${i}`}><td><strong>{String(r[2])}</strong><span className="status">{r[15] || "Queued"}</span></td><td>{String(r[0]).replace(/^[A-Z]\. /, "")}</td><td>M{String(r[1])}</td><td>{String(r[13])}h</td><td className="depth">{String(r[3])}</td><td className="resource-stack"><Link href={String(r[5])}>Read</Link><Link href={String(r[8])}>Watch</Link><Link href={String(r[11])}>Do</Link></td></tr>)}</tbody></table></div></section>}
+    {tab === "Mocks" && <section className="panel full-panel"><div className="panel-head"><div><p className="eyebrow">Interview proof</p><h2>Mocks & repetitions</h2></div><span className="panel-meta">{mockRows.length} practice loops</span></div><div className="mock-grid">{mockRows.map((r, i) => <div className="mock-row" key={i}><div className="mock-title"><strong>{String(r[0])}</strong><span>M{String(r[3])}</span></div><div className="mock-bar"><span style={{ width: `${pct(Number(r[6] || 0), Number(r[1] || 0))}%` }} /></div><div className="mock-stats"><b>{String(r[6] || 0)} / {String(r[1])}</b><span>{String(r[5])}</span></div></div>)}</div></section>}
+    {tab === "Roadmaps" && <section className="panel full-panel"><div className="panel-head"><div><p className="eyebrow">External scaffolding</p><h2>Roadmaps & guides</h2></div></div><div className="resource-grid">{roadmapRows.map((r, i) => <a className="resource-card" href={String(r[1])} target="_blank" rel="noreferrer" key={i}><span className="resource-number">{String(i + 1).padStart(2, "0")}</span><div><h3>{String(r[0])}</h3><p>{String(r[2])}</p></div><span className="arrow">↗</span></a>)}</div></section>}
+    {tab === "Comp reality" && <section className="panel full-panel"><div className="panel-head"><div><p className="eyebrow">Context, not promises</p><h2>Compensation reality</h2></div></div><div className="comp-list">{compRows.map((r, i) => <article className="comp-row" key={i}><div><span className="comp-market">{String(r[0])}</span><h3>{String(r[1])}</h3></div><p>{String(r[3])}</p><span className={`prob prob-${i}`}>{String(r[4])}</span></article>)}</div></section>}
+    <footer><span>Built from Rasul&apos;s Senior FDE Plan.xlsx</span><span>Five workbook views · one operating system</span></footer>
+  </main>;
+}
