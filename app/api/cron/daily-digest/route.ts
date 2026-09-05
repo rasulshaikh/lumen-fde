@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import workbook from "@/data/workbook.json";
 import library from "@/data/library-context.json";
 
+function cleanEmailText(value: string) { return value.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/\*/g, "").replace(/[—–]/g, " - ").trim(); }
+
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) return new Response("Unauthorized", { status: 401 });
@@ -16,7 +18,7 @@ export async function GET(request: Request) {
     const aiResponse = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${minimaxKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", messages: [{ role: "system", content: "You are Lumen, a candid and motivating Senior FDE coach." }, { role: "user", content: prompt }], temperature: 0.5, max_completion_tokens: 500 }) });
     const aiData = await aiResponse.json();
     if (!aiResponse.ok) return NextResponse.json({ ok: false, error: "MiniMax request failed." }, { status: 502 });
-    const brief = aiData?.choices?.[0]?.message?.content || "Lumen could not generate today's brief.";
+    const brief = cleanEmailText(aiData?.choices?.[0]?.message?.content || "Lumen could not generate today's brief.");
     const emailResponse = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ from, to: [to], subject: "Lumen Brief · your next Senior FDE move", text: brief, html: `<div style="font-family:system-ui,sans-serif;max-width:620px;line-height:1.6"><h1>Lumen Brief</h1><p>${brief.replace(/\n/g, "<br />")}</p><p style="color:#667085;font-size:12px">Generated from your Lumen plan and study library.</p></div>` }) });
     if (!emailResponse.ok) return NextResponse.json({ ok: false, error: "Email delivery failed." }, { status: 502 });
     return NextResponse.json({ ok: true, sentTo: to });
