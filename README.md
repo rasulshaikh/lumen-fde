@@ -25,7 +25,11 @@ git pull origin main
 rg --files reports/asks
 ```
 
-The deployed app does not currently expose a custom MCP server. Claude and Codex can work with the same context through the repository files, GitHub MCP or CLI access, and the Vercel API when those tools are configured in the client.
+Render hosts the protected Lumen MCP bridge at `https://lumen-mcp.onrender.com/mcp` after the service is created. It exposes `get_plan`, `get_learning_context`, `semantic_search`, Ask report access, study notes, progress history, and a connection map. GitHub is the durable source for reports, notes, and progress events; Vercel is the dashboard and MiniMax-backed Ask UI.
+
+For a remote MCP client, use the Render `/mcp` URL with an `Authorization: Bearer <MCP_API_KEY>` header. The same service also provides `GET /healthz`. `EXA_API_KEY` enables wider neural web search; without it, semantic search safely falls back to repository search.
+
+Claude and Codex can also work with the same context through the repository files, GitHub MCP or CLI access, and the Vercel API when those tools are configured in the client.
 
 The daily Vercel cron requires `MINIMAX_API_KEY`, `CRON_SECRET`, `RESEND_API_KEY`, and a verified `RESEND_FROM_EMAIL`.
 
