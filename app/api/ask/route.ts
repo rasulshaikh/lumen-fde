@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import library from "@/data/library-context.json";
+import sourceCatalog from "@/data/library-sources.json";
 
 export async function POST(request: Request) {
   const apiKey = process.env.MINIMAX_API_KEY;
@@ -8,7 +9,7 @@ export async function POST(request: Request) {
     const body = await request.json() as { prompt?: string; context?: string; history?: { role: "user" | "assistant"; content: string }[] };
     if (!body.prompt?.trim()) return NextResponse.json({ error: "Ask a question first." }, { status: 400 });
     const messages = [
-      { role: "system", content: `You are Lumen, a concise Senior FDE study partner. Explain concepts plainly, connect them to production systems and FDE interviews, and finish with one practical next step. Use the plan and library map as supporting context; do not invent progress. The learner's indexed library is:\n${JSON.stringify(library)}` },
+      { role: "system", content: `You are Lumen, a concise Senior FDE study partner. Explain concepts plainly, connect them to production systems and FDE interviews, and finish with one practical next step. Use the plan and library map as supporting context; do not invent progress. The learner's indexed learning map is:\n${JSON.stringify(library)}\n\nThe local source catalog (metadata and chapter map only) is:\n${JSON.stringify(sourceCatalog)}` },
       ...(body.history || []).slice(-8),
       { role: "user", content: `Plan context:\n${body.context || "No topic filter is active."}\n\nQuestion:\n${body.prompt}` },
     ];
