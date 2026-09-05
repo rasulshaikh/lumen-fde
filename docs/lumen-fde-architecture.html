@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc 3.10" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>lumen-fde-architecture</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: 1.5em;}
+    div.column{flex: auto;}
+    @media screen {
+    div.columns{gap: min(4vw, 1.5em);}
+    div.column{overflow-x: auto;}
+    }
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    html { -webkit-text-size-adjust: 100%; }
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <link rel="stylesheet" href="lumen-fde-architecture.css" />
+</head>
+<body>
+<h1 id="lumen-fde-end-to-end-architecture">Lumen FDE: end-to-end
+architecture</h1>
+<p><strong>Snapshot:</strong> 5 September 2026<br />
+<strong>System:</strong> Lumen FDE, Rasul’s personal Senior Forward
+Deployed Engineer preparation operating system<br />
+<strong>Repository:</strong> <code>rasulshaikh/lumen-fde</code><br />
+<strong>Dashboard:</strong>
+<code>https://lumen-fde.vercel.app</code><br />
+<strong>MCP bridge:</strong>
+<code>https://lumen-fde.onrender.com/mcp</code></p>
+<figure>
+<img src="lumen-fde-architecture-mindmap.png"
+alt="Lumen FDE architecture mindmap" />
+<figcaption aria-hidden="true">Lumen FDE architecture
+mindmap</figcaption>
+</figure>
+<h2 id="executive-summary">1. Executive summary</h2>
+<p>Lumen FDE turns Rasul’s Senior FDE workbook into a working learning
+system. The browser is the interaction layer. Vercel hosts the dashboard
+and the MiniMax-backed Ask API. Render hosts the protected MCP bridge so
+Claude, Codex, and other MCP clients can use the same plan and tools.
+GitHub is the durable, inspectable memory layer for Ask reports, study
+notes, progress events, and audit records. SurfSense is the live
+semantic-search connector. The private PDFs remain local source
+material; the application receives curated context indexes rather than
+shipping the books into the browser.</p>
+<p>The loop is:</p>
+<pre><code>Plan → choose a topic → read/watch/build → ask Lumen → recall with a quick check
+     → complete weekly/monthly/quarterly evidence → record progress → inspect analytics</code></pre>
+<p>The system separates three concerns:</p>
+<ol type="1">
+<li><strong>Experience:</strong> responsive dashboard, learning views,
+Ask panel, quizzes, and assessments.</li>
+<li><strong>Intelligence:</strong> MiniMax M3 with plan, book,
+repository, and lesson context; SurfSense for live search.</li>
+<li><strong>Evidence:</strong> GitHub-backed Markdown records that can
+be read by humans, Claude, Codex, and MCP clients.</li>
+</ol>
+<h2 id="what-was-built-today">2. What was built today</h2>
+<h3 id="workbook-foundation">Workbook foundation</h3>
+<ul>
+<li>Normalized the Senior FDE workbook into
+<code>data/workbook.json</code>.</li>
+<li>Preserved the source workbook as <code>data/source.xlsx</code>.</li>
+<li>Modeled the five original workbook areas: Dashboard, Plan, Mocks,
+Roadmaps, and CompReality.</li>
+<li>Exposed product views: Overview, Plan, Mocks, Roadmaps, Library,
+Assessments, and Comp reality.</li>
+<li>Added the first structured lesson context for Shell Mastery and
+Scripting.</li>
+</ul>
+<h3 id="context-layer">Context layer</h3>
+<ul>
+<li>Added a 16-book study-library index in
+<code>data/library-context.json</code>.</li>
+<li>Added repository summaries in
+<code>data/repository-context.json</code> for OpenBot and AI Engineering
+from Scratch.</li>
+<li>Added <code>data/lesson-context.json</code> for structured
+explanations, exercises, interview angles, and next steps.</li>
+<li>Kept the original PDFs local. Indexed metadata is safe to commit;
+private files and secrets are not.</li>
+<li>The context is an indexed map, not a claim that the model has
+memorized every page of every PDF.</li>
+</ul>
+<h3 id="dashboard-and-interaction-layer">Dashboard and interaction
+layer</h3>
+<ul>
+<li>Built a Lumen visual system using deep ink text, soft blue surfaces,
+restrained magenta accent, teal status color, and gold data
+emphasis.</li>
+<li>Made the Lumen mark link to the homepage <code>/</code>.</li>
+<li>Added responsive behavior for desktop, laptop, tablet, phablet, and
+mobile, with portrait and landscape layouts considered.</li>
+<li>Added horizontal overflow treatment for wide plan rows instead of
+clipping content.</li>
+<li>Added the four-question Quick Check with deterministic key
+<code>1B · 2C · 3A · 4D</code>.</li>
+<li>Added weekly, monthly, and quarterly assessment cards with
+instructions, rubrics, and answer-key guidance.</li>
+<li>Removed provider branding from the learner-facing Ask panel. The
+learner sees Lumen, not the underlying model vendor.</li>
+</ul>
+<h3 id="ask-reliability">Ask reliability</h3>
+<ul>
+<li>Added the server-side MiniMax M3 route at
+<code>/api/ask</code>.</li>
+<li>Added <code>maxDuration = 60</code> and a bounded 55-second upstream
+timeout.</li>
+<li>Added bounded completion tokens and disabled visible model thinking
+output.</li>
+<li>Added empty-answer protection, clearer upstream error handling, and
+timeout-specific messages.</li>
+<li>Added a protected internal bridge so Render MCP can call Vercel Ask
+without exposing the MiniMax key.</li>
+<li>Successful Ask responses are saved as Markdown under
+<code>reports/asks/</code>.</li>
+</ul>
+<h3 id="durable-learning-memory">Durable learning memory</h3>
+<ul>
+<li>Added <code>/api/progress</code> for append-only progress
+events.</li>
+<li>Added GitHub-backed Ask reports, notes, progress, and audit
+paths.</li>
+<li>Added report links so the same answer can be inspected from the
+dashboard, GitHub, Claude, or Codex.</li>
+<li>Added a daily digest route prepared for Vercel Cron and Resend.</li>
+</ul>
+<h3 id="mcp-and-search">MCP and search</h3>
+<ul>
+<li>Created the protected Render service <code>lumen-mcp</code>.</li>
+<li>Implemented JSON-RPC MCP protocol version <code>2025-03-26</code> at
+<code>/mcp</code>.</li>
+<li>Added bearer authentication, request-size limits, rate limiting, and
+audit logging.</li>
+<li>Added 13 tools for context, Ask, reports, notes, progress,
+assessments, search, auditing, and connection discovery.</li>
+<li>Replaced the planned Exa path with SurfSense Google Search /
+connector access, with GitHub search as a safe fallback.</li>
+</ul>
+<h2 id="runtime-architecture">3. Runtime architecture</h2>
+<h3 id="browser-vercel-dashboard">Browser → Vercel dashboard</h3>
+<p>The user opens <code>https://lumen-fde.vercel.app</code>. Next.js
+renders the learning views and keeps provider credentials on the server.
+Login uses the configured Lumen username and password, then issues an
+HMAC-signed HTTP-only session cookie. <code>proxy.ts</code> protects
+application API routes. The logo returns to <code>/</code>.</p>
+<p>The browser never receives <code>MINIMAX_API_KEY</code>,
+<code>GITHUB_TOKEN</code>, <code>RESEND_API_KEY</code>,
+<code>MCP_API_KEY</code>, <code>LUMEN_INTERNAL_API_KEY</code>, or
+<code>SURFSENSE_API_KEY</code>.</p>
+<h3 id="dashboard-ask-api-minimax-m3">Dashboard → Ask API → MiniMax
+M3</h3>
+<pre><code>Ask panel
+  → POST /api/ask
+  → proxy session check, or internal service-key check
+  → assemble plan + indexed library + repos + lesson context
+  → MiniMax M3, bounded request
+  → clean answer and reject empty output
+  → return answer to browser
+  → save Markdown report to GitHub</code></pre>
+<p>The answer contract asks for language a fifth grader can follow while
+retaining technical accuracy, a Senior FDE connection, an example, and a
+practical next step. Hidden reasoning and provider details are not shown
+to the learner.</p>
+<h3 id="mcp-vercel-ask-bridge">MCP → Vercel Ask bridge</h3>
+<pre><code>Claude / Codex / MCP client
+  → POST https://lumen-fde.onrender.com/mcp
+  → Authorization: Bearer MCP_API_KEY
+  → tools/call: ask_lumen
+  → Render → Vercel /api/ask with x-lumen-internal-key
+  → MiniMax M3
+  → answer + GitHub report path</code></pre>
+<p>Render has a direct MiniMax fallback for cases where the Vercel
+bridge variables are absent. In the intended deployment, the Vercel
+bridge is the active path.</p>
+<h3 id="progress-github">Progress → GitHub</h3>
+<p>The dashboard POSTs a progress event to <code>/api/progress</code>.
+MCP <code>record_progress</code> can do the same from a CLI or agent.
+Each event becomes Markdown under <code>reports/progress/</code>. The
+dashboard’s current topic status remains the source for the live plan
+view; GitHub is append-only history.</p>
+<h3 id="semantic-search-surfsense">Semantic search → SurfSense</h3>
+<p>With <code>SURFSENSE_API_KEY</code> and
+<code>SURFSENSE_WORKSPACE_ID=38808</code> on Render,
+<code>semantic_search</code> calls:</p>
+<pre><code>POST https://api.surfsense.com/workspaces/38808/scrapers/google_search/scrape</code></pre>
+<p>The service sends the query, language, country, and bounded page
+count. If SurfSense is unavailable or not configured, the tool falls
+back to GitHub repository search.</p>
+<h3 id="scheduled-digest">Scheduled digest</h3>
+<p>The Vercel Cron route is designed to run daily. It can call MiniMax
+for a short progress-aware motivation digest and send it with Resend to
+<code>shaikhrasul02@gmail.com</code>. It requires
+<code>CRON_SECRET</code>, <code>MINIMAX_API_KEY</code>,
+<code>RESEND_API_KEY</code>, and a verified
+<code>RESEND_FROM_EMAIL</code>. Cron invokes a route on schedule; it is
+not an always-on worker.</p>
+<h2 id="data-and-context-model">4. Data and context model</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Source</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Plan</td>
+<td><code>data/workbook.json</code></td>
+<td>Topics, tracks, months, hours, resources, workbook-derived
+progress</td>
+</tr>
+<tr>
+<td>Library</td>
+<td><code>data/library-context.json</code></td>
+<td>Curated index of private books and FDE relevance</td>
+</tr>
+<tr>
+<td>Repositories</td>
+<td><code>data/repository-context.json</code></td>
+<td>OpenBot and AI Engineering from Scratch context</td>
+</tr>
+<tr>
+<td>Lesson</td>
+<td><code>data/lesson-context.json</code></td>
+<td>Shell lesson, exercise, interview angle, next step</td>
+</tr>
+<tr>
+<td>Ask evidence</td>
+<td><code>reports/asks/</code></td>
+<td>Prompt, context summary, answer, timestamp, model label</td>
+</tr>
+<tr>
+<td>Study memory</td>
+<td><code>reports/notes/</code></td>
+<td>Explicitly saved notes</td>
+</tr>
+<tr>
+<td>Progress</td>
+<td><code>reports/progress/</code></td>
+<td>Append-only topic status and notes</td>
+</tr>
+<tr>
+<td>Audit</td>
+<td><code>reports/audit/</code></td>
+<td>Durable records for mutating MCP actions</td>
+</tr>
+</tbody>
+</table>
+<h2 id="mcp-tool-surface">5. MCP tool surface</h2>
+<p>The Render server exposes:</p>
+<ol type="1">
+<li><code>get_plan</code> — filter the plan by query, month, or
+track.</li>
+<li><code>get_learning_context</code> — read book, repository, and
+lesson indexes.</li>
+<li><code>ask_lumen</code> — request a fifth-grade-language technical
+explanation.</li>
+<li><code>list_ask_reports</code> — list GitHub Markdown Ask
+reports.</li>
+<li><code>read_ask_report</code> — read one saved report by path.</li>
+<li><code>save_study_note</code> — explicitly save a durable note.</li>
+<li><code>record_progress</code> — explicitly record a topic status
+event.</li>
+<li><code>get_progress_history</code> — list progress events.</li>
+<li><code>get_progress_analytics</code> — summarize history and recent
+events.</li>
+<li><code>score_assessment</code> — score Quick Check or rubric
+assessments.</li>
+<li><code>semantic_search</code> — SurfSense search or GitHub
+fallback.</li>
+<li><code>get_audit_log</code> — inspect recent MCP actions.</li>
+<li><code>get_connection_map</code> — return canonical service
+connections.</li>
+</ol>
+<p>Suggested MCP client configuration:</p>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;mcpServers&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;lumen-fde&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;url&quot;</span><span class="fu">:</span> <span class="st">&quot;https://lumen-fde.onrender.com/mcp&quot;</span><span class="fu">,</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;headers&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>        <span class="dt">&quot;Authorization&quot;</span><span class="fu">:</span> <span class="st">&quot;Bearer &lt;MCP_API_KEY&gt;&quot;</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>      <span class="fu">}</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>    <span class="fu">}</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<h2 id="assessments-and-learning-controls">6. Assessments and learning
+controls</h2>
+<p>Assessments are learning gates, not account locks.</p>
+<h3 id="quick-check">Quick Check</h3>
+<ul>
+<li>Four multiple-choice questions.</li>
+<li>Immediate score and explanation in the UI.</li>
+<li>Current Shell Mastery key: <code>1B · 2C · 3A · 4D</code>.</li>
+<li>The UI evaluates the quick interaction locally for speed.</li>
+<li>MCP <code>score_assessment</code> provides the authoritative
+server-side path when an agent needs to score it.</li>
+</ul>
+<h3 id="weekly-checkpoint">Weekly checkpoint</h3>
+<p>Thirty minutes. Close notes, explain one topic, solve two small
+problems, and write one production lesson. The rubric checks
+correctness, reasoning, production tradeoffs, and communication.</p>
+<h3 id="monthly-deep-dive">Monthly deep dive</h3>
+<p>Ninety minutes. Combine several plan topics into a design or
+debugging task. The rubric checks technical depth, tradeoff quality,
+implementation evidence, and explanation quality.</p>
+<h3 id="quarterly-capstone">Quarterly capstone</h3>
+<p>Three hours. Build and defend a realistic FDE artifact: architecture,
+implementation, tests, operations, and customer-facing explanation. The
+rubric checks end-to-end ownership and evidence.</p>
+<p>Currently there are no automatic unlock rules, saved UI assessment
+scores, pass/fail status, deadline tracking, streak tracking, proof
+uploads, or submission history. Open-ended answers are evaluated through
+the rubric and can be sent to Ask Lumen or
+<code>score_assessment</code>. This is an explicit boundary, not a
+hidden feature.</p>
+<h2 id="security-reliability-and-precaution-layers">7. Security,
+reliability, and precaution layers</h2>
+<h3 id="authentication-and-secrets">Authentication and secrets</h3>
+<ul>
+<li>HMAC-signed HTTP-only session cookie for the dashboard.</li>
+<li>Internal service key for Render-to-Vercel Ask calls.</li>
+<li>Bearer API key for Render MCP clients.</li>
+<li>Provider keys are server-side environment variables.</li>
+<li>No secret values belong in GitHub, browser JavaScript, reports, or
+screenshots.</li>
+</ul>
+<h3 id="abuse-and-failure-controls">Abuse and failure controls</h3>
+<ul>
+<li>MCP request body is bounded at 128 KB.</li>
+<li>MCP rate limit is 30 requests per minute per client key.</li>
+<li>Ask requests have a bounded upstream timeout.</li>
+<li>Empty model answers are failures, not successful blank
+responses.</li>
+<li>Upstream failures become readable retry messages.</li>
+<li>Assessment and progress mutations are explicit; opening a page does
+not silently change status.</li>
+</ul>
+<h3 id="auditability">Auditability</h3>
+<ul>
+<li>Successful mutating MCP actions create durable GitHub audit
+records.</li>
+<li>Recent MCP requests are also held in memory for operational
+inspection.</li>
+<li>Reports and notes are human-readable Markdown.</li>
+</ul>
+<h2 id="deployment-topology">8. Deployment topology</h2>
+<h3 id="github">GitHub</h3>
+<p><code>https://github.com/rasulshaikh/lumen-fde</code></p>
+<p>The <code>main</code> branch contains the dashboard, MCP service,
+normalized data, context maps, and durable reports. GitHub is the
+collaboration surface for Claude and Codex. Runtime Ask side effects may
+add commits to <code>reports/asks/</code>, so pull before local
+edits.</p>
+<h3 id="vercel">Vercel</h3>
+<p><code>https://lumen-fde.vercel.app</code></p>
+<p>Vercel hosts the Next.js dashboard, API routes, MiniMax Ask path,
+progress endpoint, and scheduled digest route. The clean URL may be
+protected by account-level access control in some server-to-server
+contexts; the service bridge uses a stable deployment alias when
+required.</p>
+<h3 id="render">Render</h3>
+<ul>
+<li>Service: <code>lumen-mcp</code></li>
+<li>Base URL: <code>https://lumen-fde.onrender.com</code></li>
+<li>Health: <code>https://lumen-fde.onrender.com/healthz</code></li>
+<li>MCP: <code>https://lumen-fde.onrender.com/mcp</code></li>
+</ul>
+<p>Render runs the Node MCP service from <code>mcp/</code> on the free
+tier. Auto-deploy follows <code>main</code>. The free tier may sleep
+after inactivity, so the MCP is not guaranteed to be continuously warm.
+Health checks can reduce cold-start surprises but cannot provide
+paid-tier always-on guarantees.</p>
+<h3 id="environment-variable-groups">Environment variable groups</h3>
+<p>Names only, never values:</p>
+<ul>
+<li><strong>Vercel:</strong> <code>MINIMAX_API_KEY</code>,
+<code>RESEND_API_KEY</code>, <code>RESEND_FROM_EMAIL</code>,
+<code>CRON_SECRET</code>, <code>DIGEST_TO_EMAIL</code>,
+<code>LUMEN_USERNAME</code>, <code>LUMEN_PASSWORD</code>,
+<code>GITHUB_TOKEN</code>, <code>GITHUB_REPO</code>,
+<code>GITHUB_BRANCH</code>, <code>LUMEN_INTERNAL_API_KEY</code>.</li>
+<li><strong>Render:</strong> <code>GITHUB_TOKEN</code>,
+<code>GITHUB_REPO</code>, <code>GITHUB_BRANCH</code>,
+<code>MCP_API_KEY</code>, <code>PUBLIC_MCP_URL</code>,
+<code>LUMEN_ASK_URL</code>, <code>LUMEN_INTERNAL_API_KEY</code>,
+<code>SURFSENSE_API_KEY</code>, <code>SURFSENSE_API_URL</code>,
+<code>SURFSENSE_WORKSPACE_ID</code>.</li>
+<li><strong>Optional fallback:</strong> Render
+<code>MINIMAX_API_KEY</code> is only needed when the Vercel bridge is
+disabled. Keeping two provider keys increases the security surface;
+remove the Render copy once the bridge is confirmed stable.</li>
+</ul>
+<h2 id="verification-completed">9. Verification completed</h2>
+<ul>
+<li>Production dashboard was reached at the canonical Lumen URL.</li>
+<li>Render health endpoint was checked.</li>
+<li>Unauthenticated MCP requests return <code>401</code>.</li>
+<li>MCP initialization reports protocol <code>2025-03-26</code> and
+server <code>lumen-mcp</code>.</li>
+<li>MCP rate limiting was confirmed with <code>429</code> after the
+configured threshold.</li>
+<li>A production Ask through the internal Vercel alias returned a
+non-empty answer and a GitHub report.</li>
+<li>The Ask panel now renders meaningful timeout or upstream error
+guidance instead of a generic failure for every error class.</li>
+<li>The repository contains the code and context required for GitHub,
+Vercel, Render, Claude, Codex, and MCP workflows.</li>
+</ul>
+<h2 id="known-limitations-and-recommended-next-work">10. Known
+limitations and recommended next work</h2>
+<ol type="1">
+<li><strong>Progress analytics status parsing:</strong> MCP-created
+progress filenames currently do not encode status, while analytics
+infers status from filenames. Store a structured status field or encode
+status consistently.</li>
+<li><strong>Audit durability:</strong> reads and failed requests are
+primarily in memory. Persist a bounded operational audit stream if
+historical incident review matters.</li>
+<li><strong>Rate-limit scope:</strong> the limiter is process-local and
+resets when Render restarts. Use Redis or another shared store for
+multi-instance enforcement.</li>
+<li><strong>Path hardening:</strong> reject <code>..</code> explicitly
+in <code>read_ask_report</code>, even though GitHub returned Not Found
+for the tested traversal shape.</li>
+<li><strong>CORS tightening:</strong> replace wildcard CORS with known
+origins if browser-based MCP clients are introduced.</li>
+<li><strong>Full retrieval:</strong> ingest actual PDFs and repository
+content into a retrieval index if page-level citations and deeper
+cross-book answers are required.</li>
+<li><strong>Assessment persistence:</strong> add a database or GitHub
+score record only if longitudinal scoring, streaks, or proof submissions
+are wanted.</li>
+<li><strong>Always-on MCP:</strong> move Render from free to a paid
+always-on instance if cold starts are unacceptable.</li>
+</ol>
+<h2 id="operating-runbook">11. Operating runbook</h2>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Pull durable Ask reports and progress before local work</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> pull origin main</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Inspect reports</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> ls-tree <span class="at">-r</span> <span class="at">--name-only</span> origin/main reports</span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Deploy dashboard changes</span></span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a><span class="ex">vercel</span> <span class="at">--prod</span></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a><span class="co"># Inspect Vercel environment names</span></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a><span class="ex">vercel</span> env ls production</span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Check Render MCP health</span></span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> <span class="at">-fsS</span> https://lumen-fde.onrender.com/healthz</span></code></pre></div>
+<p>For a new study session:</p>
+<ol type="1">
+<li>Open Plan and choose one topic.</li>
+<li>Read, watch, or build the listed resource.</li>
+<li>Ask Lumen for a plain-English explanation and a 20-minute
+exercise.</li>
+<li>Complete the four-question Quick Check.</li>
+<li>Save a note only when it is worth keeping.</li>
+<li>Record progress only when the status genuinely changed.</li>
+<li>At each assessment cadence, write the answer before opening the
+rubric.</li>
+<li>Pull GitHub so Claude or Codex can use the same evidence.</li>
+</ol>
+<h2 id="design-principle">12. Design principle</h2>
+<p>Lumen is not just a dashboard and not just a chatbot. It is an
+evidence loop. The interface makes the next action obvious. The model
+makes hard material explainable. Assessments force retrieval. GitHub
+preserves proof. MCP makes the system available to the tools used to
+build and operate it. The strongest future version keeps these
+boundaries clear while adding deeper retrieval and durable evaluation
+only when the learning workflow proves it needs them.</p>
+</body>
+</html>
