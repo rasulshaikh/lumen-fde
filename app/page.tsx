@@ -40,7 +40,8 @@ const FAQS = [
   "Does my plan cover machine learning, and where?",
   "What should I focus on this week, and why that over anything else?",
   "Which of my indexed books actually helps with the topic I have open?",
-  "Am I on pace to finish in 13 months at 16 hours a week?",
+  // derived, not typed: this said "13 months" until the Hours column was re-baselined
+  `Am I on pace to finish in ${months[months.length - 1]} months at 16 hours a week?`,
   "What will a senior FDE interview actually test that my plan does not cover?",
 ];
 

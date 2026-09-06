@@ -78,9 +78,23 @@ const escapeXml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(
  * large enough to carry the card, "Build proof, not just knowledge." runs past 1200px
  * and collides with the mark. SVG has no text wrapping, so the break is explicit.
  */
+/**
+ * The subtitle is read from the plan, not typed. It said "916 hours · 119 topics ·
+ * 13 months" and was already wrong twice over — 916h counted topics marked skipped,
+ * and 13 months predated the Hours re-baseline. A link preview is the one surface
+ * nobody re-reads, so it is the one that must not be hand-maintained.
+ */
+function planSubtitle() {
+  const plan = JSON.parse(readFileSync(join(ROOT, "data", "workbook.json"), "utf8")).Plan.slice(1);
+  const active = plan.filter((r) => String(r[15] ?? "").trim().toLowerCase() !== "skipped");
+  const hours = active.reduce((n, r) => n + Number(r[13] || 0), 0);
+  const months = Math.max(...active.map((r) => Number(r[1])));
+  return `${hours} hours · ${active.length} topics · ${months} months`;
+}
+
 function ogCard(markPng) {
   const lines = ["Build proof,", "not just knowledge."];
-  const sub = "916 hours · 119 topics · 13 months";
+  const sub = planSubtitle();
   return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">
   <rect width="1200" height="630" fill="${CANVAS}"/>
   <rect x="0" y="0" width="1200" height="10" fill="${ACCENT}"/>

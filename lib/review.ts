@@ -11,8 +11,11 @@ export type ReviewState = Record<string, Card>;
  * Expanding intervals in days. Successive relearning wants the gap to grow only when
  * retrieval actually succeeded, so the rung moves on the grade, never on the clock.
  *
- * The tail is deliberately long: the plan runs 13 months, and something learned in month 1
- * needs to still be there at the interview, not be re-drilled weekly for a year.
+ * The tail is deliberately long: the plan runs well over a year, and something learned in
+ * month 1 needs to still be there at the interview, not be re-drilled weekly for a year.
+ * The top rung repeats rather than growing further, so a month-1 topic is still checked
+ * roughly annually however long the plan runs — no ladder change is needed when the
+ * calendar moves.
  */
 export const LADDER = [1, 7, 21, 60, 150, 240, 330];
 
