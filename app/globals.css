@@ -462,11 +462,15 @@ code,.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
   .shell.ask-open{margin-right:auto;max-width:1440px}
 }
 
-/* Tier 3 — sheet. Below 700px there is no room to keep context, so it covers the screen
-   deliberately rather than by accident. */
+/* Tier 3 — bottom sheet that stops short of the top edge. Even at 375px a strip of the
+   page is worth keeping: it shows which tab and topic you are asking about, and it gives
+   the sheet somewhere to be dismissed *to* rather than reading as a new screen. The
+   strip is proportional (14svh) with a floor, so tall phones give up more of it than
+   short ones. No scrim — the strip is real, live context, not decoration. */
 @media(max-width:699px){
-  .ask-panel{position:fixed;inset:10px;width:auto;height:auto;max-height:none;
-    border-radius:var(--r-md);padding:18px}
+  .ask-panel{position:fixed;top:max(72px,14svh);left:8px;right:8px;bottom:8px;
+    width:auto;height:auto;max-height:none;
+    border-radius:var(--r-lg) var(--r-lg) var(--r-md) var(--r-md);padding:18px}
   .shell.ask-open{margin-right:auto;max-width:1440px}
 }
 
@@ -475,6 +479,8 @@ code,.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
 @media(max-height:460px){
   .ask-intro{display:none}
   .ask-panel{padding:14px}
+  /* this block follows the width tiers, so a plain rule wins on order */
+  .ask-panel{top:max(52px,10svh)}
   .ask-head h2{font-size:17px}
   .empty-chat{padding:12px 14px}
 }
