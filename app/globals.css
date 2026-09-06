@@ -100,3 +100,17 @@ td .topic-toggle{margin-bottom:6px}
 .cur-topic .topic-toggle span:not(.chev){color:var(--muted);font-size:11px;font-weight:500;white-space:nowrap;margin-left:auto}
 .cur-topic .syllabus{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
 @media(max-width:850px){.syllabus-grid{grid-template-columns:1fr}.cur-topic .topic-toggle{flex-wrap:wrap}.cur-topic .topic-toggle span:not(.chev){margin-left:0;flex-basis:100%}}
+
+/* Topic's own Read/Watch/Do inside an expanded syllabus. Without this the Curriculum tab
+   had no path to the video at all — subtopic links are documentation only by design. */
+.syllabus-primary ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px}
+.syllabus-primary li{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 11px;min-width:0}
+.res-kind{flex:none;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:3px 6px;border-radius:4px;background:var(--surface-strong);color:var(--muted)}
+.res-read{background:var(--primary-soft);color:var(--primary)}
+.res-watch{background:oklch(.95 .045 180);color:oklch(.35 .09 180)}
+.res-do{background:oklch(.95 .05 78);color:oklch(.38 .1 78)}
+.syllabus-primary .resource-link{min-width:0}
+.weekly-input{width:2.6ch;border:0;background:none;padding:0;color:inherit;font:inherit;text-align:right;-moz-appearance:textfield}
+.weekly-input::-webkit-outer-spin-button,.weekly-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.weekly-input:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:3px}
+@media(max-width:600px){.syllabus-primary ul{flex-direction:column}.syllabus-primary li{width:100%}}
