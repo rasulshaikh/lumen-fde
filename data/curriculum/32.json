@@ -2,7 +2,7 @@
  "i": 32,
  "topic": "Data modelling for multi-tenant AI systems: RLS, PII, encryption, audit trails",
  "track": "E. Backend and Data",
- "month": 4,
+ "month": 5.0,
  "hours": 6.0,
  "why": "An FDE is usually the person who puts a customer's data into an AI system for the first time, and the customer's security team will not let a pilot touch production data until someone shows them, table by table, how tenant A cannot read tenant B, where PII lives, how it is encrypted and who can prove what was accessed. Application-layer `WHERE tenant_id = ?` filters fail the moment an engineer forgets one, an LLM-generated query bypasses the ORM, or a background job runs as the wrong principal; Postgres row-level security, pgcrypto and an append-only audit log move those guarantees into the database where a reviewer can actually verify them. The schema you design in week one is the schema that survives the handover, so getting isolation, PII handling and auditability right before the first customer row lands is the cheapest security work you will ever do.",
  "prerequisites": [

@@ -35,6 +35,11 @@ def main() -> None:
             continue
         if str(plan_rows[i][2]).strip() != str(d["topic"]).strip():
             problems.append(f"{path.name}: topic mismatch — plan has {plan_rows[i][2]!r}, file has {d['topic']!r}")
+        # month/track/hours are duplicated here for the UI; the plan is authoritative. A
+        # renumber silently desynced 90 files once, so drift is now a hard error.
+        for key, col, cast in (("track", 0, str), ("month", 1, float), ("hours", 13, float)):
+            if key in d and cast(d[key]) != cast(plan_rows[i][col]):
+                problems.append(f"{path.name}: {key} is {d[key]!r} but the plan says {plan_rows[i][col]!r}")
         topics[str(i)] = d
 
     OUT.write_text(json.dumps({"topics": topics}, ensure_ascii=False, indent=1))

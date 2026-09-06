@@ -10,6 +10,11 @@ export async function GET() {
   try {
     let files: { name: string; path: string; html_url?: string }[] = [];
     try { files = await github("reports/progress"); } catch (error) { if (!String(error).includes("Not Found")) throw error; }
+    // Filenames start with an ISO stamp, so name order is chronological. GitHub returns
+    // them ascending, and slicing that kept the OLDEST 100 — meaning a topic's status
+    // could never advance once it had 100 events. Take the newest, and return newest-first
+    // so every consumer sees the current status before any older one.
+    files.sort((a, b) => b.name.localeCompare(a.name));
     const events = await Promise.all(files.slice(0, 100).map(async (file) => { const item = await github(file.path); const body = Buffer.from(item.content, "base64").toString("utf8"); const topic = body.match(/^Topic:\s*(.+)$/m)?.[1] || file.name; const status = body.match(/^Status:\s*(.+)$/m)?.[1] || "Not started"; const date = body.match(/^Date:\s*(.+)$/m)?.[1] || ""; return { topic, status, date, url: file.html_url }; }));
     return NextResponse.json({ events });
   } catch (error) { return NextResponse.json({ error: String((error as Error).message || error) }, { status: 502 }); }

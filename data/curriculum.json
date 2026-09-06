@@ -2392,7 +2392,7 @@
    "i": 100,
    "topic": "Supervised learning I: linear and logistic regression, regularisation, the bias-variance trade-off",
    "track": "N. Machine Learning Systems",
-   "month": 7,
+   "month": 10.0,
    "hours": 6,
    "why": "Linear and logistic regression are the two models you will actually be allowed to ship inside a regulated customer's decisioning path, and they are the baseline every boosted or neural model must beat by more than a cross-validation standard error before you are allowed to argue for it. The whole job of defending a model in a customer's room reduces to three sentences you can only say if you own this material: here is why the coefficient has that sign, here is why the validation curve looks like that, and here is the lever - more features, a different penalty, or more data - that moves it. Get it wrong and you will confidently present a leakage artefact, or quote an odds ratio that is an artefact of the L2 penalty rather than anything about their business.",
    "prerequisites": [
@@ -2620,7 +2620,7 @@
    "i": 101,
    "topic": "Supervised learning II: decision trees, random forests, gradient boosting with XGBoost and LightGBM",
    "track": "N. Machine Learning Systems",
-   "month": 7,
+   "month": 10.0,
    "hours": 8,
    "why": "Gradient-boosted trees are what actually wins on the data a customer hands you: churn, fraud, demand, pricing and propensity all live in a CSV of forty mixed-type columns with missing values, and a tuned LightGBM beats the neural network they read about in a blog post while fitting in ninety seconds on a laptop. The FDE difference is not calling .fit() - it is standing at their screen, looking at one train/validation curve, and saying 'that is overfit, cut num_leaves before you touch n_estimators' or 'that AUC of 0.99 is a leaked column and here is which one', instead of launching another overnight grid search. And when their data scientist asks why you chose a Poisson objective, what min_child_weight actually thresholds, or whether the SHAP plot about to go in a board deck means what they think it means, you need the derivation on the whiteboard, not the vocabulary.",
    "prerequisites": [
@@ -2848,7 +2848,7 @@
    "i": 102,
    "topic": "SVM, k-NN and Naive Bayes: margins, kernels, and when each still wins",
    "track": "N. Machine Learning Systems",
-   "month": 8,
+   "month": 11.0,
    "hours": 5,
    "why": "These three are the models a customer already has in production - a spam filter that is multinomial Naive Bayes, a duplicate-ticket matcher that is cosine k-NN, a fraud screen that is an RBF SVM someone tuned in 2019 - and you will be asked to explain, fix or replace them in the room, not to build a transformer. Each fails in a way you can only diagnose from the mathematics: an SVM with 92 percent of rows as support vectors is an overfit you read off the KKT conditions, a k-NN that died at 300 features is the curse of dimensionality you can derive in two lines, and a Naive Bayes returning 0.9999 posteriors is the independence assumption double-counting correlated words. Being able to write the soft-margin objective, its dual, the Cover-Hart bound and the Laplace-smoothed MLE on a whiteboard is what turns 'we should try a neural net' into a defensible recommendation with a latency number attached.",
    "prerequisites": [
@@ -3067,7 +3067,7 @@
    "i": 103,
    "topic": "Model evaluation: cross-validation, data leakage, metric choice, calibration",
    "track": "N. Machine Learning Systems",
-   "month": 8,
+   "month": 11.0,
    "hours": 7,
    "why": "Every model you hand a customer arrives attached to a number, and this topic is the difference between a number that survives contact with their production data and one that collapses in week two while you are on the plane home. An FDE is the person in the room who has to say, out loud and without a laptop, why the 0.94 AUC from the pilot became a review queue full of false positives - which means naming the split that did not match how the data was generated, the column that was populated after the outcome, the metric that ignored the prevalence, and the probability that was never calibrated. Get this wrong and you do not merely lose the model: you lose the customer's belief that anything you measure is real.",
    "prerequisites": [
@@ -3295,7 +3295,7 @@
    "i": 104,
    "topic": "Feature engineering, selection, and imbalanced data: SMOTE, class weights, target encoding",
    "track": "N. Machine Learning Systems",
-   "month": 9,
+   "month": 12.0,
    "hours": 6,
    "why": "This is the topic where an FDE either earns or loses the customer's data-science team in the first week: they will hand you a table with a 0.2 percent positive rate, a 10k-cardinality merchant column, and a model that already scores 0.98 ROC-AUC, and your job is to say whether that number is real. Almost every catastrophic on-site modelling error lives here - target encoding fit before the split, SMOTE applied outside the fold, a feature computed with future information, a metric chosen because it flatters - and every one of them produces a model that validates beautifully and fails in production, on their data, with your name on it. Being able to derive the shrinkage estimator, name the assumption SMOTE makes, and put a threshold-tuned baseline next to the fancy pipeline is what turns 'the consultant said' into a defensible engineering argument.",
    "prerequisites": [
@@ -3514,7 +3514,7 @@
    "i": 105,
    "topic": "Hyperparameter optimisation: grid, random, Bayesian search with Optuna",
    "track": "N. Machine Learning Systems",
-   "month": 9,
+   "month": 12.0,
    "hours": 5,
    "why": "Tuning is where an FDE most easily manufactures a number that is not real: the search reports 0.91 AUC, the customer's holdout says 0.84, and you have no story for the gap because the cross-validation lived outside the trial or the winner was simply the luckiest of 400 draws. Knowing the actual mechanics - that random search needs only 60 draws to hit the top 5 percent of a space with 95 percent probability, that TPE maximises the density ratio l(x)/g(x) rather than a Gaussian-process EI, that successive halving assumes low-fidelity rank order predicts full-fidelity rank order - is what lets you defend a fixed trial budget on a customer's laptop instead of asking for a GPU cluster. It is also the difference between saying 'we tuned it' and being able to point at a param-importance plot and say 'three of these seven parameters do nothing, drop them and we halve the search'.",
    "prerequisites": [
@@ -3724,7 +3724,7 @@
    "i": 106,
    "topic": "Unsupervised learning: k-means, DBSCAN, hierarchical clustering, PCA, t-SNE, UMAP",
    "track": "N. Machine Learning Systems",
-   "month": 10,
+   "month": 12.0,
    "hours": 7,
    "why": "A customer's first 'AI' request is very often unlabelled - segment these 40,000 accounts, find the anomalous machines, tell us what these 200k support tickets are about - and there is no held-out accuracy to hide behind, so the only defence of your answer is the objective you optimised, the metric you optimised it under, and evidence that the result survives resampling. An FDE who cannot say why k=6 rather than k=4, or who cannot say out loud that the gap between two blobs in a UMAP plot carries no information, will have their segmentation quietly overruled by whoever brought the prettier picture. This is also where the most expensive silent errors live: an unscaled column that becomes the entire distance metric, a PCA fitted before the split, and a two-dimensional embedding read as though its axes and distances meant something.",
    "prerequisites": [
@@ -3952,7 +3952,7 @@
    "i": 107,
    "topic": "Explainability: SHAP, LIME, permutation importance, partial dependence",
    "track": "N. Machine Learning Systems",
-   "month": 10,
+   "month": 12.0,
    "hours": 6.0,
    "why": "An FDE is the person in the room when a customer's risk officer, clinician or ops lead points at one prediction and asks why - and the honest answer requires knowing exactly what quantity your explanation estimates, on what data, against what baseline. Explainability is also your fastest debugging tool on someone else's data: leakage, a broken encoder, a proxy for the label and a feature the model never actually reads all show up first in an importance ranking or a dependence plot, weeks before they show up in a held-out metric. Get the estimand wrong and you do worse than nothing - you hand a customer a confident, wrong causal story with your name on it, and they act on it.",
    "prerequisites": [
@@ -4180,7 +4180,7 @@
    "i": 108,
    "topic": "Time series forecasting: decomposition, ARIMA, Prophet, and honest backtesting",
    "track": "N. Machine Learning Systems",
-   "month": 10,
+   "month": 12.0,
    "hours": 8,
    "why": "Forecasting is the request an FDE gets most often and defends worst: demand, headcount, spend, seat growth, capacity. It is also the single easiest place to ship a model that is silently wrong, because a random shuffle-split or an in-sample fit produces a beautiful chart that a customer's finance team will plan against for a quarter before the error surfaces. You need to be the person who can say, at a whiteboard, why the series needed a log and a seasonal difference, what the ACF/PACF and the KPSS test told you about the order, why the winning model beats seasonal-naive by a MASE of 0.71 on a rolling-origin backtest whose cut points you can draw, and which features would have leaked if you had not blocked them.",
    "prerequisites": [
@@ -4412,7 +4412,7 @@
    "i": 109,
    "topic": "Recommenders and anomaly detection: collaborative filtering, matrix factorisation, isolation forests",
    "track": "N. Machine Learning Systems",
-   "month": 11,
+   "month": 12.0,
    "hours": 8,
    "why": "These are the two ML asks that arrive unprompted in almost every deployment - 'can you suggest the next best action for each account' and 'can you flag the weird transactions' - and both usually arrive with no labels and a log the customer's own product generated. Being able to derive and implement the factorisation and the isolation forest yourself is what lets you stand in front of their data scientist and say why held-out RMSE improved while recall@10 got worse, why a 0.97 ROC-AUC fraud model will drown their three analysts, and exactly what the system returns on day one for a user it has never seen. These are also the two places where a demo metric most easily flatters a useless model, so the defensible skill here is the evaluation protocol and the stated fallback, not the fit call.",
    "prerequisites": [
@@ -4858,7 +4858,7 @@
    "i": 110,
    "topic": "Neural network foundations: backpropagation, activations, initialisation, regularisation",
    "track": "O. Deep Learning and Multimodal",
-   "month": 11,
+   "month": 13.0,
    "hours": 8,
    "why": "Every deep-learning conversation you will have with a customer eventually collapses into one of four questions - why is the loss NaN, why is validation worse than training, why does it not learn at all, and why did it work on my laptop - and all four are answered by the chain rule, the variance arithmetic of initialisation, and the train/eval semantics of the regularisers. If you have derived and coded the backward pass yourself, a per-layer gradient histogram is a diagnosis rather than a picture, and you can say 'this is a dead-ReLU problem caused by your init scale, not a data problem' in the room instead of promising to look into it. This is also the topic that makes everything downstream honest: batch norm, transformers, LoRA and fine-tuning are all just more computational graph, and you cannot debug a model you can only call.",
    "prerequisites": [
@@ -5087,7 +5087,7 @@
    "i": 111,
    "topic": "Training deep networks: optimisers, batch norm, schedules, mixed precision, debugging a bad loss curve",
    "track": "O. Deep Learning and Multimodal",
-   "month": 11,
+   "month": 13.0,
    "hours": 8,
    "why": "When a customer's model does not train, the room turns to you with one plot and no hypothesis, and the difference between a senior AI/FDE and a framework user is whether you can look at a loss curve plus a grad-norm log and say 'that is a learning rate above the 2/lambda_max stability bound' or 'that is BatchNorm still in train mode at eval' rather than 'let me try some hyperparameters'. Every knob in this topic - momentum, Adam's second moment, warmup, BatchNorm's running statistics, fp16 loss scaling - is a small piece of arithmetic you can derive on a whiteboard, and deriving it is what lets you defend a fix on the spot instead of promising a week of sweeps. It is also the topic that decides whether the customer's model fits on their GPU and finishes inside their maintenance window, because optimiser state and precision are memory and wall-clock decisions dressed up as mathematics.",
    "prerequisites": [
@@ -5297,7 +5297,7 @@
    "i": 112,
    "topic": "PyTorch at depth: tensors, autograd, Dataset and DataLoader, the training loop, profiling",
    "track": "O. Deep Learning and Multimodal",
-   "month": 12,
+   "month": 13.0,
    "hours": 8,
    "why": "Every deep-learning claim you make to a customer bottoms out in a PyTorch training loop that you must be able to defend line by line: this loss is over these logits, this gradient is this VJP, this number is a real p95 and not a launch-queue artefact. The bugs that lose deals are silent rather than loud - a broadcast that turns an (N,1) vs (N,) residual into an N-by-N loss, a `model.eval()` you forgot, a `total_loss += loss` that retains the graph until OOM at epoch two, a benchmark taken without `torch.cuda.synchronize()` - and none of them raise an exception; they produce a plausible curve and a wrong model. An FDE who can hand-derive a backward, prove it with `torch.autograd.gradcheck` in float64, and then read a `torch.profiler` table to say 'we are dataloader-bound, give me four workers and pinned memory' is the person the customer's ML team stops arguing with.",
    "prerequisites": [
@@ -5526,7 +5526,7 @@
    "i": 113,
    "topic": "Computer vision: CNNs, ResNet and EfficientNet, transfer learning, augmentation, detection",
    "track": "O. Deep Learning and Multimodal",
-   "month": 12,
+   "month": 13.0,
    "hours": 10,
    "why": "Vision is the most common 'can you just...' an FDE gets - count pallets from a warehouse camera, flag a defective part, read a scanned form - and it is the one where a customer hands you 400 labelled images on Monday and expects a demo on Friday. Being able to hand-compute output shapes, parameter counts and receptive fields is what lets you say in the room why a stride-32 backbone cannot see their 14-pixel objects, and reading a per-class mAP table is what lets you say whether the fix is anchor scales, the NMS/IoU threshold, or thirty more images of the rare class - instead of retraining blind for a week. Transfer learning is the only honest answer to 'we have 400 images', and defending it means knowing exactly which layers you froze, why the BatchNorm statistics still moved anyway, and what your augmentation pipeline is implicitly promising about the deployment distribution.",
    "prerequisites": [
@@ -5754,7 +5754,7 @@
    "i": 114,
    "topic": "Sequence models: RNNs, LSTMs, GRUs, seq2seq and the road to attention",
    "track": "O. Deep Learning and Multimodal",
-   "month": 12,
+   "month": 13.0,
    "hours": 8,
    "why": "Sequence models are where an FDE stops being able to blame the data: when a customer's extraction, forecasting or log-anomaly model plateaus on long inputs, the cause is almost always a gradient-path or a masking problem, and unless you can point at the product of Jacobians and name the exact gate that fixes it, the meeting ends at 'we'll try more epochs'. Every architectural argument in the LLM era - why attention exists at all, why the context window is a real constraint, why a KV cache is even possible - is the answer to a failure you can only feel by having built the seq2seq that fails at token 25. And GRUs and LSTMs are still shipping in production for streaming, on-device and low-latency time-series work, so 'just use a Transformer' is a recommendation you have to be able to defend with a latency number or refuse in front of the customer's ML team.",
    "prerequisites": [
@@ -7780,7 +7780,7 @@
    "i": 16,
    "topic": "IAM and cloud security: least privilege, roles, IRSA, no long-lived keys",
    "track": "C. Cloud and IaC",
-   "month": 2,
+   "month": 3.0,
    "hours": 6.0,
    "why": "Every FDE deployment into a customer's AWS account ends at the same gate: their security team opens your Terraform, finds the role your workers run as, and asks 'why does this need s3:* and where do the credentials live?' If the answer involves an access key in an environment variable, the pilot stalls for weeks and you are now the vendor who put an AKIA key in a container. The FDE also owns the other side of the boundary: your product assuming a role in the customer's account, CI deploying without stored secrets, and the ExternalId conversation with their CISO. Being able to write the worker policy by hand, wire IRSA correctly the first time, and read an AccessDenied message to its root cause in ten minutes is what separates the engineer who unblocks go-live from the one who files a ticket with the platform team.",
    "prerequisites": [
@@ -9056,7 +9056,7 @@
    "i": 22,
    "topic": "Observability: OpenTelemetry, Prometheus, Grafana, logs, traces, metrics",
    "track": "D. Reliability and Observability",
-   "month": 3,
+   "month": 4.0,
    "hours": 8.0,
    "why": "When DefenderMate misclassifies a lead or a HubSpot write silently fails at a customer, the first question on the call is 'what happened to webhook 8813 at 14:02', and the FDE who can open one Grafana tab and walk from the latency spike to the exact trace to the log line holding the HubSpot 429 body owns that conversation; the one who says 'let me add some prints and redeploy' has already lost the week. FDEs inherit the customer's stack rather than choosing it, so you must speak Prometheus, OpenTelemetry and Grafana natively because that is what their platform team runs and what their security review will ask you to integrate with instead of replace. The SLOs you wrote in topic 20 are fiction until the metrics behind them exist, are labelled without cardinality bombs, and alert on burn rate, and that instrumentation is yours to ship, not the customer's.",
    "prerequisites": [
@@ -9284,7 +9284,7 @@
    "i": 23,
    "topic": "Load testing and chaos",
    "track": "D. Reliability and Observability",
-   "month": 3,
+   "month": 4.0,
    "hours": 6.0,
    "why": "When a customer asks 'will this hold on Monday when the whole ops floor logs in' or 'what happens when your worker pod gets patched', the FDE is the only person in the room who can answer with evidence rather than opinion, and that answer decides whether the go-live happens. Load tests find the first bottleneck before the customer does and turn a vague 'it feels slow' into a number, a saturated resource and a proven fix; chaos experiments turn 'Temporal is durable' from a vendor claim into a recovery time you measured on their cluster. Both are also how you write the capacity and resilience sections of the runbook the customer will hold you to after you leave.",
    "prerequisites": [
@@ -9502,7 +9502,7 @@
    "i": 24,
    "topic": "Incident response and postmortems",
    "track": "D. Reliability and Observability",
-   "month": 3,
+   "month": 4.0,
    "hours": 6,
    "why": "When the system you deployed at a customer breaks at 02:00, the FDE is the person the customer's VP calls, the person who has to run the bridge with the customer's own platform team on it, and the person who has to send the written account the customer's CTO forwards to their board. Nobody on the vendor side has more context than you, so you are the de facto incident commander whether or not anyone gave you the title, and a sloppy incident (three people typing into production, no timeline, a status update that speculated about root cause and was wrong) costs more trust than the outage itself. The postmortem is the artifact that turns an outage into a renewal: a blameless, numbers-first document with dated action items is how a customer decides you are safe to keep in production.",
    "prerequisites": [
@@ -9702,7 +9702,7 @@
    "i": 25,
    "topic": "High availability and disaster recovery",
    "track": "D. Reliability and Observability",
-   "month": 3,
+   "month": 4.0,
    "hours": 6.0,
    "why": "Every enterprise deal an FDE touches has a security questionnaire line that reads 'state your RTO and RPO' and a CTO who asks 'what happens if the region goes down' in the second architecture review, and the answer determines whether the pilot is allowed near production data. The FDE also inherits the customer's existing Postgres, their single-AZ Kubernetes cluster and their untested nightly dump, and is the person on the bridge when a migration drops a table or an AZ degrades. An FDE who has personally restored a database to a timestamp and measured the clock can make commitments and price them; one who has only read about it will either overpromise or stall the deal.",
    "prerequisites": [
@@ -9901,7 +9901,7 @@
    "i": 26,
    "topic": "Supporting a deployment you cannot log into: preflight checks, support bundles, remote diagnosis",
    "track": "D. Reliability and Observability",
-   "month": 3,
+   "month": 4.0,
    "hours": 6,
    "why": "The engagements that pay an FDE the most are the ones where the software runs inside a bank, a hospital or a defence contractor: on-prem, BYOC or fully air-gapped, where you have no SSH, no kubectl, no screen share, and a change-control board between you and the next piece of evidence. In those accounts your entire diagnostic capability is whatever you shipped in the installer months earlier - the preflight that refused to install on an undersized node, the collector that grabbed the right log, the redactor that made it legal for that log to leave the building. An FDE who can read a support bundle cold and name the root cause turns a two-week escalation into a same-day answer; one who cannot is reduced to asking the customer's admin to paste screenshots, which is how pilots die.",
    "prerequisites": [
@@ -10129,7 +10129,7 @@
    "i": 27,
    "topic": "Production Python architecture: domain models, repositories, DI, packaging",
    "track": "E. Backend and Data",
-   "month": 3,
+   "month": 4.0,
    "hours": 8.0,
    "why": "An FDE writes code that the customer's own engineers will own six weeks after the engagement ends, so the real deliverable is not the feature but a codebase a stranger can extend in a day without calling you. The same service is deployed against different databases, secret stores and model providers per customer (Postgres here, Snowflake there; Anthropic direct here, Bedrock behind a gateway there), which is only cheap if persistence, config and LLM calls sit behind ports that the composition root wires up. Take-home graders at Palantir, Anthropic and Databricks read your module layout, your pyproject.toml and your tests before they run anything; a flat script with SQLAlchemy models as the domain model is the most common reason a strong candidate gets a 'no'.",
    "prerequisites": [
@@ -11028,7 +11028,7 @@
    "i": 31,
    "topic": "PostgreSQL at depth: planner, indexes, EXPLAIN, locks, transactions, window functions",
    "track": "E. Backend and Data",
-   "month": 4,
+   "month": 5.0,
    "hours": 12,
    "why": "On almost every engagement the customer's Postgres (RDS, Cloud SQL, or a VM their DBA guards) is the shared dependency your feature lands on, and the new access patterns you introduce (per-tenant filters, JSONB metadata, event tables, job queues, embeddings side tables) are what turns 'the AI thing is slow' into a P1 with your name on it. You will be asked to read an EXPLAIN ANALYZE on a screen-share in front of their DBA and propose an index they will accept, and to ship a schema change to a multi-billion-row table with no maintenance window. Knowing the planner, MVCC and the lock table cold is what lets you say 'this will take 40 seconds and block nothing' and be right.",
    "prerequisites": [
@@ -11246,7 +11246,7 @@
    "i": 32,
    "topic": "Data modelling for multi-tenant AI systems: RLS, PII, encryption, audit trails",
    "track": "E. Backend and Data",
-   "month": 4,
+   "month": 5.0,
    "hours": 6.0,
    "why": "An FDE is usually the person who puts a customer's data into an AI system for the first time, and the customer's security team will not let a pilot touch production data until someone shows them, table by table, how tenant A cannot read tenant B, where PII lives, how it is encrypted and who can prove what was accessed. Application-layer `WHERE tenant_id = ?` filters fail the moment an engineer forgets one, an LLM-generated query bypasses the ORM, or a background job runs as the wrong principal; Postgres row-level security, pgcrypto and an append-only audit log move those guarantees into the database where a reviewer can actually verify them. The schema you design in week one is the schema that survives the handover, so getting isolation, PII handling and auditability right before the first customer row lands is the cheapest security work you will ever do.",
    "prerequisites": [
@@ -11454,7 +11454,7 @@
    "i": 33,
    "topic": "Redis: caching, rate limiting, idempotency, streams",
    "track": "E. Backend and Data",
-   "month": 4,
+   "month": 5.0,
    "hours": 6.0,
    "why": "Every customer integration an FDE ships sits between a flaky upstream (webhooks that retry, LLM providers that 429 you, browsers that double-submit) and a database the customer cannot afford to overload, and Redis is the component you put in that gap: a cache so the demo stays fast on their real data, a limiter so one tenant cannot starve the others, an idempotency store so a retried webhook does not create two invoices, and a stream so the work survives a pod restart. The customer usually already runs ElastiCache or a Redis in a corner of the cluster, so you inherit its eviction policy, persistence settings and single-threaded limits rather than choosing them, and you need to know which of your guarantees silently disappear when that instance is configured as a cache. Take-home reviewers at Anthropic, Databricks and Palantir specifically look for whether your rate limiter is atomic, whether your idempotency layer survives a crash between claim and completion, and whether you can say what happens to each of them on failover.",
    "prerequisites": [
@@ -11654,7 +11654,7 @@
    "i": 34,
    "topic": "Real-time transports: SSE, WebSockets, streaming at scale",
    "track": "E. Backend and Data",
-   "month": 4,
+   "month": 5.0,
    "hours": 8.0,
    "why": "Every LLM feature an FDE ships at a customer site is judged on time-to-first-token and on whether a 40-second answer survives a flaky corporate VPN, a proxy that buffers, and a rolling deploy mid-stream. You will be the person in the customer's war room when their Nginx or ALB silently kills the stream at 60 seconds, when 3 uvicorn workers each hold a different third of a session, or when one slow browser tab makes the whole pod OOM. Choosing SSE vs WebSocket, making delivery resumable, and proving the numbers with a load test are the difference between a demo and a production integration the customer's platform team will sign off on.",
    "prerequisites": [
@@ -11863,7 +11863,7 @@
    "i": 35,
    "topic": "Kafka and event-driven design",
    "track": "E. Backend and Data",
-   "month": 4,
+   "month": 5.0,
    "hours": 8.0,
    "why": "Every customer above a certain size already runs Kafka in some form (MSK, Confluent Cloud, Redpanda, Event Hubs) and expects your product to consume from their topics and publish back onto them under their schema registry, ACLs and retention rules; the FDE is the person who reads their topic contract, sizes the consumer group, and explains on a Friday night why the pilot dropped or duplicated events. Just as often the customer does not have Kafka and an architect on their side wants it for four hundred events a day, and the fastest way to earn credibility is a one-page memo showing a webhook or a Postgres table does the job with a tenth of the operational weight. The phrase 'exactly-once' will be said in a design review by someone holding a vendor slide; you need to state in one sentence exactly what it covers and design the idempotent consumer for everything it does not.",
    "prerequisites": [
@@ -12081,7 +12081,7 @@
    "i": 36,
    "topic": "Temporal at depth: signals, queries, versioning, sagas, worker tuning",
    "track": "E. Backend and Data",
-   "month": 4,
+   "month": 5.0,
    "hours": 8,
    "why": "Kaupex-style engagements live or die on long-running, side-effecting orchestration: an LLM compile step, a CRM write, a Postgres commit, a webhook back to the customer, each of which fails independently and none of which can be blindly re-run. Temporal is what lets you promise a customer 'nothing is lost and nothing is duplicated' after a node reboot, but only if you can change workflow code while thousands of their executions are mid-flight, unwind a half-finished business transaction without a human reconciling spreadsheets, and size workers so the backlog drains inside the SLO you signed. FDE loops at Temporal-heavy shops probe exactly these three things, because the FDE is the person who will be standing in the customer's cluster when a deploy strands 2,000 workflows.",
    "prerequisites": [
@@ -12299,7 +12299,7 @@
    "i": 37,
    "topic": "Entity resolution and record linkage: blocking, fuzzy and probabilistic matching, survivorship",
    "track": "E. Backend and Data",
-   "month": 4,
+   "month": 5.0,
    "hours": 6.0,
    "why": "Every customer with more than one system has the same customer, patient, supplier or account represented three different ways, and the first week of almost any deployment ends with someone saying 'these two files should join but there is no shared key'. An FDE is the person who has to turn that into a defensible pipeline in days, not a research project: a candidate set that fits in the customer's compute budget, a score you can explain pair by pair to their data steward, a threshold you can defend with a precision/recall curve instead of a vibe, and golden records with IDs that survive next month's rerun. Get it wrong in the merge direction and you have combined two real companies' invoices or two patients' medication lists in their production system - the kind of error that is expensive, visible and hard to unwind.",
    "prerequisites": [
@@ -12527,7 +12527,7 @@
    "i": 38,
    "topic": "Landing in a codebase you did not write: orientation, reproduction, isolation, minimal fix",
    "track": "E. Backend and Data",
-   "month": 4,
+   "month": 5.0,
    "hours": 6.0,
    "why": "An FDE's default state is standing in a repository nobody on your team wrote - the customer's fork of your product, their in-house integration, a vendored library three versions behind - with their engineer watching and a bug blocking go-live. What is being tested is not cleverness but a repeatable landing sequence: orient in ten minutes, turn the report into a failing test, bisect to the change that caused it, ship the smallest diff that turns it green, and say the root cause and blast radius out loud before anyone asks. Get this wrong and you either freeze for two days 'understanding the architecture', or you ship a 400-line while-I-was-in-there refactor into a system you do not understand and become the outage.",
    "prerequisites": [
@@ -12755,7 +12755,7 @@
    "i": 39,
    "topic": "Testing and contracts: pytest, property tests, OpenAPI contract tests",
    "track": "E. Backend and Data",
-   "month": 5,
+   "month": 6.0,
    "hours": 6.0,
    "why": "An FDE ships an API into a customer's environment and then leaves; the customer's integration team keeps building against it for years, and the only thing that protects them from your successor's refactor is a machine-checked contract that fails the build. Customer data is the adversary: unicode task names, empty lists, 10 MB payloads, and out-of-order state transitions arrive on day one of production, and property-based tests are the cheapest way to meet them in CI first. A published coverage number and a green contract job are also what a customer's procurement and security review actually ask for in the vendor questionnaire, so the test suite is part of the sales artefact, not just engineering hygiene.",
    "prerequisites": [
@@ -12982,7 +12982,7 @@
    "i": 40,
    "topic": "Warehouse layer: dbt, DuckDB, dimensional modelling",
    "track": "E. Backend and Data",
-   "month": 5,
+   "month": 6.0,
    "hours": 6.0,
    "why": "FDEs are routinely the person a customer asks for 'just a weekly report' out of the product database, and the naive answer - a cron job running SELECTs against the OLTP primary - is what pages their DBA at 03:00 and produces numbers that disagree with the invoice. A tested, documented dbt + DuckDB mart is the smallest thing that gives you a stable grain, history that survives source overwrites, a reconciliation you can show the customer, and a project that ports to their Snowflake/BigQuery/Databricks by swapping the adapter when they outgrow one box. Dimensional-modelling vocabulary (grain, SCD2, conformed dimensions, additivity) is also the shared language with the customer's data team, and Palantir/Databricks-style loops test it directly.",
    "prerequisites": [
@@ -13200,7 +13200,7 @@
    "i": 41,
    "topic": "React and Next.js for FDE demos and internal tools",
    "track": "E. Backend and Data",
-   "month": 5,
+   "month": 6.0,
    "hours": 8,
    "why": "The customer never sees your FastAPI service, your Temporal workflows or your eval harness; they see a screen, and in week two of every engagement someone asks 'can you put a UI on that so the ops team can use it'. An FDE who can stand up a typed, authenticated, streaming Next.js front end over their own API in an afternoon turns a backend demo into a pilot the customer can click through, and can also read and fix the customer's existing Next.js code (most enterprise platform teams already run it). Take-homes at Palantir, Anthropic and Databricks routinely include a small UI, and the difference between a screen that streams tokens through the customer's Nginx and one that freezes for eight seconds is exactly the kind of production detail this topic drills.",
    "prerequisites": [
@@ -13427,7 +13427,7 @@
    "i": 42,
    "topic": "PySpark (optional: Databricks- or Palantir-style roles only)",
    "track": "E. Backend and Data",
-   "month": 5,
+   "month": 6.0,
    "hours": 6.0,
    "why": "At Databricks and Palantir the FDE works inside the customer's lakehouse: their logs, transactions and eval sets already sit in Delta tables or Foundry datasets at hundreds of gigabytes to terabytes, and the fastest path to a demo on real data is a PySpark transform that runs where their pipelines run, under their cluster's memory limits and their security team's eyes. The differentiator in those loops is not API trivia but being able to look at a stage that has run for forty minutes and say 'one tenant is 40 percent of the rows, that task is the skew, here is the salt' instead of 'Spark is slow', which requires the driver/executor model and the physical plan to be in your head. This topic is optional: if your target list is API-company FDE roles only, topic 36 (DuckDB and dbt) covers the analytics you need and this six hours is better spent on topic 43.",
    "prerequisites": [
@@ -13627,7 +13627,7 @@
    "i": 43,
    "topic": "Designing Data-Intensive Applications and Kleppmann's lectures",
    "track": "F. Distributed Systems and System Design",
-   "month": 5,
+   "month": 6.0,
    "hours": 16.0,
    "why": "Every FDE engagement eventually reaches the meeting where the customer's architect asks 'is this strongly consistent', 'what happens when the replica is behind', or 'can we just add a distributed lock', and the FDE either answers in terms of user-visible anomalies and concrete costs or loses the room. DDIA plus Kleppmann's Cambridge lectures are the shared vocabulary that Palantir, Databricks and Anthropic loops assume you already have: replication lag, quorums, isolation levels, linearizability, total order broadcast, Raft, CDC. The Gossip Glomers force you to feel the failures (lost messages, partitions, stale reads on a sequentially consistent store) in code, so that when a customer's Kafka consumer double-counts or a Postgres failover loses writes you recognise the mechanism inside a minute instead of a week.",
    "prerequisites": [
@@ -13845,7 +13845,7 @@
    "i": 44,
    "topic": "MIT 6.824 selected lectures: Raft, linearizability, transactions",
    "track": "F. Distributed Systems and System Design",
-   "month": 5,
+   "month": 6.0,
    "hours": 8,
    "why": "Every customer environment you land in already runs consensus somewhere you did not choose: etcd under their Kubernetes control plane, ZooKeeper or KRaft under their Kafka, a MongoDB replica set, a Consul cluster, a CockroachDB or Spanner tier. When the platform team asks 'is it safe if we lose one node', 'why did the API server time out for 40 seconds', or 'why did two workers both think they held the lock', the FDE in the room has to answer from mechanism, not folklore, and then translate the answer into a flag change, a topology change, or a redesign of the customer's retry logic. The same vocabulary (quorum, commit, linearizable, stale read, blocking 2PC, idempotency across failover) is exactly what a Palantir, Databricks or Anthropic system-design loop probes, so the whiteboard fluency this topic builds is doing double duty.",
    "prerequisites": [
@@ -14072,7 +14072,7 @@
    "i": 45,
    "topic": "MIT 6.824 Raft lab (optional deep dive)",
    "track": "F. Distributed Systems and System Design",
-   "month": 5,
+   "month": 7.0,
    "hours": 20,
    "why": "Reading the Raft paper makes you conversational; writing Raft and getting it past an adversarial tester makes you the person in the room who can say what a customer's etcd, Consul, CockroachDB or Kafka-KRaft cluster will actually do when a node's disk goes slow or a rack loses the network. FDEs get handed exactly these questions on-site — 'why did the API server freeze for 40 seconds', 'why did both workers hold the lock', 'is 4 nodes across 2 datacentres fine' — and the answers live in details you only internalise by hitting them: persist-before-reply, current-term-only commits, never truncating on a stale AppendEntries. It is also the strongest possible signal in a Palantir/Databricks/Anthropic loop that your distributed-systems knowledge is load-bearing rather than recited.",
    "prerequisites": [
@@ -14299,7 +14299,7 @@
    "i": 46,
    "topic": "System design playbook: load balancing, caching, sharding, queues, rate limits, IDs, search",
    "track": "F. Distributed Systems and System Design",
-   "month": 5,
+   "month": 7.0,
    "hours": 10,
    "why": "An FDE is the person in the room when the customer's architect asks 'and what happens when we roll this to all 500 clients?' and you have to answer on a whiteboard with numbers, inside their constraints (their VPC, their Postgres, their Kafka, their security team) rather than in the abstract. Every deployment you scope is assembled from the same seven building blocks: something in front spreading traffic, something remembering answers, something splitting data, something absorbing bursts, something saying no, something naming things, and something finding them. The system design round is also where senior FDE loops at Palantir, Anthropic and Databricks separate 'can build a feature' from 'can own a customer's production system', and the interviewer is grading the same thing the customer is: can you run the conversation end to end, attach numbers, name trade-offs, and tell a credible story about what breaks first.",
    "prerequisites": [
@@ -14527,7 +14527,7 @@
    "i": 47,
    "topic": "LLM-era system design: serving, caching, batching, rate limits, retries, latency budgets",
    "track": "F. Distributed Systems and System Design",
-   "month": 5,
+   "month": 7.0,
    "hours": 8,
    "why": "An LLM call breaks every assumption the classic system design playbook is built on: latency is a function of output length rather than of work done, the dependency is a metered third party that returns 429 and 529 under load you do not control, cost is per request and visible on the customer's invoice, and the response is non-deterministic so a naive retry can double-charge and double-write. As the FDE you are the one who has to tell the customer's architect, before go-live, what p95 will be at their peak, what a request costs, and what the system does when the model provider is degraded for forty minutes. Getting the answer wrong is not an SLO miss, it is a checkout page that hangs on Black Friday and a bill nobody approved.",
    "prerequisites": [
@@ -14736,7 +14736,7 @@
    "i": 48,
    "topic": "System design mocks (six, timed, recorded)",
    "track": "F. Distributed Systems and System Design",
-   "month": 5,
+   "month": 7.0,
    "hours": 10,
    "why": "An FDE does system design live and unprepared: in a customer's conference room, in front of their principal architect, with requirements that arrive as complaints rather than specs, and with a hard stop when the VP has to leave. The system design round in a Palantir, Anthropic or Databricks FDE loop is a compressed version of that meeting, and both reward the same muscle: turn a vague ask into numbers, draw something a stranger can follow, name the two things that will actually break, choose between options out loud, and stay coherent when someone pushes back. Topics 39 to 43 gave you the material; this topic trains delivery under a clock, and the recording is what lets you see the gap between what you know and what you can show in 45 minutes.",
    "prerequisites": [
@@ -14963,7 +14963,7 @@
    "i": 49,
    "topic": "LLM fundamentals: tokens, attention, pretraining, RLHF, scaling, limits",
    "track": "G. AI Engineering",
-   "month": 6,
+   "month": 7.0,
    "hours": 10,
    "why": "An FDE is the person a customer's VP of Ops corners after the demo and asks \"why did it make that up, and can you guarantee it won't?\" — and the answer has to be mechanistic, honest, and scoped, not a shrug or a sales line. Everything else in this track (prompting, tool use, RAG, evals, fine-tuning) is a set of levers whose behaviour only makes sense once you can say which part of the stack each lever touches: tokenizer, attention, pretraining distribution, or post-training preference model. Getting this wrong in front of a customer costs you the engagement — you either overpromise a determinism the architecture cannot deliver, or you kill a viable use case because you could not explain that the failure was retrieval, not the model.",
    "prerequisites": [
@@ -15190,7 +15190,7 @@
    "i": 50,
    "topic": "Prompt engineering as code: versioning, regression sets, structured outputs",
    "track": "G. AI Engineering",
-   "month": 6,
+   "month": 7.0,
    "hours": 6,
    "why": "An FDE ships prompts into a customer's production path - a classifier that writes into their CRM, an extractor that feeds their claims queue - and then changes them weekly as the customer discovers edge cases; without version control, a pinned model snapshot and a regression set that runs before merge, every improvement is an uncontrolled experiment on the customer's data. The failure you are preventing has no stack trace: a prompt edit that fixes the one document the customer complained about and silently degrades the other nine hundred, discovered a fortnight later in their monthly report. Treating prompts as code - files in Git, a changelog, typed outputs behind schemas, and a CI gate with a committed baseline - is what lets you say 'this change moved recall from 0.91 to 0.94 across 240 labelled cases, here is the diff and here is what it cost' instead of 'it seems better now'.",
    "prerequisites": [
@@ -15408,7 +15408,7 @@
    "i": 51,
    "topic": "Tool use, structured outputs and MCP servers",
    "track": "G. AI Engineering",
-   "month": 6,
+   "month": 7.0,
    "hours": 8,
    "why": "Tool use is the seam where an FDE's work actually touches the customer: the model stops describing what it would do and starts writing into their HubSpot, their Snowflake, their ticketing system, inside their network, under their auth. An MCP server is the deliverable form of that seam - a small, reviewable process whose tool list is the exact set of capabilities you are asking the customer's security team to approve, and whose input schemas are the only thing standing between a hallucinated argument and a mutation of production data. Getting this right is the difference between a pilot that clears security review in a week and one that dies in it, so the FDE skill here is not 'can you call an API from an LLM' but 'can you draw the trust boundary, defend every arrow across it, and prove with tests that the server does nothing else'.",
    "prerequisites": [
@@ -15627,7 +15627,7 @@
    "i": 52,
    "topic": "Agents: workflows vs agents, planning, memory, multi-agent, human-in-the-loop",
    "track": "G. AI Engineering",
-   "month": 6,
+   "month": 8.0,
    "hours": 10,
    "why": "An FDE's first week at a customer is spent listening to a process described in human sentences ('then Maya checks the ticket against the SOP and pings legal if it is over 50k') and deciding which of those sentences becomes a switch statement, which becomes one templated LLM call with a strict schema, and which genuinely needs a model choosing its own next action. Getting that boundary wrong is the most expensive mistake in AI delivery: an agent where a workflow would do costs ten to twenty times the tokens, has no enumerable failure set, and cannot be signed off by a risk committee; a workflow where an agent was needed produces a brittle graph that snaps on the first input the customer's business did not describe to you. You will defend this line in a room with a customer architect who has read a vendor deck and wants 'agentic' on the roadmap, so the decision criteria, the cost arithmetic and the fallback design have to be in your head, not in a bookmark.",
    "prerequisites": [
@@ -15853,7 +15853,7 @@
    "i": 53,
    "topic": "RAG at depth: chunking, embeddings, hybrid retrieval, reranking, contextual retrieval, caching",
    "track": "G. AI Engineering",
-   "month": 6,
+   "month": 8.0,
    "hours": 10,
    "why": "Every enterprise AI deployment an FDE lands on is a retrieval problem wearing a model's clothes: answer quality is capped by whether the right paragraph of the customer's MSA, runbook or ticket history actually reached the prompt. Customers do not report 'low nDCG', they report 'it could not find the liability cap in our own contract', and the fix is almost never a bigger model - it is parsing, chunking, hybrid retrieval, reranking and context assembly, each of which you must defend with a before/after number in front of their architect. It is also the highest-leverage thing you can change on site in a single week without asking anyone for GPUs, a fine-tune or a new budget line.",
    "prerequisites": [
@@ -16080,7 +16080,7 @@
    "i": 54,
    "topic": "Fine-tuning vs prompting: LoRA, PEFT, when not to",
    "track": "G. AI Engineering",
-   "month": 6,
+   "month": 8.0,
    "hours": 8,
    "why": "Fine-tuning is the most expensive wrong answer an FDE can give in a scoping call: it converts a two-week prompt-and-retrieval engagement into a six-month labelling programme, and the customer's ML-curious VP will usually ask for it by name in the first hour. Your job is to be the person who can say 'here is the measurement showing prompting already clears your bar, and here is the number that would change my mind' — which is only credible if you have actually shipped a LoRA run and can talk about masking, rank, and adapter serving without hand-waving. And when a tune genuinely is the right call — a rigid output format, a domain the tokenizer mangles, or a cost target only a small tuned model hits — you have to be able to build it, evaluate it against the baseline, and own the retraining tail you just sold.",
    "prerequisites": [
@@ -16307,7 +16307,7 @@
    "i": 55,
    "topic": "Guardrails, prompt injection, red-teaming",
    "track": "G. AI Engineering",
-   "month": 6,
+   "month": 8.0,
    "hours": 6,
    "why": "An FDE is the person who physically wires a customer's model to their real systems - their ticket queue, their document store, their write-capable internal API - which means you are the one who creates the trust boundary that prompt injection attacks. Every enterprise security review gates go-live on a threat model and a repeatable adversarial test suite, and in a forward-deployed engagement that artifact comes from you, not from the vendor's trust-centre page. Get it wrong and the outcome is not an embarrassing demo, it is data exfiltration from the customer's own infrastructure with your engagement's name attached to the incident report.",
    "prerequisites": [
@@ -16506,7 +16506,7 @@
    "i": 56,
    "topic": "Hermes Agent (Nous Research) in production",
    "track": "G. AI Engineering",
-   "month": 6,
+   "month": 8.0,
    "hours": 8.0,
    "why": "Hermes Agent is the fastest credible way to put a working, self-hosted agent on a customer's own box in an afternoon, which is exactly the FDE move when procurement will not approve a SaaS agent and the pilot has to run inside their perimeter. Operating it - not demoing it - forces you to answer the four questions every agent deployment stalls on: what the agent is allowed to execute, which customer systems it reaches through MCP, who is allowed to talk to it, and what happens at 03:00 when a scheduled job silently stops delivering. Shipping it publicly with your own HubSpot MCP server produces the artifact most AI-engineer resumes lack - an agent you ran in production with a threat model and a bill, rather than one you prompted.",
    "prerequisites": [
@@ -16733,7 +16733,7 @@
    "i": 57,
    "topic": "Permission-aware retrieval: mirroring customer ACLs into RAG and agent tools",
    "track": "G. AI Engineering",
-   "month": 6,
+   "month": 8.0,
    "hours": 6.0,
    "why": "Every enterprise RAG pilot reaches the same meeting: the customer's security architect asks what happens when a contractor asks your assistant about the severance terms in an HR document they cannot open in SharePoint, and the honest answer for most demos is 'it answers'. Retrieval is a copy of the customer's corpus with its own, usually weaker, permission system, so an FDE who ships an index without mirroring the source ACLs has silently rebuilt the customer's document store with authorization removed - and one screenshot of a leaked paragraph ends the engagement in a way no eval score recovers. Getting this right is also what unblocks the pilot: security teams sign off on a retriever whose permission model they can read, test and revoke against, and that sign-off is usually the FDE's job to earn, not the platform team's.",
    "prerequisites": [
@@ -16943,7 +16943,7 @@
    "i": 58,
    "topic": "Evals as infrastructure: eval sets, LLM-as-judge, human review, CI gates",
    "track": "H. AI in Production",
-   "month": 7,
+   "month": 9.0,
    "hours": 12,
    "why": "At the end of every pilot an FDE has to answer one question in front of the customer's engineering lead and their exec sponsor: how do you know it works? Without a labelled set you own, per-class numbers with intervals, and a gate that blocks regressions before merge, the honest answer is a demo and a feeling - so the pilot converts on trust rather than evidence, and the first bad week kills it. Evals are also the only mechanism that lets you change a prompt, swap a model or ship a retrieval improvement on a customer's production path without gambling with their data, and the only artefact that turns 'it got worse this month' into a specific class, a specific date and a specific commit.",
    "prerequisites": [
@@ -17170,7 +17170,7 @@
    "i": 59,
    "topic": "LLM observability: traces, cost, latency, datasets",
    "track": "H. AI in Production",
-   "month": 7,
+   "month": 9.0,
    "hours": 6,
    "why": "When a customer says 'the assistant gave a wrong answer at about 3pm yesterday' or 'finance says this thing cost eleven thousand dollars last month', an FDE either opens a trace and answers in ninety seconds or spends two days reconstructing the incident from application logs that never captured the prompt. LLM observability is the difference between debugging a non-deterministic system with evidence and debugging it with opinions, and it is the only mechanism that turns real production failures into a growing eval dataset instead of a growing list of complaints. It is also how you defend a deployment commercially: cost per tenant, p95 latency by prompt version, and refusal rate are the numbers that decide renewal, and nobody else on the account team can produce them.",
    "prerequisites": [
@@ -17361,7 +17361,7 @@
    "i": 60,
    "topic": "Model gateway, routing, fallbacks, canaries",
    "track": "H. AI in Production",
-   "month": 7,
+   "month": 9.0,
    "hours": 6,
    "why": "The gateway is the one piece of an AI deployment an FDE can change on a Tuesday without asking the customer's platform team for anything: it is where you swap models, cap spend, survive a provider outage, and prove a new model is better before you make it everyone's problem. Enterprise customers do not accept 'we upgraded the model and it feels better' - they accept a 10% canary with a written comparison of quality, p95 latency, cost per request and error rate, and a rollback that took one config change. Without a gateway you are hard-coding a vendor SDK into the customer's application, which means every model decision becomes a code deploy, a change-advisory-board ticket, and a three-week delay you will personally own.",
    "prerequisites": [
@@ -17561,7 +17561,7 @@
    "i": 61,
    "topic": "Serving at scale: vLLM, quantisation, KV cache, batching, GPU maths",
    "track": "H. AI in Production",
-   "month": 7,
+   "month": 9.0,
    "hours": 10,
    "why": "The moment a customer says 'we cannot send this data to an API' or 'the per-token bill does not survive procurement', the FDE becomes the person who has to say how many GPUs it takes, how fast it will feel, and what it costs per user per month - with numbers that hold up in front of their infrastructure lead and their CFO on the same call. Nobody else on the engagement can do that: the model vendor sells tokens, the platform team does not know transformer inference, and the customer's own estimate is a leaderboard screenshot. Being able to derive KV cache bytes per token on a whiteboard, tune vLLM until you find the knee of the load curve, and turn that into a one-page capacity plan is the difference between a deployment that ships and one that stalls in an architecture review for six weeks.",
    "prerequisites": [
@@ -17769,7 +17769,7 @@
    "i": 62,
    "topic": "Drift, feedback loops, registries, rollout",
    "track": "H. AI in Production",
-   "month": 7,
+   "month": 9.0,
    "hours": 5.0,
    "why": "The deployment you hand over on day 90 is not the system the customer runs on day 180: they onboard a new mailbox, change their escalation policy, or the vendor rotates a model snapshot, and the classifier that scored 94% at go-live quietly stops working while every dashboard stays green. As the FDE you are the person who has to answer 'is it actually getting worse, or does it just feel worse?' with a number, and then change a prompt version in a live tenant without a deploy window and without breaking the eight analysts working the queue. Drift detection, a feedback loop that produces real labels, a registry that makes versions addressable, and a rehearsed rollout ladder are the four things that turn 'we shipped a demo' into 'we own this in production' - and they are what a customer's platform team will interrogate you about before they let you near their environment.",
    "prerequisites": [
@@ -17969,7 +17969,7 @@
    "i": 63,
    "topic": "Experiment tracking and prompt versioning as CI",
    "track": "H. AI in Production",
-   "month": 7,
+   "month": 9.0,
    "hours": 6,
    "why": "The prompt is the highest-frequency change on a customer's production path and usually the only one that a non-engineer can make - a solutions consultant tweaking wording in a UI during a workshop is a production deploy with no PR, no review and no rollback plan. As the FDE you are the person the customer's change-management process points at, so you need to answer 'what changed on Tuesday, what did it do to the numbers, and how fast can you undo it' without a redeploy and without a hedge. Everything in topic 53 measures a system at one moment; this topic is what turns those measurements into a run history with lineage, a gate that blocks a regression before it reaches the customer's tenant, and a rollback you have actually rehearsed with a stopwatch.",
    "prerequisites": [
@@ -18160,7 +18160,7 @@
    "i": 64,
    "topic": "Cost and latency engineering: prompt caching, batching, smaller models",
    "track": "H. AI in Production",
-   "month": 7,
+   "month": 9.0,
    "hours": 6,
    "why": "The moment an AI deployment leaves pilot, the customer's finance team gets an invoice and their users get a spinner, and both land on the FDE. Nobody renews a system that costs $4 per ticket and takes eleven seconds to first token, and 'use a cheaper model' is not an answer you can give without evidence that quality held. This topic is the difference between an FDE who says 'we could try Haiku' and one who walks into the QBR with a table showing 62% lower cost per resolved ticket, p95 first-token down from 4.1s to 900ms, and an eval delta of -0.6 points inside the noise band.",
    "prerequisites": [
@@ -18369,7 +18369,7 @@
    "i": 65,
    "topic": "Platform fluency for take-homes: Anthropic and OpenAI APIs side by side",
    "track": "H. AI in Production",
-   "month": 7,
+   "month": 9.0,
    "hours": 5,
    "why": "FDE take-homes and customer POCs are timeboxed, and the person grading you is watching whether your budget went into the problem or into plumbing you should already know. Customers almost never let you pick the vendor either — they are already on Bedrock, or Azure, or have a procurement contract with one provider — so 'can you do this on our stack?' has to be answerable with a running demo rather than a maybe. Being able to write the tool loop, the strict output schema, the streaming consumer and the batch job on either API from memory turns a two-day integration into an afternoon, and turns a vendor-migration question into a one-page diff instead of a project.",
    "prerequisites": [
@@ -18578,7 +18578,7 @@
    "i": 66,
    "topic": "Application security: OWASP Top 10 hands-on",
    "track": "I. Security and Compliance",
-   "month": 7,
+   "month": 9.0,
    "hours": 10,
    "why": "An FDE is the person sitting in the room when the customer's security team returns a pentest report two weeks before go-live, and the deployment either survives that meeting or slips a quarter. You will be deploying your own code inside someone else's VPC, against their SSO, holding their regulated data, which means you personally own the authorization boundary, the secrets, and the answer to 'can tenant A see tenant B'. Reading the OWASP list is worthless here - you need to have actually exploited broken object-level authorization and a forged JWT with your own hands, because that is the only way you can look at a customer's API and see the bug before their auditor does.",
    "prerequisites": [
@@ -18805,7 +18805,7 @@
    "i": 67,
    "topic": "Threat modelling and secrets lifecycle",
    "track": "I. Security and Compliance",
-   "month": 7,
+   "month": 9.0,
    "hours": 6.0,
    "why": "An FDE is the person sitting across from the customer's security architect in week two of a deployment, and the two artifacts that unblock or kill the project are a credible threat model and a credible answer to 'how do you rotate that credential without taking us down'. Nobody buys 'we take security seriously' - they buy a data-flow diagram with named trust boundaries, a STRIDE table where every threat has a mitigation and an owner, and a rotation runbook that has actually been rehearsed against a live system. Secrets are also the single most common way an on-site deployment breaks after handover: the credential expires, the rotation job flips the password at 03:00, and the service that cached it at import time goes down while you are on a plane.",
    "prerequisites": [
@@ -19016,7 +19016,7 @@
    "i": 68,
    "topic": "Enterprise SSO and directory integration: SAML 2.0 SP setup, SCIM provisioning, group mapping",
    "track": "I. Security and Compliance",
-   "month": 7,
+   "month": 10.0,
    "hours": 5.0,
    "why": "Every enterprise deal reaches a point where the customer's identity team - not their product team - decides whether your software goes live, and the two things they ask for are 'log in with our IdP' and 'users appear and disappear automatically from Okta or Entra'. As the FDE you are the person on the call with their IdP admin, holding a base64 blob that says nothing more helpful than 'authentication failed', and you are expected to name the broken condition (audience, NameID format, clock skew, signature scope, RelayState) from the raw assertion rather than filing a ticket with your own auth vendor. Get SCIM wrong and the failure is worse than a broken login: terminated employees keep working sessions, which turns a delivery detail into a finding in the customer's next access review.",
    "prerequisites": [
@@ -19244,7 +19244,7 @@
    "i": 69,
    "topic": "Cloud and Kubernetes security games",
    "track": "I. Security and Compliance",
-   "month": 8,
+   "month": 10.0,
    "hours": 6,
    "why": "As an FDE you deploy into the customer's own AWS account and their Kubernetes cluster, often with a security team watching every IAM role you request and every Pod spec you apply, and 'the vendor's workload got popped and pivoted to our data' is the fastest way to be thrown off an account. Playing the attacker in flaws2.cloud and Kubernetes Goat teaches you exactly how a leaked credential, an SSRF, a privileged Pod or an over-broad Role turns into a full account compromise, so you can design the deployment that does not do that and defend the design in the architecture review. The tangible output is a client-facing hardening checklist you can hand a customer's platform team, which is worth more in a security review than any certificate.",
    "prerequisites": [
@@ -19435,7 +19435,7 @@
    "i": 70,
    "topic": "Compliance: SOC 2, GDPR, HIPAA, PCI, what FDEs actually do",
    "track": "I. Security and Compliance",
-   "month": 8,
+   "month": 10.0,
    "hours": 5.0,
    "why": "In enterprise delivery the last mile is almost never engineering - it is a security review, a DPA redline, or a compliance lead asking where their data goes and who can read it, and an FDE who freezes there costs the deal weeks. You are not the auditor and not counsel, but you are the only person in the room who knows that the tenant isolation is Postgres RLS, that the classifier ships prompts to a third-party model provider, and that logs live in a SaaS for 30 days - and every one of those facts is a control someone has to sign. The skill is translating a customer's questionnaire into your architecture, answering truthfully with evidence, and knowing precisely where your authority ends and legal's begins.",
    "prerequisites": [
@@ -19626,7 +19626,7 @@
    "i": 71,
    "topic": "Incident tabletop and security briefing",
    "track": "I. Security and Compliance",
-   "month": 8,
+   "month": 10.0,
    "hours": 5,
    "why": "When something breaks inside a customer's environment, the FDE is the only person in the room who both understands the system and has the customer's trust, which means you become the incident commander and the customer-facing voice at the same time - a conflict you have to resolve deliberately rather than by accident at 2am. The technical fix is rarely the hard part; the hard part is running a call with your customer's VP of Engineering on it, deciding when to say the word 'breach', and starting a regulatory clock you cannot stop. This topic is the rehearsal: you run a real tabletop against your own architecture, and you build the five-minute briefing that a customer's board or CISO will actually sit through, because the deployment survives or dies on whether they believe you had control.",
    "prerequisites": [
@@ -19817,7 +19817,7 @@
    "i": 72,
    "topic": "Discovery: finding the real problem",
    "track": "J. FDE Craft and Communication",
-   "month": 8,
+   "month": 10.0,
    "hours": 8,
    "why": "An FDE is handed a signed contract and a stated requirement that is almost always a solution somebody already picked - 'we need a dashboard', 'we need RAG over our SharePoint', 'we need an agent that does triage' - and building exactly that is the most common way an engagement ships on time and still fails. You are the only person on the vendor side who will sit with the analyst who does the work at 09:00 and the VP who signed the cheque at 16:00, so the single problem statement both of them will agree with does not exist until you go and manufacture it. Bad discovery does not fail loudly: you deliver in week six, adoption is zero by week ten, and the renewal conversation becomes about your product instead of their process.",
    "prerequisites": [
@@ -20017,7 +20017,7 @@
    "i": 73,
    "topic": "Engagement documents: site survey, PRD-lite, SOW, ADRs, design docs, runbooks",
    "track": "J. FDE Craft and Communication",
-   "month": 8,
+   "month": 10.0,
    "hours": 8,
    "why": "An FDE is the only person in the room who sits between a sponsor who wants an outcome, a platform team that owns the environment, and an on-call engineer who will be woken up by whatever you deploy, and the artifact that keeps those three aligned is writing, not code. Every expensive delivery failure - the six-week slip on an IAM role nobody was assigned, the security veto three days before go-live, the 3am incident where the customer cannot restart your service - is traceable to a document that was never written or was written for the wrong reader. Producing a site survey, a PRD-lite, a SOW section set, ADRs, a design doc and runbooks that a customer's lead accepts without rewriting is the difference between a contractor who ships code and a forward-deployed engineer who ships a working system the customer can own.",
    "prerequisites": [
@@ -20226,7 +20226,7 @@
    "i": 74,
    "topic": "Demos, executive communication, defending trade-offs",
    "track": "J. FDE Craft and Communication",
-   "month": 8,
+   "month": 10.0,
    "hours": 8,
    "why": "An FDE's work is invisible until it is demonstrated: the system you spent six weeks deploying inside a customer's VPC gets renewed, expanded or killed on the strength of ten minutes in front of people who will never read your code. The room is not friendly by default - the CFO is looking for the line item to cut, the platform lead is calculating whose pager this lands on, and both will test whether you can defend a trade-off you actually made rather than recite a script. This is the one skill where being right is worth nothing unless you can show it live, price it, and hold the number under attack.",
    "prerequisites": [
@@ -20426,7 +20426,7 @@
    "i": 75,
    "topic": "Technical writing and public write-ups",
    "track": "J. FDE Craft and Communication",
-   "month": 8,
+   "month": 10.0,
    "hours": 6,
    "why": "An FDE's output is mostly artifacts other people read without you in the room: the runbook the customer's on-call follows at 3am, the incident write-up their VP forwards to their CISO, the design doc that decides whether your integration ships. If the prose is vague, the deployment stalls in review; if it is precise, you buy trust you did not have to earn in a meeting. Public case studies do the same job pre-sales - a hiring loop or a prospect who has read three of your write-ups arrives already believing you can do the work, which is the single highest-leverage thing you can put on the internet in a job search.",
    "prerequisites": [
@@ -20635,7 +20635,7 @@
    "i": 76,
    "topic": "Negotiation and offers",
    "track": "J. FDE Craft and Communication",
-   "month": 8,
+   "month": 10.0,
    "hours": 5,
    "why": "An FDE negotiates for a living - what is in the pilot and what is not, whether the go-live slips, whether that 'small ask' becomes a change order - so the offer negotiation is the first time the people who will staff you on accounts watch you hold a position under pressure with a real relationship on the line. Folding in ten minutes because a recruiter said 'this is the band' is the same behaviour that later turns a fixed-scope deployment into six months of unpaid feature work. FDE compensation is also structurally messier than a straight software engineering offer - hybrid or field ladders with different equity bands, travel load, on-call for someone else's production, sometimes a variable component tied to deployment milestones - so the highest-leverage moves here are structural (which ladder, which level, what is written down) rather than an extra few percent on base.",
    "prerequisites": [
@@ -20835,7 +20835,7 @@
    "i": 77,
    "topic": "Domain fluency: fintech ops, healthcare intake, procurement, logistics",
    "track": "J. FDE Craft and Communication",
-   "month": 8,
+   "month": 11.0,
    "hours": 6,
    "why": "An FDE gets roughly fifteen minutes inside a customer's operation to prove they understand the business before the conversation collapses into a feature demo, and the proof is not enthusiasm - it is vocabulary, an accurate workflow map, and knowing which data you are not allowed to look at. These four domains cover the bulk of enterprise AI deployments, and each has a hard regulatory edge (PCI, HIPAA, SOX, ITAR) where a wrong default is not a bug but a reportable disclosure or an audit finding that kills the renewal. Knowing exactly who signs off is what converts a working prototype into a deployment, because in all four domains the approval, not the model, is the thing standing between you and production.",
    "prerequisites": [
@@ -21062,7 +21062,7 @@
    "i": 78,
    "topic": "Releasing to a fleet of customer installs: support and skew policy, preflight gates, cohort rollout",
    "track": "J. FDE Craft and Communication",
-   "month": 8,
+   "month": 11.0,
    "hours": 6,
    "why": "An FDE does not ship to one production environment - they ship to twenty or forty customer-owned installs that are each pinned at a different version, on a different Kubernetes minor, behind a different change-approval board, and some of them are air-gapped so you cannot see them fail. Without a written support window, a skew policy and a preflight that hard-fails an unsupported jump, every upgrade is a bespoke rescue mission and the third-oldest install eventually becomes a version only you can operate, at 02:00, on a call with their CTO. The whole discipline reduces to two customer-facing promises you have to be able to keep: any install inside the support window can reach current on a documented path, and any upgrade can be rolled back with the customer's data intact.",
    "prerequisites": [
@@ -21290,7 +21290,7 @@
    "i": 79,
    "topic": "Async engagement communication: weekly status update, escalation and slip notes, decision memo",
    "track": "J. FDE Craft and Communication",
-   "month": 8,
+   "month": 11.0,
    "hours": 5,
    "why": "An FDE is usually the only vendor-side person the customer's sponsor hears from, and that sponsor decides renewal, expansion or cancellation from a few hundred words a week read on a phone between meetings - not from your code, your dashboards or the two people on their side who actually know what you built. The engagements that die rarely die of engineering; they die because a slip was discovered by the customer rather than announced by you, because an ask sat unanswered in a Slack thread for three weeks with no owner, or because a decision taken verbally in month one was relitigated in month three with no written record. Async writing is also the only leverage you have across time zones and customer sites: a weekly update that is genuinely skimmable, an escalation that lands without humiliating your counterpart, and a decision memo that closes a question in one round are what let one FDE hold three engagements without a standing call on each.",
    "prerequisites": [
@@ -21509,7 +21509,7 @@
    "i": 80,
    "topic": "Narrative: why FDE, why this company, travel, comp",
    "track": "K. Interview Loop and Mocks",
-   "month": 8,
+   "month": 11.0,
    "hours": 3,
    "why": "An FDE loop is the only engineering loop that screens for staffing risk as hard as it screens for skill, because the hire gets put in front of a paying customer within weeks and every hour is either billable or burning a deployment budget. 'Why FDE', 'how much can you travel' and 'what number are you looking for' are not warm-up questions - they are the hiring manager deciding whether you will still be willing to fly to a customer site in month seven and whether your comp expectation fits the band they already have signed off. The same muscle is the job itself: compressing a complex situation into sixty seconds for a specific audience, and stating a constraint as a number you can actually hold, is what you do in every kickoff, every steering meeting and every scope conversation with a customer.",
    "prerequisites": [
@@ -21700,7 +21700,7 @@
    "i": 81,
    "topic": "Resume defence: every line",
    "track": "K. Interview Loop and Mocks",
-   "month": 8,
+   "month": 11.0,
    "hours": 4,
    "why": "An FDE loop is a credibility audit disguised as a conversation: the interviewer picks one line off your resume, asks 'how did you measure that', and keeps pulling until either a real system appears or the claim collapses - because that is exactly what a customer's staff engineer will do to you in week two of a deployment. Every unfalsifiable number on your resume ('45% improvement in targeting accuracy') is a trap you set for yourself, and one collapsed claim contaminates every other number in the document. This session converts a marketing artifact into a defensible technical record: for each bullet, the mechanism, the measurement, the thing that broke, and the design you would not repeat.",
    "prerequisites": [
@@ -21900,7 +21900,7 @@
    "i": 82,
    "topic": "Take-home rehearsals (four, five hours each, recorded walkthrough)",
    "track": "K. Interview Loop and Mocks",
-   "month": 9,
+   "month": 11.0,
    "hours": 24,
    "why": "The FDE take-home is the closest proxy any loop has to the actual job: an underspecified prompt, a dirty dataset, a hard clock, and a reviewer who behaves like a customer's staff engineer - skimming your README, running one command, and deciding in eight minutes whether you are safe to put in front of an account. What gets scored is almost never the model call; it is whether you scoped a defensible slice, wrote down what you cut and why, made it reproducible on a stranger's machine, and could narrate the trade-offs without hedging. Four timed builds with recorded walkthroughs turn that from a hope into a rehearsed motion, and they double as portfolio artifacts you can send before anyone asks.",
    "prerequisites": [
@@ -22100,7 +22100,7 @@
    "i": 83,
    "topic": "Decomposition drills (ten)",
    "track": "K. Interview Loop and Mocks",
-   "month": 9,
+   "month": 11.0,
    "hours": 10,
    "why": "The decomposition round maps one-to-one onto day one of a real deployment: a customer says a single sentence like 'we want AI to reduce claim denials' and you have to return a plan someone can staff, budget, sequence and kill. FDE loops use this round specifically to catch the engineer who starts drawing architecture ninety seconds in, because that engineer builds the wrong thing confidently and burns a quarter of a customer's patience doing it. Ten timed reps is what converts the framework from something you can describe into something you can execute while a stranger interrupts you, halves your timeline, and takes away production data access.",
    "prerequisites": [
@@ -22310,7 +22310,7 @@
    "i": 84,
    "topic": "LLM system design mocks (four)",
    "track": "K. Interview Loop and Mocks",
-   "month": 9,
+   "month": 12.0,
    "hours": 8,
    "why": "The LLM design round is the one place in an FDE loop where the interviewer is explicitly checking whether you can be trusted to put a non-deterministic system in front of a paying customer: not whether you know what RAG is, but whether you can put a number on p99 latency, cost per request, and what happens when the model is wrong. In the field this exact conversation happens in the customer's architecture review, where their security lead asks where the tokens go, their finance lead asks what it costs at 10x volume, and their staff engineer asks how you know it is working - and you get one whiteboard and 45 minutes to answer all three. Topics 43 and 45-60 gave you the material; this topic trains delivering it under a clock, with four recordings so you can see the gap between what you know and what you can actually say in the room.",
    "prerequisites": [
@@ -22537,7 +22537,7 @@
    "i": 85,
    "topic": "Coding drills: data manipulation and AI-assisted production builds",
    "track": "K. Interview Loop and Mocks",
-   "month": 9,
+   "month": 12.0,
    "hours": 8,
    "why": "The FDE coding round is not a LeetCode round - it is a simulation of the thing you do on day three of an engagement: a customer hands you a CSV export or read access to a schema nobody documented, and you have to produce a defensible number while someone watches. Databricks, Palantir and Anthropic-style loops score two axes at once - can you actually manipulate data under time pressure, and can you keep a human in the loop while you do it - which means silence is scored as failure even when the code is right. The AI-assisted half is now standard because the job is now standard: you will build customer code with an assistant in the room, and the interviewer is watching whether you review what it wrote or paste it and hope.",
    "prerequisites": [
@@ -22737,7 +22737,7 @@
    "i": 86,
    "topic": "Client simulations (four) and learning interviews (four)",
    "track": "K. Interview Loop and Mocks",
-   "month": 9,
+   "month": 12.0,
    "hours": 8,
    "why": "The two rounds that actually decide an FDE loop are the ones with no whiteboard: a role-play where an interviewer plays a customer stakeholder who does not want you there, and a learning round where they hand you an unfamiliar API or internal DSL and expect working output in twenty minutes. Both are direct simulations of the job - week two on site you are in a room with an architect whose system you are replacing, and week three you are reading someone's undocumented internal service at 9pm because the demo is Thursday. What gets you rejected is almost never ignorance; it is talking past a hostile question, and saying 'yes, we can do that by Friday' about something that needs their security team, which is the same behaviour that kills real deployments.",
    "prerequisites": [
@@ -22964,7 +22964,7 @@
    "i": 87,
    "topic": "STAR stories (ten) and two full-loop simulations",
    "track": "K. Interview Loop and Mocks",
-   "month": 9,
+   "month": 12.0,
    "hours": 7,
    "why": "An FDE is hired to be trusted alone in a customer's building, so the behavioural round is not a personality check - it is the panel's only direct evidence about how you behave when a VP is angry, when you broke their pipeline, when the scope was never written down, and when you had to hand the system to someone less skilled than you and leave. Every other round in the loop tests whether you could build it; this one tests whether the company can put you in front of a paying customer without supervision. Ten pre-built, evidence-backed stories plus two rehearsed full loops is the difference between recalling incidents live under time pressure and executing a bank you already know cold.",
    "prerequisites": [
@@ -23156,7 +23156,7 @@
    "i": 88,
    "topic": "Public proof: three case studies and repos",
    "track": "L. Portfolio, Positioning, Pipeline",
-   "month": 2,
+   "month": 3.0,
    "hours": 12,
    "why": "An FDE is hired on evidence that you have shipped something real inside somebody else's constraints, and almost nobody in the loop will read your code — they will read one page and decide whether to spend an hour on you. More importantly, the artifact you are building here is the same artifact the job produces weekly: the architecture write-up a customer's principal engineer reviews, the post-incident narrative their VP forwards to their CISO, the handover doc that decides whether your work survives after you leave the account. Writing three of them about DefenderMate, Kaupex and Dokeo is not marketing overhead, it is a rehearsal of the deliverable, and the recruiter screen, the referral DM and the 'tell me about something you built' round all get their raw material from the same three pages.",
    "prerequisites": [
@@ -23356,7 +23356,7 @@
    "i": 89,
    "topic": "Hermes write-up and LinkedIn positioning",
    "track": "L. Portfolio, Positioning, Pipeline",
-   "month": 3,
+   "month": 4.0,
    "hours": 4,
    "why": "FDE hiring is a trust problem before it is a skills problem: the manager has to believe you can be put in front of someone else's infrastructure, with their credentials and their risk, and not break it. A public write-up of an agent you actually operate - what it is allowed to execute, what stopped it, what it cost, what broke at 03:00 - is the cheapest way to transfer that belief before the loop starts, because it is the same artifact you would hand a customer's platform team during a pilot review. The profile is the index for it: if a recruiter's search never returns you, or the headline says 'full-stack developer', the write-up is a good essay nobody with hiring authority ever reads.",
    "prerequisites": [
@@ -23547,7 +23547,7 @@
    "i": 90,
    "topic": "Target list: 40 companies, referrals, warm intros",
    "track": "L. Portfolio, Positioning, Pipeline",
-   "month": 4,
+   "month": 5.0,
    "hours": 8,
    "why": "Forward-deployed work is portfolio management under scarcity: you cannot deploy into every account, so you qualify hard, rank on a rubric you can defend, find the one human inside each account who can actually unblock you, and keep a live state machine of who owes what to whom by when. Running your own search that way is the identical skill with your career as the account, and the interviewer will read the quality of your list as a direct sample of how you would triage their customers. The mechanics also matter on their own terms - FDE is the least consistently-titled and most location-gated engineering role in the market, so a list built by keyword search alone will be 60-70% roles you are not legally eligible for and reqs that were filled before you found them.",
    "prerequisites": [
@@ -23756,7 +23756,7 @@
    "i": 91,
    "topic": "Application pipeline: apply in waves, run three or four loops in parallel",
    "track": "L. Portfolio, Positioning, Pipeline",
-   "month": 6,
+   "month": 8.0,
    "hours": 6,
    "why": "An FDE job search is structurally identical to the job itself: a portfolio of accounts at different stages, each with a different stakeholder, each moving at a speed you do not control, all needing to be sequenced so decisions land when you need them to. Run serially, a search produces one decision every eight weeks and zero leverage; run as an instrumented pipeline with three or four loops converging, it produces two offers in the same fortnight and a real choice. The same instincts a hiring manager is testing - do you keep every thread alive with an owner and a due date, do you force a decision instead of waiting, do you tell the truth when timelines collide - are exactly the ones this topic drills, which is why running your own pipeline badly is itself a signal.",
    "prerequisites": [
@@ -23947,7 +23947,7 @@
    "i": 92,
    "topic": "Timed algorithmic screens: core data structures, complexity out loud, easy-medium volume",
    "track": "K. Interview Loop and Mocks",
-   "month": 6,
+   "month": 8.0,
    "hours": 16,
    "why": "Every FDE loop worth running still opens with a 45-minute algorithmic screen, and it is a pure filter: nobody gets to the customer-simulation and system-design rounds you are actually strong at if a hash-map problem eliminates you in week one. The screen is also the only round that tests, under a clock and in front of a stranger, the reflex the job depends on - naming the shape of a problem and its cost before you touch the keyboard, which is the same reflex that stops you shipping an accidental quadratic into a customer's nightly job. Because FDEs are judged on working-with-a-human as much as on code, the bar here is not 'solved it' but 'named the pattern, stated time and space, landed a working easy-medium inside 20 minutes, and narrated one optimisation without going silent'.",
    "prerequisites": [
@@ -24403,7 +24403,7 @@
    "i": 94,
    "topic": "Calculus and optimisation: gradients, chain rule, convexity, gradient descent variants",
    "track": "M. Mathematical Foundations",
-   "month": 1,
+   "month": 2.0,
    "hours": 8,
    "why": "Every model an FDE ships - a logistic regression scoring the customer's leads, an XGBoost ranker, a LoRA fine-tune - is a loss function being walked downhill, and when the walk goes wrong the customer sees 'the AI does not work' while you have to say in the room whether it is the learning rate, the feature scaling, a leaking label, or a backward pass that has been silently zero since Tuesday. Optimisation is the only part of ML where the failure is usually a mechanical fact you can prove in ten minutes with a finite-difference check and a log-scale loss plot, rather than a matter of opinion. It is also the layer where you either can or cannot answer 'why is Adam better here than SGD, and what would you have to change about the data to make SGD fine?' - which is exactly the question that separates someone who runs training scripts from someone a customer trusts with their model.",
    "prerequisites": [
@@ -24631,7 +24631,7 @@
    "i": 95,
    "topic": "Probability: distributions, Bayes, conditional independence, the CLT",
    "track": "M. Mathematical Foundations",
-   "month": 2,
+   "month": 3.0,
    "hours": 6,
    "why": "Every model an FDE deploys is a probability statement, and the questions that end a deployment are probabilistic ones: is this 3.2 percent lift real, why does the classifier say 0.91 when it is right 60 percent of the time, why did the pilot metric not survive rollout. Being able to name the generative story behind a customer's column (counts that are over-dispersed rather than Poisson, latencies that are log-normal rather than normal), derive a Beta-Binomial posterior on a whiteboard, and say out loud which variables are conditionally independent given what is what lets you defend a model in a room where the customer's data scientist is hostile and n is 400. Without it you will ship a metric that flatters a useless model and find out from the customer rather than from your own diagnostics.",
    "prerequisites": [
@@ -24859,7 +24859,7 @@
    "i": 96,
    "topic": "Statistical inference: estimation, confidence intervals, hypothesis testing, ANOVA",
    "track": "M. Mathematical Foundations",
-   "month": 2,
+   "month": 3.0,
    "hours": 6.0,
    "why": "Every claim an FDE makes about a model - 'the new retriever is 4 points better', 'this drift is real', 'the pilot beat the baseline' - is an inference from a finite sample, and the customer's data scientist will ask which test you used and which assumption it rests on. Without this you will ship a model whose 4-point lift is inside the noise of a 900-row eval set, or kill a working model because a Shapiro test on 50k rows told you the data was 'not normal'. This is also the layer where silent modelling errors live: a p-value from correlated cross-validation folds, a Wald interval on a 2-out-of-40 conversion rate, an omnibus F that is significant only because one group has three rows and enormous variance.",
    "prerequisites": [
@@ -25087,7 +25087,7 @@
    "i": 97,
    "topic": "Experimentation and causality: A/B design, power, sequential testing, confounding",
    "track": "M. Mathematical Foundations",
-   "month": 3,
+   "month": 4.0,
    "hours": 6,
    "why": "Every model an FDE ships eventually has to survive the question 'did it actually do anything?', and the answer is an experiment, not an offline AUC. You will be the person sizing the rollout before it launches, defending a readout to a customer's analytics team who peeked at it daily, and explaining why the 30% lift in the pilot region is a marketplace cannibalisation artefact rather than value you can invoice for. Causal literacy is also what stops you shipping a model trained on a target that a confounder generated - the difference between 'our churn model has 0.89 AUC' and 'intervening on the thing it scores changes churn' is the entire commercial argument.",
    "prerequisites": [
@@ -25315,7 +25315,7 @@
    "i": 98,
    "topic": "Information theory and loss functions: entropy, KL, cross-entropy, maximum likelihood",
    "track": "M. Mathematical Foundations",
-   "month": 4,
+   "month": 6.0,
    "hours": 6,
    "why": "Every loss you will ever ship to a customer - logistic regression's log loss, a transformer's next-token cross-entropy, a gradient-boosted Poisson deviance on their count data - is a negative log-likelihood, and the number it prints has a unit, a floor and a direction that their data scientist will ask you about in the room. Without this topic you cannot say whether a validation loss of 1.9 nats is good, whether the loss that stopped falling is irreducible label noise H(P) or model error KL(P||Q), or why a model that looks fine on AUC is quietly overconfident on the minority class the customer actually cares about. With it you can derive the objective on their whiteboard in five minutes, name which divergence and which direction it minimises, and tell the difference between a data ceiling, a leakage artefact and a training bug - which is most of what defending a model in front of a customer consists of.",
    "prerequisites": [
@@ -25543,7 +25543,7 @@
    "i": 99,
    "topic": "Numerical computing: NumPy vectorisation, floating point, numerical stability",
    "track": "M. Mathematical Foundations",
-   "month": 4,
+   "month": 6.0,
    "hours": 6,
    "why": "Every model you defend in front of a customer is a pile of floating-point arithmetic, and the failure that gets you paged is almost never a stack trace - it is a variance that came out negative, a loss that went nan at step 4000, a distance matrix that ranked the wrong neighbours, a column of gradients that a test declared 'close enough' at atol=1e-8. This topic is what lets you say in the room whether the wrong number is their data, the conditioning of the problem itself, or a bug in your algorithm - three different conversations with three different owners, and the senior move is knowing which one you are in before you promise a fix. It is also the difference between a demo notebook and a pipeline that survives their 200 million rows: vectorised NumPy is the only Python fast enough to preprocess at that scale, and being able to state the peak memory of a broadcast before you press enter is what keeps you from OOM-ing the customer's box live on a screenshare.",
    "prerequisites": [

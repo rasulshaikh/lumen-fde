@@ -2,7 +2,7 @@
  "i": 33,
  "topic": "Redis: caching, rate limiting, idempotency, streams",
  "track": "E. Backend and Data",
- "month": 4,
+ "month": 5.0,
  "hours": 6.0,
  "why": "Every customer integration an FDE ships sits between a flaky upstream (webhooks that retry, LLM providers that 429 you, browsers that double-submit) and a database the customer cannot afford to overload, and Redis is the component you put in that gap: a cache so the demo stays fast on their real data, a limiter so one tenant cannot starve the others, an idempotency store so a retried webhook does not create two invoices, and a stream so the work survives a pod restart. The customer usually already runs ElastiCache or a Redis in a corner of the cluster, so you inherit its eviction policy, persistence settings and single-threaded limits rather than choosing them, and you need to know which of your guarantees silently disappear when that instance is configured as a cache. Take-home reviewers at Anthropic, Databricks and Palantir specifically look for whether your rate limiter is atomic, whether your idempotency layer survives a crash between claim and completion, and whether you can say what happens to each of them on failover.",
  "prerequisites": [

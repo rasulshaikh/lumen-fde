@@ -2,7 +2,7 @@
  "i": 16,
  "topic": "IAM and cloud security: least privilege, roles, IRSA, no long-lived keys",
  "track": "C. Cloud and IaC",
- "month": 2,
+ "month": 3.0,
  "hours": 6.0,
  "why": "Every FDE deployment into a customer's AWS account ends at the same gate: their security team opens your Terraform, finds the role your workers run as, and asks 'why does this need s3:* and where do the credentials live?' If the answer involves an access key in an environment variable, the pilot stalls for weeks and you are now the vendor who put an AKIA key in a container. The FDE also owns the other side of the boundary: your product assuming a role in the customer's account, CI deploying without stored secrets, and the ExternalId conversation with their CISO. Being able to write the worker policy by hand, wire IRSA correctly the first time, and read an AccessDenied message to its root cause in ten minutes is what separates the engineer who unblocks go-live from the one who files a ticket with the platform team.",
  "prerequisites": [

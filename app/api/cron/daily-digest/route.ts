@@ -14,9 +14,14 @@ export async function GET(request: Request) {
   const from = process.env.RESEND_FROM_EMAIL;
   if (!minimaxKey || !resendKey || !from) return NextResponse.json({ ok: false, error: "Missing MINIMAX_API_KEY, RESEND_API_KEY, or RESEND_FROM_EMAIL." }, { status: 503 });
   try {
-    const plan = workbook.Plan.slice(1, 22).map((r) => `${r[0]} · M${r[1]} · ${r[2]} · ${r[13]}h`).join("\n");
-    const prompt = `Write a concise daily Senior FDE study brief for Rasul. Include: one honest progress lens, one concept connection across the book and repository library, one 25-minute action, and one encouraging line that does not sound generic. Keep it under 220 words. Use fifth-grade reading language with exact technical meaning. Do not use hidden reasoning, asterisks, or em dashes.\n\nPlan sample:\n${plan}\n\nLibrary map:\n${JSON.stringify(library)}\n\nRepository map:\n${JSON.stringify(repositories)}`;
-    const aiResponse = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${minimaxKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", messages: [{ role: "system", content: "You are Lumen, a candid and motivating Senior FDE coach. Use fifth-grade reading language with exact technical meaning. Do not use hidden reasoning, asterisks, or em dashes." }, { role: "user", content: prompt }], temperature: 0.5, max_tokens: 500, stream: false }) });
+    // slice(1, 22) pinned the brief to the first 21 rows forever, so the digest only ever
+    // saw months 1-3 of a 119-topic plan and could never mention anything you are doing now.
+    const rows = workbook.Plan.slice(1);
+    const plan = rows.map((r) => `${r[0]} · M${r[1]} · ${r[2]} · ${r[13]}h · ${r[15]}`).join("\n");
+    const prompt = `Write a concise daily Senior FDE study brief for Rasul. Include: one honest progress lens, one concept connection across the book and repository library, one 25-minute action, and one encouraging line that does not sound generic. Keep it under 220 words. Use fifth-grade reading language with exact technical meaning. Do not use hidden reasoning, asterisks, or em dashes.\n\nThe full plan (${rows.length} topics, ${rows.reduce((n, r) => n + Number(r[13] || 0), 0)} hours). Pick from topics that are not Done or Skipped:\n${plan}\n\nLibrary map:\n${JSON.stringify(library)}\n\nRepository map:\n${JSON.stringify(repositories)}`;
+    const aiResponse = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${minimaxKey}`, "Content-Type": "application/json" }, // thinking:disabled and max_completion_tokens match the two sibling call sites; without
+    // them MiniMax-M3 emits raw chain-of-thought and the legacy field is ignored.
+    body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, messages: [{ role: "system", content: "You are Lumen, a candid and motivating Senior FDE coach. Use fifth-grade reading language with exact technical meaning. Do not use hidden reasoning, asterisks, or em dashes." }, { role: "user", content: prompt }], temperature: 0.5, max_completion_tokens: 500, stream: false }), signal: AbortSignal.timeout(45_000) });
     const aiData = await aiResponse.json();
     if (!aiResponse.ok) return NextResponse.json({ ok: false, error: "MiniMax request failed." }, { status: 502 });
     const brief = cleanEmailText(aiData?.choices?.[0]?.message?.content || "Lumen could not generate today's brief.");
