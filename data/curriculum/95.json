@@ -1,0 +1,228 @@
+{
+ "i": 95,
+ "topic": "Probability: distributions, Bayes, conditional independence, the CLT",
+ "track": "M. Mathematical Foundations",
+ "month": 2,
+ "hours": 6,
+ "why": "Every model an FDE deploys is a probability statement, and the questions that end a deployment are probabilistic ones: is this 3.2 percent lift real, why does the classifier say 0.91 when it is right 60 percent of the time, why did the pilot metric not survive rollout. Being able to name the generative story behind a customer's column (counts that are over-dispersed rather than Poisson, latencies that are log-normal rather than normal), derive a Beta-Binomial posterior on a whiteboard, and say out loud which variables are conditionally independent given what is what lets you defend a model in a room where the customer's data scientist is hostile and n is 400. Without it you will ship a metric that flatters a useless model and find out from the customer rather than from your own diagnostics.",
+ "prerequisites": [
+  "Topic 93 (linear algebra for ML): vectors, matrices, positive semi-definiteness - a covariance matrix is the object, and the multivariate normal density needs a determinant and an inverse",
+  "Topic 94 (calculus and optimisation): definite integrals, differentiation, the chain rule - normalising constants, change-of-variables Jacobians and log-likelihood maximisation are all calculus",
+  "NumPy fluency: ndarray semantics, broadcasting, boolean masking, cumsum/searchsorted, and the modern RNG entry point rng = np.random.default_rng(seed) rather than the legacy np.random.* global state",
+  "Enough matplotlib to produce a histogram on a log axis, an ECDF, a QQ-plot and a reliability diagram from scratch without copying a template",
+  "Comfort translating summation and integral notation into vectorised code: you must be able to move between E[X] = sum x p(x) and (x * p).sum() without thinking about it",
+  "Jupyter plus git, so the notebook deliverable is reproducible from a clean kernel with a pinned requirements.txt and a fixed seed"
+ ],
+ "subtopics": [
+  {
+   "name": "Axioms, sample spaces, and the three ways to describe a random variable",
+   "learn": "Write down Kolmogorov's three axioms (non-negativity, P(Omega) = 1, countable additivity) and derive the complement, union and inclusion-exclusion rules from them instead of memorising them. Define a random variable as a function from the sample space to the reals, and keep the three descriptions straight: the pmf p(x) = P(X = x) for discrete, the pdf f(x) where P(a < X < b) is the integral of f, and the CDF F(x) = P(X <= x), which is the only one that exists for both. Be able to say why P(X = x) = 0 for a continuous X, and why a density may exceed 1 (Beta(5,1) near x = 1) without breaking anything - the constraint is that the integral is 1, not the height. Know the quantile function F^-1 as the inverse of the CDF, because that is precisely the object inverse-transform sampling consumes.",
+   "minutes": 15,
+   "resource": {
+    "label": "Maths, CS & AI Compendium - Ch.05.02 Probability concepts",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2005%20-%20probability/02.%20probability%20concepts.md"
+   }
+  },
+  {
+   "name": "Conditional probability, the chain rule, total probability, and Bayes derived by hand",
+   "learn": "Derive Bayes in one line from the definition: P(A|B) = P(A,B)/P(B) and P(A,B) = P(B|A)P(A), so P(A|B) = P(B|A)P(A)/P(B), with the denominator expanded by the law of total probability P(B) = sum over a of P(B|a)P(a). Work the base-rate problem numerically until it is reflex: 1 percent prevalence, 99 percent sensitivity, 95 percent specificity gives a positive predictive value near 17 percent, not 99. Prefer the odds form when arguing with a customer - posterior odds = prior odds x likelihood ratio - because it makes it obvious that a test with LR 20 moves 1:99 to 20:99 and no further. Treat the chain rule P(x1..xn) = prod P(xi | x1..xi-1) as the factorisation that every graphical model and every autoregressive language model is a special case of.",
+   "minutes": 25,
+   "resource": {
+    "label": "Maths, CS & AI Compendium - Ch.05.04 Bayesian",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2005%20-%20probability/04.%20bayesian.md"
+   }
+  },
+  {
+   "name": "Expectation, variance, LOTUS and the law of total variance",
+   "learn": "Compute E[g(X)] without deriving the distribution of g(X) via LOTUS (sum g(x)p(x), or the integral of g(x)f(x)dx), and know that E is linear regardless of dependence while Var(X+Y) = Var X + Var Y + 2Cov(X,Y) is not. State and use the law of total expectation E[X] = E[E[X|Y]] and Eve's law Var(X) = E[Var(X|Y)] + Var(E[X|Y]); the second term is exactly the between-segment variance you point at when a customer asks why the pooled conversion rate is noisier than any individual segment. Know that zero covariance does not imply independence (X ~ N(0,1) with Y = X^2 is the standard counterexample) and that correlation only measures the linear part. Derive Var(mean of n iid) = sigma^2/n yourself - that one line is where every 1/sqrt(n) error bar in the rest of the plan comes from.",
+   "minutes": 15,
+   "resource": {
+    "label": "Dive into Deep Learning - Random Variables (appendix: maths for deep learning)",
+    "url": "https://d2l.ai/chapter_appendix-mathematics-for-deep-learning/random-variables.html"
+   }
+  },
+  {
+   "name": "The discrete zoo and how to pick one for a real count column",
+   "learn": "Build the family tree by generative story, not formula sheet: Bernoulli(p) is one trial; Binomial(n,p) is n independent trials with fixed n; Geometric and Negative Binomial count trials to the k-th success; Poisson(lambda) is the limit of Binomial(n, lambda/n) and is the default for events in a fixed exposure window; Categorical and Multinomial generalise to k outcomes. Learn the diagnostic that matters in production: Poisson forces Var = E, so compute the sample variance-to-mean ratio on the customer's count column, and when it comes back 4 or 11 (as it does for API calls per account or tickets per customer) reach for Negative Binomial - which is a Gamma-mixed Poisson - or a zero-inflated model. In code this is scipy.stats.binom / nbinom / poisson with .pmf, .cdf and .rvs, and in a GLM it is the choice between family=Poisson() and NegativeBinomial(); getting it wrong leaves the point estimates roughly right while the standard errors come out two to three times too small.",
+   "minutes": 20,
+   "resource": {
+    "label": "Maths, CS & AI Compendium - Ch.05.03 Distributions",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2005%20-%20probability/03.%20distributions.md"
+   }
+  },
+  {
+   "name": "The continuous zoo, parameterisation traps and heavy tails",
+   "learn": "Know the shapes and their parameterisation traps: Normal(mu, sigma) where scipy takes scale=sigma not sigma^2; Exponential and Gamma as waiting times where scipy uses scale = 1/rate; Beta(a,b) on [0,1] as the natural object for a rate; LogNormal as what you get when the log is normal; Weibull for hazards; Student-t and Pareto as the heavy-tailed cases. Internalise that request latency is approximately log-normal, so the mean is not the typical value and mean +/- 2sd puts the lower bound below zero - report p50/p95/p99 and model log(latency). Recognise failure of the second moment: for Pareto with alpha <= 2 the variance is infinite, the sample variance grows with n instead of converging, and every CLT-based interval built on it is fiction. Fit with scipy.stats.<dist>.fit and confirm with a QQ-plot rather than eyeballing a histogram, and always use a log axis when the range spans decades.",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy user guide - Continuous distributions in scipy.stats",
+    "url": "https://docs.scipy.org/doc/scipy/tutorial/stats/continuous.html"
+   }
+  },
+  {
+   "name": "Exponential families, sufficiency and conjugacy: deriving Beta-Binomial",
+   "learn": "Write a density in exponential-family form h(x)exp(eta.T(x) - A(eta)) for Bernoulli, Poisson and Normal, and see that T(x) is the sufficient statistic - for n Bernoulli trials the entire dataset compresses to (successes, n). Derive the Beta-Binomial update by hand and completely: prior Beta(a,b) proportional to p^(a-1)(1-p)^(b-1), likelihood p^s(1-p)^(n-s), therefore posterior Beta(a+s, b+n-s); read off the posterior mean (a+s)/(a+b+n) and recognise it as the raw rate s/n shrunk toward the prior mean with weight (a+b)/(a+b+n). Do the same derivation for Gamma-Poisson on a rate and Normal-Normal with known variance, where the posterior mean is a precision-weighted average of prior mean and sample mean. This is the machinery behind smoothed conversion rates, empirical-Bayes ranking of accounts, and the reason a variant with 2 conversions out of 3 must not sit at the top of the customer's leaderboard.",
+   "minutes": 25,
+   "resource": {
+    "label": "Conjugate prior - table of conjugate distributions and posterior updates",
+    "url": "https://en.wikipedia.org/wiki/Conjugate_prior"
+   }
+  },
+  {
+   "name": "Pseudo-random number generation and reproducibility across workers",
+   "learn": "Use rng = np.random.default_rng(seed) (PCG64) rather than np.random.seed plus the global Mersenne Twister legacy API, and know why: the Generator stream is explicitly not guaranteed identical across NumPy versions while the legacy RandomState is, so pinning numpy is part of your reproducibility contract. Understand SeedSequence spawning - rng.spawn(k), or SeedSequence(entropy).spawn(k) - as the correct way to give each worker, fold or bootstrap replicate an independent stream, because seeding workers with seed + i can draw overlapping or correlated streams. Know that a uniform draw is the raw material for everything in the deliverable: it all starts from rng.random(). Use the secrets module for anything security-adjacent, never a statistical PRNG, and never re-seed inside a loop.",
+   "minutes": 15,
+   "resource": {
+    "label": "NumPy docs - Random Generator (default_rng, spawn, PCG64)",
+    "url": "https://numpy.org/doc/stable/reference/random/generator.html"
+   }
+  },
+  {
+   "name": "Inverse-transform sampling and the probability integral transform",
+   "learn": "Prove the probability integral transform: if U ~ Uniform(0,1) then X = F^-1(U) has CDF F, because P(F^-1(U) <= x) = P(U <= F(x)) = F(x). Implement it in closed form for Exponential (X = -ln(1-U)/lambda), Bernoulli (U < p) and Geometric (ceil of ln(U)/ln(1-p)), and for any discrete distribution by np.cumsum on the pmf plus np.searchsorted, which is O(log k) per draw. Know the converse, F(X) ~ Uniform(0,1), which is the basis of PIT residual checks: push held-out observations through the model's predicted CDF and the histogram must be flat, otherwise the model is miscalibrated. When F has no closed-form inverse, numerical inversion is a legitimate method rather than a hack - scipy.stats.sampling.NumericalInversePolynomial builds the inverse from a pdf and then samples at constant cost.",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy docs - Random number generation (scipy.stats.sampling, numerical inversion)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/stats.sampling.html"
+   }
+  },
+  {
+   "name": "Rejection sampling, Box-Muller, and why neither scales",
+   "learn": "Implement rejection sampling: pick a proposal g and a constant M with f(x) <= M g(x) everywhere, draw x ~ g and u ~ U(0,1), accept if u <= f(x)/(M g(x)); prove that accepted draws have density f, and note that the acceptance rate is exactly 1/M, so a lazily chosen M turns a 10k-sample cell into a coffee break. Implement Box-Muller (Z1 = sqrt(-2 ln U1) cos(2 pi U2), Z2 = sqrt(-2 ln U1) sin(2 pi U2)) and understand why the polar/Marsaglia variant is what libraries actually ship. Understand that acceptance decays exponentially with dimension, which is why nobody rejection-samples a 50-dimensional posterior and why MCMC exists at all. Be able to say where a library method like scipy.stats.sampling.TransformedDensityRejection applies - log-concave densities, with a precomputed hat function - versus where you must roll your own.",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy docs - TransformedDensityRejection (rejection sampling with a hat function)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.sampling.TransformedDensityRejection.html"
+   }
+  },
+  {
+   "name": "Joint, marginal, conditional, and independence versus conditional independence",
+   "learn": "Move fluently between a joint table, its marginals (sum out the other variable) and its conditionals (divide by the marginal), and state independence as the factorisation p(x,y) = p(x)p(y), not as 'unrelated'. State conditional independence precisely - X is conditionally independent of Y given Z iff p(x,y|z) = p(x|z)p(y|z) for every z with p(z) > 0 - and demonstrate both directions of the trap: two variables dependent marginally but independent given a common cause, and two independent variables made dependent by conditioning on a common effect. Do the Simpson's-paradox arithmetic once with plausible numbers (a treatment that helps in both severity strata yet hurts in the pooled table) so you recognise it in a customer's dashboard. Write the check in code: a chi-square or G-test on the contingency table, stratified by Z and then pooled, and compare.",
+   "minutes": 15,
+   "resource": {
+    "label": "Dive into Deep Learning - Probability and Statistics (joint, conditional, Bayes)",
+    "url": "https://d2l.ai/chapter_preliminaries/probability.html"
+   }
+  },
+  {
+   "name": "DAGs, colliders and d-separation: reading independence off a graph",
+   "learn": "Read conditional independence off a graph rather than out of algebra: in a chain A -> B -> C and a fork A <- B -> C, conditioning on B blocks the path; in a collider A -> B <- C the path is blocked by default and conditioning on B, or on any descendant of B, opens it. Learn 'explaining away' as the concrete consequence - among admitted students, test score and essay quality become negatively correlated even when independent in the applicant pool - and recognise it as the mechanism behind most selection-bias artefacts in customer data. Know the Markov blanket (parents, children, children's other parents) as the set that renders a node independent of everything else, which is exactly the feature set that can matter. For any proposed feature be able to say whether conditioning on it blocks a confounding path (include it) or opens a collider path (exclude it) - that decision is the difference between a model that transfers to next quarter and one that does not.",
+   "minutes": 20,
+   "resource": {
+    "label": "pgmpy guide - Causal identification (d-separation, backdoor criterion, adjustment sets)",
+    "url": "https://pgmpy.org/guides/causal_identification.html"
+   }
+  },
+  {
+   "name": "Naive Bayes: the conditional-independence assumption, stated and priced",
+   "learn": "Write the classifier out as argmax over c of log P(c) + sum over j of log P(xj | c), and be explicit that the sum is only valid under the naive assumption p(x|c) = prod p(xj|c). Fit GaussianNB, MultinomialNB and BernoulliNB from sklearn.naive_bayes and know why Laplace/Lidstone smoothing (the alpha parameter) is not optional - one unseen token otherwise drives the whole product to zero. Then observe empirically what the violated assumption costs: with correlated features the argmax, and therefore accuracy and AUC, often survives, while predict_proba is pushed hard toward 0 and 1 and is worthless as a probability. That is the canonical model that ranks acceptably and calibrates terribly, and it is exactly why the calibration subtopic exists.",
+   "minutes": 15,
+   "resource": {
+    "label": "scikit-learn user guide - Naive Bayes",
+    "url": "https://scikit-learn.org/stable/modules/naive_bayes.html"
+   }
+  },
+  {
+   "name": "LLN versus CLT: two different theorems, and where the CLT fails",
+   "learn": "State both precisely and keep them apart. WLLN/SLLN: for iid Xi with finite mean, the sample mean converges to mu in probability / almost surely - a statement about the limit with no rate attached. CLT: with finite variance sigma^2, sqrt(n)(Xbar - mu) converges in distribution to N(0, sigma^2), so error shrinks like 1/sqrt(n) and the standardised mean becomes normal even when X is nothing like normal. Know the assumptions that actually break in customer data: infinite variance (Cauchy, where the mean of n draws is again Cauchy so averaging never helps, and Pareto with alpha <= 2), dependence (autocorrelated series, repeated events from the same user, so effective n is far below the row count), and non-identical distributions where you need Lyapunov or Lindeberg conditions. Be able to say it out loud without hedging: the CLT is about the sampling distribution of the mean, never about the data being normal, and no n makes a skewed population normal.",
+   "minutes": 25,
+   "resource": {
+    "label": "Introduction to Probability, Statistics and Random Processes - Central Limit Theorem",
+    "url": "https://www.probabilitycourse.com/chapter7/7_1_2_central_limit_theorem.php"
+   }
+  },
+  {
+   "name": "How many samples is enough: skewness rules, Berry-Esseen, and QQ diagnostics",
+   "learn": "Replace 'n > 30' with something defensible. Berry-Esseen bounds the CDF error by C rho / (sigma^3 sqrt(n)) with C below 0.5, so the required n scales with the cubed third moment; Cochran's practical rule n > 25 x skewness^2 means a revenue column with skew 6 needs n > 900, not 30. For a proportion the np > 10 and n(1-p) > 10 rule is why a 0.2 percent conversion rate needs thousands of observations before a normal-approximation interval is honest, and why you should use Wilson or Clopper-Pearson instead. Diagnose rather than assume: build the sampling distribution empirically by resampling means at n = 5, 30, 100, 1000 and QQ-plot each with scipy.stats.probplot, reading the S-curve as skew and fat ends as kurtosis - do not run a normality test, which rejects everything once n is large and accepts everything when n is small.",
+   "minutes": 15,
+   "resource": {
+    "label": "SciPy docs - scipy.stats.probplot (QQ / probability plots)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.probplot.html"
+   }
+  },
+  {
+   "name": "Transformations of random variables: Jacobians, the delta method, Jensen",
+   "learn": "Derive the change-of-variables rule f_Y(y) = f_X(g^-1(y)) |d g^-1/dy| and use it to get the log-normal density from a normal. Learn the delta method: for smooth h, Var(h(Xbar)) is approximately h'(mu)^2 Var(Xbar), which is how you attach a standard error to a ratio, a log-odds or a lift; build the interval on the transformed scale (log or logit) and map the endpoints back, so the interval cannot cross zero or exceed 1. Recognise the same Jacobian term in code: torch.distributions TransformedDistribution with log_abs_det_jacobian, and rsample's reparameterisation trick, which is exactly why a VAE can backpropagate through a sample. Remember Jensen: E[log X] is not log E[X], so a mean of per-row log costs is not the log of the mean cost, and reporting the wrong one is a live way to misstate a customer's spend.",
+   "minutes": 20,
+   "resource": {
+    "label": "PyTorch docs - torch.distributions (TransformedDistribution, log_abs_det_jacobian, rsample)",
+    "url": "https://pytorch.org/docs/stable/distributions.html"
+   }
+  },
+  {
+   "name": "Concentration inequalities: guarantees without assuming normality",
+   "learn": "Learn the three bounds that give a guarantee with no distributional assumption: Markov P(X >= a) <= E[X]/a for non-negative X, Chebyshev P(|X - mu| >= k sigma) <= 1/k^2 for anything with finite variance, and Hoeffding P(|Xbar - mu| >= t) <= 2 exp(-2 n t^2 / (b-a)^2) for bounded variables. Use Hoeffding to answer 'how many users do we need' for a bounded metric before any data exists: a 1 percentage-point margin at 95 percent confidence on a 0/1 metric needs about n = ln(40)/(2 x 0.01^2), roughly 18,400. Understand that these are distribution-free and therefore loose - Chebyshev gives 25 percent at two sigma where the normal gives 5 percent - and that the loose-but-valid bound is the right thing to quote when the CLT assumptions are shaky. These are also the backbone of generalisation bounds and of the confidence width in UCB bandits.",
+   "minutes": 15,
+   "resource": {
+    "label": "Hoeffding's inequality - statement, proof sketch and bounded-variable conditions",
+    "url": "https://en.wikipedia.org/wiki/Hoeffding%27s_inequality"
+   }
+  },
+  {
+   "name": "Monte Carlo estimation: error bars on the simulation itself",
+   "learn": "Treat every simulation as an estimator with its own error: the MC estimate of E[h(X)] has standard error s/sqrt(N), so report it, and note that going from two to three significant digits costs 100x the draws. Know the variance-reduction tools by name and effect - common random numbers when comparing two configurations, antithetic variates, control variates, and importance sampling with the diagnostic that matters, effective sample size ESS = (sum w)^2 / sum w^2, which tells you when a handful of weights carry the whole estimate. Understand that dependent draws (MCMC) inflate the error by the integrated autocorrelation time, which is exactly why Stan and ArviZ report ESS and MCSE next to every posterior summary. In the deliverable this is the checking machinery: the Monte Carlo answer must agree with the analytic Beta-Binomial posterior to within a few MC standard errors, and if it does not, one of the two is wrong and the MCSE tells you which claim you are allowed to make.",
+   "minutes": 15,
+   "resource": {
+    "label": "Stan Reference Manual - Posterior analysis (effective sample size, MCSE)",
+    "url": "https://mc-stan.org/docs/reference-manual/analysis.html"
+   }
+  },
+  {
+   "name": "Bootstrap, and interval construction for a rate",
+   "learn": "Implement the nonparametric bootstrap in six lines (resample n rows with replacement B times, recompute the statistic, take percentiles), then use scipy.stats.bootstrap with method='BCa' to correct for bias and skew. Know where it fails: extreme order statistics (max, min, p99.9 with few tail points), heavy tails with no finite variance, small n, and dependent data - for the last, resample users or clusters, or use a block bootstrap, never individual rows of a session log. For a single proportion, do not bootstrap and do not use Wald: statsmodels proportion_confint with method='wilson' or 'beta' (Clopper-Pearson) stays correct near 0 and 1 where Wald yields intervals containing negative numbers. Be able to state the difference cleanly: a 95 percent confidence interval is a property of the procedure over repeated samples, a 95 percent credible interval is a probability statement about the parameter given this data and this prior.",
+   "minutes": 15,
+   "resource": {
+    "label": "SciPy docs - scipy.stats.bootstrap (percentile, basic, BCa)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.bootstrap.html"
+   }
+  },
+  {
+   "name": "Priors, credible intervals, posterior summaries and posterior predictive checks",
+   "learn": "Choose a prior and defend it: Beta(1,1) uniform, Jeffreys Beta(0.5,0.5), or a weakly-informative Beta fitted to the customer's own history - Beta(20, 1980) encodes 'about 1 percent, with the weight of 2000 observations'. Make prior-sensitivity a routine step: rerun with three priors and either show the customer the conclusion is unchanged or admit that it is not. Summarise deliberately - the posterior mean minimises squared loss, the median minimises absolute loss, the MAP minimises neither - and report an equal-tailed or HDI credible interval alongside the decision-relevant quantity P(p_B > p_A) or P(lift > 2 percent) computed from posterior draws, because that is the number a business stakeholder can act on. Run posterior predictive checks (arviz plot_ppc style): simulate replicated datasets from the posterior and compare a test statistic - the max, the zero count, the variance - against the observed value, which is how you discover that a Poisson model cannot reproduce the customer's excess zeros.",
+   "minutes": 25,
+   "resource": {
+    "label": "PyMC - General overview (priors, posteriors, posterior predictive sampling)",
+    "url": "https://www.pymc.io/projects/docs/en/stable/learn/core_notebooks/pymc_overview.html"
+   }
+  },
+  {
+   "name": "Calibration: turning model scores into probabilities you can multiply by money",
+   "learn": "Separate discrimination (AUC, ranking) from calibration (does 0.7 actually mean 70 percent). Build a reliability diagram by binning predicted probabilities and plotting observed frequency per bin, and score it with the Brier score - which decomposes into reliability minus resolution plus uncertainty - and with log loss. Fix miscalibration with sklearn.calibration.CalibratedClassifierCV using Platt scaling (sigmoid, parametric, fine on small data) or isotonic (nonparametric, needs roughly a thousand or more calibration points and cannot extrapolate), and fit the calibrator on data the model has never seen, because calibrating on training predictions is leakage that produces a beautiful curve and useless probabilities. Know that resampling for class imbalance (SMOTE, class_weight) shifts the base rate and therefore decalibrates the model, so a prior-correction term of log(pi_train/pi_test) on the logit, or recalibration at the original prevalence, is mandatory before anyone multiplies a score by a dollar amount.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn user guide - Probability calibration",
+    "url": "https://scikit-learn.org/stable/modules/calibration.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can derive Bayes' theorem from the definition of conditional probability, expand the denominator with the law of total probability, and compute a positive predictive value for a 1-percent-prevalence screening problem in your head to the nearest five points.",
+  "You can generate exact samples from five named distributions using nothing but rng.random() - at least two by closed-form inverse transform and one by rejection sampling - and verify each against scipy's CDF with a KS test and a QQ-plot.",
+  "You can derive the Beta-Binomial posterior by hand, state the posterior mean as a shrinkage of the raw rate toward the prior, and reproduce it in NumPy so the analytic and Monte Carlo quantiles agree to within a few MC standard errors.",
+  "You can look at a customer's column and justify a distribution out loud: variance-to-mean ratio for counts, log-axis histogram plus QQ-plot for latency and revenue, and name exactly what breaks downstream if you assume normal instead.",
+  "You can say how many observations a mean needs before the normal approximation is safe using the skewness rule and Berry-Esseen rather than 'n > 30', and demonstrate it empirically with QQ-plots as n grows for a deliberately skewed source.",
+  "You can draw the DAG for a customer's data-generating process, mark chains, forks and colliders, state which variables are conditionally independent given what, and decide feature by feature whether conditioning blocks a confounder or opens a collider.",
+  "You can distinguish a confidence interval from a credible interval in one sentence a non-statistician follows, produce both for the same conversion-rate question, and say which one goes in the customer deck and why.",
+  "You can take a classifier with AUC 0.85 and useless probabilities, show the reliability diagram and Brier decomposition, fix it on held-out data, and explain why the class-imbalance resampling step caused the problem."
+ ],
+ "failureModes": [
+  "Per-account API calls were modelled as Poisson because the mean matched, but the variance-to-mean ratio was 11; every standard error in the capacity forecast came out roughly three times too narrow and an ordinary busy week was reported to the customer as a five-sigma anomaly.",
+  "A latency dashboard reported mean +/- 2sd on a log-normal distribution, giving a lower bound of -40 ms and a 'p95' that 12 percent of requests exceeded; nobody caught it until the customer's SRE replotted the histogram on a log axis.",
+  "The isotonic calibrator was fitted on the same rows used to train the model, so the reliability diagram was a perfect diagonal in the notebook and badly S-shaped in production - a leakage bug that presents as a calibration success.",
+  "An A/B readout applied a normal-approximation interval to a 0.15 percent conversion rate with 800 users per arm; np was 1.2, the interval ran below zero, and the 'significant' 40 percent lift was a single extra conversion.",
+  "Eight parallel bootstrap workers were each seeded with seed + worker_id, the streams overlapped, replicates were correlated, and the resulting confidence interval came out about 30 percent too narrow with no visible symptom anywhere in the output.",
+  "A churn model conditioned on 'opened a support ticket', a collider between product dissatisfaction and account size; the coefficient flipped sign relative to the population, the model validated beautifully on the historical split, and it inverted on the next cohort.",
+  "A Monte Carlo check of a posterior used 2,000 draws and matched the analytic answer to two decimals by luck; when the prior changed the two diverged, and because no MC standard error was ever reported, three days went into debugging an analytic derivation that was correct.",
+  "Per-row log costs were averaged and exponentiated to produce a 'mean cost per call' 18 percent below the invoice - Jensen's inequality, escalated to the customer as a billing discrepancy before anyone checked the arithmetic."
+ ],
+ "interviewQuestions": [
+  "Derive Bayes' theorem from the definition of conditional probability, then use it: a test with 99 percent sensitivity and 95 percent specificity on a disease with 1 percent prevalence comes back positive. Give me the posterior, and then tell me in odds form how many independent positive tests it takes to get past 95 percent.",
+  "You are handed a column of per-account monthly API-call counts. Walk me through choosing a distribution: what do you compute first, what would make you reject Poisson, what would you fit instead, and what specifically goes wrong downstream if you choose wrong?",
+  "State the central limit theorem precisely, including its assumptions. Then give me three concrete situations in real product data where it does not apply, and how you would build an interval in each case.",
+  "Design: a customer wants to know whether variant B's 3.4 percent conversion beats variant A's 3.1 percent with 900 users per arm. Do it as a Bayesian - pick the prior and defend it, write down the posterior, say which quantity you report to the business, and tell me what you would do if the prior-sensitivity check changed the answer.",
+  "Explain conditional independence using a collider example, then tell me how you would decide whether a given feature belongs in a model that has to keep working on next quarter's data.",
+  "Debug: a fraud classifier has AUC 0.88 in validation, but the ops team says its 0.9-probability alerts are right about a third of the time. Nothing in the training loop errored. Where do you look, in what order, and what is your leading hypothesis?",
+  "You need samples from a distribution with no closed-form inverse CDF. Walk me through inverse-transform versus rejection sampling: what each requires, how you would choose the proposal, what the acceptance rate is, and why neither is what you would use in fifty dimensions."
+ ],
+ "proofOfWork": "A public repo `distribution-triage` that turns the notebook's machinery into a tool you can run on a customer's table in the first week of a deployment. One command takes a CSV or a SQL query and, per column, classifies it (bounded rate, count, duration, monetary, categorical), computes the variance-to-mean ratio, skewness, excess kurtosis and a tail-index estimate, fits two or three candidate distributions with scipy's .fit, ranks them by AIC and a KS statistic, and emits a one-page HTML report containing a log-axis histogram, an ECDF and a QQ-plot per column plus a plain-English recommendation ('over-dispersed, variance/mean = 11.4 - model as Negative Binomial; a Poisson GLM will understate standard errors by roughly 3x'). The same report answers the sample-size question for every numeric column: the Cochran n > 25 x skew^2 threshold, the empirical n at which the resampled-mean QQ-plot straightens, and a Hoeffding bound for the bounded columns. It ends with a conditional-independence section: a hand-drawn DAG of the customer's data-generating process checked in as a Graphviz file, every claimed independence tested on the data with a stratified chi-square, and every collider named explicitly as a feature to exclude. Check in the seeded-worker bug and the calibrate-on-training-data bug as failing tests with fixes so both are demonstrable, and close with a two-page memo written for a non-statistician stakeholder explaining the single conclusion the tool produced on a real public dataset."
+}

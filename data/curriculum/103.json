@@ -1,0 +1,228 @@
+{
+ "i": 103,
+ "topic": "Model evaluation: cross-validation, data leakage, metric choice, calibration",
+ "track": "N. Machine Learning Systems",
+ "month": 8,
+ "hours": 7,
+ "why": "Every model you hand a customer arrives attached to a number, and this topic is the difference between a number that survives contact with their production data and one that collapses in week two while you are on the plane home. An FDE is the person in the room who has to say, out loud and without a laptop, why the 0.94 AUC from the pilot became a review queue full of false positives - which means naming the split that did not match how the data was generated, the column that was populated after the outcome, the metric that ignored the prevalence, and the probability that was never calibrated. Get this wrong and you do not merely lose the model: you lose the customer's belief that anything you measure is real.",
+ "prerequisites": [
+  "Logistic and linear regression at Topic 100 level: what a fitted model predicts, what regularisation strength does, and the bias-variance decomposition as a statement about an estimator rather than a slogan",
+  "Trees and gradient boosting from Topic 101, including early stopping on a validation set - which is itself a model-selection step that has to live inside the fold",
+  "Log loss, Brier score and proper scoring rules from Topic 98 (information theory and loss functions), plus the fact that AUC is invariant to monotone transforms while log loss is not",
+  "Statistical inference from Topic 96: estimator, bias, standard error, confidence interval, paired vs unpaired comparison, and what a p-value does and does not say",
+  "NumPy at Topic 99 level: fancy indexing, argsort, boolean masks, cumsum, np.testing.assert_allclose, and float32 vs float64 accumulation for a metric summed over a million rows",
+  "scikit-learn API fluency: fit/predict/predict_proba/decision_function, clone, Pipeline and ColumnTransformer, and pandas joins well enough to reconstruct how a feature table was built"
+ ],
+ "subtopics": [
+  {
+   "name": "What an evaluation number is: empirical risk, the generalisation gap, and the assumption underneath",
+   "learn": "Write the population risk R(f) = E_{(x,y) ~ D}[L(y, f(x))] and the empirical risk R_hat(f) = (1/n) sum_i L(y_i, f(x_i)), and be precise that every score you will ever quote is R_hat on some sample used as a stand-in for R on a distribution you never see. Know that R_hat on the training rows is biased downward by an amount that grows with model capacity (the optimism), so the entire machinery of held-out evaluation exists to buy an unbiased-ish estimate at the cost of data. State the assumption that licenses the whole thing - the held-out rows are drawn from the same distribution as the deployment rows, and independently of the training rows - and get in the habit of asking, before any split, which of the two clauses the customer's data actually violates: identical distribution (fails under drift, seasonality, a new customer segment) or independence (fails for repeated patients, sessions, near-duplicate documents, overlapping time windows).",
+   "minutes": 15,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - Chapter 06 Machine Learning, 02. Gradient Machine Learning (evaluation, ROC/AUC, cross-validation)",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2006%20-%20machine%20learning/02.%20gradient%20machine%20learning.md"
+   }
+  },
+  {
+   "name": "Hold-out, K-fold, LOO and repeated K-fold: the bias-variance trade of the estimator itself",
+   "learn": "Implement KFold(n_splits=K, shuffle=True, random_state=0) as a partition of indices where every row is tested exactly once and trained on K-1 times, and reason about the estimator, not the model: larger K means each surrogate model trains on n(1 - 1/K) rows so the pessimistic bias shrinks, but the K training sets overlap more so the fold scores are more correlated and the average is not more precise in the way naive intuition suggests. Know the extremes cold - leave-one-out is nearly unbiased for the training-set size but expensive and notoriously high-variance for unstable learners (a single flipped prediction moves a fold score from 1 to 0), while a single 80/20 hold-out on 2,000 rows gives you a metric with a standard error you can compute and will not like. Distinguish KFold from ShuffleSplit (independent random subsets, so a row can appear in several test sets and the 'test size' is decoupled from the number of splits) and know when RepeatedStratifiedKFold(n_repeats=5) is the cheap way to stop chasing seed noise. Default position to defend on site: 5-fold repeated 3-10 times for n in the thousands, a single large hold-out only when n is large enough that its standard error is smaller than the effect you care about.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn User Guide - Cross-validation: evaluating estimator performance",
+    "url": "https://scikit-learn.org/stable/modules/cross_validation.html"
+   }
+  },
+  {
+   "name": "Stratification: preserving the base rate, and the cases where it is not enough",
+   "learn": "StratifiedKFold partitions within each class so every fold carries approximately the population class proportion; do the arithmetic that motivates it - at a 0.2 percent base rate on 5,000 rows there are 10 positives, and plain KFold with K=5 will hand some fold 0 or 1 positive, at which point recall, PR-AUC and any threshold tuned on that fold are noise. Know the mechanics that bite: stratification is on the label only, so it does not balance a feature or a time period; for regression you stratify on a binned target (pd.qcut then pass as y to the splitter); and when you need both grouping and class balance the object is StratifiedGroupKFold, which approximates both and will warn when it cannot. Always print the per-fold positive count and the per-fold prevalence before you trust a single fold score, and treat a fold with fewer than roughly 25 positives as a number you may not quote to a customer.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - sklearn.model_selection.StratifiedKFold",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.StratifiedKFold.html"
+   }
+  },
+  {
+   "name": "Grouped data: the unit of independence, GroupKFold and the repeated-entity leak",
+   "learn": "Before splitting, answer one question in a sentence: what is the unit that is independent - a patient, a customer, a device, a document, a support session, a photo shoot? If a row is not that unit, a random split puts two rows from the same entity on both sides and the model is scored partly on memorised entity identity, which is the single most common way a healthcare or B2B pilot posts an implausible number. Use GroupKFold (deterministic, balances group sizes, guarantees a group appears in exactly one test fold), LeaveOneGroupOut when groups are few and meaningful (one site, one tenant, one country), and GroupShuffleSplit for a grouped hold-out; pass groups= through cross_validate and GridSearchCV, and know it is silently ignored by any splitter that does not accept it. Extend the same logic to near-duplicates that are not tagged with a group at all - re-uploaded documents, retweets, augmented images - and deduplicate on a content hash or a similarity threshold before the split, because a duplicate straddling the split is a group leak wearing a different hat.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - sklearn.model_selection.GroupKFold",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GroupKFold.html"
+   }
+  },
+  {
+   "name": "Time-ordered evaluation: rolling origin, the horizon, and never shuffling",
+   "learn": "For anything with a time index the only honest evaluation is a rolling-origin (walk-forward) backtest: train on data up to time t, predict the horizon h you will actually be asked to predict, roll t forward, and average the errors over origins - which is what forecasters call time series cross-validation and what everybody else discovers after shipping. Match the backtest to the deployment contract precisely: if the model is retrained weekly and scores 14 days ahead, then the evaluation is 'train through Sunday, score the following two weeks', and a random K-fold that trains on December to predict November is not an approximation of that, it is a different question with a better answer. Decide expanding window versus sliding window on evidence (expanding uses all history and is right under a stable process; sliding of length L is right when the process drifts, and the choice of L is itself a hyperparameter you tune out-of-sample), and always report the metric per origin, not just the mean - a mean that hides one catastrophic quarter is how a forecasting pilot gets cancelled in month three.",
+   "minutes": 25,
+   "resource": {
+    "label": "Forecasting: Principles and Practice (3rd ed) - Time series cross-validation",
+    "url": "https://otexts.com/fpp3/tscv.html"
+   }
+  },
+  {
+   "name": "Purging, embargo and the gap parameter when labels overlap in time",
+   "learn": "TimeSeriesSplit(n_splits=5, gap=g, max_train_size=m, test_size=t) yields strictly increasing index ranges, and the gap exists for a reason most people never use: when a label at time i is computed from a window that extends forward (did the account churn within 30 days, did the price move within 5 bars, did the ticket get resolved within a week), then training rows near the boundary have labels that were determined by events inside the test period. Purge those rows - drop every training row whose label window overlaps any test row's window - and then embargo an additional stretch after the test block, because serially correlated features mean rows just after the test period still carry information about it. Be able to state the cost honestly: purging throws away data and makes the estimate more pessimistic, which is exactly the direction of error you want when the alternative is a backtest that shows a Sharpe ratio or an early-churn recall that does not exist. Implement the purge as an interval-overlap test on (label_start, label_end) rather than a fixed row count, because a fixed count is wrong the moment sampling is irregular.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - sklearn.model_selection.TimeSeriesSplit (n_splits, gap, max_train_size, test_size)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.TimeSeriesSplit.html"
+   }
+  },
+  {
+   "name": "Pipelines and ColumnTransformer: the mechanism that makes a fold honest",
+   "learn": "The rule is mechanical: anything with a fit method that learns from the data - StandardScaler's mean and std, SimpleImputer's median, SelectKBest's scores, PCA's components, TargetEncoder's per-level means, a vectoriser's vocabulary, a resampler - must be refitted inside every training fold and only applied to the validation fold, and the only reliable way to guarantee that is to put it in a Pipeline and hand the Pipeline to cross_validate, which clones it per split. Build the real thing with ColumnTransformer(remainder='drop') so numeric, categorical and text branches each get their own preprocessing, and know that handle_unknown='ignore' or an explicit unknown category is what stops a level seen only in the validation fold from raising. Understand the size of each violation so you can triage a customer's notebook: scaling on the full dataset before splitting usually inflates the score by a hair, while feature selection or target encoding on the full dataset before splitting can manufacture a completely fictitious model out of pure noise. For resampling, use imblearn's Pipeline rather than scikit-learn's - SMOTE outside the fold means synthetic points interpolated from validation rows are in the training set, and the fold score becomes meaningless.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn User Guide - Pipelines and composite estimators",
+    "url": "https://scikit-learn.org/stable/modules/compose.html"
+   }
+  },
+  {
+   "name": "A taxonomy of leakage and exactly where each type enters the pipeline",
+   "learn": "Learn leakage as a classification you can run down in a meeting rather than a vague warning: (1) target leakage, a feature that is a proxy for or downstream of the outcome - closed_date, n_collection_calls, account_status, a field the CRM only fills in after the deal is lost; (2) train-test contamination, preprocessing or resampling fitted across the split, or literal duplicate rows on both sides; (3) temporal leakage, any feature whose value at scoring time differs from the value in your training snapshot because the table was overwritten in place; (4) group leakage, the same entity on both sides; (5) availability leakage, a feature that exists in the warehouse but arrives 48 hours after the moment of prediction, so the model is unbuildable in production even though the offline number is real; (6) evaluation leakage, the test set consumed by dozens of iterations until it is a training set with extra steps. The interrogation that catches most of it is one question per column - 'at 09:00 on the day we score, is this value populated, and is it populated with the value it has now?' - backed by a cheap automated screen: fit a single-feature model per column and flag anything with an out-of-fold AUC above roughly 0.9, then explain it or delete it. Kapoor and Narayanan's survey is the artefact to cite when a customer's data scientist thinks this is a pedantic concern: leakage of these types invalidated published results across 17 scientific fields.",
+   "minutes": 30,
+   "resource": {
+    "label": "arXiv - Leakage and the Reproducibility Crisis in ML-based Science (Kapoor and Narayanan, taxonomy of eight leakage types)",
+    "url": "https://arxiv.org/abs/2207.07048"
+   }
+  },
+  {
+   "name": "Model-selection bias: why the winning configuration's CV score is not an estimate",
+   "learn": "If you evaluate 200 hyperparameter configurations on the same folds and report the best one, you have reported a maximum of 200 noisy estimates, and the expected maximum of noisy estimates exceeds the true best value - the selection itself is an optimisation against the validation noise. Cawley and Talbot quantify this and show it is not a small correction on small datasets: the reported score of the selected model can be optimistically biased by more than the difference between the algorithms being compared, which means benchmark tables built this way rank methods by how much they overfit the model-selection criterion. Recognise the same mechanism in disguises you will actually meet: early stopping on the test set, choosing a threshold on the test set, picking the feature set by looking at test performance, and the human loop where an engineer runs 40 experiments and keeps the one with the best hold-out number. The practical rules are three splits with the third genuinely untouched, a written log of every configuration evaluated, and the one-standard-error rule (choose the simplest model within one SE of the best) so you stop selecting on noise.",
+   "minutes": 20,
+   "resource": {
+    "label": "JMLR - On Over-fitting in Model Selection and Subsequent Selection Bias in Performance Evaluation (Cawley and Talbot, 2010)",
+    "url": "https://www.jmlr.org/papers/v11/cawley10a.html"
+   }
+  },
+  {
+   "name": "Nested cross-validation, and what cross_val_predict does and does not give you",
+   "learn": "Nested CV separates the two questions: the inner loop selects (GridSearchCV or RandomizedSearchCV over the training folds), the outer loop estimates (cross_val_score over the search object), and the number you report is the mean of the outer folds - which is an estimate of the whole procedure including its selection step, not of any one fitted model. Know the cost, K_outer * K_inner * |grid| fits, and the two honest cheap alternatives when that is unaffordable: a single held-out test set touched once, or nested CV over a random subsample with the caveat stated in the write-up. Be able to explain the final-model step without confusion - after estimating performance by nesting, you refit on all the data with the inner-selected hyperparameters, and the outer estimate is the number you quote for that pipeline. Separately, know cross_val_predict's contract: it returns out-of-fold predictions, which are the right input for building a reliability diagram or stacking, but computing a single metric over the concatenated vector is not the same as averaging fold metrics and is invalid for anything not decomposable over rows - and its own documentation says so.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn example - Nested versus non-nested cross-validation",
+    "url": "https://scikit-learn.org/stable/auto_examples/model_selection/plot_nested_cross_validation_iris.html"
+   }
+  },
+  {
+   "name": "The confusion matrix family: which metric answers which business question",
+   "learn": "Derive everything from the 2x2 table and be able to write each definition from memory: precision = TP/(TP+FP) answers 'when we flag, how often are we right', recall = TPR = TP/(TP+FN) answers 'of the real cases, how many did we catch', specificity = TN/(TN+FP), FPR = 1 - specificity, F1 is the harmonic mean of precision and recall (which is why it collapses toward the smaller of the two), F-beta with beta > 1 buys recall at the price of precision, balanced accuracy is the mean of recall and specificity, and MCC is the Pearson correlation of the 2x2 table and the least gameable single number under heavy imbalance. Internalise that all of these are functions of a threshold, so quoting F1 without a threshold is quoting a number about an arbitrary decision, and that accuracy at a 0.2 percent base rate is 99.8 percent for a model that predicts 'no' forever. For multiclass, know precisely what the averaging arguments do - micro equals accuracy in the single-label case, macro gives a five-row class the same weight as a five-million-row class, weighted hides the rare classes again - and always print classification_report plus the confusion matrix rather than one aggregate, because the customer's pain is usually one specific off-diagonal cell.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn User Guide - Metrics and scoring: quantifying the quality of predictions",
+    "url": "https://scikit-learn.org/stable/modules/model_evaluation.html"
+   }
+  },
+  {
+   "name": "ROC-AUC: the rank statistic, its two invariances, and where it flatters",
+   "learn": "Know the identity that makes AUC concrete: it equals the probability that a randomly chosen positive is scored above a randomly chosen negative, which is the Mann-Whitney U statistic divided by n_pos * n_neg, so you can compute it by ranking rather than by integrating a curve (and ties must take average ranks, which is the detail that makes a hand-rolled implementation disagree with scikit-learn in the third decimal). From that follow the two invariances you must be able to state in a meeting: AUC is invariant to any strictly monotone transform of the scores, so a perfectly ranked but wildly overconfident model has a beautiful AUC and unusable probabilities; and both axes are within-class rates, so AUC barely moves when prevalence changes from 50 percent to 0.2 percent even though the precision at every threshold collapses. Use max_fpr for a partial AUC when the customer only ever operates below a 1 percent false-positive rate, and for multiclass know that multi_class='ovr' with average='macro' is a different number from 'ovo' and that you must pass full predict_proba columns in the class order of estimator.classes_. Rule to carry: AUC is a screening and ranking statistic, never evidence that a probability or a threshold is fit to use.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - sklearn.metrics.roc_auc_score (average, max_fpr, multi_class)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.roc_auc_score.html"
+   }
+  },
+  {
+   "name": "Precision-recall curves and average precision under heavy imbalance",
+   "learn": "Average precision is the step-wise sum AP = sum_n (R_n - R_{n-1}) P_n over thresholds, deliberately not a trapezoidal integral, because linear interpolation between PR points is optimistic - which is why auc(recall, precision) and average_precision_score disagree and why the documentation tells you to use the latter. Know the baseline: a random scorer has AP equal to the positive prevalence, so AP = 0.35 is superb at a 0.2 percent base rate and terrible at 40 percent, and AP is therefore not comparable across datasets or across time as prevalence drifts - report the skill ratio AP/prevalence alongside it when you need comparability. Use PR when positives are rare and the cost lives on the positive class, because the PR curve reacts to the FP count directly while ROC dilutes it by the huge TN pool; know the Davis-Goadrich result that dominance in ROC space implies dominance in PR space, so the two never disagree about a uniformly better model - only about how much better. Plot both curves with the operating point marked, and pair them with precision@k when the real constraint is an analyst team that can review 50 alerts a day.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - sklearn.metrics.average_precision_score (step-wise AP, not trapezoidal)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.average_precision_score.html"
+   }
+  },
+  {
+   "name": "Choosing the threshold from the cost matrix, not from 0.5",
+   "learn": "Derive the optimal threshold rather than tuning it blindly: acting positive on a calibrated p has expected cost (1-p)*C_fp and acting negative has p*C_fn, so you should flag when p > C_fp/(C_fp + C_fn) - meaning 0.5 is correct only when a false positive and a false negative cost the same, which is essentially never in a customer's business. Build the cost matrix in the room with the customer in their units (an hour of analyst time, a chargeback, a missed renewal), turn it into a scorer, and pick the threshold that minimises expected cost out-of-fold with TunedThresholdClassifierCV(estimator, scoring=make_scorer(cost, greater_is_better=False), cv=5) - and know that scikit-learn's predict() hardcodes 0.5, which is why so many deployed thresholds are an accident. Handle the constrained variant too: when capacity is fixed at k alerts per day the threshold is the k-th highest score, and the metric is precision@k, whose value depends on prevalence and therefore has to be re-checked monthly. Tune the threshold on out-of-fold predictions only - a threshold chosen on the same data that scored the model is a one-parameter model fitted to the test set.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - sklearn.model_selection.TunedThresholdClassifierCV",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.TunedThresholdClassifierCV.html"
+   }
+  },
+  {
+   "name": "Proper scoring rules: log loss, Brier, and the Murphy decomposition",
+   "learn": "A scoring rule is proper when its expected value is optimised by reporting your true belief; log loss and the Brier score BS = (1/n) sum (p_i - y_i)^2 are proper, while accuracy, F1 and AUC are not - which is precisely how a model can climb on F1 while becoming worse at every decision that multiplies a probability by a cost. Learn the Murphy decomposition BS = reliability - resolution + uncertainty, where uncertainty = pi(1 - pi) is fixed by the base rate, reliability is the calibration term you want near zero, and resolution is the spread of conditional outcome rates you want large; the immediate consequence is that at pi = 0.002 the Brier score is dominated by an irreducible 0.001996 and quoting the raw value tells nobody anything - report the Brier skill score 1 - BS/BS_ref against the constant-prevalence forecaster instead. Know log loss's asymmetry: it is unbounded as p goes to 0 on a positive, so a single confident mistake can dominate a batch, and sklearn clips at eps to keep the number finite, which means an infinite mistake silently becomes a large one. Use log loss or Brier for model selection whenever the downstream decision uses the probability, and AUC only when the downstream decision uses the rank.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - sklearn.metrics.brier_score_loss",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.brier_score_loss.html"
+   }
+  },
+  {
+   "name": "Reading a reliability diagram",
+   "learn": "Build it with calibration_curve(y_true, y_prob, n_bins=10, strategy='quantile'): bin the predicted probabilities, plot mean predicted probability on x against observed frequency on y, and compare to the diagonal - points below the diagonal mean the model claims more than it delivers (overconfident), above means underconfident. Use strategy='quantile' rather than the default uniform whenever predictions cluster near zero, because equal-width bins at a 1 percent base rate leave eight of ten bins empty and the plot becomes three points and a straight line; always draw the histogram of predictions underneath so the reader can see how much mass each point represents, and put binomial error bars on each bin so nobody reads a bin of 12 rows as a finding. Learn the characteristic shapes and their causes: gradient-boosted trees and deep nets push probabilities toward 0 and 1 (sigmoid-shaped curve, overconfident), while bagged trees and SVMs pull them toward the centre (inverse-sigmoid, underconfident), and any model trained with class weights or on resampled data is shifted wholesale by the changed prior. The decision the plot supports is binary and concrete: can the customer threshold or multiply these numbers as they are, or must you calibrate first.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - sklearn.calibration.calibration_curve (n_bins, strategy)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.calibration.calibration_curve.html"
+   }
+  },
+  {
+   "name": "ECE is an estimator, and a gameable one",
+   "learn": "Expected calibration error is ECE = sum_b (n_b/n) |acc_b - conf_b|, a weighted average of per-bin gaps, and everything about the number depends on choices you make: fewer bins average opposing errors against each other and drive ECE toward zero for a model that is badly miscalibrated in both directions, more bins raise the variance and the plug-in estimator's upward bias, and equal-width versus equal-mass binning gives materially different numbers on the same predictions. Know Kumar et al.'s result that the standard binned estimator systematically underestimates true calibration error - so a reported ECE is a lower bound and 'our ECE is 0.01' is not a claim you can verify by looking at it - and that scaling-binning with a debiased estimator gives a value you can actually put a confidence interval on. Because ECE is not a proper scoring rule, always report it beside log loss and Brier and beside the diagram itself; and be precise about which ECE you computed, since confidence-ECE (over the max-probability class only) can be near zero while classwise-ECE over all K classes is large. In your harness, expose n_bins and strategy as explicit arguments and print the ECE across a sweep of bin counts, because a number that changes by 3x between 10 and 50 bins is telling you something the single number hides.",
+   "minutes": 20,
+   "resource": {
+    "label": "arXiv - Verified Uncertainty Calibration (Kumar, Liang, Ma; bias of binned ECE, scaling-binning)",
+    "url": "https://arxiv.org/abs/1909.10155"
+   }
+  },
+  {
+   "name": "Recalibrating: Platt, isotonic, temperature, and where the fit data comes from",
+   "learn": "Three tools with three different capacities: Platt scaling fits a two-parameter sigmoid 1/(1 + exp(a*s + b)) by logistic regression on held-out scores and is the right choice on a few hundred calibration rows; isotonic regression fits a non-decreasing step function by pool-adjacent-violators, is far more flexible, and overfits badly below roughly a thousand held-out points (its failure looks like a staircase with a few enormous flat treads); temperature scaling divides logits by a single scalar T fitted by minimising NLL, cannot change the argmax and therefore leaves accuracy and AUC exactly untouched, which is why it is the default for deep classifiers. In scikit-learn this is CalibratedClassifierCV(estimator, method='sigmoid'|'isotonic', cv=5, ensemble=True), and you must know what the arguments mean: cv=5 with ensemble=True fits five clones and averages their calibrated outputs (so the deployed object is an ensemble), ensemble=False calibrates a single model refit on all data, and cv='prefit' calibrates an already-fitted model on a set you must guarantee it never saw. The discipline that makes it defensible: fit the base model on split A, fit the calibrator on split B, measure calibration on split C, and show a before/after table where log loss and Brier improve while AUC is unchanged to four decimals - because AUC not moving is the proof you only remapped the scores monotonically.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - sklearn.calibration.CalibratedClassifierCV (method, cv, ensemble, prefit)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.calibration.CalibratedClassifierCV.html"
+   }
+  },
+  {
+   "name": "How uncertain is the number: fold correlation, bootstrap intervals and paired comparisons",
+   "learn": "Fold scores are not independent draws - the K training sets share most of their rows - so the naive standard error std(fold_scores)/sqrt(K) understates the true variability, and Bates, Hastie and Tibshirani show that intervals built this way under-cover and that cross-validation estimates the average error of the fitting procedure over datasets rather than the error of the specific model you are about to ship. Take two habits from that: quote an interval, not a point, and get it from a percentile bootstrap over test rows (resample rows with replacement, recompute the metric 2,000 times, take the 2.5th and 97.5th percentiles, stratify the resample when positives are rare so you do not draw a replicate with zero positives and an undefined AUC), and never compare two models with an unpaired t-test on fold means. Compare them paired: evaluate both on identical folds, take the per-fold difference, and look at the distribution of differences - or use McNemar's test on the 2x2 table of disagreements on a single large test set, which is the right test for two classifiers on the same rows. The sentence this buys you with a customer is the one that ends arguments: 'model B is 1.2 points better with a 95 percent interval of -0.4 to 2.9, so we cannot yet call it better, and here is the sample size that would settle it'.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv - Cross-validation: what does it estimate and how well does it do it? (Bates, Hastie, Tibshirani)",
+    "url": "https://arxiv.org/abs/2104.00673"
+   }
+  },
+  {
+   "name": "Building eval-harness in NumPy and proving it against scikit-learn",
+   "learn": "Implement the splitters as generators yielding (train_idx, test_idx) integer arrays and test the invariants rather than chasing byte-identical folds: the test folds partition range(n) exactly once, train and test are disjoint, StratifiedKFold holds each class proportion within 1/n_fold, GroupKFold leaves every group in exactly one test fold, and TimeSeriesSplit has max(train_idx) + gap < min(test_idx). Implement roc_auc via average ranks (scipy.stats.rankdata on the scores, then (sum of positive ranks - n_pos*(n_pos+1)/2) / (n_pos*n_neg)) so ties are handled the way scikit-learn handles them, average_precision as the step sum over the sorted thresholds, Brier as a plain mean squared error, log loss with an explicit eps clip you can see, and ECE with both binning strategies exposed. Then assert agreement with np.testing.assert_allclose(mine, sklearn_version, rtol=1e-10) on adversarial inputs - all-ties scores, a single positive, perfectly separable data, scores containing exact 0 and 1, and n=1 folds - and add property tests that hold regardless of implementation: AUC(-s) = 1 - AUC(s), AUC is unchanged under any monotone transform of s, AP of random scores converges to the prevalence, and Brier equals reliability - resolution + uncertainty from your own decomposition.",
+   "minutes": 25,
+   "resource": {
+    "label": "NumPy - numpy.testing.assert_allclose",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.testing.assert_allclose.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can look at any dataset and pick the split in under five minutes - random, stratified, grouped, time-ordered, or grouped-and-time-ordered - by naming the unit of independence and the deployment cadence out loud, and justify it to a customer's data scientist who wanted a random 80/20.",
+  "You can find a planted leak in someone else's notebook by running a per-column out-of-fold single-feature AUC screen plus a timestamp audit, name which of the six leakage types it is, point to the exact line where it enters, and quantify the score inflation by re-running with it removed.",
+  "You can derive the cost-optimal threshold t* = C_fp/(C_fp + C_fn) from expected cost, build the cost matrix with a customer in their own units, and produce the tuned threshold out-of-fold with its expected weekly cost and alert volume.",
+  "You can state, without notes, that AUC is invariant to monotone transforms and near-invariant to prevalence, that average precision's baseline is the prevalence, and that log loss and Brier are proper while F1 and accuracy are not - and pick the reporting metric from the customer's decision rather than from habit.",
+  "You can produce a reliability diagram with quantile bins, prediction histogram and binomial error bars, read overconfidence off it, fit a calibrator on a clean split, and show a before/after table where log loss and Brier improve while AUC is unchanged to four decimals.",
+  "You can ship an eval-harness whose KFold, StratifiedKFold, GroupKFold and TimeSeriesSplit satisfy the partition, proportion, disjoint-group and time-ordering invariants, and whose ROC-AUC, PR-AUC, Brier and ECE match scikit-learn to rtol=1e-10 including the all-ties and single-positive edge cases.",
+  "You can put an interval on any reported metric via a stratified percentile bootstrap, compare two models with a paired test on identical folds or McNemar on shared rows, and say how many more labelled rows would be needed to call a 1-point difference real.",
+  "You can explain nested cross-validation, say what number it estimates, quantify its cost in fits, and describe the cheaper protocol you would use instead on a customer engagement plus the caveat you would write next to the result."
+ ],
+ "failureModes": [
+  "A churn model trained on a warehouse snapshot included `days_since_last_login`, which the ETL recomputes nightly against the current date; churned accounts stopped logging in, so the feature encoded the label, cross-validated AUC was 0.97, and live AUC was 0.61 in the first week.",
+  "Medical images were split randomly instead of by patient, so scans of the same 400 patients appeared on both sides; the model learned patient identity, reported 0.95 AUC in the pilot, and dropped to near chance on the customer's next hospital.",
+  "SMOTE was applied to the whole dataset before cross-validation, so synthetic minority points interpolated from validation rows sat in every training fold; recall looked transformed, the customer sized a review team from it, and the real recall was roughly half.",
+  "Feature selection picked the top 200 of 40,000 columns by correlation with the target on the full dataset, then a clean 10-fold CV ran on the survivors; the model reported 0.88 AUC on data whose labels were randomly permuted, and nobody ran that sanity check for four months.",
+  "A demand forecaster was evaluated with shuffled K-fold on a time-indexed table, so every fold trained on the future to predict the past; MAPE looked excellent, and the first real four-week-ahead backtest was three times worse.",
+  "Class weights were used for a rare-event model and never undone; the scores were calibrated for a balanced world, the ops team applied the default 0.5 threshold, and a queue built for 20 cases a day received 900 on the first Monday.",
+  "The reported metric was 99.4 percent accuracy on a 0.6 percent fraud base rate - a model that predicted 'not fraud' unconditionally scored 99.4 percent, and the deck went to the customer's executive sponsor before anyone plotted a confusion matrix.",
+  "ECE was reported at 0.008 with 10 uniform-width bins on predictions that all fell below 0.05; nine bins were empty, the single populated bin averaged an overconfident and an underconfident region together, and the reliability diagram drawn later with quantile bins showed a systematic 3x overstatement of risk."
+ ],
+ "interviewQuestions": [
+  "Derive the threshold that minimises expected cost for a calibrated binary classifier given C_fp and C_fn, and tell me what has to be true about the model for that derivation to hold. Then tell me what you do instead when the constraint is not a cost but a team that can review 50 alerts a day.",
+  "A customer's model reports 0.94 AUC in cross-validation and 0.62 in production two weeks after launch. Walk me through your diagnostic order - what you check first, second and third - and for each candidate cause tell me the specific artefact that would confirm it.",
+  "Explain what cross-validation actually estimates. Given 5-fold scores of [0.81, 0.84, 0.79, 0.86, 0.80], what would you quote to a customer, and why is std/sqrt(5) not the standard error you want?",
+  "You are handed a table with a customer_id, an event timestamp, and a label defined as 'churned within 60 days'. Design the evaluation from scratch: the splitter, the purge and embargo, the metric, the threshold procedure, and the three sanity checks you run before you show anyone a number.",
+  "Two models have identical ROC-AUC of 0.88. One has log loss 0.31 and the other 0.47. Explain how that is possible, tell me which one you would ship and under what conditions, and describe exactly what you would do to the worse one and what would and would not change afterwards.",
+  "Design a leakage screen you could run automatically over any customer feature table before training. What does it compute, what is the threshold for flagging, what are its false positives, and what does it fundamentally not catch?",
+  "Someone reports an expected calibration error of 0.01 and concludes the probabilities are trustworthy. What questions do you ask about how that number was computed, and what would you ask to see instead?"
+ ],
+ "proofOfWork": "A public repo `leak-lab` that turns the eval-harness into a diagnostic you can run on a customer's table on day two of an engagement. It ships `leakage_screen.py`, which takes a dataframe plus a label column, an optional timestamp column and an optional group column, and emits a ranked report: per-column out-of-fold single-feature AUC with a flag above 0.90, exact and near-duplicate row clusters that straddle any proposed split (content hash plus a MinHash pass for text), columns whose null pattern correlates with the label, columns whose values move after the label timestamp when a second historical snapshot is supplied, and a permutation_test_score run on the full pipeline that must produce a chance-level score on shuffled labels or the pipeline is presumed leaky. It ships `split_advisor.py`, which takes the same inputs and prints the recommended splitter with the reason in one sentence, the per-fold positive counts and prevalences, and a red warning when any fold has fewer than 25 positives or when a group or a time boundary is violated by the proposed split. Alongside these, `case_studies/` reproduces four planted leaks end to end - a target-derived column, a group leak on repeated entities, a shuffled split on time-ordered data, and preprocessing fitted before the split - each as a notebook showing the inflated score, the screen catching it, the corrected score, and a two-sentence customer-readable explanation of what was wrong. `calibration_clinic.py` takes any fitted classifier and a held-out set and emits log loss, Brier with its Murphy decomposition, ECE swept across bin counts and both binning strategies, a reliability diagram with quantile bins and binomial error bars, the fitted sigmoid, isotonic and temperature calibrators compared on a third split, and the cost-optimal threshold with a bootstrap interval on the resulting weekly alert volume. CI runs the harness agreement tests against scikit-learn at rtol=1e-10, the splitter invariant tests, and the property tests (AUC(-s) = 1 - AUC(s), monotone invariance, AP of random scores equals prevalence) on every push, and the README opens with a one-page `EVALUATION-CHECKLIST.md` written for a customer's data team: the unit of independence, the split, the leak questions per column, the metric and why, the threshold and its cost basis, and the calibration evidence."
+}

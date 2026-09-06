@@ -1,0 +1,219 @@
+{
+ "i": 104,
+ "topic": "Feature engineering, selection, and imbalanced data: SMOTE, class weights, target encoding",
+ "track": "N. Machine Learning Systems",
+ "month": 9,
+ "hours": 6,
+ "why": "This is the topic where an FDE either earns or loses the customer's data-science team in the first week: they will hand you a table with a 0.2 percent positive rate, a 10k-cardinality merchant column, and a model that already scores 0.98 ROC-AUC, and your job is to say whether that number is real. Almost every catastrophic on-site modelling error lives here - target encoding fit before the split, SMOTE applied outside the fold, a feature computed with future information, a metric chosen because it flatters - and every one of them produces a model that validates beautifully and fails in production, on their data, with your name on it. Being able to derive the shrinkage estimator, name the assumption SMOTE makes, and put a threshold-tuned baseline next to the fancy pipeline is what turns 'the consultant said' into a defensible engineering argument.",
+ "prerequisites": [
+  "Logistic regression fluently: the log-odds parameterisation, log-loss, L1/L2 regularisation and what the intercept encodes (Topic 100, Supervised learning I)",
+  "Tree ensembles and their hyperparameters - how a split criterion uses counts, what sample weights do to gradients, early stopping (Topic 101, Supervised learning II with XGBoost and LightGBM)",
+  "Cross-validation mechanics, the definition of leakage, and probability calibration as concepts (Topic 103, Model evaluation) - this topic is the applied stress test of that one",
+  "Bayes rule, conditional probability, the Beta and Binomial distributions and what a conjugate prior does (Topic 95, Probability)",
+  "NumPy vectorisation at the level of fancy indexing, broadcasting and np.random.default_rng - the from-scratch SMOTE must not be a Python loop (Topic 99, Numerical computing)",
+  "sklearn's estimator API in practice: Pipeline, ColumnTransformer, cross_validate, and the difference between fit_transform and transform"
+ ],
+ "subtopics": [
+  {
+   "name": "What imbalance actually is: base rate, class overlap, and the null model",
+   "learn": "Separate the two things people call 'imbalance': the marginal prior pi = P(y=1), which mathematically only shifts where the optimal decision threshold sits, and class overlap, which is irreducible Bayes error that no resampler removes. Compute the three numbers that actually predict difficulty before touching a model - the absolute positive count n_pos, the ratio n_neg/n_pos, and events-per-variable n_pos/p (below roughly 10 a logistic fit is separation-prone and its coefficients are biased away from zero). Fit DummyClassifier(strategy='prior') and record its average_precision: it equals pi exactly and is the only honest floor for every number you report afterwards. Say the framing out loud on site - with 492 frauds in 284,807 rows the problem is 492 examples, not the 0.17 percent.",
+   "minutes": 15,
+   "resource": {
+    "label": "Google ML Crash Course - Imbalanced datasets",
+    "url": "https://developers.google.com/machine-learning/crash-course/overfitting/imbalanced-datasets"
+   }
+  },
+  {
+   "name": "Metrics that survive a 1 percent base rate: PR-AUC, average precision, recall at fixed precision",
+   "learn": "Derive precision = TPR*pi / (TPR*pi + FPR*(1-pi)) and substitute pi=0.01, TPR=0.90, FPR=0.01: precision is 0.48 while ROC-AUC still looks superb, which is exactly why ROC-AUC is prevalence-invariant and therefore the wrong headline number for a rare target. Use average_precision_score, the step-wise sum over operating points of (R_n - R_{n-1}) * P_n, rather than auc(recall, precision), which trapezoid-interpolates between operating points that do not exist. Report the two numbers a customer can staff against - recall at the precision their review capacity implies, and precision at their required recall - extracted from precision_recall_curve with np.searchsorted rather than read off a plot. Remember PR-AUC is not comparable across datasets with different pi, so always print the baseline pi beside it.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn example - Precision-Recall (incl. average precision definition)",
+    "url": "https://scikit-learn.org/stable/auto_examples/model_selection/plot_precision_recall.html"
+   }
+  },
+  {
+   "name": "The decision threshold is the cheapest lever: expected cost and TunedThresholdClassifierCV",
+   "learn": "Treat predict()'s hard-coded 0.5 as an arbitrary default, not a property of the model. For a calibrated score with costs C_fp and C_fn, derive the expected-cost-minimising cut by comparing p*C_fn against (1-p)*C_fp, giving t* = C_fp / (C_fp + C_fn) - a 1:50 cost ratio puts the threshold at about 0.02, which recovers most of what people believe they need SMOTE for. Use TunedThresholdClassifierCV(estimator, scoring=make_scorer(business_metric), cv=5) so the cut is chosen on held-out folds against the customer's actual objective; a threshold picked on the same data used to fit is a second fitted parameter and inflates the score. Make 'untouched model plus tuned threshold' a mandatory arm in every imbalance benchmark you run, because it is free at train time and frequently wins.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn example - Post-hoc tuning the cut-off point of decision function (cost-sensitive learning)",
+    "url": "https://scikit-learn.org/stable/auto_examples/model_selection/plot_cost_sensitive_learning.html"
+   }
+  },
+  {
+   "name": "Cost-sensitive learning: weighted losses, class_weight='balanced', sample_weight",
+   "learn": "Write the weighted log-loss L = -(1/sum_i w_i) * sum_i w_i [y_i log p_i + (1-y_i) log(1-p_i)] and see that class_weight is nothing but w_i = w_{y_i}; sklearn's 'balanced' sets w_k = n_samples / (n_classes * n_k), so at pi=0.01 the positive class gets weight ~50. Know the equivalences and where they stop holding: weighting equals minority duplication for losses that are plain sums over examples, but not for tree split criteria that also use raw counts (min_samples_leaf, min_child_weight), not for early stopping evaluated on an unweighted metric, and XGBoost's scale_pos_weight scales gradients and hessians so it interacts with min_child_weight directly. Understand the consequence you must disclose: weighting moves the decision boundary and therefore decalibrates the output, so a weighted model's p-hat is no longer P(y=1|x) on the deployment population.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - compute_class_weight (the 'balanced' formula)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.utils.class_weight.compute_class_weight.html"
+   }
+  },
+  {
+   "name": "Prior shift and calibration: what resampling does to the predicted probability",
+   "learn": "Show analytically that for a logistic model, resampling the positives from prevalence pi to pi' changes only the intercept, so the corrected log-odds are logit(p_resampled) - log[(pi'/(1-pi')) / (pi/(1-pi))]; implement that offset and verify the mean predicted probability returns to the true base rate. Measure calibration with brier_score_loss and CalibrationDisplay (strategy='quantile', because uniform bins are empty at the top of a rare-event score) and repair it with CalibratedClassifierCV(method='isotonic' or 'sigmoid') fitted on data that never saw the resampled rows. Be able to state van den Goorbergh et al.'s simulation result in one sentence to a customer: imbalance correction leaves discrimination essentially unchanged and destroys calibration - which is fatal when the output feeds an expected-loss calculation rather than a top-k review queue.",
+   "minutes": 20,
+   "resource": {
+    "label": "arXiv:2202.09101 - The harm of class imbalance corrections for risk prediction models",
+    "url": "https://arxiv.org/abs/2202.09101"
+   }
+  },
+  {
+   "name": "SMOTE from first principles and from scratch in NumPy",
+   "learn": "Implement the Chawla 2002 algorithm exactly: for each minority point x_i find its k=5 nearest minority neighbours under Euclidean distance, sample one neighbour x_zi uniformly, and emit x_new = x_i + lam * (x_zi - x_i) with lam ~ Uniform(0,1) - vectorise with NearestNeighbors(n_neighbors=k+1) (discard the self-match at column 0), an rng = np.random.default_rng(seed), and integer index arrays instead of a Python loop. Name the assumptions you assert by using it: the minority class is locally convex (the segment joining two positives is positive), features are continuous and comparably scaled so Euclidean distance is meaningful (hence SMOTE must sit after the scaler in the pipeline), and interpolation adds zero information - it only reshapes the density the learner sees. Validate yours against imblearn's SMOTE(random_state=0) on identical input for output shape and class counts, and assert every synthetic point lies inside the convex hull of the minority set.",
+   "minutes": 30,
+   "resource": {
+    "label": "arXiv:1106.1813 - SMOTE: Synthetic Minority Over-sampling Technique (Chawla et al., JAIR 2002)",
+    "url": "https://arxiv.org/abs/1106.1813"
+   }
+  },
+  {
+   "name": "SMOTE variants and mixed-type tables: Borderline, ADASYN, SMOTENC, hybrids",
+   "learn": "Know precisely what each variant changes: BorderlineSMOTE synthesises only around minority points whose neighbourhood is majority-dominated (the decision boundary), ADASYN allocates more synthetic points where local majority density is higher, which makes it a noise amplifier on mislabelled data, and KMeansSMOTE oversamples within clusters so it stops filling empty space between distant minority islands. For mixed tables use SMOTENC (interpolates continuous columns, takes the neighbourhood mode for categoricals) or SMOTEN with a value-difference metric for all-categorical data - plain SMOTE over one-hot columns emits 0.37 in a binary indicator, a row that cannot exist and that the customer's domain expert will spot immediately. Treat sampling_strategy as a hyperparameter to sweep (it takes a float ratio, 'minority', 'not majority', or a dict); forcing a 1:1 balance is a default, not an answer.",
+   "minutes": 20,
+   "resource": {
+    "label": "imbalanced-learn User Guide - Over-sampling (SMOTE variants, SMOTENC/SMOTEN, sampling_strategy)",
+    "url": "https://imbalanced-learn.org/stable/over_sampling.html"
+   }
+  },
+  {
+   "name": "Under-sampling and balanced ensembles: Tomek, ENN, NearMiss, BalancedRandomForest, RUSBoost",
+   "learn": "Distinguish blind random under-sampling (RandomUnderSampler, fast and cheap but discards labelled data the customer paid for) from cleaning methods that remove specific rows: TomekLinks drops mutual-nearest-neighbour pairs of opposite class to thin the boundary, EditedNearestNeighbours drops points their own neighbours misclassify, and NearMiss selects majority points by distance heuristics and routinely selects exactly the wrong ones. Prefer the ensemble forms that achieve balance per-learner without throwing data away globally - BalancedRandomForestClassifier (a balanced bootstrap per tree), RUSBoostClassifier, and EasyEnsembleClassifier (a bag of AdaBoosts each on a different under-sample). Remember these change your model class as well as the class balance, so they must be compared against a plain HistGradientBoostingClassifier with a tuned threshold, not against a strawman.",
+   "minutes": 15,
+   "resource": {
+    "label": "imbalanced-learn User Guide - Ensemble of samplers (BalancedRandomForest, RUSBoost, EasyEnsemble)",
+    "url": "https://imbalanced-learn.org/stable/ensemble.html"
+   }
+  },
+  {
+   "name": "Does balancing actually win? Reading the empirical evidence",
+   "learn": "Read Elor and Averbuch-Elor's benchmark across 73 datasets and internalise the finding: for strong learners such as XGBoost and CatBoost, balancing yields no significant gain once the decision threshold is tuned, whereas it does help weak or heavily regularised learners - which tells you exactly which control arm your benchmark must include. Pair that with the observation that most published SMOTE wins are measured with accuracy or F1 at threshold 0.5 on a single train/test split, a setup that guarantees a resampler looks good. The FDE-usable rule: never claim a balancing method helps without an unbalanced, threshold-tuned control at the same hyperparameter budget, evaluated with repeated stratified CV and reported with a standard deviation.",
+   "minutes": 15,
+   "resource": {
+    "label": "arXiv:2201.08528 - To SMOTE, or not to SMOTE?",
+    "url": "https://arxiv.org/abs/2201.08528"
+   }
+  },
+  {
+   "name": "Resampling inside the fold: imblearn Pipeline and the leakage demonstration",
+   "learn": "Learn the ordering law: any transformation that consumes y or changes the row multiset is fit on the training fold only and must never touch validation or test. Use imblearn.pipeline.Pipeline rather than sklearn's - it is the one that calls fit_resample during fit and skips the sampler entirely at predict time, which makes cross_validate, GridSearchCV and Optuna correct by construction. Build the deliberately wrong control on purpose: SMOTE the full X, y and then StratifiedKFold, so near-duplicate interpolants of the same positive land on both sides of the split, and watch PR-AUC jump by tens of points on a model that learned nothing. Be able to explain it to a customer engineer in one line - a synthetic row is a function of its neighbours, so oversampling before the split is train/test contamination even though no literal row was copied.",
+   "minutes": 25,
+   "resource": {
+    "label": "imbalanced-learn - Common pitfalls and recommended practices",
+    "url": "https://imbalanced-learn.org/stable/common_pitfalls.html"
+   }
+  },
+  {
+   "name": "Target encoding: deriving the empirical-Bayes shrinkage estimator",
+   "learn": "Derive the smoothed encoder as a Beta-Binomial posterior mean: with a Beta(alpha, beta) prior matched to the global positive rate, a category c with n_c rows and k_c positives encodes to (k_c + alpha) / (n_c + alpha + beta), which rearranges into the m-estimate (n_c * ybar_c + m * ybar) / (n_c + m) with m = alpha + beta acting as a prior row count. Know exactly what m controls - it is the category size at which the estimate sits halfway between the category mean and the global mean - and be able to argue why a category with one observation must encode to approximately the global mean rather than to 0 or 1. Derive the leakage argument formally: encoding row i using a target mean that includes y_i makes the feature a deterministic function of the label, so a 10k-cardinality ID column becomes a perfect in-sample predictor with zero out-of-sample signal, which is why the encoding must be computed out-of-fold.",
+   "minutes": 25,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - ch.05 Probability, Bayesian methods (conjugate Beta priors, MAP shrinkage)",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2005%20-%20probability/04.%20bayesian.md"
+   }
+  },
+  {
+   "name": "Target encoding in practice: sklearn TargetEncoder and cross-fitting",
+   "learn": "Use TargetEncoder(target_type='binary', smooth='auto', cv=5) and understand its deliberate API asymmetry: fit_transform() returns cross-fitted encodings computed on held-out folds, while fit().transform() on the same data returns full-data encodings - calling fit then transform on your training set is the leak, and it is a different code path, not a bug. Set smooth explicitly when you can justify m from the customer's category-size distribution, and know the defined behaviour for unseen categories (they map to the global target mean) and for NaN (its own category). Benchmark it honestly against OneHotEncoder(min_frequency=..., handle_unknown='infrequent_if_exist') and against native categorical splits: for a 10k-cardinality merchant ID, one-hot explodes the design matrix, hashing collides, and target encoding wins only when the cross-fitting is real.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn example - Comparing Target Encoder with other encoders / internal cross-fitting",
+    "url": "https://scikit-learn.org/stable/auto_examples/preprocessing/plot_target_encoder_cross_val.html"
+   }
+  },
+  {
+   "name": "The rest of the categorical toolbox: one-hot, ordinal, count, hashing, native splits",
+   "learn": "Match the encoder to the model class: linear models need one-hot (with drop='first' when there is an unregularised intercept) because an ordinal code silently asserts an ordering, while tree ensembles tolerate ordinal codes but need many splits to isolate a single level. Prefer native categorical support where it exists - LightGBM sorts levels by accumulated gradient statistics and finds a subset split in O(k log k), which is why it beats one-hot on high cardinality, with cat_smooth, min_data_per_group and max_cat_threshold as the overfitting knobs; XGBoost's enable_categorical does the partition-based equivalent. Keep count/frequency encoding in mind as the cheap, leak-free fallback that captures 'rare merchant' signal, and the hashing trick (FeatureHasher) when cardinality is unbounded or streaming and you can accept collisions.",
+   "minutes": 15,
+   "resource": {
+    "label": "LightGBM docs - Advanced Topics (categorical feature support and its parameters)",
+    "url": "https://lightgbm.readthedocs.io/en/stable/Advanced-Topics.html"
+   }
+  },
+  {
+   "name": "Numeric feature construction: splines, quantile and power transforms, interactions, monotonic constraints",
+   "learn": "Give a linear model curvature without a polynomial explosion: SplineTransformer(n_knots, degree, extrapolation='periodic') for smooth nonlinearity and cyclical time (hour-of-day, day-of-week), QuantileTransformer(output_distribution='normal') and PowerTransformer(method='yeo-johnson') for heavily skewed monetary amounts (Box-Cox requires strictly positive input, Yeo-Johnson does not). Know that all of these are no-ops for tree ensembles - a monotone transform cannot change split ordering - but decisive for logistic regression, SVM and k-NN, which is the point an FDE must make out loud: half of what a customer calls feature engineering is a model choice in disguise. Add interactions deliberately with PolynomialFeatures(interaction_only=True) or a domain ratio (amount / rolling-mean amount for that card), and encode domain law with monotonic_cst / monotone_constraints when the customer requires that risk cannot decrease as amount rises.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn example - Time-related feature engineering (splines, periodic encoding, interactions)",
+    "url": "https://scikit-learn.org/stable/auto_examples/applications/plot_cyclical_feature_engineering.html"
+   }
+  },
+  {
+   "name": "Filter selection: mutual information and what its estimator really does",
+   "learn": "Understand what mutual_info_classif computes - I(X;Y) = sum p(x,y) log[p(x,y)/(p(x)p(y))], estimated for continuous X by the Kraskov/Ross k-nearest-neighbour method, which makes it stochastic (set random_state), sensitive to n_neighbors, and dependent on discrete_features being declared correctly or one-hot columns are silently treated as continuous. Know its virtue and its two blind spots: it detects nonlinear and non-monotone dependence that Pearson correlation misses, but it is univariate, so it ranks a redundant copy of a strong feature just as highly, and it scores approximately zero for a feature that only matters in interaction (the XOR case). Apply it as SelectKBest(mutual_info_classif, k=...) inside the pipeline so it is refit per fold, and cross-check its ranking against f_classif and chi2 so you can explain the disagreements instead of trusting one list.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - mutual_info_classif (kNN entropy estimator, discrete_features, random_state)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.feature_selection.mutual_info_classif.html"
+   }
+  },
+  {
+   "name": "Permutation importance and the correlated-feature trap",
+   "learn": "Know the algorithm exactly: shuffle one column of the validation set, re-score, average the drop over n_repeats - so it measures how much this fitted model relies on this column on this dataset, not how informative the column is in general. Learn its two dominant failure modes: with correlated features the importance is split or collapses to near zero for both (the model reconstructs the signal from the twin), and permutation destroys the joint distribution so the model is scored on impossible rows. Mitigate by hierarchically clustering the Spearman correlation matrix and permuting whole clusters, or by drop-column importance when you can afford p refits; always compute on held-out data, since permutation importance on the training set of a deep tree ranks everything as important. Contrast with impurity-based MDI (feature_importances_), which is biased towards high-cardinality and continuous features - precisely the merchant-ID column you just target-encoded.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn example - Permutation importance with multicollinear or correlated features",
+    "url": "https://scikit-learn.org/stable/auto_examples/inspection/plot_permutation_importance_multicollinear.html"
+   }
+  },
+  {
+   "name": "Embedded and wrapper selection: L1 paths, SelectFromModel, RFECV, stability",
+   "learn": "Use L1-penalised logistic regression or LinearSVC(penalty='l1', dual=False) with SelectFromModel(threshold='median' or 1e-5) and read the regularisation path to see the order in which features enter; know that lasso keeps one arbitrary member of a correlated group and that elastic net is the remedy. Reach for RFECV(estimator, step, cv, scoring, min_features_to_select) when the model exposes coefficients or importances and the feature count itself is an operational constraint, understanding it costs roughly p/step refits per fold. The rule that decides whether your number is real: the selector must live inside the Pipeline so it is refit on every training fold - selecting features once on the full dataset and then cross-validating is the classic selection-bias error that produced a decade of unreproducible gene-expression results. Add a stability check by refitting over bootstrap resamples and keeping only features selected in more than about 60 percent of runs.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn User Guide - Feature selection (SelectFromModel, RFE/RFECV, selection in a pipeline)",
+    "url": "https://scikit-learn.org/stable/modules/feature_selection.html"
+   }
+  },
+  {
+   "name": "Splitting so the number is real: stratified, grouped and time-based validation",
+   "learn": "Pick the splitter from the data's dependence structure, not from habit: StratifiedKFold when rows are iid and positives are rare (it preserves pi per fold and prevents a fold with zero positives), GroupKFold or StratifiedGroupKFold when rows share an entity such as many transactions per card, and TimeSeriesSplit when deployment means 'predict tomorrow from today'. Enforce point-in-time correctness on every engineered feature - a per-card historical fraud rate computed over the full dataset is a time-travelling feature that evaporates in production, so compute it with an expanding window strictly earlier than each row's timestamp. Report RepeatedStratifiedKFold means with a standard deviation, because at 492 positives a single split's PR-AUC moves several points on reseeding alone, and any 'A beats B' inside that band is not a result.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - StratifiedGroupKFold (grouped + stratified cross-validation)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.StratifiedGroupKFold.html"
+   }
+  },
+  {
+   "name": "Shipping it: sklearn-compatible transformers and samplers",
+   "learn": "Write your target encoder and SMOTE against the real contract: __init__ stores hyperparameters only with no validation and no renaming, fit(X, y) validates input, sets learned attributes with trailing underscores (categories_, encodings_) and returns self, transform() calls check_is_fitted so it raises NotFittedError rather than a confusing IndexError, and get_feature_names_out() keeps ColumnTransformer output readable. Inherit BaseEstimator + TransformerMixin for the encoder, but note the sampler is a different interface - fit_resample returns X and y with a different number of rows, which is exactly why it cannot be an sklearn transformer and why imblearn's Pipeline exists. Run check_estimator or parametrize_with_checks in the test suite, verify clone(est) round-trips every parameter, and confirm set_output(transform='pandas') preserves column names, because a transformer that silently drops names is the one that breaks the customer's SHAP plot three weeks after handover.",
+   "minutes": 15,
+   "resource": {
+    "label": "scikit-learn - Developing scikit-learn estimators (API contract, check_estimator, get_feature_names_out)",
+    "url": "https://scikit-learn.org/stable/developers/develop.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take a raw table with a 1 percent positive target and build a single leakage-free imblearn Pipeline - ColumnTransformer with out-of-fold target encoding, scaler, sampler, estimator - that passes cross_validate with no step ever seeing validation rows, and you can point at the line that guarantees each property.",
+  "You can derive on a whiteboard the m-estimate target encoding (n_c*ybar_c + m*ybar)/(n_c + m) from a Beta-Binomial posterior, state what m means in rows, and say what a single-row category must encode to and why.",
+  "You can implement SMOTE in under 30 lines of vectorised NumPy, reproduce imblearn's class counts on the same seed, and name the three assumptions it makes about the minority class and the feature space.",
+  "You can produce a benchmark table over repeated stratified CV comparing plain model, class_weight='balanced', SMOTE, SMOTENC, BalancedRandomForest and threshold tuning on PR-AUC and recall-at-fixed-precision with standard deviations, and state which differences are inside the noise.",
+  "You can quantify a leakage bug: run the same pipeline with resampling and target encoding fitted before the split versus inside the fold, and report the exact PR-AUC inflation in points as evidence for the customer.",
+  "You can show a calibration curve and Brier score before and after resampling, apply the log-odds prior-shift correction analytically, and demonstrate that the mean predicted probability returns to the observed base rate.",
+  "You can rank features by mutual information, permutation importance and L1 path entry, explain why the three rankings disagree on correlated columns, and defend a final feature set with a stability-over-bootstraps number.",
+  "You can look at a customer's existing notebook and identify, within ten minutes, every step whose fit consumed information from outside its training fold."
+ ],
+ "failureModes": [
+  "The target encoder is fit on the full dataset before the split, so a 10k-cardinality merchant ID becomes an almost perfect in-sample predictor; CV reports 0.95 PR-AUC, production reports roughly the base rate, and the column looks like the model's most important feature in SHAP the whole time.",
+  "SMOTE is applied to X, y before StratifiedKFold, putting interpolants of the same positive in both train and validation; the score jumps twenty points, nobody can reproduce it on the holdout month, and the team spends a week blaming distribution shift.",
+  "ROC-AUC is chosen as the headline metric because it reads 0.98; at the operating threshold the customer can actually staff, precision is 4 percent, their analysts drown in false positives, and the model is switched off in week three.",
+  "A per-card historical fraud rate is computed over the entire dataset rather than an expanding window, so every training row knows about future frauds on that card; the feature dominates importance rankings and contributes nothing after deployment.",
+  "class_weight='balanced' is used for a model whose output feeds an expected-loss calculation; discrimination is fine but the probabilities are inflated by the implicit prior shift, so the customer's reserve numbers are systematically too high and no one traces it back to the weighting.",
+  "Features are selected once with SelectKBest on the whole dataset and cross-validation is run afterwards on the surviving columns; the selection already saw the validation labels, so every subsequent score is optimistically biased and hyperparameter search happily overfits into the gap.",
+  "Multiple transactions per card are split with plain StratifiedKFold rather than StratifiedGroupKFold, so the model memorises cards instead of behaviour and scores far better in CV than on any card it has never seen.",
+  "SMOTE is run on one-hot encoded columns, producing synthetic rows with 0.37 in a binary indicator and impossible category combinations; the model learns off-manifold structure, and the customer's domain expert loses confidence in the whole engagement the moment they inspect a generated row."
+ ],
+ "interviewQuestions": [
+  "Derive the smoothed target encoding formula from a Beta-Binomial posterior. What does the smoothing parameter mean in units of data, how would you choose it for a column where 80 percent of categories have fewer than five rows, and why must the encoding be computed out-of-fold?",
+  "A customer has a 0.2 percent positive rate and their model reports 0.99 ROC-AUC. Write down the relationship between precision, TPR, FPR and prevalence, and use it to explain to their VP why that number tells you almost nothing about whether the model is deployable.",
+  "Explain what SMOTE does geometrically and state the assumptions it makes. Given a table with 40 numeric and 12 categorical columns, 3 percent positives, and an XGBoost model, would you use it? Justify with the control arms you would run and the metric you would compare on.",
+  "Design the validation scheme for a fraud model where each customer has many transactions, fraud is 0.5 percent, the data spans two years, and the model will score transactions in real time. Name the splitter, the metric, the threshold-selection procedure, and every feature-engineering step that has to move inside the fold.",
+  "Debug: a colleague's pipeline scores 0.93 PR-AUC in cross-validation and 0.21 on the holdout month. You have their notebook. What are the four things you check, in order, and what would each look like in the code?",
+  "class_weight='balanced' versus SMOTE versus threshold tuning: derive what each one does to the loss, the decision boundary and the predicted probability, and say which you would reach for when the model's output is consumed as a probability rather than a ranking.",
+  "Permutation importance says a feature has zero importance, but dropping it and refitting makes the model measurably worse. Explain how both results can be true, and what you would do to get an importance ranking you would show a customer."
+ ],
+ "proofOfWork": "A one-page, customer-facing 'imbalance and leakage audit' tool plus the memo it generates, checked in alongside the benchmark repo. The tool is a single function audit(X, y, split_spec, feature_spec) that emits a report for any tabular classification dataset: base rate, absolute positive count, events-per-variable, DummyClassifier PR-AUC floor, the per-column cardinality and category-size histogram (flagging every column where target encoding without smoothing would be dominated by singleton categories), a group-leakage check that reports how many entity IDs appear on both sides of the proposed split, a point-in-time check that flags any engineered feature whose computation window extends past the row timestamp, and a paired benchmark of the four arms (plain, class_weight, sampler, tuned threshold) under RepeatedStratifiedKFold with means and standard deviations. Run it against two datasets - the credit-card-fraud table from the deliverable and one other public imbalanced table with a genuine group structure, such as a churn or readmission dataset - and write the two-page memo it feeds: the recommended arm, the recall achievable at the precision their review capacity implies, the calibration curve before and after any correction, and an explicit 'what we did not do and why' section naming SMOTE if the evidence did not support it. The point of the artifact is that it is the thing you can run in front of a customer's data-science team on day one and have them agree with the numbers before any modelling starts."
+}

@@ -1,0 +1,229 @@
+{
+ "i": 112,
+ "topic": "PyTorch at depth: tensors, autograd, Dataset and DataLoader, the training loop, profiling",
+ "track": "O. Deep Learning and Multimodal",
+ "month": 12,
+ "hours": 8,
+ "why": "Every deep-learning claim you make to a customer bottoms out in a PyTorch training loop that you must be able to defend line by line: this loss is over these logits, this gradient is this VJP, this number is a real p95 and not a launch-queue artefact. The bugs that lose deals are silent rather than loud - a broadcast that turns an (N,1) vs (N,) residual into an N-by-N loss, a `model.eval()` you forgot, a `total_loss += loss` that retains the graph until OOM at epoch two, a benchmark taken without `torch.cuda.synchronize()` - and none of them raise an exception; they produce a plausible curve and a wrong model. An FDE who can hand-derive a backward, prove it with `torch.autograd.gradcheck` in float64, and then read a `torch.profiler` table to say 'we are dataloader-bound, give me four workers and pinned memory' is the person the customer's ML team stops arguing with.",
+ "prerequisites": [
+  "Reverse-mode backpropagation on paper: the chain rule over a computational graph, and having already written a NumPy MLP with your own autograd (Topic 110, Neural network foundations)",
+  "Matrix calculus: Jacobians, the gradient of x @ W + b with respect to each argument, and why a vector-Jacobian product is cheaper than a Jacobian (Topic 93 linear algebra, Topic 94 calculus and optimisation)",
+  "NumPy at depth: ndarray strides, views versus copies, broadcasting rules, float32 versus float64 error budgets and catastrophic cancellation (Topic 99, Numerical computing)",
+  "The optimiser and mixed-precision vocabulary from Topic 111 (SGD-momentum, Adam, warmup and cosine schedules, a bad loss curve) - this topic is the implementation and instrumentation view of the same machinery",
+  "Python beyond scripting: classes and dunder methods, closures, context managers, iterators/generators, and the multiprocessing fork-versus-spawn distinction, since Dataset workers are separate processes",
+  "A working PyTorch 2.x install plus access to one CUDA GPU (a Colab T4 or a rented A10/A100 is enough) - the profiling and mixed-precision subtopics cannot be done CPU-only",
+  "pytest and git, because the deliverable's gradient checks and profiler traces belong in CI, not in a notebook"
+ ],
+ "subtopics": [
+  {
+   "name": "The tensor memory model: storage, offset, sizes, strides, contiguity",
+   "learn": "Understand a tensor as a four-tuple over a flat buffer - `untyped_storage()`, `storage_offset()`, `size()`, `stride()` - and be able to predict all four after `t[2:, ::2].transpose(0, 1)` before you run it. Know which ops are metadata-only views (`view`, `reshape` when possible, `permute`, `transpose`, `expand`, `squeeze`, basic slicing, `narrow`, `select`) and which must copy (`reshape` on an incompatible layout, `contiguous`, `repeat`, advanced/fancy indexing, `flatten` across non-contiguous dims). Be able to explain the error `view size is not compatible with input tensor's size and stride (at least one dimension spans across two contiguous subspaces)` in stride terms, and why `expand` costs zero memory (it sets a stride of 0) while `repeat` costs the full product. Check with `x.is_contiguous()`, `x.data_ptr()` and `x.is_contiguous(memory_format=torch.channels_last)` - the last one is what a convolution kernel actually dispatches on.",
+   "minutes": 20,
+   "resource": {
+    "label": "PyTorch docs - Tensor Views",
+    "url": "https://docs.pytorch.org/docs/stable/tensor_view.html"
+   }
+  },
+  {
+   "name": "Broadcasting semantics and the silent-bug surface they create",
+   "learn": "State the rule exactly: align shapes from the trailing dimension, each pair must be equal or one of them 1, missing leading dims are treated as 1. Then internalise the two things it costs you: (a) `pred` of shape (N, 1) minus `target` of shape (N,) broadcasts to (N, N), so `mse_loss` happily returns a small smooth number computed over N-squared pairs and the model converges to predicting the mean - no exception, no warning; (b) the backward of a broadcast is a sum over the broadcast axes, so every op you hand-implement must 'unbroadcast' the incoming gradient back to the input shape. Defend against (a) with explicit `keepdim=` discipline, `x.unsqueeze(-1)`, `torch.broadcast_shapes(a.shape, b.shape)` asserted against what you expect, and shape assertions or `einsum`/`einops` strings at every layer boundary. Be able to write the general `unbroadcast(grad, target_shape)` routine: sum away the extra leading dims, then `sum(dim=i, keepdim=True)` wherever `target_shape[i] == 1`.",
+   "minutes": 25,
+   "resource": {
+    "label": "PyTorch docs - Broadcasting semantics",
+    "url": "https://docs.pytorch.org/docs/stable/notes/broadcasting.html"
+   }
+  },
+  {
+   "name": "dtype, device and the precision budget you are actually training in",
+   "learn": "Know the four formats by their bit layout and what that implies: fp32 (8 exponent, 23 mantissa, eps about 1.2e-7), tf32 (fp32 range with a 10-bit mantissa, silently used for matmuls on Ampere+ unless you set `torch.backends.cuda.matmul.allow_tf32 = False` or `torch.set_float32_matmul_precision`), fp16 (5 exponent bits, max finite value 65504, so activations and squared terms overflow to `inf`), bf16 (fp32's exponent range with a 7-bit mantissa, eps about 7.8e-3 - no overflow, much coarser rounding). Be able to say why a reduction accumulates in fp32 even when the inputs are fp16, why `torch.allclose` defaults (rtol=1e-5, atol=1e-8) are meaningless for a fp16 comparison, and why numerical-gradient checking must be done in float64. Know that `.to()` on a tensor returns a new tensor while `Module.to()` mutates in place, and that a device mismatch raises `Expected all tensors to be on the same device` while a dtype mismatch often just silently upcasts.",
+   "minutes": 20,
+   "resource": {
+    "label": "PyTorch docs - Numerical accuracy (TF32, reduced precision reductions, batched computation)",
+    "url": "https://docs.pytorch.org/docs/stable/notes/numerical_accuracy.html"
+   }
+  },
+  {
+   "name": "Aliasing, in-place ops and the autograd version counter",
+   "learn": "Every tensor carries a version counter; autograd records the version of each saved tensor at forward time and compares at backward time, which is what produces `one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.FloatTensor [64, 128]], which is output 0 of ReluBackward0, is at version 2; expected version 1 instead`. Be able to read that message as 'something wrote through an alias of a saved activation' and to find it with `torch.autograd.set_detect_anomaly(True)`, which prints the forward stack of the offending op. Know when `nn.ReLU(inplace=True)` and `x += y` are safe (the input is not needed for any backward) and when they are not (residual branches with two consumers, any op whose backward saves its output). Know the genuinely dangerous case: `.data` and in-place writes through a `detach()`ed alias share storage and bypass the version counter entirely, so gradients come out wrong with no error at all - use `.clone()` when you mean a copy.",
+   "minutes": 20,
+   "resource": {
+    "label": "NumPy docs - Copies and views (the aliasing model PyTorch inherits)",
+    "url": "https://numpy.org/doc/stable/user/basics.copies.html"
+   }
+  },
+  {
+   "name": "Reverse-mode autodiff derived: VJPs, not Jacobians",
+   "learn": "Derive it: for a composition f = f_k o ... o f_1 the Jacobian is a product of Jacobians, forward mode evaluates J v (one JVP per input direction, cost proportional to the number of inputs), reverse mode evaluates v-transpose J (one VJP per output direction, cost proportional to the number of outputs). Scalar losses have one output, so reverse mode costs roughly two forward passes for the entire gradient regardless of parameter count - be able to say this in one sentence to a customer asking why training is only ~3x the cost of inference. Understand that `loss.backward()` is `torch.autograd.grad(loss, params, grad_outputs=torch.ones(()))`, that calling `.backward()` on a non-scalar requires you to supply `gradient=v` because there is no canonical seed, and that gradients accumulate with `+=` into `.grad` (hence `zero_grad`). Be able to reach for `torch.func.jacrev`, `jacfwd`, `vmap` and `create_graph=True` when you genuinely need a Jacobian, a Hessian-vector product or a second-order term.",
+   "minutes": 30,
+   "resource": {
+    "label": "PyTorch tutorial - A Gentle Introduction to torch.autograd (vector-Jacobian products)",
+    "url": "https://docs.pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html"
+   }
+  },
+  {
+   "name": "The autograd graph at runtime: leaves, grad_fn, retention, no_grad vs inference_mode",
+   "learn": "Walk a real graph in a REPL: `y.grad_fn`, `y.grad_fn.next_functions`, the terminal `AccumulateGrad` nodes, `x.is_leaf`, and `retain_grad()` when you want a non-leaf's gradient. Know that the graph is freed during backward, so a second `.backward()` raises `Trying to backward through the graph a second time`, and that `retain_graph=True` is almost always the wrong fix for what is really a graph you accidentally kept alive across iterations. Distinguish four ways of switching gradients off and when each is right: `torch.no_grad()` (do not record, tensors remain normal), `torch.inference_mode()` (faster, no version counter or view tracking, and its outputs raise `Inference tensors cannot be saved for backward` if they later touch autograd), `.detach()` (cut this tensor out of the graph but keep the storage), `requires_grad_(False)` (freeze a parameter - and remember the optimiser must also exclude it or Adam's decay still moves it). Learn the classic leak by heart: `total_loss += loss` retains every graph in the epoch; write `total_loss += loss.detach()` or `loss.item()`.",
+   "minutes": 30,
+   "resource": {
+    "label": "PyTorch docs - torch.autograd package reference (grad, graph, anomaly detection, hooks)",
+    "url": "https://docs.pytorch.org/docs/stable/autograd.html"
+   }
+  },
+  {
+   "name": "Writing a custom torch.autograd.Function and hand-deriving its backward",
+   "learn": "Implement the full contract: `forward` as a `@staticmethod` (or the modern split with `setup_context`), `ctx.save_for_backward(...)` for tensors and plain `ctx.attr` for non-tensors, and a `backward` that returns exactly one gradient per forward input with `None` for non-tensor arguments, gated on `ctx.needs_input_grad[i]`. Derive at least two by hand and implement them: fused softmax-cross-entropy, whose backward collapses to (p - y)/N and is both faster and more stable than composing the pieces, and SiLU/swish y = x*sigmoid(x) with dy/dx = sigmoid(x)*(1 + x*(1 - sigmoid(x))). Know the sharp edges: call it as `MyFn.apply(x, w)` and never `MyFn()(x, w)`; `@once_differentiable` when your backward is not itself differentiable; `ctx.mark_dirty` if you mutate an input; the backward runs under `no_grad` unless you build it from differentiable ops. Use a custom Function when you have a closed-form gradient that beats the composed one, need to save memory by not storing intermediates, or are wrapping a non-PyTorch kernel.",
+   "minutes": 35,
+   "resource": {
+    "label": "PyTorch docs - Extending PyTorch (custom autograd.Function, setup_context, forward-mode AD)",
+    "url": "https://docs.pytorch.org/docs/stable/notes/extending.html"
+   }
+  },
+  {
+   "name": "Proving the backward with torch.autograd.gradcheck",
+   "learn": "Understand what gradcheck actually does: it builds the analytic Jacobian from your VJPs and compares it against central finite differences (f(x+eps) - f(x-eps)) / (2*eps), so the comparison is only meaningful when the truncation error (order eps-squared) dominates the rounding error (order machine-eps / eps) - which is why inputs must be `dtype=torch.double` with `requires_grad=True` and why the same check in float32 fails or passes at random. Run `gradcheck(MyFn.apply, (x, w), eps=1e-6, atol=1e-5, rtol=1e-3)` and `gradgradcheck` for second order; use `nondet_tol` only for genuinely nondeterministic kernels and `fast_mode=True` (random projections u-transpose J v) for big inputs. Know its honest failure modes: non-differentiable points (ReLU or abs at exactly 0, ties in `max`) make it fail spuriously - perturb the input away from the kink rather than loosening `atol`, because loosening tolerance until green is how a genuinely wrong backward ships.",
+   "minutes": 25,
+   "resource": {
+    "label": "PyTorch docs - Gradcheck mechanics",
+    "url": "https://docs.pytorch.org/docs/stable/notes/gradcheck.html"
+   }
+  },
+  {
+   "name": "Building the ~300-line broadcasting-aware autograd engine",
+   "learn": "Structure it exactly like PyTorch's: a `Tensor` wrapping a NumPy array with `.data`, `.grad`, `._backward` (a closure that pushes gradient into its parents), `._parents`, and a `backward()` that seeds `ones_like`, builds a topological order with a visited set, and walks it in reverse accumulating with `+=`. Implement add, mul, matmul (dA = dC @ B.T, dB = A.T @ dC - derive both and get the transposes right), sum/mean with `keepdim` handling, relu, exp, log, softmax-crossentropy, reshape and transpose. The part that actually distinguishes this from a toy is broadcasting: every binary op's backward runs the gradient through `unbroadcast(grad, parent.shape)` before accumulating, and this is the piece that only breaks on non-square batches - test with shapes like (7, 3) op (3,) and (7, 1) op (1, 3). Verify by running the same 2-layer MLP forward/backward in your engine and in PyTorch from identical initial weights and asserting `np.allclose(mine, torch_grad, atol=1e-6)` per parameter, and make that assertion a pytest, not a print.",
+   "minutes": 30,
+   "resource": {
+    "label": "GitHub - karpathy/micrograd (reference scalar autograd engine to extend to arrays)",
+    "url": "https://github.com/karpathy/micrograd"
+   }
+  },
+  {
+   "name": "nn.Module internals: parameters vs buffers, state_dict, hooks, train/eval",
+   "learn": "Know that `Module.__setattr__` is overridden so assigning an `nn.Parameter` or a submodule registers it - which is why a plain Python list of layers loses every parameter and you must use `nn.ModuleList`/`nn.ModuleDict`, and why `self.mask = torch.ones(...)` never moves to the GPU unless you call `register_buffer('mask', ...)`. Distinguish `parameters()` (what the optimiser gets), `named_parameters()`, `buffers()` (BatchNorm's `running_mean`/`running_var`, `num_batches_tracked`) and `state_dict()` (parameters plus persistent buffers, which is what you ship); read the `missing_keys` / `unexpected_keys` returned by `load_state_dict(..., strict=False)` instead of ignoring them. Understand exactly what `model.train()` / `model.eval()` toggles - Dropout on/off and BatchNorm using batch statistics versus running statistics - and that it does nothing about gradients. Use `register_forward_hook` to capture intermediate activations for a customer-facing explanation without editing the model's `forward`.",
+   "minutes": 25,
+   "resource": {
+    "label": "PyTorch docs - Modules (registration, state_dict, train/eval, hooks)",
+    "url": "https://docs.pytorch.org/docs/stable/notes/modules.html"
+   }
+  },
+  {
+   "name": "The update rules as PyTorch actually implements them: SGD, momentum, Adam, AdamW",
+   "learn": "Write out and be able to reproduce, in a 20-line NumPy loop that matches `torch.optim` step for step: PyTorch's SGD momentum form b_t = mu*b_{t-1} + (1 - dampening)*g_t with p -= lr*b_t (note this differs from the textbook form where lr multiplies inside the buffer, so 'the same' momentum and lr give different trajectories across frameworks); Adam's m_t = b1*m + (1-b1)*g, v_t = b2*v + (1-b2)*g^2, bias corrections m/(1-b1^t) and v/(1-b2^t), update p -= lr * m_hat / (sqrt(v_hat) + eps) - and note eps sits outside the square root, which is why 1e-8 behaves differently in fp16. Then derive the AdamW distinction that actually matters: L2 regularisation added into g gets divided by sqrt(v_hat), so it is effectively scaled down for high-variance parameters, whereas decoupled decay applies p -= lr*wd*p directly. The operational consequence is a `param_groups` split - weight decay on weight matrices, zero decay on biases, LayerNorm/BatchNorm gains and embeddings.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv 1711.05101 - Loshchilov & Hutter, Decoupled Weight Decay Regularization (AdamW)",
+    "url": "https://arxiv.org/abs/1711.05101"
+   }
+  },
+  {
+   "name": "torch.optim in practice: param_groups, set_to_none, schedulers, resumable state",
+   "learn": "Build the optimiser from explicit groups - `optim.AdamW([{'params': decay, 'weight_decay': 0.1}, {'params': no_decay, 'weight_decay': 0.0}], lr=3e-4)` - and know how to inspect and mutate `opt.param_groups[i]['lr']` at runtime. Know that `zero_grad(set_to_none=True)` is the default from PyTorch 2.0 and that it sets `.grad` to `None`, not zero, so any diagnostic code doing `p.grad.norm()` must handle `None`. Get scheduler discipline right: `LinearLR`/`LambdaLR` warmup chained into `CosineAnnealingLR` via `SequentialLR`, per-iteration versus per-epoch `step()` (OneCycleLR is per-iteration), calling `scheduler.step()` after `optimizer.step()`, and logging `scheduler.get_last_lr()` so a flat loss curve can be attributed to a collapsed LR. Save and load `optimizer.state_dict()` alongside the model - Adam's first and second moments are the reason a resumed run without them shows a loss spike that looks like data corruption.",
+   "minutes": 20,
+   "resource": {
+    "label": "PyTorch docs - torch.optim (param groups, schedulers, foreach/fused implementations)",
+    "url": "https://docs.pytorch.org/docs/stable/optim.html"
+   }
+  },
+  {
+   "name": "Losses and the logits contract",
+   "learn": "Internalise that `nn.CrossEntropyLoss` consumes raw logits and internally applies `log_softmax` + `nll_loss`; feeding it softmax probabilities is a double softmax that flattens the gradient and parks the loss near ln(C) forever, which every junior misreads as a data problem. Same contract for `BCEWithLogitsLoss` versus `BCELoss`: the with-logits version folds the sigmoid into a log-sum-exp-stable expression, so it is the only safe choice, and its `pos_weight` argument is the correct lever for class imbalance. Know the shape and dtype rules cold - input (N, C) with target (N,) of `int64` class indices, or (N, C, d1, d2) with target (N, d1, d2) for segmentation - plus `ignore_index=-100`, `label_smoothing`, and that `reduction='mean'` divides by the sum of class weights, not by N, when `weight=` is supplied. Sanity check every new classifier: an untrained model must report a loss of about ln(C) (2.30 for 10 classes); anything else means the head, the targets or the reduction is wrong before you have trained a single step.",
+   "minutes": 20,
+   "resource": {
+    "label": "PyTorch docs - nn.CrossEntropyLoss (logits contract, shapes, weight, ignore_index)",
+    "url": "https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html"
+   }
+  },
+  {
+   "name": "The training and evaluation loop, written closed-book",
+   "learn": "Be able to type the canonical loop from memory in under 20 minutes: `model.train()`, then per batch `opt.zero_grad(set_to_none=True)`, forward under `autocast`, loss, `backward()`, `clip_grad_norm_(model.parameters(), 1.0)`, `opt.step()`, `scheduler.step()`; then an eval pass under `model.eval()` and `torch.no_grad()`. Get the two arithmetic details right that quietly corrupt reported metrics: accumulate `loss.item() * x.size(0)` and divide by `len(dataset)` rather than averaging per-batch means (the final short batch otherwise gets equal weight), and compute epoch accuracy from summed correct counts, not from a mean of batch accuracies. Implement gradient accumulation properly - divide the loss by `accum_steps`, step every k micro-batches - and know it does not reproduce a true large batch for BatchNorm, whose statistics are still per-micro-batch. Bake in the two sanity gates before any long run: initial loss must be about ln(C), and the model must be able to drive a single fixed batch to near-zero loss.",
+   "minutes": 30,
+   "resource": {
+    "label": "PyTorch tutorial - Optimizing model parameters (the train/test loop)",
+    "url": "https://docs.pytorch.org/tutorials/beginner/basics/optimization_tutorial.html"
+   }
+  },
+  {
+   "name": "Dataset, IterableDataset, Sampler and collate_fn",
+   "learn": "Write a map-style `Dataset` (`__len__` + `__getitem__`) that opens file handles lazily inside `__getitem__` rather than in `__init__`, because handles and DB connections do not survive process forking. Know when to switch to `IterableDataset` (streams, Kafka, one giant sharded file, unknown length) and its hard rule: you must shard by `torch.utils.data.get_worker_info()` yourself, or every worker yields the identical stream and your epoch silently contains num_workers copies of the data. Understand the split of responsibilities - `Sampler` decides the order of indices (`RandomSampler`, `SequentialSampler`, `WeightedRandomSampler` for imbalance, `DistributedSampler` with `set_epoch`), `BatchSampler` groups them, `collate_fn` turns a list of samples into a batch. Write a custom `collate_fn` for variable-length inputs using `pad_sequence` plus an explicit attention/length mask, and know that `shuffle=True` and a custom `sampler=` are mutually exclusive and `drop_last=True` is what stops a batch of size 1 from blowing up BatchNorm.",
+   "minutes": 25,
+   "resource": {
+    "label": "PyTorch docs - torch.utils.data (Dataset, samplers, collate, worker semantics)",
+    "url": "https://docs.pytorch.org/docs/stable/data.html"
+   }
+  },
+  {
+   "name": "DataLoader throughput: workers, prefetch, pinned memory, and how workers die",
+   "learn": "Tune the knobs deliberately and measure each: `num_workers` (start at the physical core count, then bisect - too many thrashes the page cache and RAM), `prefetch_factor` (batches queued per worker, default 2), `persistent_workers=True` so you do not pay process startup every epoch, `pin_memory=True` plus `non_blocking=True` on the `.to(device)` so the host-to-device copy can overlap compute - non_blocking is a no-op from pageable memory. Know the worker failure signatures on sight: `DataLoader worker (pid N) is killed by signal: Bus error` is an exhausted `/dev/shm` in a container (raise `--shm-size`), `Too many open files` is the file-descriptor sharing strategy, and a worker's RSS climbing until the OOM killer fires is copy-on-write pages being dirtied by Python refcounting over a large list of objects - store the index as a NumPy array or tensor instead. Remember each worker gets its own copy of the Dataset, so any counter or cache you mutate in `__getitem__` is per-process and per-epoch.",
+   "minutes": 25,
+   "resource": {
+    "label": "PyTorch recipe - Performance Tuning Guide (workers, pinned memory, non_blocking, set_to_none)",
+    "url": "https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html"
+   }
+  },
+  {
+   "name": "Seeding and determinism: what you can and cannot promise a customer",
+   "learn": "Know the four independent RNGs in play (Python `random`, NumPy, `torch` CPU, `torch.cuda`) and that DataLoader workers get a derived torch seed automatically but *not* a derived NumPy or Python seed - so NumPy-based augmentation in four workers replays the same sequence unless you set it in `worker_init_fn` from `torch.utils.data.get_worker_info().seed`. Pass an explicit `generator=` to the DataLoader so shuffling is reproducible independent of global state. For the GPU: `torch.use_deterministic_algorithms(True)` plus `CUBLAS_WORKSPACE_CONFIG=:4096:8` turns nondeterministic kernels into a loud error rather than silent variance, at a real speed cost, and `torch.backends.cudnn.benchmark = True` speeds up fixed shapes but makes algorithm selection - and therefore results - vary. Be able to tell a customer the honest version: floating-point addition is not associative, so bitwise-identical results across different GPU counts, batch sizes or library versions are not achievable; what you guarantee is a pinned seed, pinned versions and a metric reproducible within a stated tolerance.",
+   "minutes": 20,
+   "resource": {
+    "label": "PyTorch docs - Reproducibility (seeding, deterministic algorithms, DataLoader workers)",
+    "url": "https://docs.pytorch.org/docs/stable/notes/randomness.html"
+   }
+  },
+  {
+   "name": "Mixed precision: autocast, GradScaler, and where NaNs come from",
+   "learn": "Use `with torch.autocast(device_type='cuda', dtype=torch.bfloat16)` around the forward and loss only - never the backward, never `optimizer.step()` - and understand the mechanism: autocast keeps master weights in fp32 and casts per-op according to a list (matmul and conv run in reduced precision, softmax, layer norm, and reductions stay fp32). For fp16 you also need `GradScaler`: `scaler.scale(loss).backward()` multiplies the loss so small gradients do not underflow to zero, `scaler.unscale_(opt)` must come before any gradient clipping or norm logging, `scaler.step(opt)` skips the update entirely when it sees inf/NaN, and `scaler.update()` halves the scale on overflow and doubles it every `growth_interval` steps. Know why bf16 usually needs no scaler (fp32 exponent range) but rounds more coarsely, and that a run where the scale collapses toward zero has a real numerical bug rather than a scaler problem. Never call `model.half()` as a substitute - that puts the master weights in fp16 and destroys small updates.",
+   "minutes": 25,
+   "resource": {
+    "label": "PyTorch docs - Automatic Mixed Precision package (autocast, GradScaler)",
+    "url": "https://docs.pytorch.org/docs/stable/amp.html"
+   }
+  },
+  {
+   "name": "torch.profiler mechanics: schedule, record_function, key_averages, traces",
+   "learn": "Instrument one real step, not an epoch: `profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], schedule=schedule(wait=1, warmup=1, active=3, repeat=1), on_trace_ready=tensorboard_trace_handler('./log'), record_shapes=True, profile_memory=True, with_stack=True)` with `prof.step()` at the end of each iteration - the warmup phase matters because the first iterations pay CUDA context creation, allocator growth and cuDNN autotuning. Wrap your own phases in `with record_function('dataload')` / `'forward'` / `'backward'` / `'optimizer'` so the table has your labels next to ATen ops. Read `prof.key_averages(group_by_input_shape=True).table(sort_by='self_cuda_time_total', row_limit=20)` and know precisely what the columns mean: Self CPU excludes children, CPU total includes them, Self CUDA is device kernel time, and Number of Calls is what exposes a thousand tiny kernels. Export with `prof.export_chrome_trace('trace.json')` and open it in Perfetto to see the CPU and CUDA timelines aligned - the gaps are the whole point.",
+   "minutes": 30,
+   "resource": {
+    "label": "PyTorch docs - torch.profiler (profile, schedule, record_function, key_averages)",
+    "url": "https://docs.pytorch.org/docs/stable/profiler.html"
+   }
+  },
+  {
+   "name": "Bottleneck triage: dataloader-bound vs kernel-bound vs host-sync-bound",
+   "learn": "Learn the three signatures and the fix for each. Dataloader-bound: the CUDA timeline has a wide idle gap at the start of every iteration while the CPU sits in `enumerate(loader)`; the GPU is under-used and the fix is more workers, prefetch, pinned memory, cheaper decoding, or caching the preprocessed tensors. Kernel-bound: the GPU timeline is near-solid with a handful of long `sgemm`/conv kernels; there is nothing to fix in Python and the levers are batch size, mixed precision, `channels_last`, a better kernel, or `torch.compile`. Host-sync-bound: `cudaStreamSynchronize` or `cudaMemcpyAsync DtoH` appears once per iteration and the CPU blocks - caused by `.item()`, `.cpu()`, `float(loss)`, `print(loss)`, `if torch.isnan(loss)`, or `.tolist()` inside the loop; fix by accumulating metrics in a device tensor and syncing once every N steps. Underpinning all of it: CUDA launches are asynchronous, so `time.time()` around a forward measures launch time only - time with `torch.cuda.Event(enable_timing=True)` or an explicit `torch.cuda.synchronize()`, and read memory with `torch.cuda.max_memory_allocated()` versus `memory_reserved()` to distinguish a real OOM from allocator fragmentation.",
+   "minutes": 25,
+   "resource": {
+    "label": "PyTorch docs - CUDA semantics (asynchronous execution, streams, pinned memory, events)",
+    "url": "https://docs.pytorch.org/docs/stable/notes/cuda.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can hand-derive the backward for a fused softmax-cross-entropy and for SiLU, implement each as a `torch.autograd.Function` with `save_for_backward` and `needs_input_grad`, and have `torch.autograd.gradcheck` pass in float64 at default tolerances without loosening `atol`.",
+  "You can build a ~300-line NumPy-backed autograd engine with broadcasting-aware backward (add, mul, matmul, sum/mean, relu, exp/log, softmax-CE, reshape, transpose) whose gradients match PyTorch to 1e-6 on a 2-layer MLP for non-square, broadcasting shapes, asserted in pytest.",
+  "You can predict `size()`, `stride()` and `storage_offset()` after a chain of slice/transpose/expand operations, say in advance whether `view()` will raise, and explain in stride terms why it does.",
+  "You can write a complete PyTorch training and evaluation loop closed-book in under 20 minutes - `set_to_none`, autocast, clipping, scheduler ordering, dataset-weighted metric accumulation - and it trains a real model to a sane accuracy on the first run.",
+  "You can run `torch.profiler` with a `schedule` over one training step and, from the `key_averages` table plus the Perfetto trace, state whether the step is dataloader-bound, kernel-bound or host-sync-bound, name the specific line responsible, and show a before/after wall-clock improvement.",
+  "You can diagnose from the error text alone: an in-place version-counter error, `Trying to backward through the graph a second time`, `Inference tensors cannot be saved for backward`, `Expected all tensors to be on the same device`, and a worker bus error - and give the one-line fix for each.",
+  "You can implement a Dataset plus custom `collate_fn` for variable-length inputs, shard an `IterableDataset` correctly across four workers, seed NumPy per worker via `worker_init_fn`, and prove that the loader is not the bottleneck with a measured GPU-idle percentage.",
+  "You can state exactly what reproducibility you will guarantee a customer - pinned seeds, pinned versions, deterministic algorithms on, a metric reproducible within a stated tolerance - and explain in two sentences why bitwise identity across hardware is not on the table."
+ ],
+ "failureModes": [
+  "The validation loop compares a (N, 1) prediction to a (N,) target, so MSE broadcasts to an N-by-N matrix of pairwise errors; the loss is smooth, small and decreasing, and the model has simply learned to predict the mean of the target.",
+  "Somebody passes `softmax(logits)` into `nn.CrossEntropyLoss`; the double softmax squashes the gradient, the loss flattens just under ln(C), accuracy sits barely above chance, and the team spends two weeks blaming label quality instead of one line of code.",
+  "`total_loss += loss` inside the epoch retains every iteration's graph, so memory grows linearly and the run dies with a CUDA OOM near the end of epoch one; it gets misdiagnosed as 'the batch size is too large' and the batch is halved, which merely delays the crash.",
+  "The eval loop never calls `model.eval()`, so dropout stays active and BatchNorm uses the eval batch's own statistics; validation accuracy is noisy and pessimistic, model selection picks the wrong checkpoint, and the effect reverses if the customer later evaluates with batch size 1.",
+  "Latency is benchmarked with `time.time()` around the forward pass without `torch.cuda.synchronize()`, so the number measured is kernel launch time; the deck says 8 ms per inference and production measures 35 ms in front of the customer.",
+  "An `IterableDataset` streaming from sharded files is used with `num_workers=4` and no `get_worker_info()` sharding, so every worker emits the same records; each epoch trains on four copies of a quarter of the data, and the only symptom is a train/validation gap nobody can explain.",
+  "Augmentation uses `np.random` inside `__getitem__` with `num_workers>0` and no `worker_init_fn`; all workers inherit the same NumPy seed, the same augmentation sequence repeats every epoch, effective augmentation diversity collapses, and the model overfits in a way that looks like a regularisation problem.",
+  "A custom `Function`'s backward forgets to sum the incoming gradient back over a broadcast bias dimension; `gradcheck` on a square test input passes by coincidence, tolerances get loosened when it later fails on a real shape, and the bias gradient is wrong by a factor of the batch size on every batch."
+ ],
+ "interviewQuestions": [
+  "Derive the backward for y = x @ W + b where x is (B, T, D) and b is (D,). Give dL/dx, dL/dW and dL/db including exactly which axes are summed, then tell me how you would implement it as a `torch.autograd.Function` and prove it with `gradcheck` - including why the test must run in float64.",
+  "Explain reverse-mode versus forward-mode autodiff in terms of Jacobian-vector and vector-Jacobian products. Which one does `.backward()` perform, what is the compute and memory cost of a backward pass relative to a forward pass, and when would you reach for `torch.func.jacfwd` instead?",
+  "Debug: training loss is decreasing but each step takes 400 ms and `nvidia-smi` shows 20 percent utilisation. Walk me through the profiling run you would set up and how you would distinguish dataloader-bound from launch-bound from host-sync-bound - name the specific evidence you would look for in each case.",
+  "Your run produces NaN loss at step 3000 under fp16 autocast. Give me your ordered checklist of causes and the check for each, and explain what the GradScaler is doing at the moment the NaN appears.",
+  "Distinguish `torch.no_grad()`, `torch.inference_mode()`, `.detach()` and `requires_grad_(False)`. Give one situation where each is the correct tool and one where using it instead of the right one silently produces a wrong result rather than an error.",
+  "Write out the Adam and AdamW update rules. Where exactly does weight decay enter in each, why does that difference matter, and how would you configure `param_groups` for a transformer with biases, LayerNorm gains and embeddings?",
+  "Design: a customer hands you 4 TB of JPEGs on an NFS mount and one A100. Design the input pipeline - map-style Dataset or IterableDataset, worker count, collate, caching, sharding, augmentation seeding - and tell me how you would prove to their team that the GPU, not the loader, is the limit."
+ ],
+ "proofOfWork": "A public repo `torch-failure-museum`: twelve numbered, self-contained scripts, each a minimal reproduction of one silent PyTorch failure from the list above - the (N,1)-vs-(N,) broadcast loss, the double softmax, the retained-graph OOM, the missing `model.eval()`, the unsynchronised timing, the unsharded `IterableDataset`, the duplicated NumPy seed across workers, the missing unbroadcast in a custom backward, the fp16 underflow with no scaler, the in-place version-counter error, the `.item()` sync in the inner loop, and a `.data` write that corrupts a gradient with no exception at all. Each script prints the misleading-but-plausible output, then a pytest asserts the specific wrong number (loss stuck near ln(C), gradient off by exactly the batch size, measured latency 4x below the synchronised truth), and a `--fixed` flag runs the one-line correction so the same assertion flips. Ship it with a `bench/` harness that times the same ResNet-ish step with CUDA events under six configurations (baseline, +workers, +pin_memory/non_blocking, +bf16 autocast, +channels_last, +torch.compile), a committed `trace.json` plus the `key_averages` table before and after for the one bottleneck you removed, and a one-page PYTORCH-REVIEW-CHECKLIST.md written for a customer's ML team - fifteen questions to ask of any training script before it is trusted, each traceable to one of the twelve reproductions."
+}

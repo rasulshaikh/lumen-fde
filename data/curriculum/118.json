@@ -1,0 +1,229 @@
+{
+ "i": 118,
+ "topic": "Graph neural networks: message passing, GCN/GAT, and enterprise graph use cases",
+ "track": "O. Deep Learning and Multimodal",
+ "month": 13,
+ "hours": 8,
+ "why": "Enterprise data is already a graph - accounts wire money to accounts, users touch products, tickets reference tickets - and the customer who says 'we have a graph problem' is usually asking whether the relational structure carries signal their flat feature table does not. An FDE who has hand-derived the GCN propagation rule and coded the scatter-based message pass can answer that in the room: state the node/edge/graph-level task, measure homophily, show that an MLP on node features plus label propagation is or is not already beating the GNN, and name the depth at which accuracy dies and why. Without that, you ship a two-layer GCN whose 0.99 offline AUC came from supervision edges left in the adjacency, and you find out in production - in front of the customer's fraud team.",
+ "prerequisites": [
+  "PyTorch at depth from Topic 112: custom nn.Module, autograd and vector-Jacobian products, advanced indexing versus views, index_add_/scatter_add_ semantics, and reading a training loop line by line",
+  "Backpropagation, initialisation and residual connections from Topic 110, plus optimisers, schedules and bad-loss-curve triage from Topic 111 - a GNN that will not train is usually an ordinary deep-learning bug wearing a graph costume",
+  "Linear algebra from Topic 93: symmetric matrices, eigendecomposition, what repeated multiplication by a matrix does to a vector as a function of its spectrum, and why the eigenvalue range of a propagation operator decides whether depth is safe",
+  "Scaled dot-product attention from Topic 115 - GAT is attention over an irregular neighbourhood set rather than a fixed-length sequence, and the softmax normalisation domain is the whole difference",
+  "Honest evaluation from Topic 103: train/validation/test discipline, leakage, class imbalance, PR-AUC versus ROC-AUC, and reporting mean plus standard deviation across seeds",
+  "NumPy/SciPy sparse fluency from Topic 99: COO versus CSR, int64 index arrays, broadcasting, and the memory arithmetic of an N-by-N dense matrix"
+ ],
+ "subtopics": [
+  {
+   "name": "Is this actually a graph problem, or a feature join in disguise",
+   "learn": "Before any modelling, be able to argue the relational inductive bias out loud: a GNN imposes permutation-equivariant, locally-shared computation over an irregular neighbourhood, which pays off only when a node's label depends on its neighbours' labels or features in a way you cannot cheaply denormalise. Learn the honest alternative - flatten the graph into aggregate features (neighbour count, sum of neighbour transaction volume, degree, triangle count, PageRank, connected-component id) and train a gradient-boosted tree from Topic 101 - and know that on many enterprise tables this wins, is faster, and is explainable. State the three conditions that actually favour a GNN: the signal is multi-hop, the neighbourhood is variable-sized and unordered, and the graph is large enough that hand-engineered aggregates would be a combinatorial mess. Rehearse saying no to a GNN in one paragraph a customer's architect will accept.",
+   "minutes": 15,
+   "resource": {
+    "label": "Battaglia et al. - Relational inductive biases, deep learning, and graph networks (arXiv:1806.01261)",
+    "url": "https://arxiv.org/abs/1806.01261"
+   }
+  },
+  {
+   "name": "Graph representations: adjacency matrix, COO edge_index, CSR, and what each costs",
+   "learn": "Build the same graph four ways and know the costs: dense adjacency A of shape (N, N) in float32 costs 4*N^2 bytes, so 100k nodes is 40 GB and is never the answer; COO edge_index of shape (2, E) int64 is what PyTorch Geometric and your from-scratch layer both consume; CSR (indptr, indices) gives O(1) slicing of a node's neighbours and is what scipy.sparse.csr_matrix and METIS partitioners want; an adjacency list of Python lists is what you will actually be handed. Practise the conversions with scipy.sparse.coo_matrix((data, (row, col)), shape=(N, N)).tocsr() and back. Internalise the traps that silently change your model: an undirected edge must appear twice in edge_index (row->col and col->row) or your message passing is directed; duplicate edges are summed by COO-to-CSR conversion and silently double a neighbour's weight, so coalesce first; and self-loops are absent unless you add them. Compute degrees as A.sum(axis=1) and know that a degree-zero node exists in almost every real customer extract.",
+   "minutes": 25,
+   "resource": {
+    "label": "SciPy docs - Sparse arrays (COO, CSR, construction and conversion)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/sparse.html"
+   }
+  },
+  {
+   "name": "Tasks, transductive versus inductive, and the split that leaks",
+   "learn": "Name the three task levels and the loss each implies: node-level (per-node logits, cross-entropy masked to the labelled nodes), edge-level (score a node pair, binary cross-entropy against sampled negatives), graph-level (a readout such as mean/sum/max over node embeddings, then a head). Separate transductive (the whole graph including test-node features and edges is present at training time; only labels are hidden - this is Cora) from inductive (test nodes or whole test graphs are unseen; the model must generalise to new neighbourhoods - this is what a customer deploying on tomorrow's accounts needs), and be able to say which one your customer is actually in. Understand the standard Planetoid split (20 labelled nodes per class, 500 validation, 1000 test) and why Shchur et al. show model rankings flip under different random splits and equal hyperparameter budgets - so report mean and standard deviation over at least 10 random splits and 10 seeds, never a single number. Know the graph-specific leakage forms: edges created after the prediction timestamp, an edge that is itself the label, and near-duplicate subgraphs across folds.",
+   "minutes": 30,
+   "resource": {
+    "label": "Shchur et al. - Pitfalls of Graph Neural Network Evaluation (arXiv:1811.05868)",
+    "url": "https://arxiv.org/abs/1811.05868"
+   }
+  },
+  {
+   "name": "Homophily, and the two baselines a GNN must beat",
+   "learn": "Compute edge homophily h = (number of edges joining same-label nodes) / |E| before training anything; Cora is about 0.81, a fraud graph may be near 0.2, and the whole GCN smoothing prior assumes h is high. Then build the two baselines you are obliged to report: (a) an MLP or logistic regression on node features alone, which ignores the graph entirely, and (b) label propagation, which ignores the features entirely and just diffuses known labels. Reproduce the Correct-and-Smooth result: a shallow base predictor plus residual error propagation plus label smoothing matches or beats large GNNs on several OGB node tasks with orders of magnitude fewer parameters. Adopt the rule: if your GCN does not clearly beat max(MLP, label propagation, C-and-S) across seeds, you do not have a GNN problem, you have a feature problem. On heterophilous graphs know the specific failure - averaging over neighbours actively destroys signal - and the design responses (separating the ego embedding from the neighbour aggregate, using 2-hop neighbourhoods, concatenating intermediate layers).",
+   "minutes": 25,
+   "resource": {
+    "label": "Huang et al. - Combining Label Propagation and Simple Models Out-performs Graph Neural Networks (arXiv:2010.13993)",
+    "url": "https://arxiv.org/abs/2010.13993"
+   }
+  },
+  {
+   "name": "The message-passing framework: message, aggregate, update, readout",
+   "learn": "Write the general MPNN update and be able to place every architecture in it: m_ij = M_l(h_i, h_j, e_ij); a_i = AGG_{j in N(i)} m_ij; h_i' = U_l(h_i, a_i); and for graph-level tasks y = R({h_i}). The non-negotiable constraint is that AGG must be permutation-invariant over a variable-sized multiset - sum, mean, max, or a learned set function - because a neighbourhood has no order; any AGG that depends on neighbour ordering makes the layer non-equivariant and the model will disagree with itself when the customer's export sorts differently. Know what each aggregator preserves and destroys: sum keeps multiplicity and degree information (and is the one that makes GIN maximally expressive), mean keeps proportions and discards degree, max keeps the presence of a distinctive neighbour and discards counts. Be able to state that L stacked layers give each node a receptive field of exactly its L-hop neighbourhood, which is the single fact that governs everything about depth later in this topic.",
+   "minutes": 30,
+   "resource": {
+    "label": "Gilmer et al. - Neural Message Passing for Quantum Chemistry (arXiv:1704.01212)",
+    "url": "https://arxiv.org/abs/1704.01212"
+   }
+  },
+  {
+   "name": "Spectral roots: the graph Laplacian, Chebyshev filters and localisation",
+   "learn": "Define L = D - A and its symmetric normalisation L_sym = I - D^-1/2 A D^-1/2, know that L_sym is positive semi-definite with eigenvalues in [0, 2], that the multiplicity of eigenvalue 0 equals the number of connected components, and that the eigenvector for 0 is proportional to D^1/2 * 1 - the fact that returns as the over-smoothing fixed point. Understand graph Fourier transform as x_hat = U^T x where L = U diag(lambda) U^T, spectral filtering as U g_theta(Lambda) U^T x, and why that is unusable in practice: the eigendecomposition is O(N^3), the filter is not localised, and the basis does not transfer between graphs. Follow Defferrard's fix - approximate g_theta by a truncated Chebyshev expansion in the rescaled Laplacian, giving a filter that is exactly K-hop localised and costs O(K|E|) with no eigendecomposition. You should be able to explain in one sentence why polynomial-in-L equals K-hop localised: L^k has non-zero entry (i, j) only if a walk of length at most k connects i and j.",
+   "minutes": 25,
+   "resource": {
+    "label": "Defferrard et al. - Convolutional Neural Networks on Graphs with Fast Localized Spectral Filtering (arXiv:1606.09375)",
+    "url": "https://arxiv.org/abs/1606.09375"
+   }
+  },
+  {
+   "name": "Deriving the GCN layer and justifying D~^-1/2 A~ D~^-1/2",
+   "learn": "Derive Kipf and Welling's layer from Chebyshev order K=1: with lambda_max approximated by 2 the filter becomes theta_0 x + theta_1 (L_sym - I) x = theta_0 x - theta_1 D^-1/2 A D^-1/2 x; tie theta = theta_0 = -theta_1 to get theta (I + D^-1/2 A D^-1/2) x; then apply the renormalisation trick I + D^-1/2 A D^-1/2 -> D~^-1/2 A~ D~^-1/2 with A~ = A + I, giving H^(l+1) = sigma(D~^-1/2 A~ D~^-1/2 H^(l) W^(l)). Be able to write the per-node form h_i' = sigma(sum over j in N(i) union {i} of (1 / sqrt(d~_i * d~_j)) W h_j) and to justify the normalisation against the two alternatives: unnormalised sum makes activation scale grow with degree so a hub's features explode; row-stochastic mean D~^-1 A~ weights every neighbour 1/d~_i, is not symmetric, and ignores how popular the neighbour is; the symmetric form down-weights messages from high-degree neighbours by 1/sqrt(d~_j), keeps the operator symmetric with real eigenvalues, and - the point of the renormalisation trick - keeps the spectrum inside roughly (-1, 1] so repeated application neither explodes nor vanishes. Then state the cost: it is a fixed, non-learned weighting, which is precisely what GAT replaces.",
+   "minutes": 30,
+   "resource": {
+    "label": "Kipf and Welling - Semi-Supervised Classification with Graph Convolutional Networks (arXiv:1609.02907)",
+    "url": "https://arxiv.org/abs/1609.02907"
+   }
+  },
+  {
+   "name": "Implementing message passing: gather-scatter with index_add_ versus a single SpMM",
+   "learn": "Write the layer from a raw edge_index with no PyG layers: row, col = edge_index; msg = (x @ W)[row] of shape (E, d); out = torch.zeros(N, d, dtype=msg.dtype, device=msg.device).index_add_(0, col, norm.unsqueeze(-1) * msg). Compute degrees the same way (deg = torch.zeros(N).index_add_(0, col, torch.ones(E))), then deg_inv_sqrt = deg.pow(-0.5) and - this is the line everyone forgets - deg_inv_sqrt[deg == 0] = 0, because pow(-0.5) on a degree-zero node gives inf and inf*0 gives NaN one step later. Know that index_add_ and scatter_add_ differ in index shape (scatter_add_ needs index broadcast to the src shape, which is the classic silent bug), that both use atomicAdd on CUDA so float summation order is non-deterministic unless you set torch.use_deterministic_algorithms(True), and that gradients flow through gather (a sum-scatter on the backward pass) automatically. Then implement the alternative: build a torch.sparse_coo_tensor for D~^-1/2 A~ D~^-1/2 once and use torch.sparse.mm - faster for a fixed operator, but structurally unable to express per-edge attention, which is why GAT must stay in the gather-scatter world. Verify both against torch_geometric.nn.GCNConv with torch.allclose(atol=1e-6) and run torch.autograd.gradcheck in float64 on a five-node toy graph.",
+   "minutes": 35,
+   "resource": {
+    "label": "PyTorch docs - torch.Tensor.index_add_",
+    "url": "https://docs.pytorch.org/docs/stable/generated/torch.Tensor.index_add_.html"
+   }
+  },
+  {
+   "name": "GAT: unnormalised scores, neighbourhood softmax, multi-head attention",
+   "learn": "Implement the layer exactly: e_ij = LeakyReLU(a^T [W h_i || W h_j]) with negative slope 0.2, then alpha_ij = softmax over j in N(i) union {i} of e_ij, then h_i' = sigma(sum_j alpha_ij W h_j). The implementation detail that matters is that the softmax is segmented by destination node, not global: compute per-node maxima with a scatter-max for stability, exponentiate the shifted scores, accumulate the denominator with index_add_ on col, then divide - a global softmax over all E edges runs without error and produces a plausible but wrong model. Exploit the decomposition a^T[Wh_i || Wh_j] = a_src^T W h_i + a_dst^T W h_j so you compute two length-N vectors and add them per edge instead of materialising concatenations of size (E, 2d). Know the multi-head convention: concatenate K heads in hidden layers (output dim K*F'), average them in the final prediction layer; the Cora recipe is 8 heads of 8 features with dropout 0.6 applied both to input features and to the attention coefficients themselves. Be able to say why GAT costs more memory than GCN (an (E, K) coefficient tensor plus per-edge intermediates) and when the learned weighting is worth it: heterogeneous neighbour quality, noisy edges, and graphs where degree alone is a bad prior.",
+   "minutes": 35,
+   "resource": {
+    "label": "Velickovic et al. - Graph Attention Networks (arXiv:1710.10903)",
+    "url": "https://arxiv.org/abs/1710.10903"
+   }
+  },
+  {
+   "name": "GATv2 and static attention: the assumption GAT quietly breaks",
+   "learn": "Understand the failure precisely: because GAT applies the shared vector a after the concatenation and before the nonlinearity, the score decomposes into a term depending only on i plus a term depending only on j, so argmax_j alpha_ij is the same neighbour ranking for every query node i - GAT computes static attention, not the query-conditioned dynamic attention people assume when they read the paper. GATv2 fixes it by moving the linear layer after the nonlinearity: e(h_i, h_j) = a^T LeakyReLU(W [h_i || h_j]), which is a universal approximator over the pair and restores per-query ranking. Be able to demonstrate the difference on the synthetic bipartite matching problem from the paper, and to state the practical consequence for a customer: if you are about to justify a prediction with 'the model attended most to this counterparty', a plain GATConv may be attending to the same counterparty for every node in the graph. Know that torch_geometric.nn.GATv2Conv is a drop-in replacement with the same head and dropout arguments.",
+   "minutes": 15,
+   "resource": {
+    "label": "Brody et al. - How Attentive are Graph Attention Networks? (arXiv:2105.14491)",
+    "url": "https://arxiv.org/abs/2105.14491"
+   }
+  },
+  {
+   "name": "GraphSAGE: neighbour sampling, inductive embeddings, aggregator choice",
+   "learn": "Learn the update h_i' = sigma(W . CONCAT(h_i, AGG({h_j : j in sampled N(i)}))) with optional L2 normalisation of h_i', and note the two structural differences from GCN: the ego embedding is concatenated rather than mixed into the same weighted sum (which is exactly what helps on heterophilous graphs), and the neighbourhood is a fixed-size uniform sample (typically 25 then 10 for two layers) rather than the full set. Understand why this makes the method inductive: the parameters are the aggregator weights, not a per-node embedding table, so a new account that appears tomorrow gets an embedding from its features and neighbours with no retraining - which is the property most enterprise deployments actually need and the reason a transductive matrix-factorisation embedding fails in production. Compare the four aggregators (mean, GCN-style, LSTM over a random permutation - which is not permutation-invariant and is a deliberate compromise - and max-pool with a per-neighbour MLP), and know that sampling makes the forward pass a stochastic estimate, so evaluation should use full neighbourhoods or layer-wise inference to avoid train/serve skew.",
+   "minutes": 25,
+   "resource": {
+    "label": "Hamilton et al. - Inductive Representation Learning on Large Graphs (arXiv:1706.02216)",
+    "url": "https://arxiv.org/abs/1706.02216"
+   }
+  },
+  {
+   "name": "Expressive power: 1-WL, GIN, and what a message-passing GNN provably cannot see",
+   "learn": "Know the theorem: any message-passing GNN with permutation-invariant aggregation is at most as powerful as the 1-dimensional Weisfeiler-Lehman colour refinement test at distinguishing non-isomorphic graphs, and it attains that bound only when message and readout functions are injective on multisets. That is why GIN uses h_i' = MLP((1 + eps) h_i + sum_{j in N(i)} h_j) - sum rather than mean or max, and an MLP rather than a single linear layer, because mean cannot distinguish multisets with the same proportions and max cannot count. Be able to draw the standard counterexamples on a napkin: two 3-regular graphs (a 6-cycle versus two triangles) that 1-WL and therefore any GCN/GAT sees as identical, and the consequence that a plain GNN cannot count triangles or detect cycles - which matters directly when the customer's fraud pattern is a ring. Know the practical escapes: add structural features as node inputs (triangle count, clustering coefficient, degree, positional encodings), or use subgraph/higher-order methods. This subtopic is what lets you say 'your circular-payment pattern is not learnable by this architecture; here is the feature that makes it learnable' rather than tuning for a week.",
+   "minutes": 25,
+   "resource": {
+    "label": "Xu et al. - How Powerful are Graph Neural Networks? (arXiv:1810.00826)",
+    "url": "https://arxiv.org/abs/1810.00826"
+   }
+  },
+  {
+   "name": "Over-smoothing: the Laplacian-smoothing argument and how to measure it",
+   "learn": "Understand the result that a GCN layer is a form of symmetric Laplacian smoothing, so repeated propagation drives node representations within each connected component toward a common fixed point proportional to the dominant eigenvector D~^1/2 * 1 - the features converge, class information is destroyed, and accuracy collapses no matter how well the optimiser is doing. Produce the diagnostic yourself: train GCNs of depth 1 through 10 on Cora with everything else fixed, plot test accuracy against depth (the peak is at 2 or 3 layers and the curve falls off a cliff by 6 or 7), and on the same axes plot a smoothing metric - mean pairwise cosine distance between final-layer node embeddings, or the row-wise variance of H^(L) - and show it collapsing toward zero as accuracy falls. Be able to separate over-smoothing from the confounds that travel with depth: more parameters (control by holding hidden width and total parameter count roughly fixed), vanishing gradients (check per-layer gradient norms as in Topic 110), and plain overfitting (train accuracy stays high under overfitting but falls too under over-smoothing).",
+   "minutes": 30,
+   "resource": {
+    "label": "Li, Han and Wu - Deeper Insights into Graph Convolutional Networks for Semi-Supervised Learning (arXiv:1801.07606)",
+    "url": "https://arxiv.org/abs/1801.07606"
+   }
+  },
+  {
+   "name": "Depth remedies, and the SGC ablation that asks whether the nonlinearity earns its keep",
+   "learn": "Know the four families of fix and what each actually does: residual/initial-residual connections and jumping-knowledge concatenation of intermediate layers (keep a path back to the un-smoothed features), PairNorm (rescale so that total pairwise squared distance between node embeddings is preserved across layers, which prevents convergence to a point without forbidding useful smoothing), DropEdge (randomly drop a fraction of edges each epoch, which slows the convergence rate of the smoothing and acts as a data augmentation), and simply not going deep - the correct answer for most 2-hop enterprise tasks. Then run the ablation that keeps you honest: Simplifying Graph Convolutional Networks strips out every nonlinearity to give Y = softmax(S^K X Theta) with S = D~^-1/2 A~ D~^-1/2, a plain logistic regression on K-times-propagated features, and matches GCN on Cora, CiteSeer and Pubmed while training orders of magnitude faster. If SGC ties your GCN on the customer's graph, the propagation is doing the work and the deep model is a liability you now have to operate.",
+   "minutes": 20,
+   "resource": {
+    "label": "Zhao and Akoglu - PairNorm: Tackling Oversmoothing in GNNs (arXiv:1909.12223)",
+    "url": "https://arxiv.org/abs/1909.12223"
+   }
+  },
+  {
+   "name": "Over-squashing: exponential receptive fields compressed into a fixed vector",
+   "learn": "Distinguish the second depth pathology sharply from the first: over-smoothing is representations becoming uniform with depth; over-squashing is that the number of nodes in an L-hop receptive field grows exponentially while the node vector stays a fixed d dimensions, so information from distant nodes is compressed to nothing through graph bottlenecks. Learn the diagnostic signature - the problem radius exceeds 2 or 3, training accuracy itself stays low even with more parameters and no regularisation, and the failure concentrates on node pairs separated by a bottleneck edge - and reproduce it on the NeighborsMatch synthetic task where accuracy falls off a cliff as the required radius grows. Know why adding layers does not fix it and can make it worse, and know the remedies that change topology rather than depth: a fully-adjacent final layer, curvature-based or expander rewiring, virtual/global nodes, and graph transformers with global attention. The customer-facing version: if the signal is 5 hops away in a graph with hubs, a stack of GCN layers is the wrong tool and no hyperparameter search will rescue it.",
+   "minutes": 25,
+   "resource": {
+    "label": "Alon and Yahav - On the Bottleneck of Graph Neural Networks and its Practical Implications (arXiv:2006.05205)",
+    "url": "https://arxiv.org/abs/2006.05205"
+   }
+  },
+  {
+   "name": "Scaling past full-batch: neighbour sampling, Cluster-GCN, GraphSAINT",
+   "learn": "Do the memory arithmetic first: full-batch training stores O(L * N * d) node activations plus O(L * E * d) per-edge messages in the gather-scatter formulation, so 2 layers over 5 million edges at d=256 in float32 is already tens of gigabytes and Cora-scale code does not port. Then know the three mini-batching strategies and their distinct biases. Neighbour sampling (NeighborLoader with num_neighbors=[15, 10]) samples a bounded k-hop subgraph per seed node but suffers neighbour explosion with depth and gives a biased/stochastic estimate of the full aggregation. Cluster-GCN partitions the graph with METIS and trains on intra-cluster subgraphs, which is memory-flat and fast but drops every inter-cluster edge during training - a systematic bias if the customer's fraud rings straddle partitions. GraphSAINT samples subgraphs and applies normalisation coefficients so the estimator stays unbiased. In every case, inference must use full neighbourhoods (layer-wise inference) or you ship train/serve skew, and the sampled loader must never sample edges the label depends on.",
+   "minutes": 25,
+   "resource": {
+    "label": "PyTorch Geometric tutorial - Scaling GNNs via Neighbor Sampling",
+    "url": "https://pytorch-geometric.readthedocs.io/en/latest/tutorial/neighbor_loader.html"
+   }
+  },
+  {
+   "name": "Heterogeneous and relational graphs: mapping a CRM/transaction schema onto R-GCN",
+   "learn": "Take the customer schema literally - accounts, users, transactions, products, tickets - and make the modelling decisions explicit: which tables become node types, which foreign keys become edge types, and whether an entity with its own attributes (a transaction with amount, timestamp, channel) should be an edge with features or a node of its own connected to payer and payee (usually a node, because an edge cannot easily carry a rich feature vector into every layer). Then implement the relational update h_i' = sigma(sum over relations r of sum over j in N_i^r of (1/c_{i,r}) W_r h_j + W_0 h_i), and know why the naive version explodes: one d-by-d matrix per relation times hundreds of foreign keys is a parameter count that overfits instantly, which is what basis decomposition (share a small set of basis matrices across relations) and block-diagonal decomposition exist to fix. Handle the practical issues an enterprise graph always has: different node types with different feature dimensions (project each type to a shared d first), extreme degree skew (one product node connected to a million users - cap or sample), and bipartite user-product structure. Write down the node/edge/graph-level task statement for the customer graph before any code.",
+   "minutes": 30,
+   "resource": {
+    "label": "Schlichtkrull et al. - Modeling Relational Data with Graph Convolutional Networks (R-GCN) (arXiv:1703.06103)",
+    "url": "https://arxiv.org/abs/1703.06103"
+   }
+  },
+  {
+   "name": "Link prediction: the message-passing/supervision edge split and ranking metrics",
+   "learn": "Learn the protocol that most implementations get wrong: the edge set must be partitioned into message-passing edges (used to build the adjacency for the forward pass) and supervision edges (scored by the loss), and a positive supervision edge must be removed from the adjacency, otherwise the model reads the answer off its own input and offline AUC goes to 0.99 while production is random. Implement scoring as a decoder over the two node embeddings (dot product, or an MLP on the concatenation, or DistMult for typed relations) with binary cross-entropy against sampled negatives, and know that the negative sampling ratio and the sampling distribution (uniform over all pairs versus degree-proportional versus hard negatives) change AUC and average precision by tens of points, so it must be reported. Prefer ranking metrics against a fixed candidate set - Hits@K and MRR - to a raw ROC-AUC computed against one negative per positive, because a graph with 10^10 candidate pairs and 10^6 real edges makes any balanced-sample AUC meaningless. Always report the heuristic baselines (common neighbours, Adamic-Adar, preferential attachment); SEAL's contribution is showing a GNN over the enclosing subgraph can learn those heuristics and more, not that it always beats them.",
+   "minutes": 25,
+   "resource": {
+    "label": "Zhang and Chen - Link Prediction Based on Graph Neural Networks (SEAL) (arXiv:1802.09691)",
+    "url": "https://arxiv.org/abs/1802.09691"
+   }
+  },
+  {
+   "name": "Fraud and AML on transaction graphs: temporal splits, imbalance, and the tabular baseline that wins",
+   "learn": "Study the Elliptic Bitcoin case as the template for enterprise graph work: about 203k transaction nodes over 49 time steps, roughly 2 percent labelled illicit and 21 percent licit with the rest unknown, so accuracy is a useless metric and you report precision, recall and F1 on the illicit class or PR-AUC. Take the two findings seriously - a random forest on node features is competitive with or better than a GCN, and concatenating GCN embeddings into the random forest helps - because that is the shape of most real engagements and it is a far more defensible thing to present than a GNN that lost. Enforce the temporal discipline: split by time step (train on t <= T, test on t > T), and check that message passing at prediction time never aggregates edges with a later timestamp, because a random split lets tomorrow's transactions explain today's and yields a beautiful number that evaporates. Note the dark-market shutdown in the Elliptic timeline where every model's performance drops - the concrete lesson that a graph model degrades under distribution shift and needs monitoring on a rolling time window, not a one-off holdout.",
+   "minutes": 25,
+   "resource": {
+    "label": "Weber et al. - Anti-Money Laundering in Bitcoin: Graph Convolutional Networks for Financial Forensics (arXiv:1908.02591)",
+    "url": "https://arxiv.org/abs/1908.02591"
+   }
+  },
+  {
+   "name": "Explaining a node prediction, and what attention weights do not prove",
+   "learn": "Know what GNNExplainer optimises: a soft mask over edges (and optionally node features) in the L-hop computation subgraph, learned by maximising the mutual information between the prediction on the masked subgraph and the original prediction, with size and entropy regularisers to force a small, near-binary mask - the output is a compact subgraph plus feature subset for one node, which is exactly the artefact a fraud analyst can act on. Be able to state its limits before the customer finds them: the mask is learned per instance and is not unique, the regularisation strength trades faithfulness for readability, and it explains the fitted model rather than the world (the causal caveats from Topic 97 and the estimand discipline from Topic 107 apply unchanged). Separately, refuse the tempting shortcut: attention coefficients from GAT are not an explanation - they are one head of one layer, they are not identifiable, and by the GATv2 result a plain GAT may be ranking neighbours identically for every query node. If you visualise attention for a node's neighbourhood, label it as a diagnostic of the model, not as evidence about the account.",
+   "minutes": 20,
+   "resource": {
+    "label": "Ying et al. - GNNExplainer: Generating Explanations for Graph Neural Networks (arXiv:1903.03894)",
+    "url": "https://arxiv.org/abs/1903.03894"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can derive the GCN propagation rule from the first-order Chebyshev approximation on a whiteboard, write the per-node form h_i' = sigma(sum_j 1/sqrt(d~_i d~_j) W h_j), and justify symmetric normalisation over unnormalised sum and over row-stochastic mean in terms of activation scale, symmetry and the spectrum of the propagation operator.",
+  "You can implement GCN and GAT layers from a raw (2, E) edge_index using gather plus index_add_ with a segmented, max-shifted neighbourhood softmax, match torch_geometric.nn.GCNConv and GATConv within atol=1e-6, and pass torch.autograd.gradcheck in float64 on a toy graph.",
+  "You can produce a depth-versus-accuracy curve on Cora alongside a measured smoothing statistic, and state from those two plots whether a failing 8-layer model is suffering over-smoothing, over-squashing, vanishing gradients or ordinary overfitting - and name the fix for each.",
+  "You can compute edge homophily on a customer graph and report a GNN result only alongside an MLP-on-features baseline, a label-propagation baseline and a Correct-and-Smooth baseline, each as mean plus standard deviation over at least 10 random splits and seeds.",
+  "You can take an enterprise schema of accounts, users, transactions and products and write, in under a page, the node and edge types, the task level, the exact label and its timestamp, the time-respecting split, and whether GCN, GraphSAGE, GAT or R-GCN is the right shape with a reason for each rejection.",
+  "You can set up a link-prediction experiment with a correct message-passing/supervision edge partition, a stated negative-sampling scheme, Hits@K and MRR against a fixed candidate set, and common-neighbour and Adamic-Adar baselines - and demonstrate the inflated AUC you get when supervision edges are left in the adjacency.",
+  "You can size a GNN for a customer's hardware: state the activation and message memory as a function of N, E, d and L, choose between full-batch, NeighborLoader, Cluster-GCN and GraphSAINT, name the bias each sampling scheme introduces, and explain why inference must use full neighbourhoods.",
+  "You can explain to a non-ML stakeholder, in two minutes, why a message-passing GNN cannot count triangles, what that means for their circular-payment fraud pattern, and which added structural feature makes the pattern learnable."
+ ],
+ "failureModes": [
+  "deg.pow(-0.5) is applied without masking degree-zero nodes, so isolated accounts in the customer extract produce inf, the scatter turns inf*0 into NaN, the loss is NaN by the second epoch, and three hours go into lowering the learning rate before anyone prints the degree histogram.",
+  "The customer's undirected relationship table is loaded into edge_index in one direction only; message passing is silently directed, half the neighbourhood never contributes, accuracy sits four to six points below the published number, and it gets debugged as a hyperparameter problem for a week.",
+  "GAT's softmax is computed over all E edges instead of segmented by destination node; the code runs, the loss decreases, the attention coefficients sum to one across the entire graph rather than per neighbourhood, and the model quietly degenerates to a degree-weighted average.",
+  "Link prediction is evaluated with positive supervision edges still present in the adjacency used for message passing; the model reads the label off its own input, offline ROC-AUC is 0.99, and the deployed recommender performs at chance.",
+  "A fraud graph is split uniformly at random rather than by time, so message passing at training time aggregates transactions that had not happened yet; PR-AUC on the holdout is excellent, the live model catches nothing, and the postmortem blames data drift rather than the split.",
+  "A two-layer GCN reports 98 percent accuracy on a 2-percent-positive AML graph and is presented as a success; a constant predict-licit baseline scores 98 percent too, and nobody computed precision and recall on the illicit class.",
+  "Depth-versus-accuracy falls off after three layers, the team reads it as overfitting and increases dropout and weight decay; training accuracy is also falling because the representations are over-smoothed, so the regularisation makes it strictly worse and the real fix - fewer layers plus a jumping-knowledge or residual path - is never tried.",
+  "Cluster-GCN with METIS partitioning trains on intra-cluster edges only while inference uses full neighbourhoods, so the serving-time aggregation is over a distribution the model never saw; the offline validation number was computed on the same truncated graph and did not catch it.",
+  "A GAT attention heat map is shown to a customer's analysts as evidence that the model focuses on a particular counterparty; the weights are from one head of one layer, are not identifiable, and by the GATv2 static-attention result the same neighbour may be ranked top for every node in the graph."
+ ],
+ "interviewQuestions": [
+  "Derive the GCN layer from the spectral formulation: start at L_sym = I - D^-1/2 A D^-1/2, take the first-order Chebyshev approximation, and get to D~^-1/2 A~ D~^-1/2 H W. Then tell me exactly what the renormalisation trick buys you and what goes wrong with plain mean aggregation instead.",
+  "Implement a GCN layer on a whiteboard given only edge_index of shape (2, E) and a feature matrix X, with no library layers. Where does the degree normalisation come from, what happens to a node of degree zero, and how would you change your code to make it a GAT layer?",
+  "A customer's GCN gets 79 percent at two layers, 76 at four and 41 at eight. Walk me through how you decide whether this is over-smoothing, over-squashing, vanishing gradients or overfitting. What do you measure, what plot do you produce, and what is the fix in each case?",
+  "Design: a bank gives you accounts, users, transactions and products across four tables, and wants to flag accounts likely to be mules within the next 30 days. Define the graph, the task level, the label and its timestamp, the split, the metric, the baselines you must beat, and whether you would reach for GCN, GraphSAGE, GAT or R-GCN - and why you rejected the other three.",
+  "Explain why a message-passing GNN is bounded by the 1-WL test. Give me two non-isomorphic graphs it cannot tell apart, and tell me what that implies for detecting a circular-payment ring - including what you would add to the input to make the pattern learnable.",
+  "Your team reports 0.99 ROC-AUC on link prediction for a product recommender and it performs at chance in the pilot. List the three most likely causes in order, say how you would test each in under an hour, and describe the evaluation protocol you would have insisted on instead.",
+  "The customer's graph has 40 million edges and will not fit in GPU memory full-batch. Compare neighbour sampling, Cluster-GCN and GraphSAINT: what bias does each introduce, how does each interact with the depth you need, and what has to change at inference time so that serving matches training?"
+ ],
+ "proofOfWork": "A public repo `gnn-baseline-gauntlet` that turns the honesty rules of this topic into a harness anyone can run on a new graph. It takes a graph in one canonical form (edge_index, node features, labels, an optional per-edge timestamp) and produces a single report: measured edge homophily and degree distribution; a leaderboard of MLP-on-features, label propagation, Correct-and-Smooth, SGC, your from-scratch GCN, your from-scratch GAT, GATv2 and GraphSAGE, each reported as mean plus standard deviation over 10 random splits by 10 seeds under an equal hyperparameter budget, with the Shchur-style caveat printed at the top; a depth sweep from 1 to 10 layers plotting test accuracy against a measured over-smoothing statistic on shared axes; and a numerical-equivalence section showing your hand-written layers matching torch_geometric.nn.GCNConv and GATConv to atol=1e-6 plus a passing float64 gradcheck. Add a `leakage_check` module that refuses to run when it detects the three traps - supervision edges present in the message-passing adjacency, edges with timestamps later than the label timestamp, and a random split on a graph that carries timestamps - each failing with a one-line explanation. Ship it with a two-page memo aimed at a customer architect that applies the harness to a synthetic CRM/transaction graph, states the node and edge types, the task level and split, and concludes with an explicit recommendation - including the case where the recommendation is a gradient-boosted tree on graph-derived aggregate features rather than a GNN at all."
+}

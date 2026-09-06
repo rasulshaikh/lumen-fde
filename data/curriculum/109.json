@@ -1,0 +1,228 @@
+{
+ "i": 109,
+ "topic": "Recommenders and anomaly detection: collaborative filtering, matrix factorisation, isolation forests",
+ "track": "N. Machine Learning Systems",
+ "month": 11,
+ "hours": 8,
+ "why": "These are the two ML asks that arrive unprompted in almost every deployment - 'can you suggest the next best action for each account' and 'can you flag the weird transactions' - and both usually arrive with no labels and a log the customer's own product generated. Being able to derive and implement the factorisation and the isolation forest yourself is what lets you stand in front of their data scientist and say why held-out RMSE improved while recall@10 got worse, why a 0.97 ROC-AUC fraud model will drown their three analysts, and exactly what the system returns on day one for a user it has never seen. These are also the two places where a demo metric most easily flatters a useless model, so the defensible skill here is the evaluation protocol and the stated fallback, not the fit call.",
+ "prerequisites": [
+  "Topic 93 (linear algebra): SVD, low-rank approximation and the Eckart-Young statement, and reading an expression like (Q^T Q + lambda I)^-1 Q^T r without unpacking it",
+  "Topic 94 (calculus and optimisation): differentiating a squared loss with an L2 penalty by hand, and what a non-convex but biconvex objective implies about convergence and seeds",
+  "Topic 99 (NumPy and numerical computing): fancy indexing, broadcasting, np.add.at, and the reflex never to materialise a dense m x n interaction matrix",
+  "Topic 103 (model evaluation): cross-validation discipline, leakage, calibration and metric choice - this topic is a stress test of all three",
+  "Topic 104 (feature engineering and imbalanced data): class weights, resampling and why accuracy and ROC-AUC mislead at a 0.17 percent positive rate",
+  "Topic 101 (trees and ensembles): binary splits, tree depth and bagging, since an isolation forest is that machinery with a random split criterion and no target"
+ ],
+ "subtopics": [
+  {
+   "name": "From an interaction log to a sparse matrix",
+   "learn": "State the density before choosing an algorithm: MovieLens-100K is 943 users x 1682 items with 100,000 ratings, so 6.3 percent dense, while the credit-card fraud set is 284,807 rows x 30 dense float columns - two completely different regimes. Build the matrix with scipy.sparse.coo_matrix((vals, (u_idx, i_idx)), shape=(m, n)).tocsr(), holding integer id maps in both directions (pd.factorize) so a predicted column index turns back into a movie title. Know CSR's three arrays (data, indices, indptr), why R[u].indices gives user u's rated items in time proportional to that user's row, and why the item-side sweep of ALS wants R.tocsc(). Never call .toarray() on a real interaction matrix: 1M users x 100k items in float64 is 800 GB.",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy docs - scipy.sparse.csr_matrix",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.csr_matrix.html"
+   }
+  },
+  {
+   "name": "The baselines that must be beaten: global mean, bias model, popularity",
+   "learn": "Implement r_hat_ui = mu + b_u + b_i and fit the biases by alternating shrunk means, b_u = sum over I_u of (r_ui - mu - b_i) / (lambda2 + |I_u|); on MovieLens-100K this alone lands near 0.94 RMSE, and any factorisation that does not beat it is broken, not subtle. On the ranking side the baseline is 'most popular item the user has not seen', which is embarrassingly strong on recall@10 - Dacrema et al reproduced 18 neural recommenders and found most failed to beat tuned kNN and popularity baselines once the baselines were tuned with the same budget. Make the rule non-negotiable: every model is reported next to both baselines, on the same split, with the same tuning budget, or the number is not a result.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv 1907.06902 - Are We Really Making Much Progress? A Worrying Analysis of Recent Neural Recommendation Approaches",
+    "url": "https://arxiv.org/abs/1907.06902"
+   }
+  },
+  {
+   "name": "Neighbourhood CF: item-item similarity and shrinkage",
+   "learn": "Implement item-item CF as r_hat_ui = sum over j in topN(i) intersect I_u of s_ij * r_uj / sum |s_ij|, with s_ij cosine on mean-centred columns (which is Pearson). Understand the pathology that makes naive similarity useless: two items co-rated by two users can score s = 1.0, so shrink with s_ij' = n_ij / (n_ij + beta) * s_ij for beta around 25-100, exactly what Surprise's pearson_baseline shrinkage does. Choose item-item over user-user when items are far fewer than users and item taste is more stable, when you need an explanation ('because you watched X'), and when new users must be served without retraining - only their history is needed. The cost is an O(|I|^2) similarity matrix, so this is the interpretable fallback you keep, not the model you scale.",
+   "minutes": 25,
+   "resource": {
+    "label": "Surprise docs - Similarity measures (cosine, MSD, Pearson, pearson_baseline shrinkage)",
+    "url": "https://surprise.readthedocs.io/en/stable/similarities.html"
+   }
+  },
+  {
+   "name": "Latent factors, Eckart-Young, and why truncated SVD is the wrong tool here",
+   "learn": "Start from A = U S V^T and the Eckart-Young theorem: truncating to the top k singular values gives the provably best rank-k approximation in Frobenius and spectral norm. Then be able to say precisely why you cannot just call scipy.sparse.linalg.svds on a ratings matrix: SVD minimises error over every entry, and the stored zeros of a sparse interaction matrix mean 'unobserved', not 'rated zero', so the decomposition is fitted to fabricated data and predicts near zero everywhere. Imputing row or column means instead makes the matrix dense and the factorisation intractable at scale. The fix is to change the objective, not the solver: sum only over the observed pairs K, which destroys the eigen-decomposition route and leaves a non-convex optimisation problem attacked by SGD or ALS. Rehearse that answer in one sentence for the customer data scientist who asks 'why not just SVD?'.",
+   "minutes": 25,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - Chapter 02, Decompositions (SVD, low-rank approximation, pseudo-inverse)",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2002%20-%20matrices/05.%20decompositions.md"
+   }
+  },
+  {
+   "name": "SGD matrix factorisation from scratch: objective and update rule",
+   "learn": "Derive and implement it: minimise sum over observed (u,i) of (r_ui - mu - b_u - b_i - p_u . q_i)^2 + lambda(||p_u||^2 + ||q_i||^2 + b_u^2 + b_i^2). With e_ui the residual, the updates are p_u += gamma(e_ui q_i - lambda p_u), q_i += gamma(e_ui p_u - lambda q_i), b_u += gamma(e_ui - lambda b_u), b_i += gamma(e_ui - lambda b_i), and you should be able to write those four lines from the gradient without looking. Initialise factors from N(0, 0.1) or scaled by 1/sqrt(k) - never zeros, because a product of zeros has no gradient - shuffle the triple list each epoch with rng.permutation so consecutive updates are not all the same user, and decay gamma_t = gamma_0 / (1 + decay * t). Diagnose from one plot of train and validation RMSE per epoch: validation turning up while train falls is overfit (raise lambda or lower k), both flat and high is too small a learning rate or k, NaN by epoch two is gamma too large, and ||q_i|| growing without bound means the regularisation term never made it into the update.",
+   "minutes": 30,
+   "resource": {
+    "label": "Dive into Deep Learning - 21.3 Matrix Factorization",
+    "url": "https://d2l.ai/chapter_recommender-systems/mf.html"
+   }
+  },
+  {
+   "name": "ALS: the closed-form ridge step and why it parallelises",
+   "learn": "Fix Q and the objective separates into one ridge regression per user: p_u = (Q_Iu^T Q_Iu + lambda |I_u| I_k)^-1 Q_Iu^T r_u, solved with np.linalg.solve (never np.linalg.inv) at cost O(|I_u| k^2 + k^3), then alternate to the item side. Each half-sweep is convex and the loss is monotone non-increasing, which is why ALS never blows up the way SGD does with a bad learning rate, while the joint problem stays biconvex and non-convex so the optimum still depends on the seed. Weighted-lambda regularisation - scaling lambda by |I_u| - is what stops heavy users being over-regularised relative to users with three ratings. Every user solve is independent, which is exactly why Spark ships ALS and not SGD; be able to state the trade rule out loud: SGD on one box with sparse explicit ratings, ALS when the data is distributed or the feedback is implicit.",
+   "minutes": 30,
+   "resource": {
+    "label": "Apache Spark MLlib - Collaborative Filtering (ALS, implicit feedback, coldStartStrategy)",
+    "url": "https://spark.apache.org/docs/latest/ml-collaborative-filtering.html"
+   }
+  },
+  {
+   "name": "Implicit feedback: confidence weighting and the Gram-matrix trick",
+   "learn": "With clicks and plays there are no negatives, only observed and unknown, so the explicit objective does not apply. Hu, Koren and Volinsky binarise preference p_ui = 1 if r_ui > 0 else 0 and set confidence c_ui = 1 + alpha r_ui with alpha around 40, then minimise sum over ALL user-item pairs of c_ui (p_ui - p_u . q_i)^2 plus regularisation - the sum runs over the full matrix so unobserved pairs act as low-confidence negatives. Naively that is O(m n k^2) per sweep; the trick that makes it tractable is Q^T C^u Q = Q^T Q + Q^T (C^u - I) Q, where Q^T Q is computed once per sweep and the second term touches only that user's non-zeros, giving O(k^2 * nnz + (m+n) k^3). Be able to explain to a customer why 200 plays is not 'ten times the rating' of 20 plays but ten times the confidence in the same binary preference.",
+   "minutes": 25,
+   "resource": {
+    "label": "Hu, Koren, Volinsky - Collaborative Filtering for Implicit Feedback Datasets (author PDF)",
+    "url": "http://yifanhu.net/PUB/cf.pdf"
+   }
+  },
+  {
+   "name": "Tuning k and lambda honestly",
+   "learn": "Treat k as capacity: k = 1 is barely more than popularity plus biases, k = 200 memorises the training ratings. Sweep k in {8, 16, 32, 64, 128} against lambda in {0.005, 0.01, 0.05, 0.1, 0.5} on a fixed held-out split and plot validation RMSE against k for each lambda - you should see the classic U, and larger k should need larger lambda. If the best k is the largest one you tried, you have not searched far enough; if the curve is flat, your regularisation is dominating. Fix the seed and epoch budget across the grid, early-stop on validation RMSE with patience, and touch the test split exactly once at the end (Topic 105 automates this with Optuna; do it by hand here so you see the surface). Repeat the winner over three seeds and report the spread, so you never claim a 0.003 RMSE win that is seed noise.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn User Guide - Validation curves: plotting scores to evaluate models",
+    "url": "https://scikit-learn.org/stable/modules/learning_curve.html"
+   }
+  },
+  {
+   "name": "Pairwise ranking: BPR and matching the loss to the metric",
+   "learn": "BPR-Opt maximises sum over triples (u, i, j) of ln sigmoid(x_ui - x_uj) - lambda ||Theta||^2, where i is an observed item and j is drawn from the user's unobserved set; be able to derive it as MAP estimation under independent user preferences and a Gaussian prior on the parameters. The gradient carries the factor (1 - sigmoid(x_uij)), so badly ordered pairs dominate the update, and with x_ui = p_u . q_i you get p_u += gamma[(1 - sigmoid) (q_i - q_j) - lambda p_u]. Implement uniform negative sampling first, then popularity-proportional sampling, and measure what each does to recall@10. The point to internalise: pointwise squared error asks 'what score would this user give', pairwise asks 'which of these two comes first' - and only the second is the question a top-10 list actually poses, which is the mechanism behind RMSE improving while recall@10 falls.",
+   "minutes": 30,
+   "resource": {
+    "label": "arXiv 1205.2618 - BPR: Bayesian Personalized Ranking from Implicit Feedback",
+    "url": "https://arxiv.org/abs/1205.2618"
+   }
+  },
+  {
+   "name": "Splits and leakage: random, leave-one-out, temporal",
+   "learn": "Know the three protocols and what each actually measures. A random hold-out of ratings measures rating prediction and leaks the future into the past; leave-one-out per user (hide each user's last interaction) matches next-item prediction but still leaks other users' futures; a single global temporal cut is the only protocol that answers 'would this have worked in production'. Demonstrate the leak rather than assert it: score the same MF model under a random 80/20 and a temporal 80/20 and report both recall@10 values - the gap is the number you owe the customer. Two more non-negotiables: remove items already in the user's training history from the candidate set before taking the top K, and rank against the full catalogue rather than 100 sampled negatives, because sampled metrics do not preserve the ranking between models. Users with no training history are excluded and counted in a separate cold-start bucket, never silently dropped.",
+   "minutes": 30,
+   "resource": {
+    "label": "scikit-learn - TimeSeriesSplit (forward-chaining splits for time-ordered data)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.TimeSeriesSplit.html"
+   }
+  },
+  {
+   "name": "Ranking metrics and the RMSE vs recall@10 divergence",
+   "learn": "Implement recall@k = |topk intersect relevant| / min(k, |relevant|), precision@k, MAP@k and NDCG@k = DCG@k / IDCG@k with DCG = sum over positions of (2^rel_i - 1) / log2(i + 1), and check your implementation against sklearn.metrics.ndcg_score on a hand-built fixture before trusting it on 943 users. Then be able to articulate the divergence on demand: RMSE averages squared error over every observed rating and is dominated by the dense mid-scale mass of popular items, while recall@10 depends only on the extreme right tail of each user's score distribution, so a model can genuinely improve its predictions of 3-star ratings that will never enter a top-10 list while reordering the head badly. Always report catalogue coverage and the mean popularity rank of recommended items alongside recall: a model that hands the same 50 blockbusters to everyone can look excellent and be worthless.",
+   "minutes": 30,
+   "resource": {
+    "label": "scikit-learn - sklearn.metrics.ndcg_score",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.ndcg_score.html"
+   }
+  },
+  {
+   "name": "Cold start and the fallback you must state out loud",
+   "learn": "Separate the four cases: new item, new user, new tenant, and the returning user with one interaction. A pure MF model has no factor vector for an unseen id, so the fallback has to be explicit, coded and testable rather than implied. For new items, represent the item as the sum of its feature embeddings (genre, text, price band) plus an id embedding that only starts to matter once interactions accumulate, which is exactly the LightFM hybrid construction; for new users, segment popularity plus an onboarding elicitation of five items; for everyone, a deterministic backfill so the endpoint never returns an empty list. Write the routing rule as code (if n_interactions < 3 then segment_popularity) and put the share of traffic served by each path on the dashboard, because 'what does it do on day one' is asked in every demo and 'it degrades to popularity within the account's segment' is the answer that wins the room.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv 1507.08439 - Metadata Embeddings for User and Item Cold-start Recommendations (LightFM)",
+    "url": "https://arxiv.org/abs/1507.08439"
+   }
+  },
+  {
+   "name": "Serving: from a dot product to an ANN index",
+   "learn": "Scoring every item for a user is the dense product P[u] @ Q.T, which is fine for MovieLens and impossible at request time for 1M users x 500k items, so the production shape is two stages: candidate generation by approximate maximum inner-product search over Q, then ranking of roughly 500 candidates by an exact model that can use business features (often a gradient-boosted model from Topic 101). Use faiss IndexFlatIP as the exact reference and IVF or HNSW for scale, and know that MIPS is not metric search - either use an inner-product index or transform the vectors so that L2 or cosine ordering matches. Measure the ANN index's recall@10 against brute force as a separate number from model quality, tune nprobe or efSearch against a p99 latency budget, and filter already-seen items at read time rather than baking them into the index.",
+   "minutes": 20,
+   "resource": {
+    "label": "FAISS wiki - Guidelines to choose an index",
+    "url": "https://github.com/facebookresearch/faiss/wiki/Guidelines-to-choose-an-index"
+   }
+  },
+  {
+   "name": "Feedback loops, popularity bias and why offline wins evaporate",
+   "learn": "The training log was generated by the previous recommender, so the data is missing-not-at-random: items the old system never surfaced have no positives, and a new model that surfaces them scores worse offline precisely because it is exploring. The consequences to name are popularity self-reinforcement, narrowing catalogue coverage, and systematic offline/online metric disagreement. The mitigations you can actually ship on a customer deployment: log the slot and the serving model for every impression, reserve a small random-exposure slice as an unbiased evaluation set, use inverse-propensity-weighted replay for offline estimates, and hold back an epsilon of traffic for exploration in a contextual bandit. State the decision rule at the start of the engagement: offline metrics gate what is allowed into an A/B test, and only the A/B (Topic 97) decides what ships.",
+   "minutes": 20,
+   "resource": {
+    "label": "arXiv 1003.0146 - A Contextual-Bandit Approach to Personalized News Article Recommendation (LinUCB, unbiased offline replay)",
+    "url": "https://arxiv.org/abs/1003.0146"
+   }
+  },
+  {
+   "name": "Anomaly detection: choosing the regime before choosing the algorithm",
+   "learn": "Separate three regimes and say which one you are in before naming a model. Unsupervised outlier detection assumes the training set is already contaminated and has no labels (IsolationForest, LocalOutlierFactor, EllipticEnvelope); semi-supervised novelty detection trains on data believed clean (OneClassSVM, LocalOutlierFactor with novelty=True); supervised detection has labels and should use a weighted classifier from Topic 104. Learn the sklearn contract that unifies them - fit/predict returning +1 for inlier and -1 for outlier, score_samples where higher means more normal, and decision_function = score_samples - offset_. The honest rule for when an isolation forest beats a supervised classifier: no labels, labels that arrive months late, a shifting attack distribution so last quarter's positives do not describe this quarter's, or a day-one model on a new tenant. With thousands of clean labels on a stationary problem the supervised model wins on PR-AUC every time - benchmark suites like ADBench show even partial supervision beating the best unsupervised detector - and volunteering that in the meeting buys more credibility than defending your unsupervised model.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv 2206.09426 - ADBench: Anomaly Detection Benchmark (30 algorithms, 57 datasets, effect of supervision)",
+    "url": "https://arxiv.org/abs/2206.09426"
+   }
+  },
+  {
+   "name": "Isolation forest mechanics: random cuts, expected path length, the score",
+   "learn": "An isolation tree picks a uniformly random feature and a uniformly random split value between that feature's min and max within the node, recursing until the point is alone or the height limit ceil(log2(psi)) is reached. Anomalies need fewer splits to isolate, so the statistic is the path length h(x) plus an adjustment for the subtree that was never built: c(psi) = 2H(psi - 1) - 2(psi - 1)/psi with H(i) approximately ln(i) + 0.5772156649, the Euler-Mascheroni constant. The score is s(x, psi) = 2^(-E[h(x)] / c(psi)): near 1 means clearly anomalous, near 0.5 means the sample is undifferentiated, below 0.5 means normal. Be able to derive c(psi) from the average unsuccessful search path length in a binary search tree, and to explain why the score is a ratio rather than a raw depth - normalising by c(psi) is what makes scores comparable across subsample sizes and forests. Training is O(t psi log psi) and scoring O(n t log psi), linear in n with tiny constants, which is the practical reason it is the default first detector on wide tabular data.",
+   "minutes": 30,
+   "resource": {
+    "label": "scikit-learn example - IsolationForest example (path lengths, decision boundary, max_samples)",
+    "url": "https://scikit-learn.org/stable/auto_examples/ensemble/plot_isolation_forest.html"
+   }
+  },
+  {
+   "name": "Reaching parity with sklearn: max_samples, contamination, offset_",
+   "learn": "Write the forest yourself (n_estimators=100, max_samples=256 drawn without replacement per tree, random feature, uniform split inside the node's range) and then reconcile with the library: score_samples returns the NEGATIVE of the 2^(-E/c) score, decision_function = score_samples - offset_, and offset_ is -0.5 under contamination='auto' or the contamination-th percentile of the training scores otherwise. Defend both knobs out loud. max_samples=256 is deliberately small: subsampling reduces swamping (normal points surrounded by anomalies) and masking (a cluster of anomalies hiding each other), so raising it usually makes the detector worse, not better. contamination is a prior on the anomaly rate that moves only the threshold and never the ranking, so set it from the analyst review budget (100 reviews per day out of 200k transactions is 0.05 percent), or keep ranking and thresholding as two separate decisions. Verify parity by Spearman rank correlation against sklearn's score_samples on the same rows (aim above 0.95), not by matching predicted labels.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - sklearn.ensemble.IsolationForest (score_samples, decision_function, offset_, max_samples)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.IsolationForest.html"
+   }
+  },
+  {
+   "name": "Where isolation forests fail and what to reach for instead",
+   "learn": "Four failure geometries you should be able to name and demonstrate. (a) Cuts are axis-parallel, so a diagonal or interaction-defined anomaly produces rectangular ghost bands in the score field - the Extended Isolation Forest paper visualises this; rotate features with PCA (Topic 106) or use EIF. (b) Local density: a point that is globally normal but abnormal for its own cluster needs LocalOutlierFactor's reachability-density ratio, which an isolation forest cannot express. (c) Clustered anomalies: 300 near-identical transactions from one fraud ring form their own dense region and stop being easy to isolate, so the forest scores them as normal while a clustering or graph method finds them immediately. (d) High dimension with mostly irrelevant features: random feature selection dilutes the signal, path lengths concentrate, and the score histogram collapses into a narrow band around 0.5 - always plot that histogram, and if it has no right tail the detector has found nothing. Also remember the forest is scale-free across features but not immune to a monotone id or timestamp column, which it will happily isolate on.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn example - Comparing anomaly detection algorithms for outlier detection on toy datasets",
+    "url": "https://scikit-learn.org/stable/auto_examples/miscellaneous/plot_anomaly_comparison.html"
+   }
+  },
+  {
+   "name": "Evaluating at 0.172 percent positives: PR-AUC, precision@k and the alert budget",
+   "learn": "With 492 positives in 284,807 rows, 99.83 percent accuracy is achieved by predicting 'not fraud' for everything, so accuracy leaves the report. ROC-AUC also flatters: FPR = FP / (FP + TN) has a 284k denominator, so 5,000 false positives shift it by under 0.02 while destroying an analyst team's week. Use average_precision_score as the PR-AUC, whose no-skill baseline equals the positive rate (0.0017 here), plus precision@k and recall@k at the k the customer can genuinely review, and convert to a lift statement they can act on ('precision@100 = 0.32, which is 186 times base rate'). Threshold selection is a business decision, not a model output: take k from the review budget or the threshold that hits a target recall, and show the confusion matrix at that operating point instead of one scalar. Bootstrap the metric - with 492 positives, precision@100 has a wide interval and a 0.02 gap between two models is usually noise.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn example - Precision-Recall (average precision, imbalanced settings)",
+    "url": "https://scikit-learn.org/stable/auto_examples/model_selection/plot_precision_recall.html"
+   }
+  },
+  {
+   "name": "Non-stationarity: seasonality, drift and the retraining contract",
+   "learn": "Most production anomalies are just Tuesdays. Before scoring any time-indexed signal, remove the structure: STL decomposes a series into trend, seasonal and remainder, and you score the remainder, not the raw value; alternatively forecast the expected value with the models from Topic 108 and treat the standardised residual as the score. Then write the retraining contract with the customer explicitly: refit cadence, training window (a rolling 90 days usually beats all-history once behaviour drifts), a drift monitor on the score distribution itself (PSI or a KS test between the training scores and last week's), and the escalation rule for when the alert rate doubles - is that a fraud wave or model drift? Keep a frozen scored sample from launch so you can tell 'the world changed' from 'my model changed', and version the fitted forest together with the feature-transform code, because a quiet preprocessing change reranks every alert.",
+   "minutes": 20,
+   "resource": {
+    "label": "Forecasting: Principles and Practice (3rd ed) - STL decomposition",
+    "url": "https://otexts.com/fpp3/stl.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can derive the biased matrix-factorisation objective and its SGD update rule on paper, implement it in NumPy only, and beat the mu + b_u + b_i baseline on MovieLens-100K held-out RMSE.",
+  "You can implement one ALS sweep as a per-user ridge solve with np.linalg.solve, show the training loss is monotone non-increasing across sweeps, and state the conditions under which you would ship ALS rather than SGD.",
+  "You can produce one table for MovieLens showing held-out RMSE, recall@10, NDCG@10 and catalogue coverage for popularity, item-item kNN, SGD-MF and BPR-MF under the same temporal split, and explain every row where RMSE and recall@10 disagree.",
+  "You can demonstrate the split leak numerically: same model and hyperparameters, random 80/20 versus temporal 80/20, with the recall@10 gap quantified and the candidate set correctly filtered of already-seen items.",
+  "You can derive c(psi) = 2H(psi - 1) - 2(psi - 1)/psi and the score 2^(-E[h(x)] / c(psi)), implement an isolation forest from scratch, and reach Spearman rank correlation above 0.95 with sklearn's score_samples on the credit-card data.",
+  "You can defend max_samples and contamination in a customer meeting: subsampling as the cure for swamping and masking, contamination as a threshold set from the analyst review budget rather than a model parameter that changes the ranking.",
+  "You can report PR-AUC, precision@100 and lift over base rate with bootstrap intervals for two detectors and state, with evidence, whether the difference is real.",
+  "You can look at a new dataset and say whether an isolation forest or a supervised model is the right call, naming the geometry (diagonal, local-density, clustered, high-dimensional) that would make you switch, and state the cold-start or fallback path for whichever you choose."
+ ],
+ "failureModes": [
+  "A random 80/20 split is taken over a timestamped interaction log, so a user's later sessions sit in train and predict their earlier ones; offline recall@10 reads 0.31, the pilot delivers 0.06, and the model is blamed instead of the protocol.",
+  "Truncated SVD is run on the ratings matrix with unobserved entries left as stored zeros; the factors learn to predict near zero, held-out RMSE still looks respectable because the held-out set is zero-heavy too, and the top-K lists are effectively random.",
+  "The top-K candidate set is not filtered against the user's training history, so recall@10 is inflated by re-recommending items the user already consumed; the metric halves the day the filter is added, which is the week after the quarterly review.",
+  "Model selection is done on RMSE alone: k = 64 beats k = 16 on RMSE by fitting mid-scale ratings on popular items, but recall@10 drops, and the shipped model is worse than the one it replaced while the dashboard says it improved.",
+  "The cold-start path is never exercised because every demo user has history; on stage a brand-new tenant's user hits the id lookup, raises a KeyError or returns an empty list, and the meeting is about reliability for the rest of the hour.",
+  "The isolation forest is fitted on raw columns including transaction_id and a monotonically increasing timestamp, so the trees isolate on those; the top 100 anomalies are simply the newest, highest-id rows, and the analyst queue is abandoned within a week.",
+  "contamination is left at its default and predict() is wired straight to the alert queue, generating around 1,400 alerts a day for a team that can review 100, of which roughly 96 percent are noise at a 0.172 percent true rate.",
+  "The detector is selected on ROC-AUC of 0.95 and described as excellent, while precision@100 is 0.04; the pilot is judged on analyst hours wasted, not on ranking theory, and the project is cancelled with a technically fine model."
+ ],
+ "interviewQuestions": [
+  "Derive the regularised matrix-factorisation objective with user and item biases and give me the SGD update for p_u and q_i. Now fix Q and derive the closed-form update for p_u. Which would you run on two billion interactions on the customer's Spark cluster, and why?",
+  "Held-out RMSE improved from 0.912 to 0.897 but recall@10 fell from 0.28 to 0.24. Explain the mechanism that produces both at once, tell me which number you take to the customer, and say what you would change about the training objective.",
+  "Design a recommender for a marketplace with 4M buyers, 900k listings, no ratings, only clicks and purchases, and 60 percent of listings younger than seven days. Specify model, loss, negative sampling, split, metrics, cold-start path and serving architecture, then tell me where it fails first.",
+  "How does an isolation forest score a point? Write the score formula, explain what c(psi) is and where it comes from, and say why the score normalises expected path length rather than using raw depth.",
+  "Your isolation forest has PR-AUC 0.31 on labelled historical fraud, but in the pilot the top-100 queue is 95 percent legitimate high-value transactions. List your hypotheses in the order you would test them and say what evidence would settle each.",
+  "When would you tell a customer not to use an isolation forest? Give me three concrete data situations and the alternative you would reach for in each.",
+  "With 492 positives in 284,807 rows, model A has precision@100 of 0.34 and model B has 0.38. Is B better? Explain how you decide, and what exactly you would put in front of the customer to justify the choice."
+ ],
+ "proofOfWork": "A companion repo `metric-divergence-lab` plus a two-page customer-facing note, both reproducible with one make target, that turns the two lessons of this topic into evidence someone else can rerun. The recommender half sweeps k in {8, 16, 32, 64, 128} against lambda over three seeds on MovieLens-100K under both a random and a temporal split, and produces a single figure with held-out RMSE on one axis and recall@10 on the other, annotated with the region where the two disagree, plus a table of popularity, item-item kNN, SGD-MF and BPR-MF that reports RMSE, recall@10, NDCG@10, catalogue coverage and mean popularity rank with bootstrap intervals - including the exact recall@10 delta caused by forgetting to filter already-seen items, and a cold-start section reporting metrics separately for users with 0, 1-2 and 3+ training interactions alongside the routing rule that serves them. The anomaly half generates four synthetic 2-D fixtures (Gaussian blob, diagonal correlated band, two-density clusters, and a 300-point anomaly cluster) plus a 50-dimension version with 45 noise features, scores each with your from-scratch forest, sklearn's IsolationForest, LocalOutlierFactor and EllipticEnvelope, and renders the score fields side by side so the axis-parallel artefacts, the local-density blind spot, the clustered-anomaly miss and the score-histogram collapse in high dimension are all visible rather than asserted; a parity check reports Spearman rho against sklearn on the credit-card data and a sensitivity table shows PR-AUC and precision@100 as max_samples moves from 64 to 8192. The note is written for a customer's data lead: one page on why the model that wins on RMSE is not the model to ship, one page on how the alert threshold follows from their review capacity, each claim pointing at a figure in the repo."
+}

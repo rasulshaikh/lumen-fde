@@ -1,0 +1,228 @@
+{
+ "i": 97,
+ "topic": "Experimentation and causality: A/B design, power, sequential testing, confounding",
+ "track": "M. Mathematical Foundations",
+ "month": 3,
+ "hours": 6,
+ "why": "Every model an FDE ships eventually has to survive the question 'did it actually do anything?', and the answer is an experiment, not an offline AUC. You will be the person sizing the rollout before it launches, defending a readout to a customer's analytics team who peeked at it daily, and explaining why the 30% lift in the pilot region is a marketplace cannibalisation artefact rather than value you can invoice for. Causal literacy is also what stops you shipping a model trained on a target that a confounder generated - the difference between 'our churn model has 0.89 AUC' and 'intervening on the thing it scores changes churn' is the entire commercial argument.",
+ "prerequisites": [
+  "Probability at the level of Topic 95: random variables, expectation and variance algebra, Bernoulli/binomial/normal, the CLT and why sample means are asymptotically normal",
+  "Statistical inference at the level of Topic 96: estimators and their sampling distributions, standard errors, confidence intervals, Type I/II error, the t-distribution",
+  "NumPy vectorisation and a reproducible RNG (Topic 99): you will run 10,000-replicate Monte Carlo simulations, so np.random.default_rng(seed) and array-level thinking, not Python loops",
+  "pandas group-by and joins plus enough SQL (Topic 29/40) to pull an assignment log, an exposure log and a metric table and reconcile their row counts",
+  "Linear regression as an estimator, not a black box (Topic 93/94): the OLS normal equations, what a coefficient means, and why heteroskedasticity changes the standard error but not the point estimate",
+  "matplotlib for the three diagnostic plots this topic lives on: MDE-vs-N curve, p-value histogram from an A/A suite, and a propensity-overlap histogram"
+ ],
+ "subtopics": [
+  {
+   "name": "Potential outcomes, estimands and SUTVA",
+   "learn": "Write the Rubin model down: each unit has Y_i(1) and Y_i(0), the individual effect Y_i(1)-Y_i(0) is never observed (the fundamental problem of causal inference), and consistency links them to data as Y_i = T_i·Y_i(1) + (1-T_i)·Y_i(0). Be able to derive in three lines that the naive contrast decomposes as E[Y|T=1] - E[Y|T=0] = ATE + (E[Y(0)|T=1] - E[Y(0)|T=0]) + (1-p)(ATT - ATC), so the bias term is a statement about counterfactuals, not about sample size. State the identification assumptions by name - ignorability (Y(1),Y(0)) ⟂ T | X, positivity 0 < P(T=1|X) < 1, SUTVA (no interference between units, no hidden versions of treatment) - and get in the habit of writing the estimand as one English sentence ('the ATE of showing the recommendation panel on 7-day retained revenue per assigned user') before touching any data.",
+   "minutes": 20,
+   "resource": {
+    "label": "Hernán & Robins - Causal Inference: What If (free full text)",
+    "url": "https://miguelhernan.org/whatifbook"
+   }
+  },
+  {
+   "name": "Randomisation as identification, A/A tests and balance checks",
+   "learn": "Understand precisely what randomisation buys: it forces T ⟂ (Y(1),Y(0)) by construction, which zeroes the selection-bias term above without you having to know, measure or model a single confounder. Check balance with standardised mean differences (|mean_T - mean_C| / pooled SD, flag above 0.1), not with a p-value per covariate - testing 30 covariates at α=0.05 and finding one 'imbalanced' is testing your RNG, not your design. Build the A/A harness you will reuse all topic: replay the assignment hash on historical data 1,000-10,000 times with no treatment applied, collect p-values, and assert they are Uniform(0,1) (KS test does not reject) and that the empirical rejection rate sits at α within Monte Carlo error. An A/A that fails means your variance estimator, your randomisation unit or your bucketing hash is broken - fix that before you evaluate any feature.",
+   "minutes": 18,
+   "resource": {
+    "label": "Causal Inference for The Brave and True - Ch. 02 Randomised Experiments",
+    "url": "https://matheusfacure.github.io/python-causality-handbook/02-Randomised-Experiments.html"
+   }
+  },
+  {
+   "name": "Metric design: OEC, guardrails, ratio metrics and capping",
+   "learn": "Pick exactly one OEC (overall evaluation criterion) before launch and write it into the pre-registration; everything else is a guardrail or a debug metric with a different decision rule. Classify each metric by shape because the shape determines the variance formula: per-user sums (additive, plain t-test), ratio-of-sums like CTR = Σclicks/Σimpressions (analysis unit is not the randomisation unit - needs the delta method), and quantiles like p95 latency (no closed-form variance; bootstrap or a Cochran-style order-statistic interval). Guardrails are one-sided non-inferiority tests against a pre-agreed margin - 'p > 0.05 so no harm' is not a guardrail, it is an underpowered test dressed up as a pass. Pre-register a winsorisation percentile for heavy-tailed revenue metrics and report capped and uncapped side by side, so the customer sees that one whale did not decide the launch.",
+   "minutes": 20,
+   "resource": {
+    "label": "Dmitriev et al., KDD 2017 - A Dirty Dozen: Twelve Common Metric Interpretation Pitfalls in Online Controlled Experiments (PDF)",
+    "url": "https://exp-platform.com/Documents/2017-08%20KDDMetricInterpretationPitfalls.pdf"
+   }
+  },
+  {
+   "name": "The difference-in-means estimator, Welch's t-test and the two-proportion z",
+   "learn": "The estimator is τ̂ = Ȳ_T - Ȳ_C and its Neyman variance is σ²_T/n_T + σ²_C/n_C - note it never assumes equal variances, so use scipy.stats.ttest_ind(a, b, equal_var=False) (Welch, with the Welch-Satterthwaite df) as the default, because a treatment that changes the mean usually changes the spread too. Report τ̂ ± z_{1-α/2}·SE in both absolute and relative terms; a p-value alone is not a readout. For a binary metric, know that the correct test statistic pools p̂ under H0 (SE = √(p̂(1-p̂)(1/n_T+1/n_C))) while the confidence interval must use the unpooled SE - using the pooled SE for the interval is a very common inconsistency that makes the CI and the p-value disagree at the boundary. At n in the hundreds of thousands the CLT makes normality a non-issue for Bernoulli and mildly skewed metrics; what actually breaks the t-test is an extreme tail (revenue, session length), not the shape near the middle.",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy docs - scipy.stats.ttest_ind (Welch's t-test, equal_var=False)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ttest_ind.html"
+   }
+  },
+  {
+   "name": "Deriving power, MDE and sample size from first principles",
+   "learn": "Derive it, do not look it up: you reject when |τ̂|/SE > z_{1-α/2}; power 1-β against a true effect Δ requires Δ/SE ≥ z_{1-α/2} + z_{1-β}; with equal arms SE = σ√(2/n), so n per arm = 2σ²(z_{1-α/2}+z_{1-β})²/Δ². For α=0.05 two-sided and 80% power, (1.96+0.8416)² ≈ 7.849, giving the number you should be able to quote in a meeting: n ≈ 15.7σ²/Δ², and for a proportion n ≈ 15.7·p(1-p)/Δ². Internalise the quadratic: halving the MDE quadruples N, so a customer asking to detect 1% instead of 2% is asking for four times the traffic, not twice. Understand Type M (exaggeration) and Type S (sign) error - conditional on significance, a 20%-powered test overstates the true effect by roughly 2-3x and has a non-trivial chance of the wrong sign, which is exactly why an underpowered 'win' is the most expensive result in the readout.",
+   "minutes": 25,
+   "resource": {
+    "label": "NIST/SEMATECH e-Handbook 7.2.2.2 - Sample sizes required",
+    "url": "https://www.itl.nist.gov/div898/handbook/prc/section2/prc222.htm"
+   }
+  },
+  {
+   "name": "The MDE-vs-N curve, allocation ratio, triggering and runtime",
+   "learn": "Use statsmodels TTestIndPower().solve_power(effect_size, nobs1, alpha, power, ratio) to solve for whichever of the five quantities is unknown, and plot MDE against N on a log-x axis - this single curve is what you show a customer who wants a two-day test. Handle unequal allocation properly: with fraction k in treatment the variance scales as 1/(k(1-k)n), so a 90/10 split costs 2.78x the users of 50/50 for the same MDE (sometimes still correct, when the point is risk containment on a risky change). Convert N into runtime through daily eligible units and always round up to whole weeks, because day-of-week seasonality otherwise leaks into the contrast. Handle triggering explicitly: if only 20% of assigned users ever reach the surface, the effect measured on all assigned users is diluted to 0.2·τ_exposed, so you either analyse the triggered population (with symmetric counterfactual logging in control) or size for the diluted effect - and say which one the number in the deck is.",
+   "minutes": 18,
+   "resource": {
+    "label": "statsmodels docs - TTestIndPower (solve_power for power / nobs / effect size)",
+    "url": "https://www.statsmodels.org/stable/generated/statsmodels.stats.power.TTestIndPower.html"
+   }
+  },
+  {
+   "name": "Variance is the enemy: De Moivre's equation and heavy tails",
+   "learn": "The most dangerous equation is SE = σ/√n: small groups produce both the highest and the lowest observed rates, so any 'top 5 segments by lift' table is largely a ranking by inverse sample size, and any per-tenant leaderboard on a small customer's data is noise with a story attached. Since N is usually fixed by the customer's traffic, the lever you actually control is σ - capping, trigger-only analysis, choosing a less variable OEC (bounded engagement rather than raw revenue), and the variance-reduction techniques later in this topic. Estimate σ from the customer's own historical data, never from an assumption; for a long-tailed metric get σ and the sampling distribution from a bootstrap over historical users rather than trusting the normal approximation, and check the resulting MDE against what the business calls a meaningful change before agreeing to run anything.",
+   "minutes": 15,
+   "resource": {
+    "label": "Causal Inference for The Brave and True - Ch. 03 Stats Review: The Most Dangerous Equation",
+    "url": "https://matheusfacure.github.io/python-causality-handbook/03-Stats-Review-The-Most-Dangerous-Equation.html"
+   }
+  },
+  {
+   "name": "Ratio metrics: the delta method and the user-level bootstrap",
+   "learn": "When the metric is R = X̄/Ȳ (clicks per impression, revenue per session) but randomisation is per user, derive the variance from the first-order Taylor expansion of f(x,y) = x/y around (E[X], E[Y]): Var(R) ≈ (1/n)·[ Var(X)/E[Y]² - 2·E[X]·Cov(X,Y)/E[Y]³ + E[X]²·Var(Y)/E[Y]⁴ ], where n is the number of users and X_i, Y_i are per-user sums. Implement it in NumPy from the per-user aggregates and confirm against a bootstrap that resamples users (not impressions) and recomputes the ratio - the two should agree within a few percent. Then reproduce the bug it exists to fix: compute the naive impression-level SE on the same data and observe it is typically 2-5x too small, which is how an A/A test on CTR 'detects' a lift. Extend the same expansion to a difference of two ratios and to CUPED-adjusted ratio metrics.",
+   "minutes": 20,
+   "resource": {
+    "label": "Deng, Knoblich & Lu - Applying the Delta Method in Metric Analytics (arXiv:1803.06336)",
+    "url": "https://arxiv.org/abs/1803.06336"
+   }
+  },
+  {
+   "name": "Randomisation unit vs analysis unit: ICC, design effect and clustered SEs",
+   "learn": "When you randomise accounts but analyse seats, the observations inside a cluster are correlated and the variance inflates by the design effect DEFF = 1 + (m̄ - 1)·ρ, where ρ is the intra-cluster correlation and m̄ the mean cluster size; effective sample size is n_eff = n/DEFF. Be able to compute it: ρ = 0.3 with 20 seats per account gives DEFF ≈ 6.7, so an interval computed as if seats were independent is √6.7 ≈ 2.6x too narrow - which is exactly the readout that gets torn apart in front of the customer's data scientist. Three fixes, in order of preference: aggregate to the randomisation unit and run the plain t-test, use cluster-robust standard errors (OLS with cov_type='cluster', groups=account_id), or fit a GEE with an exchangeable working correlation. Know the small-cluster caveat: cluster-robust asymptotics need roughly 40+ clusters, so a pilot across 12 enterprise accounts must use randomisation inference (permute the account-level assignment and read the exact p-value off the null distribution) instead.",
+   "minutes": 18,
+   "resource": {
+    "label": "statsmodels docs - Generalized Estimating Equations (clustered/correlated data)",
+    "url": "https://www.statsmodels.org/stable/gee.html"
+   }
+  },
+  {
+   "name": "Sample ratio mismatch: the check that invalidates a readout",
+   "learn": "Before reading any lift, test the assignment counts against the intended split with a chi-square goodness-of-fit on 1 df: scipy.stats.chisquare([n_T, n_C], f_exp=[N/2, N/2]); at N=1,000,000 a 50.2/49.8 split gives p ≈ 6e-5. Use a strict threshold (p < 0.001) and treat a hit as a hard stop - an SRM means the two groups are no longer exchangeable, so every downstream number is uninterpretable and 'the lift is still probably real' is the wrong sentence. Learn the standard root causes so you can triage in minutes: bot/fraud filtering applied after assignment, differential redirect latency or crash rate dropping treatment users out of the log, a triggering condition evaluated after the treatment already changed behaviour, deduplication on a key that behaves differently per arm, and delayed telemetry flush for one variant. Run SRM per day and per reported segment too, since an overall-balanced experiment can be badly skewed inside the exact slice you are about to present.",
+   "minutes": 15,
+   "resource": {
+    "label": "SciPy docs - scipy.stats.chisquare (goodness-of-fit test)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.chisquare.html"
+   }
+  },
+  {
+   "name": "Peeking: why fixed-horizon p-values collapse under optional stopping",
+   "learn": "A fixed-horizon p-value is only calibrated at the single pre-declared N; the distribution of the p-value at a data-dependent stopping time is not uniform. Simulate it rather than believing it: 10,000 A/A replications of a Bernoulli metric, evaluate the two-sample test after every 100 users, stop and declare a winner the first time p < 0.05, and watch the empirical false-positive rate climb to roughly 0.2-0.3 for a handful of looks and past 0.5 for continuous monitoring. The law of the iterated logarithm makes the limiting case exact: monitor forever and you reject at α = 0.05 with probability 1, so 'we watched the dashboard until it went green' is a procedure with 100% Type I error. Understand that the fix is not a longer run or a Bonferroni over looks (which is both wrong and needlessly conservative for dependent partial sums) but a procedure whose error is controlled uniformly over the whole monitoring path.",
+   "minutes": 25,
+   "resource": {
+    "label": "Johari, Pekelis & Walsh - Always Valid Inference: Bringing Sequential Analysis to A/B Testing (arXiv:1512.04922)",
+    "url": "https://arxiv.org/abs/1512.04922"
+   }
+  },
+  {
+   "name": "Always-valid inference: confidence sequences, mSPRT and alpha spending",
+   "learn": "A confidence sequence is a family (L_t, U_t) satisfying P(∀t ≥ 1 : τ ∈ (L_t, U_t)) ≥ 1 - α - the quantifier is inside the probability, which is exactly what licenses stopping whenever you like. Understand the machinery well enough to implement one: a mixture likelihood ratio Λ_t = ∫ (L_θ(data_t)/L_0(data_t)) dH(θ) is a nonnegative martingale under H0, so Ville's inequality gives P(∃t : Λ_t ≥ 1/α) ≤ α, and inverting Λ_t ≤ 1/α yields the interval; the mSPRT of the previous reference is this with a normal mixing distribution, and sub-Gaussian / empirical-Bernstein constructions give the characteristic √(log log t) boundary. Know the discrete alternative: pre-declare K interim analyses and spend α with an O'Brien-Fleming (very strict early, near-α at the final look) or Pocock (constant boundary) spending function. Quantify the price honestly - at the planned N an always-valid interval is typically 1.3-2x wider than the fixed-horizon one - and say that out loud when you propose it, because the trade is 'the right to stop early' against 'a bigger sample if you do not'.",
+   "minutes": 25,
+   "resource": {
+    "label": "Howard, Ramdas, McAuliffe & Sekhon - Time-uniform, nonparametric, nonasymptotic confidence sequences (arXiv:1810.08240)",
+    "url": "https://arxiv.org/abs/1810.08240"
+   }
+  },
+  {
+   "name": "CUPED: variance reduction from pre-experiment data",
+   "learn": "Define Y_cuped = Y - θ(X - E[X]) where X is a strictly pre-treatment covariate; because X is unaffected by treatment, E[Y_cuped] is unchanged and the estimator stays unbiased, while Var(Y_cuped) = Var(Y)(1 - ρ²_{X,Y}) at the optimal θ* = Cov(Y,X)/Var(X). Do the arithmetic that sells it: ρ = 0.7 removes 51% of the variance, which halves the required runtime for the same MDE - the single highest-leverage thing you can offer a customer with thin traffic. The best X is almost always the same metric measured over the 14-28 days before assignment; estimate θ pooled across both arms, and give users with no pre-period the pooled mean of X (they simply get no variance reduction). The failure that matters: any covariate measured during the experiment is post-treatment, so adjusting on it reintroduces bias - verify your implementation by rerunning the A/A suite with CUPED enabled and confirming the false-positive rate is still α and the p-values still uniform.",
+   "minutes": 20,
+   "resource": {
+    "label": "Deng, Xu, Kohavi & Walker, WSDM 2013 - Improving the Sensitivity of Online Controlled Experiments by Utilizing Pre-Experiment Data (CUPED, PDF)",
+    "url": "https://exp-platform.com/Documents/2013-02-CUPED-ImprovingSensitivityOfControlledExperiments.pdf"
+   }
+  },
+  {
+   "name": "Regression adjustment done right: Lin's estimator and stratification",
+   "learn": "Regressing Y on T alone reproduces the difference in means exactly, so covariates in a randomised experiment are about precision, not bias. Know Freedman's critique - naive additive adjustment Y ~ T + X can be less efficient than the unadjusted estimator and its usual OLS standard errors are wrong under treatment-effect heterogeneity - and know Lin's fix: centre the covariates and interact them all with treatment, Y ~ T + X_c + T:X_c, which is asymptotically never worse than the unadjusted difference in means, paired with HC2 heteroskedasticity-robust standard errors. Recognise CUPED as the one-covariate special case of exactly this, and post-stratification as the categorical version. If randomisation was blocked or stratified, the strata must appear in the analysis - analysing a blocked design as simple randomisation is conservative, which sounds safe until you tell a customer they need 40% more traffic than they actually do.",
+   "minutes": 18,
+   "resource": {
+    "label": "Winston Lin - Agnostic notes on regression adjustments to experimental data: Reexamining Freedman's critique (arXiv:1208.2301)",
+    "url": "https://arxiv.org/abs/1208.2301"
+   }
+  },
+  {
+   "name": "Multiple comparisons: FWER, FDR and pre-registered segments",
+   "learn": "With m independent tests at level α the family-wise error is 1-(1-α)^m: 20 secondary metrics gives a 64% chance of at least one false positive, which is why every experiment dashboard has something green on it. Know the three procedures and when each is right - Bonferroni (α/m, controls FWER, needlessly harsh), Holm-Bonferroni (step-down, uniformly more powerful, still exact FWER control), and Benjamini-Hochberg (reject the k largest p-values with p_(k) ≤ k·q/m, controls the false discovery rate) - and run them with statsmodels multipletests(pvals, method='holm'|'fdr_bh'). Apply a tiered policy rather than one blanket correction: the single OEC at full α, guardrails as one-sided non-inferiority tests where you want power against harm, and the long tail of secondary metrics under BH at q = 0.1. Post-hoc segment slicing is the worst offender in practice - pre-register the segments, or estimate a CATE function (causal forest, X-learner) and treat any segment story as a hypothesis for the next experiment rather than a finding in this one.",
+   "minutes": 15,
+   "resource": {
+    "label": "statsmodels docs - multipletests (Bonferroni, Holm, Benjamini-Hochberg)",
+    "url": "https://www.statsmodels.org/stable/generated/statsmodels.stats.multitest.multipletests.html"
+   }
+  },
+  {
+   "name": "Interference: network effects, marketplaces, cluster randomisation and switchbacks",
+   "learn": "SUTVA fails whenever a control unit's outcome depends on who else was treated: social graphs and shared feeds, two-sided marketplaces where treatment consumes finite supply so control is actively depressed (the measured lift then overstates the global effect, sometimes by more than the whole effect), shared caches and rate limits, and any ML system retrained on traffic the experiment generated. Learn the designs that restore identification - graph cluster randomisation (partition into communities, randomise clusters, and define an exposure model so partially-exposed units are handled explicitly), market/region-level randomisation with randomisation inference because you have tens of clusters not millions, and switchbacks that randomise time buckets with a burn-in after each switch and a bucket length chosen to trade carryover bias against variance. The FDE skill is naming the bias direction out loud: 'in a marketplace this is an upper bound on the global effect' is a defensible sentence and buys you far more credibility than a confident point estimate.",
+   "minutes": 18,
+   "resource": {
+    "label": "Ugander, Karrer, Backstrom & Kleinberg - Graph cluster randomization: network exposure to multiple universes (arXiv:1305.6979)",
+    "url": "https://arxiv.org/abs/1305.6979"
+   }
+  },
+  {
+   "name": "Non-compliance and dilution: ITT vs LATE, and why 'as-treated' is a trap",
+   "learn": "Intention-to-treat compares assigned groups and is always unbiased for the question 'what happens if we ship this', but it is diluted whenever some assigned users never receive treatment. The complier average causal effect recovers the effect on the exposed: LATE = ITT / P(comply), which is 2SLS with assignment as an instrument for exposure, valid under relevance, the exclusion restriction (assignment affects Y only through exposure) and monotonicity (no defiers). The trap to be able to name instantly is 'as-treated' analysis - comparing users who actually engaged with the feature against all of control conditions on a post-treatment variable and reintroduces precisely the selection bias randomisation removed, and it is the single most common way an internal dashboard reports a 40% lift that evaporates on rollout. Triggered analysis is the disciplined version: log the counterfactual trigger in control symmetrically, verify the trigger rates match between arms, and report both the triggered effect and the diluted all-users effect.",
+   "minutes": 15,
+   "resource": {
+    "label": "Causal Inference for The Brave and True - Ch. 08 Instrumental Variables",
+    "url": "https://matheusfacure.github.io/python-causality-handbook/08-Instrumental-Variables.html"
+   }
+  },
+  {
+   "name": "DAGs: d-separation, the backdoor criterion, colliders and bad controls",
+   "learn": "Draw the graph before you choose controls. Master the three building blocks - chain T → M → Y, fork T ← C → Y, collider T → K ← Y - and d-separation: a path is blocked if a non-collider on it is conditioned on, or if a collider (and every descendant of it) is not conditioned on. State the backdoor criterion exactly: a set Z identifies the effect of T on Y if it blocks every path into T that starts with an arrow into T, and contains no descendant of T. Then learn the three ways adjustment actively makes things worse, because 'control for more variables' is the customer's instinct: conditioning on a mediator removes the very effect you are estimating, conditioning on a collider (or a selected sample, which is the same thing) opens a spurious path and produces M-bias, and conditioning on an instrument amplifies whatever residual confounding is left. Build the graph in DAGitty, read off the minimal sufficient adjustment set, and then test the graph's implied conditional independences against the data - a DAG that fails its own testable implications is a hypothesis you just refuted.",
+   "minutes": 25,
+   "resource": {
+    "label": "DAGitty - Learn (d-separation, adjustment sets, testable implications)",
+    "url": "https://dagitty.net/learn/index.html"
+   }
+  },
+  {
+   "name": "Adjusting for confounding without randomisation: propensity scores, IPW, DML and refutations",
+   "learn": "Define the propensity score e(X) = P(T=1|X) and write the IPW estimator τ̂ = (1/n)Σ [ T_i·Y_i/ê(X_i) - (1-T_i)·Y_i/(1-ê(X_i)) ], unbiased under ignorability and positivity. The diagnostic that decides whether the analysis is possible at all is the overlap plot: histogram ê(X) by arm, and if treated units pile up near 1 with no control mass there, no weighting scheme creates comparable units - trim to the common support and say the estimand narrowed, rather than shipping weights of 400. Know that AIPW/doubly-robust is consistent if either the outcome model or the propensity model is correct, and that double/debiased ML adds cross-fitting plus a Neyman-orthogonal score so that slow-converging ML nuisance estimates do not contaminate the rate on τ̂. Finish every observational estimate with the refutation battery: placebo treatment (estimate must go to zero), random common cause (estimate must not move), data-subset and bootstrap stability, and a sensitivity analysis - the E-value or Rosenbaum Γ answering 'how strong would an unmeasured confounder have to be to erase this?'",
+   "minutes": 22,
+   "resource": {
+    "label": "Causal Inference for The Brave and True - Ch. 11 Propensity Score",
+    "url": "https://matheusfacure.github.io/python-causality-handbook/11-Propensity-Score.html"
+   }
+  },
+  {
+   "name": "Quasi-experiments and writing the readout",
+   "learn": "For the very common 'we already rolled it out to Region A' situation, know difference-in-differences: τ̂ = (Ȳ_post,treat - Ȳ_pre,treat) - (Ȳ_post,ctrl - Ȳ_pre,ctrl), identified by parallel counterfactual trends, not by matching pre-period levels - so always plot the event study of pre-period leads and require them to be flat and insignificant. Know that two-way fixed effects with staggered adoption is biased under time-varying heterogeneous effects (it puts negative weights on already-treated comparisons) and that Callaway-Sant'Anna or Sun-Abraham estimators fix it; keep synthetic control for a single treated unit with a long clean pre-period, and regression discontinuity when eligibility follows a threshold rule. Then write the artefact that actually gets read: estimand in one sentence, design and randomisation unit, pre-registered α / power / MDE / runtime, SRM and A/A checks passed, τ̂ with a CI in absolute and relative terms, guardrail results, variance-reduction method and its A/A validation, the interference or confounding caveat with its bias direction, and a ship / no-ship recommendation that states what evidence would change your mind.",
+   "minutes": 22,
+   "resource": {
+    "label": "Roth, Sant'Anna, Bilinski & Poe - What's Trending in Difference-in-Differences? (arXiv:2201.01194)",
+    "url": "https://arxiv.org/abs/2201.01194"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can derive n = 2σ²(z_{1-α/2}+z_{1-β})²/Δ² on a whiteboard from the rejection rule, apply it to a 3% baseline conversion with a 5% relative MDE, and match statsmodels TTestIndPower to within 1%, then produce the MDE-vs-N curve and translate it into whole-week runtime for a stated daily traffic.",
+  "You can run a 10,000-replicate Monte Carlo A/A study showing the false-positive rate of a daily-peeked fixed-horizon t-test rising well past 5%, and show an always-valid confidence sequence on the same simulated streams holding at 5% while quantifying how much wider its interval is at the planned N.",
+  "You can implement CUPED from the pre-period covariate up (θ* = Cov(Y,X)/Var(X)), report the realised variance reduction against the predicted 1-ρ², and prove correctness by rerunning the A/A suite with adjustment on and showing uniform p-values.",
+  "You can compute a ratio-metric standard error with the delta method from per-user aggregates, match it against a user-level bootstrap, and demonstrate on real data how much the naive impression-level SE understates it.",
+  "You can look at an assignment log and decide in under five minutes whether the experiment is readable: chi-square SRM test overall and per segment, trigger-rate symmetry between arms, allocation ratio versus intent, and pre-period balance by standardised mean difference.",
+  "You can compute the design effect for a cluster-randomised rollout (DEFF = 1 + (m̄-1)ρ), restate the effective sample size and corrected CI, and choose between aggregation, cluster-robust SEs, GEE and randomisation inference based on cluster count.",
+  "You can draw a DAG for a customer's observational question, name the minimal sufficient adjustment set from the backdoor criterion, identify at least one variable they wanted to control for that is a mediator or collider, and state why adding it would bias the estimate.",
+  "You can read a finished readout and deliver a verdict that names the specific defect and the specific fix - sequential bound, CUPED, delta-method SE, cluster-robust SE, backdoor adjustment, ITT instead of as-treated - rather than 'run it longer'."
+ ],
+ "failureModes": [
+  "The team watched the dashboard daily and shipped the first day p dipped below 0.05; the fixed-horizon test had no sequential bound, the true false-positive rate for that procedure was above 25%, and the effect vanished on full rollout while the customer had already told their board about it.",
+  "CTR was computed as total clicks over total impressions with an impression-level standard error while randomisation was by user; the SE came out roughly four times too small, an A/A test would have flagged it, and a 0.4% 'significant' lift was pure noise.",
+  "A 50.4/49.6 split with a p-value of 1e-6 on the SRM chi-square was waved through as 'basically balanced'; the imbalance came from treatment users crashing before their telemetry flushed, so the surviving treatment users were systematically healthier and every metric looked better.",
+  "The guardrail was a two-sided test on p95 latency that came back p = 0.3, reported as 'no regression'; it was powered to detect only a 40 ms change, the true regression was 18 ms across every request, and support tickets started three weeks after launch.",
+  "In a two-sided marketplace, treatment buyers absorbed inventory that control buyers would otherwise have bought; the measured 12% conversion lift was mostly redistribution, and the global rollout produced a fraction of it because the control group had been the source of the gain.",
+  "Analysts compared users who actually opened the new panel against the entire control group; conditioning on a post-treatment engagement variable reintroduced selection bias, turning a roughly flat effect into a reported 35% lift that no rollout ever reproduced.",
+  "CUPED was applied with a covariate computed over the experiment window rather than the pre-period; the adjustment absorbed part of the treatment effect itself, shrinking the estimate toward zero, and the A/A validation that would have exposed it was never rerun after the covariate changed.",
+  "Forty segments were sliced post-hoc with no correction, one came back at p = 0.03, and 'the feature works for enterprise users on Android' became a roadmap commitment built on an expected-by-chance result in a segment of 900 users."
+ ],
+ "interviewQuestions": [
+  "Derive the per-arm sample size for a two-sample test of proportions from the rejection rule and the power requirement. Baseline conversion is 4%, the product team wants to detect a 5% relative lift at 80% power and α = 0.05 two-sided, and you get 40,000 eligible users per day. How long does the test run, and what are three legitimate ways to shorten it without changing α or power?",
+  "Explain to a customer's VP of Product, who has been checking the dashboard every morning, exactly why that invalidates the p-value. Then explain what a confidence sequence guarantees that a fixed-horizon confidence interval does not, and what it costs them at the planned sample size.",
+  "Debug: an A/A test on your platform returns significant results about 15% of the time on the click-through-rate metric but exactly 5% of the time on revenue per user. What are the two most likely causes, how do you distinguish them from the assignment and exposure logs, and what is the fix for each?",
+  "Design: a customer wants to know whether their new AI-assisted support triage reduces time-to-resolution. Agents work in teams, they talk to each other, and only 6 of their 30 teams handle the relevant ticket volume. Give me the design - randomisation unit, estimand, how you get a standard error you would defend, and what you would tell them you cannot measure.",
+  "Write down the CUPED estimator, prove it is unbiased, and derive the variance reduction factor. What exactly goes wrong if the covariate is measured during the experiment instead of before it, and what test would catch that mistake before the readout ships?",
+  "A customer has no experiment - they rolled the feature out to their EU region in March and want the impact. Draw the DAG you would sketch with them, state the identifying assumption for difference-in-differences in one sentence, name the plot that would falsify it, and say what you would do differently if six regions adopted it at six different times.",
+  "You are handed a readout showing a 22% lift on the primary metric with p = 0.001, computed on the users who were exposed to treatment versus everyone in control, with a 60/40 assignment split. List everything you would check before letting that number leave the building, in the order you would check it."
+ ],
+ "proofOfWork": "A public `experiment-review-board` repo that turns the ab-toolkit into something a customer's analytics team can actually adopt. It contains (1) a `preregister` CLI that takes baseline mean and variance from the customer's own historical data, an MDE, α, power and daily traffic, and emits a signed pre-registration YAML - estimand sentence, randomisation unit, OEC, guardrails with non-inferiority margins, pre-declared segments, analysis method, planned N and runtime in whole weeks - plus the MDE-vs-N plot; (2) an `audit` command that consumes an assignment log, an exposure log and a metric table and returns a pass/fail card covering SRM (chi-square, overall and per segment and per day), trigger-rate symmetry, pre-period standardised mean differences, allocation ratio versus intent, and whether the analysis unit matches the randomisation unit, refusing to print a lift when any hard check fails; (3) a `variance` module implementing delta-method SEs for ratio metrics, cluster-robust and GEE options with the DEFF computed and printed, CUPED with the realised-versus-predicted variance reduction, and Lin's interacted regression adjustment, each shipped with an A/A calibration test in CI that fails the build if the false-positive rate drifts outside [0.04, 0.06] over 10,000 replications; and (4) six deliberately broken readouts in `cases/` - peeked, SRM, impression-level ratio SE, as-treated, marketplace interference, post-hoc segment - each with a one-page written verdict naming the defect, the corrected number where one can be recovered, and the single design change that would have prevented it. The README opens with the pre-registration template as a fill-in-the-blanks page a customer can use without reading any of the code."
+}

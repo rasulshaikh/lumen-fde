@@ -1,0 +1,210 @@
+{
+ "i": 105,
+ "topic": "Hyperparameter optimisation: grid, random, Bayesian search with Optuna",
+ "track": "N. Machine Learning Systems",
+ "month": 9,
+ "hours": 5,
+ "why": "Tuning is where an FDE most easily manufactures a number that is not real: the search reports 0.91 AUC, the customer's holdout says 0.84, and you have no story for the gap because the cross-validation lived outside the trial or the winner was simply the luckiest of 400 draws. Knowing the actual mechanics - that random search needs only 60 draws to hit the top 5 percent of a space with 95 percent probability, that TPE maximises the density ratio l(x)/g(x) rather than a Gaussian-process EI, that successive halving assumes low-fidelity rank order predicts full-fidelity rank order - is what lets you defend a fixed trial budget on a customer's laptop instead of asking for a GPU cluster. It is also the difference between saying 'we tuned it' and being able to point at a param-importance plot and say 'three of these seven parameters do nothing, drop them and we halve the search'.",
+ "prerequisites": [
+  "Cross-validation mechanics and leakage taxonomy from Topic 103 (Model evaluation): KFold vs StratifiedKFold vs GroupKFold vs TimeSeriesSplit, and why a transform fitted outside the fold is leakage",
+  "Gradient boosting from Topic 101 (Supervised learning II): what num_leaves, min_data_in_leaf, learning_rate, feature_fraction and lambda_l2 each do to the fitted trees, plus early stopping with a watchlist",
+  "Bias-variance decomposition and regularisation from Topic 100, since every hyperparameter is a knob on one of those two terms",
+  "Estimation and interval basics from Topic 96 (Statistical inference): standard error of a mean, why the maximum of k noisy estimates is biased upward, paired comparisons",
+  "Probability densities and quantiles from Topic 95: what a log-uniform prior is, what a gamma-quantile split of observed losses means, what a kernel density estimate is",
+  "sklearn Pipeline and ColumnTransformer fluency plus a working LightGBM install, since the deliverable tunes one LightGBM model four ways under one budget"
+ ],
+ "subtopics": [
+  {
+   "name": "HPO as noisy, expensive, derivative-free black-box optimisation",
+   "learn": "State the problem formally: minimise the expected generalisation risk L(lambda) = E[loss(model trained with lambda)] over a mixed continuous/integer/categorical space, where you can only observe a noisy estimate L_hat(lambda) from cross-validation, each observation costs minutes, and no gradient of L with respect to lambda exists. Every method in this topic is a different answer to 'how do I spend n noisy, expensive evaluations', so name the three axes that decide the answer: dimensionality of the space, cost per evaluation, and the noise floor sigma of L_hat across CV folds. Internalise the consequence that if the fold-to-fold standard error of your metric is larger than the spread between your top ten configurations, no search algorithm can help you - you are ranking noise.",
+   "minutes": 15,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - chapter 06, machine learning",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/tree/main/chapter%2006%20-%20machine%20learning"
+   }
+  },
+  {
+   "name": "Why the search itself overfits: the optimistic bias of the argmax",
+   "learn": "Derive the core statistical fact: because E[max_i X_i] >= max_i E[X_i] for noisy estimates X_i, the CV score of the winning trial is an upward-biased estimate of that configuration's true performance, and the bias grows with the number of trials and with the variance of L_hat. This is selection on noise - with 500 trials on a 5000-row dataset you can 'win' 0.02 AUC purely by drawing a configuration that happens to suit your particular fold assignment. The two defences are a held-out test set touched exactly once after the search, and nested cross-validation where the inner loop selects lambda and the outer loop estimates the generalisation of the whole tuning procedure; be able to say that nested CV evaluates the procedure, not a specific lambda, and that the two numbers answer different customer questions.",
+   "minutes": 18,
+   "resource": {
+    "label": "scikit-learn example - Nested versus non-nested cross-validation",
+    "url": "https://scikit-learn.org/stable/auto_examples/model_selection/plot_nested_cross_validation_iris.html"
+   }
+  },
+  {
+   "name": "Grid search: the geometry, and why it dies above three parameters",
+   "learn": "Grid search over d parameters with N values each costs N^d evaluations, so a 6-parameter LightGBM grid at 5 values apiece is 15625 fits - the budget is set by the space, not by you, which is the practical objection. Reproduce Bergstra and Bengio's argument: when only k of the d parameters matter (low effective dimensionality), a grid of n points still probes only N = n^(1/d) distinct values along the important axis, while n random draws probe n distinct values along every axis, so random search dominates for the same budget. Know the two places grid is still correct: a genuinely small discrete space (3 boosting types x 4 max_depth), and a customer-facing sweep where you must show a complete, explainable table rather than the best point. Optuna reproduces it exactly with GridSampler, which makes the four-way comparison in the deliverable apples to apples.",
+   "minutes": 18,
+   "resource": {
+    "label": "Bergstra and Bengio (JMLR 2012) - Random Search for Hyper-Parameter Optimization",
+    "url": "https://www.jmlr.org/papers/v13/bergstra12a.html"
+   }
+  },
+  {
+   "name": "Random search: the 1-(1-p)^n coverage bound and log-uniform priors",
+   "learn": "Derive the budget rule you will quote to customers: if a fraction p of the space is 'good enough', n independent draws miss it with probability (1-p)^n, so P(hit) = 1 - (1-p)^n; n = 60 gives 95 percent coverage of the top 5 percent, and n = 300 gives 95 percent of the top 1 percent, regardless of dimensionality. Then get the priors right, because coverage is over the sampling measure, not the interval: learning_rate on [1e-4, 1e-1] drawn uniformly puts 90 percent of the mass above 1e-2, so use scipy.stats.loguniform (density proportional to 1/x) or Optuna's suggest_float(..., log=True), and use integer log scales for num_leaves. Implement a from-scratch random search with a seeded numpy Generator so the draw sequence is reproducible and can be replayed against a different estimator.",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy docs - scipy.stats.loguniform",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.loguniform.html"
+   }
+  },
+  {
+   "name": "Keeping cross-validation inside the trial: Pipeline, leakage and the fold boundary",
+   "learn": "The non-negotiable rule: everything fitted from data - imputer, scaler, target encoder, SMOTE resampler, feature selector, PCA - is fitted inside each training fold, which in practice means the objective builds a Pipeline and calls cross_val_score on the pipeline, never on a pre-transformed matrix. Enumerate the leakage channels this closes and the ones it does not: pre-fold target encoding (closed), pre-fold feature selection (closed), the same fold used both for LightGBM early stopping and for scoring (not closed - use an inner split or accept the optimism and say so), the same customer or device in train and validation (needs GroupKFold), and future rows in a past fold (needs TimeSeriesSplit with a gap). Be able to demonstrate the size of the effect: fit a StandardScaler plus SelectKBest on the full training set before CV and show the phantom gain, then move both inside the pipeline and watch it vanish.",
+   "minutes": 22,
+   "resource": {
+    "label": "scikit-learn User Guide - Common pitfalls and recommended practices (data leakage)",
+    "url": "https://scikit-learn.org/stable/common_pitfalls.html"
+   }
+  },
+  {
+   "name": "What the objective actually returns: metric choice, scorer sign, and aggregation",
+   "learn": "The objective returns one scalar and the search will exploit exactly that scalar, so pick it deliberately: accuracy on a 2 percent positive rate rewards the all-negative model, ROC AUC is threshold-free and insensitive to prevalence while average_precision tracks the minority class, and log_loss is what you want when the customer consumes probabilities rather than labels. Know sklearn's convention that scorers are greater-is-better so error metrics appear as neg_log_loss and neg_root_mean_squared_error, and that make_scorer(..., greater_is_better=False) flips the sign for you. Decide the aggregation across folds and say why: mean is standard, mean minus one standard error is a defensible tie-break that prefers stable configurations, and returning the mean while logging the per-fold spread as a trial user attribute is what later lets you tell the customer whether the winner won by a real margin.",
+   "minutes": 18,
+   "resource": {
+    "label": "scikit-learn User Guide - Metrics and scoring (scorer conventions, sign flipping)",
+    "url": "https://scikit-learn.org/stable/modules/model_evaluation.html"
+   }
+  },
+  {
+   "name": "Bayesian optimisation: surrogate model plus acquisition function",
+   "learn": "Understand the loop: fit a probabilistic surrogate to the observed (lambda, loss) pairs, maximise a cheap acquisition function over the surrogate to pick the next lambda, evaluate, refit. With a Gaussian-process surrogate giving posterior mean mu(x) and standard deviation sigma(x), be able to write Expected Improvement in closed form for minimisation - EI(x) = (f_best - mu(x)) * Phi(z) + sigma(x) * phi(z) with z = (f_best - mu(x)) / sigma(x) - and read off the exploration/exploitation split: the first term rewards a low predicted mean, the second rewards uncertainty. Know the alternatives by name (probability of improvement, upper confidence bound mu - kappa*sigma, entropy search) and the practical limits of GPs: cubic cost in the number of trials, awkwardness with categorical and conditional parameters, and sensitivity to the kernel and length-scale, which is precisely why Optuna's default is not a GP. Optuna's GPSampler is available when the space is low-dimensional, continuous and evaluations are genuinely expensive.",
+   "minutes": 22,
+   "resource": {
+    "label": "Distill - Exploring Bayesian Optimization (GP surrogate and acquisition functions)",
+    "url": "https://distill.pub/2020/bayesian-optimization/"
+   }
+  },
+  {
+   "name": "TPE: the density ratio l(x)/g(x) that Optuna actually maximises",
+   "learn": "Derive the estimator rather than treating TPE as a black box: sort the observed losses, split them at the gamma-quantile y*, and fit two kernel density estimates over the parameter values - l(x) = p(x | y < y*) from the good trials and g(x) = p(x | y >= y*) from the rest. Expected improvement under this model is proportional to (gamma + (1 - gamma) * g(x)/l(x))^-1, so maximising EI reduces to maximising the ratio l(x)/g(x); TPE therefore samples n_ei_candidates points from l and returns the one with the highest ratio, which is cheap, handles categorical and conditional parameters natively, and scales linearly rather than cubically in trials. Know the knobs and what they mean: n_startup_trials (pure random sampling before the model kicks in, default 10), multivariate=True and group=True to model parameter interactions instead of independent marginals, and constant_liar=True to stop parallel workers proposing the same point. Know its weakness - the univariate default ignores correlations such as the learning_rate/n_estimators coupling.",
+   "minutes": 22,
+   "resource": {
+    "label": "arXiv 2304.11127 - Tree-Structured Parzen Estimator: Understanding Its Algorithm Components",
+    "url": "https://arxiv.org/abs/2304.11127"
+   }
+  },
+  {
+   "name": "Writing an Optuna objective: define-by-run, suggest_* and study wiring",
+   "learn": "Write objective(trial) as ordinary Python so the search space is defined by execution, not by a static dict: trial.suggest_float('learning_rate', 1e-3, 3e-1, log=True), trial.suggest_int('num_leaves', 8, 256, log=True), trial.suggest_categorical('boosting_type', ['gbdt', 'dart']), with conditional branches so a parameter only exists when it applies (bagging_freq only when bagging_fraction < 1). Wire the study with optuna.create_study(direction='maximize', sampler=TPESampler(seed=42, multivariate=True), pruner=..., study_name=..., storage='sqlite:///hpo.db', load_if_exists=True) and run study.optimize(objective, n_trials=100, timeout=1800, catch=(ValueError,)) so one exploding configuration does not kill the run. Attach everything you will need later with trial.set_user_attr - per-fold scores, best_iteration from early stopping, fit seconds - and pull the whole record out with study.trials_dataframe(); note that suggest_uniform and suggest_loguniform are deprecated aliases for suggest_float.",
+   "minutes": 18,
+   "resource": {
+    "label": "Optuna API reference - optuna.trial.Trial (suggest_*, report, set_user_attr)",
+    "url": "https://optuna.readthedocs.io/en/stable/reference/generated/optuna.trial.Trial.html"
+   }
+  },
+  {
+   "name": "Pruning: report, should_prune, and the assumption that makes it valid",
+   "learn": "Add trial.report(intermediate_value, step) inside the boosting callback or epoch loop and then 'if trial.should_prune(): raise optuna.TrialPruned()' - the exception is how Optuna records a pruned trial rather than a failed one. Understand MedianPruner precisely: after n_startup_trials completed trials and n_warmup_steps within a trial, it prunes when this trial's best intermediate value at step t is worse than the median of previous trials' intermediate values at the same step, with interval_steps controlling how often the check runs. State the assumption out loud, because it is what breaks: the rank order of partially trained models must predict the rank order of fully trained models, which fails under warmup schedules, cosine restarts, dart boosting, and any configuration that is slow early and best late - a low learning_rate with many trees is exactly the victim. Know SuccessiveHalvingPruner, HyperbandPruner, PercentilePruner and PatientPruner as the alternatives, and that a pruned trial is not a free trial when you are comparing budgets.",
+   "minutes": 18,
+   "resource": {
+    "label": "Optuna API reference - optuna.pruners.MedianPruner",
+    "url": "https://optuna.readthedocs.io/en/stable/reference/generated/optuna.pruners.MedianPruner.html"
+   }
+  },
+  {
+   "name": "Successive halving and Hyperband: the budget arithmetic",
+   "learn": "Successive halving takes n configurations at a small resource r (rows, trees, or epochs), evaluates all of them, keeps the top 1/eta, multiplies the resource by eta, and repeats for log_eta(n) rungs, so it spends roughly equal budget per rung while the survivors get exponentially more resource - this is how you evaluate 81 configurations for the cost of a handful of full fits. The bias is explicit: it trades fidelity for breadth and assumes low-fidelity rank order predicts full-fidelity rank order. Hyperband removes the n-versus-r guess by running several brackets with different starting (n, r) trade-offs, from many-cheap to few-expensive, and ASHA makes the rungs asynchronous so workers never idle waiting for a rung to fill. Be able to compute, for eta=3, R=81 and a fixed wall-clock, how many configurations each bracket starts with and how many survive to full fidelity.",
+   "minutes": 20,
+   "resource": {
+    "label": "Dive into Deep Learning - Multi-Fidelity Hyperparameter Optimization (successive halving)",
+    "url": "https://d2l.ai/chapter_hyperparameter-optimization/sh-intro.html"
+   }
+  },
+  {
+   "name": "HalvingRandomSearchCV in scikit-learn: the API and its sharp edges",
+   "learn": "You must write 'from sklearn.experimental import enable_halving_search_cv' before importing the class or the import fails - this is the number one reason the example does not run. Configure it deliberately: factor is eta, resource defaults to 'n_samples' but can be any integer estimator parameter such as 'n_estimators', min_resources takes 'smallest' or 'exhaust', n_candidates takes 'exhaust' to size the first rung to the budget, and aggressive_elimination=True forces extra elimination rounds when the candidates cannot be reduced to one by the last rung. Know the modelling failure the 'n_samples' resource introduces: on small subsamples, heavily regularised, low-capacity configurations look best, so a search that eliminates on 5 percent of rows can discard the high-capacity configuration that wins on the full data. Read cv_results_ columns iter, n_resources and mean_test_score to see the elimination path rather than only the winner.",
+   "minutes": 15,
+   "resource": {
+    "label": "scikit-learn API - HalvingRandomSearchCV",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.HalvingRandomSearchCV.html"
+   }
+  },
+  {
+   "name": "Designing a LightGBM search space that is worth searching",
+   "learn": "Bound the space from the model's own constraints rather than from a blog post: num_leaves must stay below 2^max_depth to keep the leaf-wise growth from becoming a depth-limited tree, min_data_in_leaf is the strongest anti-overfit knob on small data and should scale with rows per leaf, feature_fraction and bagging_fraction with bagging_freq >= 1 give decorrelation, and lambda_l1/lambda_l2 belong on a log scale spanning several decades including a value near zero. Do not tune n_estimators and learning_rate as independent axes - their product is roughly conserved, so fix n_estimators high, pass early stopping against the fold's validation split, and record best_iteration as a trial user attribute so the refit on full data uses it. Decide up front which parameters are search space and which are fixed policy (objective, metric, deterministic, num_threads, categorical handling), because every unnecessary axis multiplies the volume the sampler must cover.",
+   "minutes": 18,
+   "resource": {
+    "label": "LightGBM docs - Parameters Tuning",
+    "url": "https://lightgbm.readthedocs.io/en/stable/Parameters-Tuning.html"
+   }
+  },
+  {
+   "name": "Reading the diagnostics: history, param importances, slice, contour, EDF",
+   "learn": "Learn to make a decision from each plot rather than screenshotting all of them. plot_optimization_history shows best-so-far against trial index: still stepping means keep going, flat for the last third means stop or widen; plot_param_importances runs fANOVA over a surrogate fitted to the trials and decomposes predicted-loss variance into per-parameter contributions, so a parameter under a few percent is a candidate to freeze at its default and remove an axis. plot_slice is the range diagnostic - when the best values pile up at the edge of an interval, the interval is wrong and you widen it; plot_contour exposes two-parameter interactions such as learning_rate against num_leaves; plot_edf compares whole studies by the distribution of achieved objective values, not just their maxima; plot_intermediate_values tells you whether the pruner cut trials that were still climbing. Remember fANOVA importance is importance under your chosen ranges: a parameter looks unimportant if you searched a narrow interval of it.",
+   "minutes": 20,
+   "resource": {
+    "label": "Optuna API reference - visualization module (history, importances, slice, contour, EDF)",
+    "url": "https://optuna.readthedocs.io/en/stable/reference/visualization/index.html"
+   }
+  },
+  {
+   "name": "Benchmarking four searches honestly: budget definition, seeds, and paired tests",
+   "learn": "Define the budget in a unit that survives pruning: trial count is not comparable when a TPE run prunes half its trials at 20 percent fidelity, so fix either wall-clock seconds or total full-fidelity-equivalent model fits, and report both. Hold the CV split fixed across all four searches with the same seed so the objective is literally the same function, then vary the sampler seed across at least five repeats and report median and interquartile range of best CV score - a single TPE run beating a single random run is n=1 and means nothing. Compute trials-to-90-percent-of-best from the best-so-far curve as the anytime-performance number that customers actually care about, and when you compare two configurations' CV scores use a corrected resampled t-test rather than a naive paired t-test, because overlapping training sets correlate the folds and inflate the Type I error rate.",
+   "minutes": 18,
+   "resource": {
+    "label": "scikit-learn example - Statistical comparison of models using grid search (corrected t-test)",
+    "url": "https://scikit-learn.org/stable/auto_examples/model_selection/plot_grid_search_stats.html"
+   }
+  },
+  {
+   "name": "Multi-objective and constrained search: Pareto fronts and latency budgets",
+   "learn": "When the customer needs accuracy and p99 latency, do not silently collapse them into a weighted sum - use optuna.create_study(directions=['maximize', 'minimize']), read study.best_trials as the Pareto set, and plot_pareto_front to hand the customer the actual trade-off curve so they choose the exchange rate. Know that multi-objective studies use NSGAIISampler or the multi-objective TPE variant, that there is no single best_trial (accessing study.best_trial raises), and that non-dominated sorting plus crowding distance is what maintains front diversity. For a hard limit rather than a trade-off, use a constraints_func returning values that are feasible when <= 0, so infeasible trials still inform the sampler instead of being discarded, or return a large penalty and accept that you have distorted the surrogate.",
+   "minutes": 14,
+   "resource": {
+    "label": "Optuna tutorial - Multi-objective Optimization",
+    "url": "https://optuna.readthedocs.io/en/stable/tutorial/20_recipes/002_multi_objective.html"
+   }
+  },
+  {
+   "name": "Operationalising a study: storage, parallelism, resume and reproducibility",
+   "learn": "Persist to an RDB with storage='sqlite:///hpo.db' plus study_name and load_if_exists=True so a killed run resumes instead of restarting; know that SQLite is single-writer and fine for one process but that several parallel workers need PostgreSQL/MySQL or the JournalStorage file backend, and that the scale-out pattern is N separate processes running the same study_name, not n_jobs. Understand why study.optimize(n_jobs=-1) is threads and therefore GIL-bound for Python-side work, and why nesting it inside LightGBM's own num_threads oversubscribes the cores and destroys any wall-clock comparison. Be precise about reproducibility: a sampler seed reproduces a sequential single-worker study exactly, but parallel studies are non-deterministic because the sampler conditions on whichever trials finished first - so pin the seed, pin the library versions, log the git SHA and the dataset hash as study user attributes, and treat the trials table, not the notebook, as the record.",
+   "minutes": 16,
+   "resource": {
+    "label": "Optuna tutorial - Easy Parallelization (shared storage, multiple workers)",
+    "url": "https://optuna.readthedocs.io/en/stable/tutorial/10_key_features/004_distributed.html"
+   }
+  },
+  {
+   "name": "When not to tune: diagnosing before spending the budget",
+   "learn": "Establish the honest baseline first - defaults plus a correct CV harness - and compute the fold-to-fold standard error of the metric; if tuning moves the mean by less than one standard error, you have spent a day buying noise and should say so rather than shipping the number. Diagnose which direction to move before searching: a large train-versus-validation gap is a variance problem pointing at min_data_in_leaf, feature_fraction and lambda_l2, while both scores being poor is a bias problem pointing at capacity, more boosting rounds, or better features. Hold the FDE ordering in mind - a fixed label definition, a removed leaked column, or 10x more rows usually beats every hyperparameter you can turn - and be ready to tell a customer that the correct recommendation is to stop tuning and go fix the data.",
+   "minutes": 12,
+   "resource": {
+    "label": "XGBoost docs - Notes on Parameter Tuning (bias-variance control)",
+    "url": "https://xgboost.readthedocs.io/en/stable/tutorials/param_tuning.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can pick between grid, random, successive halving and TPE for a given search space and a fixed trial budget, and defend the choice from the space dimensionality, the cost per evaluation and the fold-to-fold noise rather than from what is fashionable.",
+  "You can derive the random-search coverage bound 1-(1-p)^n at a whiteboard, use it to say why 60 trials is the usual floor, and explain why the bound only holds under the sampling distribution you chose (so learning_rate must be log-uniform).",
+  "You can write, from memory, an Optuna objective that builds a sklearn Pipeline inside the trial, cross-validates it, reports intermediate values for pruning, records per-fold scores and best_iteration as user attributes, and returns a single scalar - and prove no transform was fitted outside a fold.",
+  "You can explain TPE as maximising l(x)/g(x) from a gamma-quantile split of observed losses, name n_startup_trials, multivariate and constant_liar, and say when a GP surrogate would be the better choice instead.",
+  "You can read an optimisation-history, param-importance and slice plot and produce one of four decisions - stop, keep going, widen this range, drop this parameter - with the evidence from the plot that supports it.",
+  "You can benchmark four search strategies under one identical budget, define that budget in a pruning-proof unit, repeat over five sampler seeds, and report median best CV, trials-to-90-percent-of-best, wall-clock and a single held-out test score per strategy.",
+  "You can quantify the optimism of the search: report the winner's CV score, the held-out test score and a nested-CV estimate, and explain to a customer which of the three answers 'how will this model do next month'.",
+  "You can convert an accuracy-versus-latency requirement into a two-direction Optuna study, hand back a Pareto front instead of one model, and state which point you recommend and why."
+ ],
+ "failureModes": [
+  "The scaler and target encoder are fitted on the full training frame before the Optuna loop starts, so every one of 400 trials scores against leaked statistics; CV reports 0.91 AUC, the customer's holdout returns 0.84, and the search is blamed for overfitting when the harness was wrong before the first trial.",
+  "LightGBM early stopping is evaluated on the same fold that produces the trial's score, so the validation set is used twice and every configuration looks a little better than it is - uniformly enough that the ranking survives and nobody notices until the gap appears in production.",
+  "The MedianPruner is left at n_warmup_steps=0, so low-learning-rate configurations that are slow for the first 100 trees and best at 900 are killed at trial step 20; the search converges confidently on a high-learning-rate model that is measurably worse at full fidelity.",
+  "TPE with 500 trials is compared against random search with 500 trials, but TPE pruned 60 percent of its trials at low fidelity; the comparison is reported as trials-for-trials, TPE looks dramatically better, and the same experiment measured in wall-clock shows no difference.",
+  "learning_rate is sampled uniformly on [1e-4, 1e-1] instead of log-uniformly, so 90 percent of draws land above 1e-2, the optimum near 3e-3 is never sampled, and the slice plot showing every good trial pressed against the left edge of the range is never looked at.",
+  "HalvingRandomSearchCV eliminates on n_samples with min_resources='smallest', so the first rung ranks configurations on 3 percent of the data where heavily regularised low-capacity models dominate; the high-capacity winner is eliminated in rung one and can never come back.",
+  "Two workers run study.optimize against the same SQLite storage with a fixed sampler seed; the run is presented as reproducible, but the sampler conditions on whichever trials committed first, so the rerun for the customer produces a different winner and the whole result loses credibility.",
+  "The tuned model beats defaults by 0.004 AUC while the fold-to-fold standard error is 0.02; the improvement is written into a deliverable as a real gain, the customer retrains on next month's data, the ordering flips, and the tuning process is what gets distrusted."
+ ],
+ "interviewQuestions": [
+  "Derive the probability that random search finds a configuration in the top p fraction of the space within n trials, and use it to justify a trial budget to a customer. Then tell me what assumption of that derivation your actual search space usually violates.",
+  "Explain how TPE picks its next point. Write down what l(x) and g(x) are, how gamma enters, and why maximising expected improvement reduces to maximising the density ratio. When would you use a Gaussian-process surrogate with expected improvement instead, and what does the closed form of EI look like?",
+  "Design: a customer gives you a 200k-row tabular dataset, a LightGBM baseline, one 8-core box and four hours. Specify the search space, the CV scheme, the objective, the budget, the pruning strategy, and exactly how you will report the result so it holds up when they retrain next quarter.",
+  "Your Optuna study reports 0.93 AUC on the best trial and the held-out test set returns 0.87. Walk me through your diagnosis in order. Which candidate causes are leakage, which are selection on noise, and what experiment separates the two?",
+  "Successive halving eliminates on a fraction of the training rows. Explain the bias that introduces, give me a concrete case where the eventual best configuration is eliminated in the first rung, and describe how you would change the resource or the schedule to avoid it.",
+  "You have optimisation-history, param-importance and slice plots from a 300-trial study. For each plot, tell me one specific pattern that would make you stop the search, one that would make you widen a range, and one that would make you delete a parameter from the space.",
+  "A customer needs AUC above 0.85 and p99 inference latency under 40 milliseconds. How do you set the search up so you are not silently choosing their trade-off for them, and what artifact do you hand back?"
+ ],
+ "proofOfWork": "A companion `tuning-honesty` module and drill checked into the same repo as hpo-lab, aimed at the part customers actually challenge. It ships (a) `optuna_cv.py`, a small reusable objective factory that takes a Pipeline builder, a CV splitter and a scorer and guarantees the two invariants by construction - every transform is fitted inside the fold, and the held-out test set is inaccessible to the objective (it is not even passed in) - with unit tests that assert a deliberately leaky variant scores higher and that the guarded version does not; (b) a reproduced leakage drill on one dataset showing three numbers side by side for the same winning configuration - best-trial CV, nested-CV estimate of the tuning procedure, and the single held-out test score - with the CV-minus-test gap plotted as a function of trial count so the optimistic bias of the argmax is visible growing from 20 to 500 trials; (c) a pruner-validity check that reruns the top 20 pruned trials at full fidelity and reports the rank correlation between the intermediate value at the pruning step and the final score, which is the evidence that the MedianPruner settings were safe on this problem; and (d) a one-page customer-facing Tuning Report template, filled in for the deliverable's dataset, giving the search space table, the budget in wall-clock and full-fidelity-equivalent fits, the gain over defaults with the fold-to-fold standard error as an error bar, the param-importance ranking with a recommendation to freeze the bottom parameters, and an explicit 'we recommend you stop tuning and do X to the data instead' section when the gain does not clear one standard error."
+}

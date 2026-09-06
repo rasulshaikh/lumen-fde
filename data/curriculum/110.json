@@ -1,0 +1,229 @@
+{
+ "i": 110,
+ "topic": "Neural network foundations: backpropagation, activations, initialisation, regularisation",
+ "track": "O. Deep Learning and Multimodal",
+ "month": 11,
+ "hours": 8,
+ "why": "Every deep-learning conversation you will have with a customer eventually collapses into one of four questions - why is the loss NaN, why is validation worse than training, why does it not learn at all, and why did it work on my laptop - and all four are answered by the chain rule, the variance arithmetic of initialisation, and the train/eval semantics of the regularisers. If you have derived and coded the backward pass yourself, a per-layer gradient histogram is a diagnosis rather than a picture, and you can say 'this is a dead-ReLU problem caused by your init scale, not a data problem' in the room instead of promising to look into it. This is also the topic that makes everything downstream honest: batch norm, transformers, LoRA and fine-tuning are all just more computational graph, and you cannot debug a model you can only call.",
+ "prerequisites": [
+  "Matrix calculus at the level of Topic 94 (Calculus and optimisation): Jacobians, the multivariable chain rule, gradient descent, and being able to differentiate a scalar with respect to a matrix",
+  "Linear algebra from Topic 93: matrix products and shapes, transposes, inner products, singular values and what a spectral radius says about repeated multiplication",
+  "Cross-entropy and maximum likelihood from Topic 98 (Information theory and loss functions) - you must already know that minimising NLL is fitting a categorical likelihood",
+  "NumPy vectorisation, broadcasting rules and float32-vs-float64 behaviour from Topic 99 (Numerical computing), including why catastrophic cancellation exists",
+  "Regularisation and the bias-variance decomposition as seen for linear models in Topic 100 (Supervised learning I) - L2 on a logistic regression should already be familiar",
+  "An honest train/validation/test split discipline and leakage awareness from Topic 103 (Model evaluation), because every ablation number in the deliverable is a held-out number",
+  "Python 3.11+ with NumPy and Matplotlib installed, pytest for the gradient-check test, and PyTorch available for cross-checking only (it must not appear in the training path)"
+ ],
+ "subtopics": [
+  {
+   "name": "Computational graphs and reverse-mode automatic differentiation",
+   "learn": "Understand that backpropagation is not a special algorithm for neural nets but reverse-mode AD on a DAG: each primitive defines a vector-Jacobian product v -> v^T (df/dx), and the reverse sweep composes them right-to-left. Be able to state the cost argument: for f: R^n -> R, forward mode needs n sweeps (one per input direction) while reverse mode needs one, at the price of storing every intermediate activation - so training memory scales with depth x batch x width, which is why activation checkpointing exists. Know that the reverse sweep visits nodes in reverse topological order, that a node used twice must have its incoming gradients summed (fan-out becomes addition), and that non-differentiable points (ReLU at 0, max, abs) are handled by convention, not by the theory.",
+   "minutes": 25,
+   "resource": {
+    "label": "Baydin et al., \"Automatic Differentiation in Machine Learning: a Survey\" (arXiv:1502.05767)",
+    "url": "https://arxiv.org/abs/1502.05767"
+   }
+  },
+  {
+   "name": "Hand-deriving the backward pass of an L-layer MLP",
+   "learn": "Derive on paper, without notes, for z^l = W^l a^{l-1} + b^l and a^l = phi(z^l): the output error delta^L = grad_{a^L} J (*) phi'(z^L), the recursion delta^l = ((W^{l+1})^T delta^{l+1}) (*) phi'(z^l), and the parameter gradients dJ/dW^l = delta^l (a^{l-1})^T and dJ/db^l = delta^l, where (*) is elementwise. Then redo it in batched row-major layout - A of shape (B, d_in), dZ of shape (B, d_out), dW = A^T dZ, db = dZ.sum(axis=0), dA = dZ W^T - and be explicit about where the 1/B from a mean-reduced loss lives, because putting it in two places is a silent 1/B^2 that looks like a learning-rate problem. Be able to name which activations must be cached during the forward pass for each of these to be computable.",
+   "minutes": 35,
+   "resource": {
+    "label": "d2l.ai - Forward Propagation, Backward Propagation, and Computational Graphs",
+    "url": "https://d2l.ai/chapter_multilayer-perceptrons/backprop.html"
+   }
+  },
+  {
+   "name": "Softmax + cross-entropy: the (yhat - y) identity and log-sum-exp",
+   "learn": "Derive the softmax Jacobian dp_i/dz_j = p_i(delta_ij - p_j), i.e. diag(p) - p p^T, then compose it with dL/dp_i = -y_i/p_i and watch everything cancel to the identity dL/dz = yhat - y (per example, divided by B if the loss is mean-reduced). Implement log-softmax with the shift trick log sum_j exp(z_j) = m + log sum_j exp(z_j - m) where m = max_j z_j, and know that computing softmax then log separately overflows for logits around 90 in float32 and underflows to log(0) = -inf for confidently wrong predictions. Know that torch.nn.CrossEntropyLoss and torch.nn.functional.log_softmax consume raw logits for exactly this reason, so an extra softmax before the loss is a real and common bug that halves effective gradients rather than crashing.",
+   "minutes": 30,
+   "resource": {
+    "label": "d2l.ai - Concise Implementation of Softmax Regression (Softmax Implementation Revisited / LogSumExp)",
+    "url": "https://d2l.ai/chapter_linear-classification/softmax-regression-concise.html"
+   }
+  },
+  {
+   "name": "Writing a minimal reverse-mode autograd engine",
+   "learn": "Build a Tensor/Value node holding .data, .grad, a ._backward closure and a set of parents, so that every op (add, mul, matmul, relu, log-softmax) constructs the child node and registers how to push gradient back. Implement backward() as: build the topological order by DFS, seed the output gradient with 1.0, then walk the reversal calling each closure - and always accumulate with += so a tensor consumed by two branches is correct. Get the three details that bite: an explicit zero_grad() between steps (PyTorch accumulates too), a detach()/no-grad path so evaluation does not build graph, and broadcast-aware gradients where a (1, d) bias added to (B, d) must have its gradient summed back over the broadcast axis. Read micrograd once, then write your own from the derivation rather than copying.",
+   "minutes": 35,
+   "resource": {
+    "label": "karpathy/micrograd - a ~150-line scalar reverse-mode autograd engine",
+    "url": "https://github.com/karpathy/micrograd"
+   }
+  },
+  {
+   "name": "Vectorised NumPy layer implementations and shape discipline",
+   "learn": "Write Linear.forward/backward, ReLU, Dropout and the loss as objects with an explicit cache, and make every backward assert that dW.shape == W.shape and dX.shape == X.shape - a transposed matmul that happens to be conformable is the single most common from-scratch bug and it presents as 'the model trains, badly'. Use A.T @ dZ and dZ @ W.T rather than loops, use np.einsum('bi,bj->ij', A, dZ) when the index bookkeeping gets confusing, and keep the reduction convention (mean over batch) written once in the loss and nowhere else. Run the whole net in float64 for the gradient-check test and float32 for training, and know that np.float32 accumulation over a 60k-row epoch is where your 'reference' numbers start disagreeing at the 1e-4 level.",
+   "minutes": 25,
+   "resource": {
+    "label": "NumPy user guide - Broadcasting",
+    "url": "https://numpy.org/doc/stable/user/basics.broadcasting.html"
+   }
+  },
+  {
+   "name": "Finite-difference gradient checking to 1e-7",
+   "learn": "Use the centred difference (J(theta + h e_i) - J(theta - h e_i)) / (2h), which has O(h^2) truncation error versus O(h) for the one-sided form, with h = 1e-5 in float64; score with the relative error |g_analytic - g_numeric| / max(|g_analytic|, |g_numeric|, 1e-8) and treat < 1e-7 as pass, 1e-5 as suspicious, > 1e-3 as a bug. Check a random sample of coordinates per parameter tensor rather than all of them, and check biases separately because they are few and their bugs hide in the average. Control the environment: fix the seed, disable dropout, use a tiny net and a handful of examples, include the regularisation term in J if it is in the gradient, and know that ReLU kinks produce false failures when a pre-activation sits within h of zero - perturb the input away from the kink instead of lowering h until noise swamps the signal.",
+   "minutes": 30,
+   "resource": {
+    "label": "Stanford CS231n notes - Learning and Evaluation (gradient checks, sanity checks, babysitting)",
+    "url": "https://cs231n.github.io/neural-networks-3/"
+   }
+  },
+  {
+   "name": "Cross-checking against torch.autograd.gradcheck",
+   "learn": "Wrap your NumPy layers' forward as a torch function on double-precision tensors with requires_grad=True and run torch.autograd.gradcheck(fn, inputs, eps=1e-6, atol=1e-5), then separately assert np.allclose between your analytic gradients and torch's autograd gradients for an identical net with copied weights. Understand what gradcheck actually does (numerical Jacobian versus the VJP-derived analytic Jacobian, column by column), why it demands float64, and what nondet_tol is for. This is the FDE move: two independent implementations agreeing to 1e-7 is evidence you can put in a README and defend, whereas 'it trains' is not.",
+   "minutes": 20,
+   "resource": {
+    "label": "PyTorch docs - Gradcheck mechanics (numerical vs analytical Jacobian)",
+    "url": "https://pytorch.org/docs/stable/notes/gradcheck.html"
+   }
+  },
+  {
+   "name": "Activation functions and their derivatives: saturation and dead units",
+   "learn": "Know each derivative cold and what it does to a product of L of them: sigmoid' = s(1-s) with maximum 0.25 (so >= 4x gradient shrinkage per layer even at the best point, and ~0 in the tails), tanh' = 1 - tanh^2 with maximum 1 and zero-centred output (strictly better than sigmoid for hidden layers), ReLU' = 1[z > 0] which neither shrinks nor saturates on the positive side but is exactly zero on the negative side. Be able to explain dead ReLUs mechanically: one large update drives a unit's pre-activation negative for every input, its gradient becomes identically zero, and it never recovers - caused by too-high learning rate or a large negative bias, and measurable as the fraction of units with zero activation across a validation batch. Know leaky ReLU (slope 0.01) and ELU as the standard mitigations and what each costs.",
+   "minutes": 30,
+   "resource": {
+    "label": "d2l.ai - Multilayer Perceptrons (activation functions)",
+    "url": "https://d2l.ai/chapter_multilayer-perceptrons/mlp.html"
+   }
+  },
+  {
+   "name": "Modern activations: GELU and SiLU/Swish",
+   "learn": "Understand GELU(x) = x * Phi(x) as a stochastic-regulariser-flavoured smooth gate (and its tanh approximation, which is what most implementations actually compute), and SiLU(x) = x * sigmoid(x); both are smooth, non-monotonic near the origin and pass a small negative gradient, which is why transformer blocks use them instead of ReLU. Know that their derivatives are not indicator functions, so the clean Kaiming factor-of-2 argument no longer holds exactly - people use the ReLU gain anyway and rely on normalisation layers to absorb the mismatch. In the ablation, treat GELU as the sanity control that shows your framework generalises past the three classical activations.",
+   "minutes": 15,
+   "resource": {
+    "label": "Hendrycks & Gimpel, \"Gaussian Error Linear Units (GELUs)\" (arXiv:1606.08415)",
+    "url": "https://arxiv.org/abs/1606.08415"
+   }
+  },
+  {
+   "name": "Vanishing and exploding gradients as a product of Jacobians",
+   "learn": "Write the gradient at layer l as a product of (L - l) factors of the form diag(phi'(z)) W^T and reason about it multiplicatively: if the typical singular value of each factor is s, the gradient magnitude scales like s^{L-l}, so s = 0.8 over 20 layers is 0.01x and s = 1.2 is 40x. This is why the fix is variance control (init and normalisation) rather than a bigger learning rate. Instrument it: log the L2 norm of the gradient per layer each epoch and plot on a log axis - a monotone decay towards the input layers is vanishing, a spike then NaN is exploding. Know global-norm gradient clipping (torch.nn.utils.clip_grad_norm_) as the blunt fix, and residual connections as the structural one, because an identity path contributes a Jacobian of I that keeps the product from collapsing.",
+   "minutes": 25,
+   "resource": {
+    "label": "d2l.ai - Numerical Stability and Initialization",
+    "url": "https://d2l.ai/chapter_multilayer-perceptrons/numerical-stability-and-init.html"
+   }
+  },
+  {
+   "name": "Xavier/Glorot initialisation: derive the variance condition",
+   "learn": "Derive it yourself: assuming inputs and weights are independent with zero mean, Var(z) = n_in * Var(w) * Var(x), so preserving forward variance requires Var(w) = 1/n_in, while preserving backward (gradient) variance requires Var(w) = 1/n_out; Glorot takes the harmonic-style compromise Var(w) = 2/(n_in + n_out), which as a uniform distribution is U[-sqrt(6/(n_in+n_out)), +sqrt(6/(n_in+n_out))]. Be explicit about the assumptions that make this true and where they fail: zero-mean symmetric activation operating in its near-linear regime (fine for tanh, wrong for ReLU), independence between weights and activations (false after the first update), and i.i.d. inputs (false for unnormalised pixel data). This is the derivation an interviewer will ask you to do on a whiteboard.",
+   "minutes": 25,
+   "resource": {
+    "label": "Glorot & Bengio, \"Understanding the difficulty of training deep feedforward neural networks\" (AISTATS 2010, PMLR)",
+    "url": "https://proceedings.mlr.press/v9/glorot10a.html"
+   }
+  },
+  {
+   "name": "Kaiming/He initialisation: where the factor of 2 comes from",
+   "learn": "Redo the variance argument with ReLU in the loop: for z symmetric about zero, E[ReLU(z)^2] = (1/2) Var(z), so half the second moment is destroyed at every layer and the fix is Var(w) = 2/n_in (normal with std sqrt(2/n_in), or the uniform equivalent). Know that mode='fan_in' preserves the forward signal and mode='fan_out' preserves the backward signal, that either is acceptable for a plain MLP but the choice matters in deep conv stacks, and that the leaky-ReLU generalisation is gain = sqrt(2/(1 + a^2)). Be able to state the consequence concretely: with naive 0.01*randn in a 10-layer ReLU net the forward activations decay to ~0 and the loss sits pinned at log(C) forever, which is the single fastest way to convince a customer that init is not a detail.",
+   "minutes": 25,
+   "resource": {
+    "label": "He et al., \"Delving Deep into Rectifiers\" (arXiv:1502.01852)",
+    "url": "https://arxiv.org/abs/1502.01852"
+   }
+  },
+  {
+   "name": "Initialisation in practice: symmetry breaking, biases, framework defaults",
+   "learn": "Know the API surface - torch.nn.init.kaiming_normal_(w, mode='fan_in', nonlinearity='relu'), xavier_uniform_(w, gain=calculate_gain('tanh')), zeros_ for biases - and the rules: never initialise all weights identically (every unit in a layer then computes the same function and receives the same gradient forever), biases at zero is the default and the exceptions are deliberate (LSTM forget-gate bias 1, a final-layer bias set to the log base rate for heavily imbalanced classification). Know that PyTorch's nn.Linear default is kaiming_uniform_(a=sqrt(5)), which is not Kaiming-for-ReLU and is closer to a Xavier-scale init, so 'I used the default' is not the same as 'I used He init'. In deep residual stacks, scaling the residual branch by 1/sqrt(L) or zero-initialising the last layer of each block is the standard stabiliser.",
+   "minutes": 15,
+   "resource": {
+    "label": "PyTorch docs - torch.nn.init",
+    "url": "https://pytorch.org/docs/stable/nn.init.html"
+   }
+  },
+  {
+   "name": "Batch normalisation: what it actually fixes and its train/eval asymmetry",
+   "learn": "Write the transform: per feature, xhat = (x - mu_B) / sqrt(var_B + eps) then y = gamma * xhat + beta, where mu_B and var_B are computed over the batch, which means the backward pass through them couples every example in the batch - derive the three-term BN gradient at least once so you understand why it is not a pointwise op. Know the train/eval asymmetry cold: training uses batch statistics and updates running_mean/running_var with momentum; evaluation uses the running estimates, so forgetting model.eval() changes predictions and a batch size of 1 or 2 makes the batch statistics noise. Know the empirical result that BN mainly buys robustness to initialisation and larger usable learning rates, that the original 'internal covariate shift' story is contested, and that LayerNorm is the sequence-model replacement precisely because it needs no batch.",
+   "minutes": 25,
+   "resource": {
+    "label": "Ioffe & Szegedy, \"Batch Normalization\" (arXiv:1502.03167)",
+    "url": "https://arxiv.org/abs/1502.03167"
+   }
+  },
+  {
+   "name": "L2 / weight decay: the shrinkage update and where it must not apply",
+   "learn": "Add (lambda/2)||w||^2 to the loss, differentiate, and read off the update w <- (1 - eta*lambda) w - eta * grad L: plain SGD with L2 is literally multiplicative shrinkage each step. Know the MAP interpretation (Gaussian prior on weights, so lambda is a prior precision), and that the penalty applies to weight matrices only - decaying biases and BatchNorm gamma/beta shifts the function for no regularisation benefit. Know the adaptive-optimiser subtlety that trips most people: adding lambda*w to the gradient inside Adam means the penalty gets divided by sqrt(v_hat) like everything else, so large-gradient weights are decayed less; decoupled weight decay (AdamW) applies the shrinkage outside the adaptive scaling and is why torch.optim.AdamW exists. Tune lambda on a log grid (1e-5 to 1e-1) against validation loss, never training loss.",
+   "minutes": 25,
+   "resource": {
+    "label": "d2l.ai - Weight Decay",
+    "url": "https://d2l.ai/chapter_linear-regression/weight-decay.html"
+   }
+  },
+  {
+   "name": "Dropout: inverted dropout and the eval-mode bug",
+   "learn": "Implement inverted dropout: at training time sample a Bernoulli(1-p) mask per unit, multiply, and divide by (1-p) so E[activation] is unchanged; at eval time do nothing at all. The backward pass is the same mask and the same scale, and if you scale in forward but not backward the gradient check fails immediately - which is exactly why you write the gradient check first. Know the practical settings (p ~ 0.5 on wide hidden layers, 0.1-0.2 on inputs, usually applied after the activation), why dropout and BatchNorm interact badly (the variance shift between train and eval), and that dropout raises training loss by design, so an ablation must compare validation curves - a dropout run whose training loss is higher is not a worse run.",
+   "minutes": 25,
+   "resource": {
+    "label": "d2l.ai - Dropout",
+    "url": "https://d2l.ai/chapter_multilayer-perceptrons/dropout.html"
+   }
+  },
+  {
+   "name": "Early stopping, the generalisation gap, and when more capacity helps",
+   "learn": "Implement early stopping properly: monitor validation loss (not accuracy, which is noisier), keep a patience counter, and restore the best checkpoint rather than returning the last one - 'early stopping' that returns final weights is not early stopping. Know the theoretical hook: for a quadratic objective with small learning rate, stopping after t steps constrains the solution in the same way an L2 penalty does, with the number of steps playing the role of 1/lambda, which is why L2 + early stopping often adds little on top of either. Be able to read the two curves: train falling while validation rises is overfitting, both plateauing high is underfitting or a learning-rate/init problem, and validation improving again after a long worse stretch is the double-descent regime rather than a bug.",
+   "minutes": 20,
+   "resource": {
+    "label": "Goodfellow, Bengio & Courville, Deep Learning - Chapter 7: Regularization for Deep Learning",
+    "url": "https://www.deeplearningbook.org/contents/regularization.html"
+   }
+  },
+  {
+   "name": "Optimiser and learning rate: SGD + momentum, Adam, bias correction",
+   "learn": "Implement SGD with momentum (v <- mu*v + g; w <- w - eta*v, mu = 0.9) and Adam from the paper: m <- b1*m + (1-b1)*g, v <- b2*v + (1-b2)*g^2, then the bias corrections m_hat = m/(1 - b1^t) and v_hat = v/(1 - b2^t) and the step w <- w - eta * m_hat / (sqrt(v_hat) + eps). Be able to explain why bias correction exists at all - m and v start at zero, so without it the first ~1/(1-b2) ~ 1000 steps take artificially tiny steps - and why eps sits outside the sqrt in the reference implementation. Learn the LR range test (sweep eta geometrically over a few hundred steps, plot loss, pick just below the minimum) and the standard schedules (step, cosine, linear warmup), and internalise that learning rate is the first knob you touch when the loss is NaN, flat, or oscillating.",
+   "minutes": 30,
+   "resource": {
+    "label": "Kingma & Ba, \"Adam: A Method for Stochastic Optimization\" (arXiv:1412.6980)",
+    "url": "https://arxiv.org/abs/1412.6980"
+   }
+  },
+  {
+   "name": "Diagnostics: activation, gradient and update-ratio histograms",
+   "learn": "Log three families of per-layer statistics every epoch and be able to name the fix from each: activation histograms (mass piled at the tails means tanh/sigmoid saturation; a spike at exactly zero covering >50 percent of units means dead ReLUs; std shrinking layer by layer means init scale too small), gradient-norm-per-layer on a log axis (monotone decay towards the input = vanishing, spikes = exploding or a bad batch), and the update-to-weight ratio ||eta * grad|| / ||w||, which should sit around 1e-3 - 1e-2 means the learning rate is too high, 1e-5 means the model is barely moving. Produce them with forward/backward hooks and SummaryWriter.add_histogram, or with plain NumPy in your from-scratch net. Then read the loss curve as a fourth signal: a NaN at a specific step is log(0), an exploding gradient, or one corrupt row - bisect the batch to find out which.",
+   "minutes": 30,
+   "resource": {
+    "label": "PyTorch docs - torch.utils.tensorboard (SummaryWriter, add_histogram, add_scalar)",
+    "url": "https://pytorch.org/docs/stable/tensorboard.html"
+   }
+  },
+  {
+   "name": "Training protocol: overfit one batch, fix seeds, run the ablation honestly",
+   "learn": "Adopt the ritual before any real run: get input shapes and the loss at initialisation right (a 10-class net must start near ln(10) = 2.30 - if it starts at 0.3 you have a label leak, if it starts at 15 your init is broken), then overfit a single batch of 32 to near-zero loss with regularisation off, which proves the backward pass and the optimiser before any data question is on the table. Then make the ablation defensible: identical val split and epoch budget for every cell, seeds fixed (np.random.default_rng(seed), torch.manual_seed) and at least three seeds per cell so the README table reports mean +/- std, and report both final validation accuracy and epochs-to-reach-threshold, because a config that wins by 0.2 points but takes 3x the epochs is not the recommendation you give a customer.",
+   "minutes": 20,
+   "resource": {
+    "label": "Karpathy - \"A Recipe for Training Neural Networks\"",
+    "url": "https://karpathy.github.io/2019/04/25/recipe/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can derive, on a whiteboard and without notes, delta^L = grad_a J (*) phi'(z^L), delta^l = ((W^{l+1})^T delta^{l+1}) (*) phi'(z^l), dJ/dW^l = delta^l (a^{l-1})^T, and restate all of it in batched row-major NumPy shapes including where the 1/B belongs.",
+  "You can implement a reverse-mode autograd engine from scratch (topological order, VJP per primitive, gradient accumulation on fan-out, broadcast-aware reductions) and train a multi-layer MLP with it, no framework in the training path.",
+  "You can write a centred finite-difference gradient check with a relative-error criterion that passes at ~1e-7 in float64 for weights, biases and the regularisation term, explain why ReLU kinks cause false failures, and have it run as a pytest test in CI.",
+  "You can derive Xavier from Var(z) = n_in Var(w) Var(x) and Kaiming's factor of 2 from E[ReLU(z)^2] = Var(z)/2, and predict which of Kaiming, Xavier or 0.01*randn will fail for a given depth and activation before running it.",
+  "You can look at per-layer activation histograms, gradient-norm plots and the update-to-weight ratio for a failing run and name one knob - activation, init scale, learning rate, or regulariser - with a stated reason, then show the fixed run.",
+  "You can explain the train/eval asymmetry of dropout and batch norm precisely (inverted scaling by 1/(1-p); batch statistics versus running estimates) and demonstrate the exact accuracy delta caused by forgetting model.eval().",
+  "You can produce an ablation table over activation x init x regulariser with mean +/- std across three seeds, a fixed val split and a fixed epoch budget, and defend which cell you would ship and why the runner-up lost.",
+  "You can implement Adam from the paper including bias correction, explain why the correction matters for the first ~1000 steps, and state why L2-in-the-gradient behaves differently under Adam than decoupled weight decay under AdamW."
+ ],
+ "failureModes": [
+  "The 1/B from a mean-reduced loss is applied both in the loss backward and again in the layer backward; gradients are B times too small, the model trains but plateaus early, and three days go into 'the features are too weak' before anyone runs a gradient check.",
+  "A softmax is applied inside the model and CrossEntropyLoss is applied on top of it; nothing crashes, the gradients are wrong but still descend, and the model reaches 82 percent instead of 89 percent - a silent modelling error that no test catches without a reference implementation.",
+  "The gradient check passes at 1e-7 on a net with dropout accidentally disabled by the fixed seed path, and the dropout backward mask scaling bug ships anyway - the check must be run in the exact configuration being trained, not a convenient one.",
+  "A 10-layer ReLU net initialised with 0.01*randn has forward activations that decay to zero by layer 6; the loss sits flat at ln(10) = 2.30 for every epoch and gets diagnosed as 'the dataset is too hard' rather than as a variance-propagation failure fixed by one line of Kaiming init.",
+  "Validation is computed without model.eval(), so batch-norm uses batch statistics of the validation minibatches and dropout stays on; the validation number is both noisy and optimistically biased, and the model that wins the ablation is the one that got the luckiest eval batches.",
+  "Standardisation statistics (mean and std of Fashion-MNIST pixels) are computed over the whole dataset before the train/val split, leaking validation information into training; the reported gap is smaller than the true one and the customer's held-out result is worse than the deck promised.",
+  "Weight decay is added as lambda*w inside the gradient while using Adam, so the effective decay is divided by sqrt(v_hat) per parameter; the regularisation strength varies wildly across layers, the lambda sweep looks flat and non-monotonic, and the conclusion 'L2 does not help here' is recorded as a finding.",
+  "Each ablation cell is run once with a different random seed; the 27-cell table has a spread of +/- 1.2 points that is entirely seed noise, and the README recommends a configuration that is not reproducibly better than three of its neighbours."
+ ],
+ "interviewQuestions": [
+  "Derive the backward pass for a two-layer MLP with softmax cross-entropy. Show me why dL/dz at the output collapses to yhat - y, and then write the shapes for a batched implementation and tell me where the 1/B goes.",
+  "Derive the Xavier initialisation variance condition from scratch, then tell me what changes for ReLU and why the constant becomes 2/n_in. Which assumptions in that derivation are false after the first gradient step, and does it matter?",
+  "A colleague's from-scratch net trains but converges to a worse loss than the PyTorch equivalent with identical hyperparameters. Design the debugging sequence - what do you check first, second and third, and what does a gradient check that passes at 1e-7 rule out and not rule out?",
+  "Explain exactly what dropout does at training time and at evaluation time, why the 1/(1-p) scaling exists and which side it is applied on, and what happens numerically if someone forgets model.eval() in a network that also has batch norm.",
+  "Training loss goes to NaN at step 4,300 having been healthy before. Give me the four most likely causes in order, and the specific instrumentation that distinguishes them.",
+  "A customer's 20-layer network learns nothing - the loss is flat at ln(C) from epoch 0. Walk me through diagnosing it from activation and gradient histograms alone, and tell me which of activation choice, init scale, learning rate and normalisation you would change first and why.",
+  "Design an ablation over three activations, three initialisers and three regularisers that you would put in front of a customer's ML team. How many runs, what is held fixed, what do you report, and how do you keep someone from reading seed noise as a result?"
+ ],
+ "proofOfWork": "A companion repo, backprop-forensics, that turns the from-scratch MLP into a debugging clinic: eight deliberately broken variants of the same trainer, each shipping exactly one classic defect - the double 1/B, a transposed dW in the linear backward, softmax applied before cross-entropy, dropout scaled in forward but not backward, dropout left on at eval, 0.01*randn init in a 10-layer stack, learning rate 100x too high, and a mean/std leak computed before the split - together with a make reproduce target that trains each for a fixed budget and emits the same four diagnostic artefacts per run (loss curves, per-layer activation histograms, per-layer gradient norms on a log axis, and the update-to-weight ratio). The README is a one-page diagnostic decision tree mapping each observable signature back to its cause, plus a blind-triage log in which you recorded your diagnosis from the plots alone before revealing which variant was which, with your hit rate stated honestly. Ship it with a scanned or typeset derivation of the batched backward pass and the Xavier/Kaiming variance arguments, a pytest suite where the finite-difference check and a torch.autograd.gradcheck cross-check both run in GitHub Actions, and a 300-word section written for a non-ML customer engineer explaining why initialisation and eval-mode discipline are correctness issues rather than tuning preferences."
+}

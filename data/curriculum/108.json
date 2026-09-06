@@ -1,0 +1,232 @@
+{
+ "i": 108,
+ "topic": "Time series forecasting: decomposition, ARIMA, Prophet, and honest backtesting",
+ "track": "N. Machine Learning Systems",
+ "month": 10,
+ "hours": 8,
+ "why": "Forecasting is the request an FDE gets most often and defends worst: demand, headcount, spend, seat growth, capacity. It is also the single easiest place to ship a model that is silently wrong, because a random shuffle-split or an in-sample fit produces a beautiful chart that a customer's finance team will plan against for a quarter before the error surfaces. You need to be the person who can say, at a whiteboard, why the series needed a log and a seasonal difference, what the ACF/PACF and the KPSS test told you about the order, why the winning model beats seasonal-naive by a MASE of 0.71 on a rolling-origin backtest whose cut points you can draw, and which features would have leaked if you had not blocked them.",
+ "prerequisites": [
+  "Probability and estimation at the level of Topic 95 and Topic 96: expectation and conditional expectation, variance of a sum, maximum likelihood, what a null hypothesis and a p-value are (ADF and KPSS have opposite nulls and you must not misread that)",
+  "Linear regression and regularisation from Topic 100, including reading an OLS design matrix, because dynamic regression and Fourier-term seasonality are regression with autocorrelated errors",
+  "Cross-validation and leakage from Topic 103 - you are about to learn why every one of its assumptions (i.i.d. rows, exchangeable folds) is false here",
+  "Gradient boosting from Topic 101 (LightGBM/XGBoost API, categorical features, early stopping) for the global-model subtopic",
+  "NumPy vectorisation and numerical stability from Topic 99: STL, the Kalman filter recursion and the ACF are all written as array operations, and log/Box-Cox back-transforms are where float error shows up",
+  "pandas fluency: DatetimeIndex, resample, shift, rolling, groupby on a panel of (store, family, date) rows",
+  "Working Python env with statsmodels, prophet (or cmdstanpy backend), scikit-learn, LightGBM, matplotlib, and a Kaggle account for the Store Sales data"
+ ],
+ "subtopics": [
+  {
+   "name": "What a forecast is: the h-step conditional distribution, and the benchmarks it must beat",
+   "learn": "State the target precisely: you are estimating the distribution of y_{T+h} conditional on the information set I_T = {y_1..y_T, plus any exogenous series known at T}, and a 'forecast' is a summary of it. Know which summary each loss picks: the conditional mean minimises expected squared error, the conditional median minimises expected absolute error, and the tau-quantile minimises pinball loss - so 'the forecast' is not a single number until you name the loss. Implement the four benchmarks by hand before anything else: mean, naive (yhat = y_T), drift (yhat_{T+h|T} = y_T + h*(y_T - y_1)/(T-1)), and seasonal naive (yhat_{T+h|T} = y_{T+h-m(k+1)}). Seasonal naive is not a strawman - on retail daily data it is a strong model, it is the denominator of MASE, and any model you ship must beat it on the same folds or you have shipped complexity for nothing.",
+   "minutes": 18,
+   "resource": {
+    "label": "FPP3 - The statistical forecasting perspective",
+    "url": "https://otexts.com/fpp3/perspective.html"
+   }
+  },
+  {
+   "name": "Index hygiene: frequency, implicit gaps, zero versus missing, and the plots you draw first",
+   "learn": "Get the index right or every downstream diagnostic lies. Build a complete DatetimeIndex with an explicit freq, reindex the series onto pd.date_range so that days with no rows become explicit NaN, and then make the modelling decision that matters: a closed store is missing (leave NaN or model it), a store that opened and sold nothing is a real zero. Know the difference between resample('W-MON').sum() and asfreq('W-MON') (aggregation versus subsampling), between .shift(1) on position and .shift(1, freq='D') on the calendar, and why a tz-naive index plus a DST boundary silently drops or duplicates an hour on hourly data. Then draw four plots in order: the raw series, a seasonal plot (all years overlaid by day-of-year or day-of-week), a subseries plot (one panel per season with its mean), and the ACF. In the Favorita Store Sales data this immediately shows the Christmas-day gap, the payday spikes on the 15th and month-end, and the April 2016 earthquake - all of which are decisions you will have to defend, not noise.",
+   "minutes": 22,
+   "resource": {
+    "label": "pandas user guide - Time series / date functionality",
+    "url": "https://pandas.pydata.org/docs/user_guide/timeseries.html"
+   }
+  },
+  {
+   "name": "Transformations: Box-Cox, log1p, and the back-transform bias nobody adjusts for",
+   "learn": "Apply a variance-stabilising transform when the seasonal amplitude grows with the level: Box-Cox w_t = (y_t^lambda - 1)/lambda for lambda != 0 and log(y_t) for lambda = 0, with lambda chosen by the Guerrero coefficient-of-variation method or profile likelihood (scipy.stats.boxcox returns the MLE lambda). Retail counts contain zeros, so reach for log1p (equivalently a shifted log) and remember that it changes the meaning of the errors. Then internalise the part that gets shipped wrong: back-transforming a point forecast gives a median, not a mean, because E[exp(w)] = exp(mu + sigma^2/2) by Jensen - so exp(what you predicted) is systematically low, and the fpp3 bias adjustment yhat*(1 + sigma_h^2/2) is what restores the mean. Prediction interval endpoints, by contrast, back-transform exactly, because quantiles are equivariant under monotone transforms. If the customer sums your per-store forecasts into a total, the un-adjusted medians do not add up to the total's mean and the sum will read low every month.",
+   "minutes": 25,
+   "resource": {
+    "label": "FPP3 - Transformations and adjustments (Box-Cox, bias adjustment)",
+    "url": "https://otexts.com/fpp3/transformations.html"
+   }
+  },
+  {
+   "name": "Classical decomposition and exactly where it breaks",
+   "learn": "Write y_t = T_t + S_t + R_t (additive) or y_t = T_t * S_t * R_t (multiplicative, which is additive on logs) and implement classical decomposition: estimate T_t with a centred m-MA, or a 2xm-MA when m is even (because a 12-MA on monthly data is not centred on an observation), detrend, average the detrended values by season index to get S_t, and take the remainder. Then name its three defects out loud, because they are the reason STL exists: the trend is undefined for the first and last m/2 observations - precisely the region your forecast starts from; the seasonal figure is assumed constant across all years, so a store whose weekend pattern changed in 2015 gets a wrong S_t everywhere; and a single outlier (the earthquake week) leaks into the seasonal average for that day-of-week for the entire history. statsmodels seasonal_decompose is this algorithm, which is why it should almost never be the one you ship.",
+   "minutes": 18,
+   "resource": {
+    "label": "FPP3 - Classical decomposition",
+    "url": "https://otexts.com/fpp3/classical-decomposition.html"
+   }
+  },
+  {
+   "name": "STL from scratch: loess, the inner loop, robustness weights, and the two windows",
+   "learn": "Be able to implement STL end to end, because the deliverable asks for it. Inner loop, six steps: detrend (y - T), split into cycle-subseries (all Mondays, all Tuesdays for m=7), smooth each subseries with loess of span s_window, low-pass filter the extended seasonal series with 3xMA plus a loess to strip any low-frequency leakage, subtract that from the smoothed seasonal to get S, deseasonalise, then loess the result with span t_window to get T. Outer loop: form robustness weights rho_t = B(|R_t| / (6 * median|R|)) with B the bisquare, and re-run the inner loop with those weights so outliers stop dragging the fit. Know the knobs in statsmodels.tsa.seasonal.STL: period=m, seasonal= an odd integer (small = seasonality allowed to change fast, 'periodic' = fixed), trend= odd and > period (default roughly ceil(1.5*period/(1 - 1.5/seasonal))), robust=True for the outer loop, and that STL is additive-only and single-seasonality - daily retail with weekly AND yearly cycles needs MSTL or Fourier terms. Validate your implementation by asserting seasonal + trend + resid == observed to float tolerance and by comparing component-wise against statsmodels on the same series.",
+   "minutes": 32,
+   "resource": {
+    "label": "statsmodels API - tsa.seasonal.STL (period, seasonal, trend, robust)",
+    "url": "https://www.statsmodels.org/stable/generated/statsmodels.tsa.seasonal.STL.html"
+   }
+  },
+  {
+   "name": "Stationarity, differencing, and the opposite nulls of ADF and KPSS",
+   "learn": "Define weak stationarity properly - constant mean, finite constant variance, autocovariance gamma_k depending only on lag k, not on t - and know that ARIMA requires it after differencing, while ETS and Prophet do not. Apply first differences nabla y_t = y_t - y_{t-1} for trend and seasonal differences nabla_m y_t = y_t - y_{t-m} for seasonality, and take the seasonal difference FIRST because it often removes the trend too. The trap that gets misread in every review: the ADF null is 'a unit root is present' (rejecting means stationary) while the KPSS null is 'the series is (trend-)stationary' (rejecting means non-stationary) - the tests can disagree or both reject, and 'ADF p = 0.3 therefore it has a unit root' is failing to reject, not evidence. Pick D by seasonal strength F_S = max(0, 1 - Var(R)/Var(S+R)) from the STL components, seasonally difference when F_S > 0.64, then pick d by repeated KPSS. Stop at d <= 2 and D <= 1; over-differencing inflates the innovation variance, widens your intervals, and plants a unit root in the MA polynomial that makes the model non-invertible.",
+   "minutes": 30,
+   "resource": {
+    "label": "FPP3 - Stationarity and differencing (incl. unit root tests)",
+    "url": "https://otexts.com/fpp3/stationarity.html"
+   }
+  },
+  {
+   "name": "ACF and PACF: the estimators, their sampling distribution, and reading orders off the plot",
+   "learn": "Write the estimator down: r_k = sum_{t=k+1}^{T}(y_t - ybar)(y_{t-k} - ybar) / sum_{t=1}^{T}(y_t - ybar)^2. Under white noise r_k is approximately N(0, 1/T), which is exactly where the +/- 1.96/sqrt(T) bands come from - so on T = 100 you expect 1 in 20 lags outside the band by chance and 'lag 17 is significant' means nothing on its own. The PACF phi_kk is the correlation between y_t and y_{t-k} with lags 1..k-1 partialled out, computed by the Durbin-Levinson recursion or by OLS of y_t on its first k lags (statsmodels pacf method='ywm' vs 'ols' can differ visibly on short series). Reading rules you must be able to justify, not recite: AR(p) has PACF cutting off after lag p with a decaying ACF; MA(q) has ACF cutting off after lag q with a decaying PACF; a mixed ARMA cuts off in neither, so stop plot-reading and use AICc. A slowly, near-linearly decaying ACF is the signature of needing a difference; spikes at exactly m, 2m, 3m give you the seasonal P and Q.",
+   "minutes": 28,
+   "resource": {
+    "label": "FPP3 - Autocorrelation (r_k, correlogram, white-noise bands)",
+    "url": "https://otexts.com/fpp3/acf.html"
+   }
+  },
+  {
+   "name": "AR, MA and ARMA in backshift algebra: causality, invertibility, and the MA(infinity) form",
+   "learn": "Use B with B y_t = y_{t-1} and write the whole family as one line: phi(B)(1-B)^d y_t = c + theta(B) eps_t, with phi(B) = 1 - phi_1 B - ... - phi_p B^p and theta(B) = 1 + theta_1 B + ... + theta_q B^q. Be able to derive that AR(1) with |phi| < 1 has ACF rho_k = phi^k, and that stationarity/causality holds iff all roots of phi(z) = 0 lie outside the unit circle while invertibility holds iff all roots of theta(z) = 0 do. Understand why invertibility matters operationally: only an invertible MA has a convergent AR(infinity) representation, so only then can the model reconstruct the unobserved eps_t from past y - a non-invertible fit (a root on the unit circle, or statsmodels quietly enforcing one) is nearly always the fingerprint of over-differencing, not of a real MA process. Derive the MA(infinity) psi-weights y_{T+h} = sum psi_j eps_{T+h-j}; you need them in the prediction-interval subtopic because Var(e_{T+h}) = sigma^2 * sum_{j=0}^{h-1} psi_j^2.",
+   "minutes": 25,
+   "resource": {
+    "label": "FPP3 - Backshift notation",
+    "url": "https://otexts.com/fpp3/backshift.html"
+   }
+  },
+  {
+   "name": "SARIMA(p,d,q)(P,D,Q)m: the multiplicative seasonal polynomial and what each order buys",
+   "learn": "Write the full model: Phi(B^m) phi(B) (1-B)^d (1-B^m)^D y_t = c + Theta(B^m) theta(B) eps_t, and multiply out a (0,1,1)(0,1,1)_7 by hand so you can see it generates terms at lags 1, 7 and 8 - the seasonal and non-seasonal parts interact, which is why 'add a lag-7 term' is not the same model. Be able to say what each order does: d and D remove trend and seasonal level shifts, q and Q say 'shocks persist for a few periods', p and P say 'the level regresses toward its own past'. Know the constant's meaning under differencing: with d = 1 a non-zero c is a linear drift, with d = 2 it implies a quadratic trend and is almost always wrong for a business series. Know the ceiling: SARIMA is intractable for m = 365 (yearly seasonality on daily data) because the seasonal polynomial spans 365 lags - at that point you move to a dynamic regression with Fourier terms plus ARIMA errors, which is exactly the structure Prophet is approximating.",
+   "minutes": 28,
+   "resource": {
+    "label": "FPP3 - Seasonal ARIMA models",
+    "url": "https://otexts.com/fpp3/seasonal-arima.html"
+   }
+  },
+  {
+   "name": "Estimation and order selection: MLE, AICc, and why AIC cannot compare different d",
+   "learn": "Understand that ARIMA coefficients are fitted by maximum likelihood, computed by casting the model in state-space form and running the Kalman filter to get the prediction-error decomposition of the log-likelihood - it is not OLS on lags, and that is why the optimiser can fail to converge and report a boundary solution. Select orders with AICc = -2 log L + 2k + 2k(k+1)/(T-k-1), the small-sample correction that matters when you have 150 monthly points and 8 parameters. The rule that catches people out in review: AIC/AICc are only comparable across models fitted to the SAME differenced data and the same number of observations, so you may use them to choose p, q, P, Q but NEVER to choose d and D - those come from the unit-root tests and seasonal strength. Know the Hyndman-Khandakar stepwise search that auto.arima / pmdarima implements (fit four seeds, step one order at a time, keep the best AICc) and its two known holes: it is greedy so it can stop in a local optimum, and its approximation mode uses conditional sum of squares rather than the exact likelihood, so re-fit the finalist exactly.",
+   "minutes": 22,
+   "resource": {
+    "label": "FPP3 - Estimation and order selection (AICc for ARIMA)",
+    "url": "https://otexts.com/fpp3/arima-estimation.html"
+   }
+  },
+  {
+   "name": "statsmodels SARIMAX in practice: exog, append/extend, and the dynamic=False trap",
+   "learn": "Drive the actual API: SARIMAX(endog, exog=X, order=(p,d,q), seasonal_order=(P,D,Q,m), trend='c'|'t'|'n', enforce_stationarity=, enforce_invertibility=, simple_differencing=). Learn the four things that bite. (1) exog must be supplied for the forecast horizon too - res.get_forecast(steps=16, exog=X_future) - so any exogenous column you cannot know 16 days ahead (a promo flag decided next week, that day's oil price) is a leak dressed up as a feature, while a holiday calendar is legitimately known. (2) res.get_prediction(start=..., dynamic=False) returns ONE-STEP-AHEAD in-sample predictions that use the true y at every step: they look spectacular and are not forecasts; dynamic=True from a cut point is the honest in-sample analogue. (3) res.append(new_obs, refit=False) and res.extend(new_obs) roll a fitted model forward over backtest folds without re-estimating, turning an O(folds) fitting cost into one fit - use them deliberately and record that you did, because it is slightly optimistic if the orders were chosen on all the data. (4) enforce_invertibility=False will happily hand you a non-invertible MA that forecasts nonsense at long horizons instead of erroring.",
+   "minutes": 28,
+   "resource": {
+    "label": "statsmodels API - tsa.statespace.sarimax.SARIMAX",
+    "url": "https://www.statsmodels.org/stable/generated/statsmodels.tsa.statespace.sarimax.SARIMAX.html"
+   }
+  },
+  {
+   "name": "Exponential smoothing and ETS: the recursions, damping, and its overlap with ARIMA",
+   "learn": "Derive the recursions rather than memorising them. SES: level l_t = alpha*y_t + (1-alpha)*l_{t-1}, forecast flat at l_T - an exponentially weighted average with weights alpha(1-alpha)^j. Holt adds a slope b_t = beta*(l_t - l_{t-1}) + (1-beta)*b_{t-1}; Holt-Winters adds a seasonal state s_t with additive or multiplicative form. Damped trend replaces the h*b_T extrapolation with (phi + phi^2 + ... + phi^h)*b_T, which converges to l_T + phi*b_T/(1-phi) - and that single knob is usually the difference between a credible 12-month forecast and a straight line through the ceiling. Learn the ETS(Error, Trend, Season) taxonomy: 30 combinations, additive vs multiplicative error give IDENTICAL point forecasts but different prediction intervals, and the model is chosen by AICc over the state-space likelihood. Know the equivalences: ETS(A,N,N) = ARIMA(0,1,1), ETS(A,A,N) = ARIMA(0,2,2), ETS(A,A,A) has a SARIMA equivalent with parameter constraints - and every multiplicative-error ETS has no ARIMA counterpart at all, which is the honest answer to 'why fit both'.",
+   "minutes": 25,
+   "resource": {
+    "label": "FPP3 - A taxonomy of exponential smoothing / ETS state space models",
+    "url": "https://otexts.com/fpp3/ets.html"
+   }
+  },
+  {
+   "name": "Prophet end to end: the decomposable GAM, changepoint prior, Fourier seasonality, holidays",
+   "learn": "Prophet is a curve-fitting GAM, not a stochastic process: y(t) = g(t) + s(t) + h(t) + eps_t, fitted in Stan by L-BFGS MAP (mcmc_samples > 0 switches to full posterior sampling). g(t) is piecewise linear (or logistic with a required cap/floor column) with rate deltas at n_changepoints=25 candidate points placed over the first changepoint_range=0.8 of history, regularised by a Laplace prior delta_j ~ Laplace(0, changepoint_prior_scale) - so that one scalar controls how twitchy your trend is, and raising it from 0.05 to 0.5 is how a 'flat' forecast becomes a hockey stick. s(t) is a Fourier series sum a_n cos(2*pi*n*t/P) + b_n sin(2*pi*n*t/P) truncated at order N (yearly 10, weekly 3), so seasonality is smooth and multi-period seasonalities simply add - which is why Prophet handles daily data with weekly AND yearly cycles where SARIMA cannot. h(t) is holiday indicators with lower_window/upper_window to spread the effect across surrounding days and their own prior scale; add_country_holidays('EC') for the Ecuador calendar in the Favorita data, add_regressor() for oil price or onpromotion (which then needs future values). Know the two things to say out loud to a customer: the uncertainty intervals come from simulating future trend changes at the fitted changepoint rate and are not calibrated coverage, and Prophet leaves autocorrelated residuals by construction because nothing in the model has an error process.",
+   "minutes": 35,
+   "resource": {
+    "label": "Prophet docs - Seasonality, holiday effects, and regressors",
+    "url": "https://facebook.github.io/prophet/docs/seasonality,_holiday_effects,_and_regressors.html"
+   }
+  },
+  {
+   "name": "Rolling-origin backtesting: expanding vs sliding, horizon-wise scoring, refit cadence, nesting",
+   "learn": "Build the harness yourself: for a set of origins t_1 < t_2 < ... < t_K, train on data up to t_i and score on t_i+1 .. t_i+h, then aggregate. Expanding window keeps all history (right when the process is stable and data is scarce); sliding window fixes the training length L (right when there is a regime change or the model must forget). Score errors as a matrix e[i][h], and report MEAN BY HORIZON - collapsing to one number hides that your model is excellent at h=1 and worse than seasonal-naive at h=14, which is the horizon the customer actually plans on. Set the fold geometry from the decision, not from convenience: for the Kaggle Store Sales task h=16 days, so every fold is 16 days, spaced by a multiple of 7 so day-of-week alignment is constant across folds. Decide refit cadence explicitly (refit every fold = honest and expensive; fit once then res.extend = cheap and mildly optimistic) and record it in the results table. Nest it: hyperparameters selected on inner folds inside each training block, final numbers reported on outer folds only - selecting orders or changepoint_prior_scale on the same folds you report is how a MASE of 0.8 becomes 1.1 in production.",
+   "minutes": 33,
+   "resource": {
+    "label": "FPP3 - Time series cross-validation (rolling origin)",
+    "url": "https://otexts.com/fpp3/tscv.html"
+   }
+  },
+  {
+   "name": "Leakage: lags, rolling statistics, fitted transforms, and features that cannot exist yet",
+   "learn": "Enumerate the five leaks and write a test for each. (1) Rolling statistics that include today: df.rolling(7).mean() at row t uses y_t, so every rolling feature must be .shift(1).rolling(w).mean() and the fold needs a gap >= w between train end and test start. (2) Fitted transforms: the Box-Cox lambda, the StandardScaler, the target encoding of store_id, and the MASE denominator must all be estimated on the training slice of the fold, never on the full series. (3) Panel-wide aggregates: 'total national sales that day' or 'that family's share of the store' are computed across the whole frame and encode the future of other series into this one. (4) Exogenous columns without a future value: oil price and onpromotion are given for the test window in this competition, but in a customer deployment they are not - decide per column whether it is known-in-advance (calendar, holidays, planned promos) or must itself be forecast. (5) Structural: sklearn.model_selection.TimeSeriesSplit gives ordered folds and a gap= parameter but assumes a single sorted series - on a panel of 1782 (store, family) pairs it will slice through a single timestamp unless you split on unique dates. The test that actually catches all of these: for each fold, rebuild the feature matrix from train-only rows and assert it is element-wise equal to the matrix the harness handed the model.",
+   "minutes": 28,
+   "resource": {
+    "label": "scikit-learn API - TimeSeriesSplit (gap, max_train_size, test_size)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.TimeSeriesSplit.html"
+   }
+  },
+  {
+   "name": "Metrics: MASE and RMSSE, and why MAPE flatters and RMSLE is asymmetric",
+   "learn": "Know what each metric optimises and where it dies. MAE is minimised by the conditional median, RMSE by the conditional mean - so ranking models by RMSE while training on absolute error compares apples to a different fruit. MAPE is undefined at y = 0 (fatal on retail rows where a family sells nothing) and is asymmetric: it caps the penalty for over-forecasting at 100% while under-forecasting is unbounded, so it systematically prefers models that under-predict; sMAPE fixes neither cleanly. Use MASE = mean(|e_j|) / [ (1/(T-m)) * sum_{t=m+1}^{T} |y_t - y_{t-m}| ], where the denominator is the IN-SAMPLE seasonal-naive MAE: it is scale-free, comparable across stores, defined when y = 0, and MASE < 1 literally means 'beat seasonal naive'. RMSSE is the squared-error twin used in M5, and WRMSSE weights each series by its dollar volume so the aggregate reflects the business rather than the long tail. Note the competition's own metric here is RMSLE = sqrt(mean((log1p(yhat) - log1p(y))^2)), which penalises under-forecasting more than over-forecasting, so the RMSLE-optimal prediction is not the conditional mean - train on the log1p target rather than post-hoc logging. Finally, decide aggregation across series consciously: the MEAN MASE over 1782 series is dominated by a handful of near-zero-volume ones, the MEDIAN hides a broken segment - report both plus the count of series where you lose to seasonal naive.",
+   "minutes": 25,
+   "resource": {
+    "label": "Hyndman & Koehler - Another look at measures of forecast accuracy (MASE)",
+    "url": "https://robjhyndman.com/papers/mase.pdf"
+   }
+  },
+  {
+   "name": "Distributional accuracy: prediction intervals, coverage, pinball loss and CRPS",
+   "learn": "A point forecast without an interval is not a deliverable. Derive the ARIMA interval from the psi-weights: Var(e_{T+h}) = sigma^2 * sum_{j=0}^{h-1} psi_j^2, giving yhat +/- z_{1-alpha/2} * sqrt(that) - and know the three reasons the real coverage is narrower than nominal: it assumes the parameters are known (no estimation uncertainty), it assumes the model is correct, and it assumes Gaussian innovations. Prefer simulation or bootstrapped residual paths when the residual histogram is skewed. Score distributions with pinball loss L_tau(y, q) = tau*(y - q) if y >= q else (1 - tau)*(q - y), averaged over a grid of quantiles as a discrete approximation to CRPS (sklearn.metrics.mean_pinball_loss). Then always report EMPIRICAL COVERAGE by horizon from the backtest: the fraction of held-out points inside the nominal 80% and 95% bands. An interval that is nominally 95% and empirically 68% at h=14 is a defect you must fix or disclose - it is also, in practice, the number a customer's planner cares about more than your MASE.",
+   "minutes": 22,
+   "resource": {
+    "label": "FPP3 - Evaluating distributional forecast accuracy (quantile/Winkler/CRPS)",
+    "url": "https://otexts.com/fpp3/distaccuracy.html"
+   }
+  },
+  {
+   "name": "Residual diagnostics: white noise, Ljung-Box degrees of freedom, and what passing does not prove",
+   "learn": "Check the innovation residuals (residuals in the TRANSFORMED space, after any Box-Cox) for four properties: zero mean, no autocorrelation, constant variance, and roughly normal if you want the closed-form intervals. Run the portmanteau test Q* = T(T+2) * sum_{k=1}^{l} r_k^2/(T-k) which is chi-squared with l - K degrees of freedom, where K is the number of estimated ARMA parameters - statsmodels acorr_ljungbox(resid, lags=[l], model_df=K); forgetting model_df inflates the p-value and lets a bad model pass. Use l = 10 for non-seasonal data and l = 2m for seasonal. Read the outcome correctly in both directions: a small p-value means structure is left in the residuals, so your intervals are too narrow and there is signal on the table; a large p-value does NOT mean the model forecasts well, only that the linear autocorrelation is used up - a residual plot fanning out with the level means you needed the log, and a residual ACF spike at exactly lag 7 or 12 tells you which seasonal order you missed.",
+   "minutes": 18,
+   "resource": {
+    "label": "statsmodels API - acorr_ljungbox (lags, model_df, boxpierce)",
+    "url": "https://www.statsmodels.org/stable/generated/statsmodels.stats.diagnostic.acorr_ljungbox.html"
+   }
+  },
+  {
+   "name": "Global models: tabularising a panel for LightGBM, recursive vs direct multi-step",
+   "learn": "Know when to abandon one-model-per-series. With 1782 (store, family) series, per-series SARIMA means 1782 fits per fold and no sharing; a single gradient-boosted model over rows keyed (series_id, date) with lag features (y_{t-16}, y_{t-17}, ..., y_{t-365}), shifted rolling means/stds, day-of-week, day-of-month, payday and holiday flags, and store/family as native LightGBM categoricals learns shared seasonality and handles a series with 30 days of history. Choose the multi-step strategy deliberately: RECURSIVE feeds each prediction back as the next lag (needs lag-1, accumulates its own error, and is what produces the flat-line collapse at long horizons), DIRECT trains one model per horizon h with only features available at the origin (16 models here, no error accumulation, higher variance per model). Know the tree-model failure that gets shipped: gradient boosting cannot extrapolate beyond the range of the training target, so a growing series must be modelled on differences or a detrended target, or every forecast is capped at the historical maximum. Elsayed et al. is the reference to cite when a customer asks for a transformer: a well-configured GBRT matches or beats DeepAR and N-BEATS on the standard benchmarks.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv:2101.02118 - Do We Really Need Deep Learning Models for Time Series Forecasting?",
+    "url": "https://arxiv.org/abs/2101.02118"
+   }
+  },
+  {
+   "name": "Hierarchies and reconciliation: making store, family and national forecasts add up",
+   "learn": "Business forecasts are almost always a hierarchy - item within family within store within region within country - and independently fitted base forecasts do not sum to their parents, which is the first thing a CFO notices. Encode the structure as the summing matrix S so that the coherent vector is ytilde = S*G*yhat, and know the three choices of G: bottom-up (G just selects the leaves - unbiased but noisy when leaves are sparse), top-down (forecast the total, split by historical or forecast proportions - stable but destroys leaf-level signal), and MinT optimal reconciliation G = (S' W^-1 S)^-1 S' W^-1 with W an estimate of the base-forecast error covariance (use the shrinkage estimator; the full sample covariance is singular with 1782 series). The property worth stating to a customer: MinT reconciliation is a projection, so it cannot increase, and in practice reduces, total squared error while guaranteeing coherence for free. The discipline: estimate W from the residuals of THAT FOLD's training data only, or reconciliation becomes a leak that silently improves your backtest.",
+   "minutes": 20,
+   "resource": {
+    "label": "FPP3 - Forecast reconciliation (bottom-up, top-down, MinT)",
+    "url": "https://otexts.com/fpp3/reconciliation.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take an unseen daily business series, produce in under 30 minutes a defended preprocessing decision - transform (with the Box-Cox lambda and how you chose it), d and D (with the seasonal strength F_S and the KPSS output), and candidate (p,q,P,Q) read off the ACF/PACF - and state which of those choices AICc is and is not allowed to arbitrate.",
+  "You can implement STL from scratch (inner loop with cycle-subseries loess and low-pass filter, outer loop with bisquare robustness weights) and show your components matching statsmodels.tsa.seasonal.STL to within float tolerance, plus a reconstruction assertion that seasonal + trend + resid equals the observation.",
+  "You can write a rolling-origin backtest harness from scratch supporting both expanding and sliding windows, an embargo gap sized to the widest rolling feature, per-horizon error matrices, and a configurable refit cadence, and draw its cut points on a timeline for a customer.",
+  "You can fit seasonal-naive, STL+ETS, SARIMAX and Prophet on identical folds and publish a MASE and RMSSE table broken out by horizon, naming the horizon at which each model stops beating seasonal naive.",
+  "You can write a test that fails when any feature sees data past its fold boundary - by rebuilding the fold's feature matrix from train-only rows and asserting element-wise equality - and demonstrate it catching a deliberately unshifted rolling mean.",
+  "You can report empirical interval coverage by horizon against the nominal level, explain in two sentences why an ARIMA 95% interval under-covers, and produce a bootstrapped or simulated alternative that covers correctly.",
+  "You can run Ljung-Box on innovation residuals with the correct model_df, interpret both a rejection and a non-rejection correctly, and connect a residual-ACF spike at lag m to a specific missing seasonal order.",
+  "You can explain to a non-technical stakeholder why the point forecast is a median not a mean after a log transform, what the bias adjustment changes, and why their per-store forecasts previously did not sum to the national total.",
+  "You can decide and defend, for a given customer dataset, whether to ship per-series SARIMA/ETS or one global LightGBM, including the recursive-vs-direct multi-step choice and the tree extrapolation problem."
+ ],
+ "failureModes": [
+  "The backtest used sklearn KFold or a random train_test_split, so future weeks trained the model that predicts past weeks; MASE came out at 0.4, the deck said 'beats baseline by 60%', and the first live month came in at 1.2.",
+  "Rolling features were built as df.groupby('store').sales.rolling(7).mean() without a .shift(1), so every training row contained its own target inside the window; the model looked near-perfect in backtest and collapsed to seasonal-naive quality in production because that feature is unavailable at forecast time.",
+  "The Box-Cox lambda and the StandardScaler were fitted on the full series before folding, so every fold's training data carried summary statistics of its own test window; the leak is small, invisible in any plot, and consistently makes the reported error 5-15% too low.",
+  "Forecasts were produced on a log scale and exponentiated back without the bias adjustment, so every number shipped was a median; the customer summed 54 store forecasts into a national plan that ran a few percent under actuals every single month and nobody could find the bug.",
+  "res.get_prediction(dynamic=False) was used to generate the 'backtest' chart, so every plotted point was a one-step-ahead prediction conditioned on the true previous value; the fit hugged the data beautifully and the model had never once forecast 16 days ahead.",
+  "The series was differenced twice 'to be safe' - d=1 plus D=1 on a series that only needed the seasonal difference - which pushed a root of the MA polynomial onto the unit circle; statsmodels enforced invertibility silently, the innovation variance roughly doubled, and the prediction intervals shipped twice as wide as they needed to be.",
+  "MAPE was the reported metric on retail data containing zero-sales days; the zero rows were dropped to avoid the division by zero, which quietly removed exactly the hardest observations, and the surviving asymmetry made the systematically under-forecasting model look like the winner.",
+  "Prophet was fitted with the default changepoint_prior_scale on a series whose last six weeks were a COVID-style dip; it placed changepoints in that window, extrapolated the dip as the new trend, and produced a confidently declining 12-month forecast with intervals that never covered the recovery.",
+  "The Kaggle test window's oil price and onpromotion columns were joined as exogenous regressors and the model was praised for its accuracy; in the customer's deployment neither column exists for future dates, so the whole feature set had to be rebuilt and the accuracy claim retracted."
+ ],
+ "interviewQuestions": [
+  "Derive the prediction-interval variance for an ARIMA h-step forecast from the MA(infinity) representation, then tell me three reasons the empirical coverage of that interval will be below nominal on real data and what you would do about each.",
+  "I hand you three years of daily sales for 1800 store-product pairs and ask for a 16-day forecast. Walk me from raw CSV to a defended model: what you plot first, how you decide the transform and the differencing orders, what you can and cannot use AICc for, and how you decide between 1800 SARIMAs and one LightGBM.",
+  "ADF gives p = 0.28 and KPSS gives p = 0.01 on the same series. What does each test's null hypothesis say, what do you conclude, and what do you do next? Now tell me what it means if ADF gives p = 0.02 and KPSS also gives p = 0.01.",
+  "Design an honest backtest for a model whose features include a 28-day rolling mean and a target encoding of store_id, refitting quarterly in production. Specify the window type, the gap, the fold spacing, the refit cadence, how hyperparameters are selected, and one automated test that would fail if any of it leaked.",
+  "A colleague's Prophet model reports 8% MAPE in backtest and 22% in production. The code has no obvious shuffle. Where do you look, in what order, and which three checks would you run first?",
+  "Explain MASE: write the formula, say why the denominator is in-sample rather than out-of-sample, and explain what MASE = 0.85 means. Then tell me when you would refuse to use it and what you would use instead.",
+  "Your per-store forecasts and your national forecast disagree by 3%. Explain to the customer's CFO why that happens, then describe bottom-up, top-down and MinT reconciliation and which one you would ship and why.",
+  "You fit SARIMA(1,1,1)(1,1,1)_7 and Ljung-Box on the residuals gives p = 0.003 with a clear ACF spike at lag 30. Interpret it, and tell me what you change about the model versus what you change about the features."
+ ],
+ "proofOfWork": "Alongside the `ts-backtest` repo, publish a `forecast-audit` notebook-plus-report that takes someone else's working forecasting notebook - pick a highly-voted public Store Sales kernel - and audits it the way you would audit a customer's incumbent model on day three of an engagement. The report reproduces their headline metric, then re-scores the identical model under your own rolling-origin harness with an embargo gap and per-horizon breakdown, and quantifies the gap between the two numbers attributable to each defect you find: leaked rolling features, transforms fitted before splitting, a metric that rewards under-forecasting, one-step-ahead predictions presented as forecasts, and exogenous columns that would not exist at inference time in a real deployment. Include a coverage table showing nominal versus empirical 80% and 95% interval coverage by horizon for their model and yours, an ablation showing what each defect is individually worth in MASE, and a two-page memo written for a non-technical stakeholder that says what the original model's number really means, what the corrected number is, and what would have to be true operationally - which columns are known in advance, what refit cadence, what monitoring on rolling MASE drift - for the corrected model to hold up in production."
+}

@@ -1,0 +1,229 @@
+{
+ "i": 96,
+ "topic": "Statistical inference: estimation, confidence intervals, hypothesis testing, ANOVA",
+ "track": "M. Mathematical Foundations",
+ "month": 2,
+ "hours": 6.0,
+ "why": "Every claim an FDE makes about a model - 'the new retriever is 4 points better', 'this drift is real', 'the pilot beat the baseline' - is an inference from a finite sample, and the customer's data scientist will ask which test you used and which assumption it rests on. Without this you will ship a model whose 4-point lift is inside the noise of a 900-row eval set, or kill a working model because a Shapiro test on 50k rows told you the data was 'not normal'. This is also the layer where silent modelling errors live: a p-value from correlated cross-validation folds, a Wald interval on a 2-out-of-40 conversion rate, an omnibus F that is significant only because one group has three rows and enormous variance."
+ ,
+ "prerequisites": [
+  "Random variables, expectation, variance, independence, and the normal / t / chi-square / F families, plus the CLT and its finite-sample caveats (Topic 95, Probability)",
+  "Differentiation and the chain rule well enough to take d/dtheta of a log-likelihood and set it to zero, and to recognise a Hessian (Topic 94, Calculus and optimisation)",
+  "Vector projection and orthogonal decomposition - the ANOVA sum-of-squares identity is Pythagoras on the column space of the group-indicator matrix (Topic 93, Linear algebra for ML)",
+  "NumPy at working level: broadcasting, axis=, dtype and ddof=, np.random.default_rng - the deliverable is pure NumPy and the bootstrap must be vectorised, not a Python loop",
+  "pytest with parametrize and pytest.approx, since the deliverable's contract is 'matches scipy.stats to 1e-6 on three real datasets' (Topic 39, Testing and contracts)",
+  "pandas basics for loading and grouping the three datasets (read_csv, groupby, dropna) so time goes into the statistics, not the ETL"
+ ],
+ "subtopics": [
+  {
+   "name": "The inference frame: estimand, estimator, estimate, sampling distribution",
+   "learn": "Separate the four objects and use the words correctly in front of a customer: the estimand is the population quantity you care about (mu_A - mu_B, the true AUC, the conversion rate), the estimator is a function of the sample (a random variable, e.g. Xbar), the estimate is the one number you computed, and the sampling distribution is the distribution of the estimator over hypothetical repeat samples. Everything in this topic - standard errors, confidence intervals, p-values - is a statement about that sampling distribution, which you never observe and must either derive analytically, approximate asymptotically, or simulate by bootstrap/permutation. Practise writing the estimand as a sentence before any code: 'the difference in mean handle time between the agent-assisted and control cohorts, over the population of tickets this deployment will see'; if you cannot write it, no test is the right test.",
+   "minutes": 15,
+   "resource": {
+    "label": "Dive into Deep Learning - Statistics (estimators, evaluating estimators, hypothesis tests)",
+    "url": "https://d2l.ai/chapter_appendix-mathematics-for-deep-learning/statistics.html"
+   }
+  },
+  {
+   "name": "Properties of estimators: bias, variance, MSE, consistency, the plug-in principle",
+   "learn": "Be able to derive, on paper, that E[Xbar] = mu, Var(Xbar) = sigma^2/n, and that the plug-in variance (1/n)sum(x_i - xbar)^2 has expectation ((n-1)/n)sigma^2, which is exactly why the unbiased estimator divides by n-1 and why NumPy's default ddof=0 quietly biases every variance you compute (np.var(x, ddof=1) is the one you want for inference). Decompose MSE(thetahat) = Bias^2 + Variance and say why a biased-but-low-variance estimator (ridge, shrunk covariance) can beat the unbiased one - the same trade-off you will meet again as bias-variance in Topic 100. Define consistency (thetahat ->p theta) and know it is a large-n promise that says nothing about your n=40 pilot, and know the plug-in principle: estimate a functional T(F) by T(Fhat_n), which is the entire justification for the bootstrap later in this topic.",
+   "minutes": 15,
+   "resource": {
+    "label": "Maths, CS & AI Compendium - Chapter 04.05 Inference",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2004%20-%20statistics/05.%20inference.md"
+   }
+  },
+  {
+   "name": "Maximum likelihood: score, Fisher information, and where every asymptotic SE comes from",
+   "learn": "Derive an MLE end to end: write the log-likelihood l(theta) = sum log f(x_i; theta), take the score U(theta) = dl/dtheta, solve U = 0, and check the second derivative is negative - do this for the Bernoulli (thetahat = xbar), the normal (muhat = xbar, sigmahat^2 = (1/n)sum(x_i-xbar)^2, biased), and the exponential. Then get the standard error from the information: I(theta) = -E[d^2 l/dtheta^2], sqrt(n)(thetahat - theta) -> N(0, I(theta)^-1), so SE(thetahat) = 1/sqrt(n*I(thetahat)) or, in practice, sqrt of the diagonal of the inverse observed-information (negative Hessian) matrix - which is precisely where statsmodels' `bse` column and every logistic-regression coefficient p-value come from. Know the invariance property (the MLE of g(theta) is g(thetahat)) and that this asymptotic normality is exactly what fails at small n or on a boundary (a fitted probability of 0 or 1 gives an infinite SE, which is separation, not a bug).",
+   "minutes": 20,
+   "resource": {
+    "label": "Dive into Deep Learning - Maximum Likelihood",
+    "url": "https://d2l.ai/chapter_appendix-mathematics-for-deep-learning/maximum-likelihood.html"
+   }
+  },
+  {
+   "name": "Confidence intervals: coverage, t vs z, and the sentence you are allowed to say",
+   "learn": "A 95% CI is a procedure-level guarantee: P(L(X) <= theta <= U(X)) = 0.95 over repeated sampling; the realised interval [1.2, 4.8] either contains theta or does not, so 'there is a 95% probability the true lift is between 1.2 and 4.8' is a Bayesian credible-interval statement, not this. Build the one-sample interval xbar +/- t_{1-alpha/2, n-1} * s/sqrt(n) using scipy.stats.t.ppf, and be able to say why the t rather than the z: s is itself estimated, (n-1)s^2/sigma^2 ~ chi2_{n-1}, and the ratio of a standard normal to sqrt(chi2/df) is Student's t - which is why the interval is wider at small n and converges to +/-1.96 as df grows. Report a CI next to every point estimate in customer-facing work, and check coverage empirically once by simulation (draw 10,000 samples from a known distribution, count how often the interval covers) - that simulation is the only honest test of a CI you wrote yourself.",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy docs - scipy.stats.t (ppf, sf, interval)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.t.html"
+   }
+  },
+  {
+   "name": "Proportions: why the Wald interval is broken and what to use instead",
+   "learn": "The textbook interval phat +/- z*sqrt(phat(1-phat)/n) has actual coverage far below its nominal 95% for small n or p near 0 or 1, and degenerates to zero width at phat = 0 - so '0 failures in 40 calls' becomes the interval [0, 0], which is the single most common way an FDE overclaims reliability in a pilot readout. Use statsmodels.stats.proportion.proportion_confint(count, nobs, method='wilson') by default, 'beta' (Clopper-Pearson) when you must be conservative for a compliance claim, and know the rule of three: with 0 events in n trials the upper 95% bound is about 3/n. Wilson centres the interval at (phat + z^2/2n)/(1 + z^2/n), which is why it never leaves [0,1] and behaves at the edges; use proportion_confint on the difference of two proportions (or a bootstrap) rather than eyeballing two overlapping single-arm intervals, because non-overlapping intervals are a sufficient but not necessary condition for a significant difference.",
+   "minutes": 15,
+   "resource": {
+    "label": "statsmodels - proportion_confint (normal, wilson, beta, jeffreys, agresti_coull)",
+    "url": "https://www.statsmodels.org/stable/generated/statsmodels.stats.proportion.proportion_confint.html"
+   }
+  },
+  {
+   "name": "The nonparametric bootstrap: percentile, basic, BCa, and where it fails",
+   "learn": "Implement the algorithm you will be asked to defend: resample n points with replacement B times, recompute the statistic each time to get thetahat*_1..B, then form the percentile interval [q_{alpha/2}(thetahat*), q_{1-alpha/2}(thetahat*)], the basic/reverse-percentile interval [2thetahat - q_{1-alpha/2}, 2thetahat - q_{alpha/2}], and understand BCa's two corrections - the bias correction z0 = Phi^-1(#{thetahat* < thetahat}/B) and the acceleration a computed from jackknife leave-one-out values - which is what scipy.stats.bootstrap does by default (method='BCa'). Know the failure list cold, because 'we bootstrapped it' is not a defence: the bootstrap is inconsistent for extremes (max/min), for non-smooth functionals, at tiny n where the resample space is degenerate, for dependent data (use a moving-block bootstrap on time series), and it does not fix a biased estimator or a leaky evaluation - it only estimates the sampling variability of whatever you handed it. For paired or clustered data, resample the cluster (the user, the ticket, the tenant), never the row.",
+   "minutes": 30,
+   "resource": {
+    "label": "SciPy docs - scipy.stats.bootstrap (percentile, basic, BCa; paired and n_resamples)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.bootstrap.html"
+   }
+  },
+  {
+   "name": "Bootstrapping in NumPy: vectorised resampling, B, seeds and Monte-Carlo error",
+   "learn": "Write it once as a vectorised draw - rng = np.random.default_rng(seed); idx = rng.integers(0, n, size=(B, n)); stats = statistic(x[idx], axis=1) - instead of a Python loop, so B=10,000 on 50k rows runs in seconds; use rng.choice only when you need weights or replace=False. Choose B by the precision you need on the interval endpoint, not by habit: the Monte-Carlo standard error of a bootstrap quantile falls as 1/sqrt(B), so B=1,000 is fine for a standard error and too coarse for a 2.5% percentile - rerun with two different seeds and if the CI endpoints move in the third significant figure, raise B. Seed with a SeedSequence and record it in the artifact so the customer's data scientist reproduces your interval exactly; never reuse a global np.random seed across parallel workers, spawn child streams. Memory is the real limit: an (B, n) index matrix at B=10,000 and n=1e6 is 80 GB, so chunk over B and accumulate.",
+   "minutes": 20,
+   "resource": {
+    "label": "NumPy docs - Generator.choice (resampling with/without replacement)",
+    "url": "https://numpy.org/doc/stable/reference/random/generated/numpy.random.Generator.choice.html"
+   }
+  },
+  {
+   "name": "The Neyman-Pearson frame: null, test statistic, alpha, beta, power",
+   "learn": "State any test as five objects: H0, the test statistic T(X), the distribution of T under H0, the rejection region for a chosen alpha, and the power 1-beta at the effect size you care about. Understand the asymmetry - alpha is the Type I error rate you fix in advance, beta is the Type II error you only control by design (sample size and effect size), and 'fail to reject' is not evidence for H0 unless you can also state the power (an underpowered test fails to reject almost everything, which is why 'no significant difference' from a 60-row eval means nothing). Know that a one-sided test has more power but must be declared before seeing the data, and that the whole frame is a decision rule for repeated use, not a measure of belief in this particular result.",
+   "minutes": 20,
+   "resource": {
+    "label": "Maths, CS & AI Compendium - Chapter 04.04 Hypothesis testing",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2004%20-%20statistics/04.%20hypothesis%20testing.md"
+   }
+  },
+  {
+   "name": "What a p-value licenses, and the misinterpretations that end credibility",
+   "learn": "Define it precisely: p = P(T >= t_obs | H0 and the entire model - iid sampling, the assumed variance structure, the pre-specified analysis), so a small p indicts the whole package, not just the null mean. Be able to recite the four denials on demand: it is not P(H0 | data), not the probability the result is a fluke, not 1 minus the replication probability, and its magnitude is not an effect size (p=0.001 on n=2,000,000 can be a 0.01% lift no customer would pay for). Know that p is uniform on [0,1] under H0, which is why peeking and re-testing inflate the false-positive rate, and adopt the habit of leading every readout with the estimate and CI and putting the p-value in parentheses afterwards - reversing that order is how a 0.3-point 'significant' improvement gets into a customer deck.",
+   "minutes": 20,
+   "resource": {
+    "label": "Greenland et al. 2016 - Statistical tests, P values, confidence intervals and power: a guide to misinterpretations (open access)",
+    "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC4877414/"
+   }
+  },
+  {
+   "name": "Two-sample means: Student vs Welch, Behrens-Fisher, Satterthwaite df",
+   "learn": "Derive both statistics. Student pools: s_p^2 = ((n1-1)s1^2 + (n2-1)s2^2)/(n1+n2-2), t = (xbar1-xbar2)/(s_p*sqrt(1/n1+1/n2)) on n1+n2-2 df, and it assumes equal population variances. Welch does not pool: t = (xbar1-xbar2)/sqrt(s1^2/n1 + s2^2/n2) with the Satterthwaite approximation df = (s1^2/n1 + s2^2/n2)^2 / [ (s1^2/n1)^2/(n1-1) + (s2^2/n2)^2/(n2-1) ], a non-integer df you must pass to scipy.stats.t.sf. Make Welch (scipy.stats.ttest_ind(a, b, equal_var=False)) your default for unequal or unknown variances and unequal group sizes, because the pooled test's Type I error can be badly wrong when the larger variance sits in the smaller group; invert the same statistic to get the CI on the difference, xbar1-xbar2 +/- t_{1-alpha/2, df_welch} * sqrt(s1^2/n1+s2^2/n2), and confirm it agrees with your bootstrap interval to two significant figures.",
+   "minutes": 30,
+   "resource": {
+    "label": "SciPy docs - scipy.stats.ttest_ind (equal_var=False is Welch)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ttest_ind.html"
+   }
+  },
+  {
+   "name": "Paired and blocked designs: the cheapest variance reduction you will ever get",
+   "learn": "When the same unit is measured twice (same prompt under model A and B, same ticket before and after), analyse the differences d_i = x_i - y_i with a one-sample t on d (scipy.stats.ttest_rel), because Var(Xbar - Ybar) = (sigma_x^2 + sigma_y^2 - 2*cov)/n collapses when the pairing is strongly correlated - the same 200 examples can go from inconclusive to decisive with no extra data. Recognise the FDE version of this: evaluating two prompts or two retrievers on the same eval set is inherently paired, and running an unpaired ttest_ind on it throws away the correlation and understates your own improvement. Know the failure: paired analysis on data that is not actually paired (unequal lengths, misaligned order after a groupby, a dropped row shifting the alignment) silently computes differences between unrelated units.",
+   "minutes": 15,
+   "resource": {
+    "label": "SciPy docs - scipy.stats.ttest_rel (paired two-sample t-test)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ttest_rel.html"
+   }
+  },
+  {
+   "name": "Assumption diagnostics: QQ plots, Levene, Shapiro, and what actually has to be normal",
+   "learn": "The t-test does not require normal data - it requires the sampling distribution of the mean to be approximately normal, which the CLT supplies at moderate n unless the data are heavily skewed, heavy-tailed, or contaminated by outliers (latency distributions are all three). Diagnose by eye first: scipy.stats.probplot(x, dist='norm', plot=ax) for a QQ plot (an S-curve is skew, fat ends are heavy tails), a histogram, and a plot of the bootstrap distribution of the statistic itself, which directly shows whether the normal approximation is safe. Use scipy.stats.levene(*groups, center='median') - Brown-Forsythe, robust to non-normality - rather than bartlett for equal variances, and treat scipy.stats.shapiro as diagnostic only: its power grows with n, so it rejects irrelevant deviations at n=10,000 and misses real ones at n=20, making 'Shapiro said p<0.05 so we used a nonparametric test' an anti-pattern. Prefer choosing the test from the design and the plot, not from a chain of pre-tests, which itself inflates Type I error.",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy docs - scipy.stats.probplot (QQ plot against a reference distribution)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.probplot.html"
+   }
+  },
+  {
+   "name": "Permutation and rank alternatives: exchangeability instead of normality",
+   "learn": "When the null is 'the labels carry no information', build the null distribution by shuffling: recompute the statistic on B random relabelings and report p = (1 + #{|T*| >= |T_obs|})/(B+1) - the +1 in numerator and denominator is not cosmetic, it keeps the test valid and prevents a p of exactly 0. scipy.stats.permutation_test handles the three flavours: permutation_type='independent' (two independent samples), 'samples' (paired, flips signs within pairs), 'pairings' (correlation/association), and it works for any statistic including median difference, p95 difference or AUC, where no closed form exists. The assumption is exchangeability under H0, which clustered or time-ordered data violates - permute clusters, not rows. Know the rank options and what they actually test: scipy.stats.mannwhitneyu tests P(X > Y) != 1/2 (stochastic dominance), and it is only a test of medians under an additional identical-shape assumption people routinely forget to state.",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy docs - scipy.stats.permutation_test",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.permutation_test.html"
+   }
+  },
+  {
+   "name": "One-way ANOVA: the sum-of-squares identity and the F statistic",
+   "learn": "Derive SST = SSB + SSW: with group means xbar_j and grand mean xbar, SSB = sum_j n_j (xbar_j - xbar)^2 on k-1 df and SSW = sum_j sum_i (x_ij - xbar_j)^2 on N-k df; then MSB = SSB/(k-1), MSW = SSW/(N-k), and F = MSB/MSW which under H0 (all mu_j equal, normal errors, equal variance, independence) follows F(k-1, N-k) - get the p-value from scipy.stats.f.sf(F, k-1, N-k), never 1-cdf, which loses precision in the tail. Understand what the ratio means: MSW always estimates sigma^2, MSB estimates sigma^2 plus a term proportional to the spread of the true group means, so F is 'between-group signal per unit of within-group noise'. Verify two identities in your implementation - for k=2 the F equals the square of the pooled two-sample t, and SSB/SST is eta^2, the effect size you should report because a significant F on 400k rows says nothing about magnitude.",
+   "minutes": 30,
+   "resource": {
+    "label": "NIST/SEMATECH e-Handbook 7.4.3.3 - The ANOVA table and tests of hypotheses about means",
+    "url": "https://www.itl.nist.gov/div898/handbook/prc/section4/prc433.htm"
+   }
+  },
+  {
+   "name": "ANOVA as a linear model: OLS, dummy coding, and Type I/II/III sums of squares",
+   "learn": "See that one-way ANOVA is just OLS on group indicators - fit smf.ols('y ~ C(group)', data=df).fit() and sm.stats.anova_lm(model, typ=2) returns the same F and p as scipy.stats.f_oneway on balanced data - which is why the reference-level coefficient is a contrast against the baseline group and why the residual df is N-k. Once there are two or more factors, know that Type I SS is sequential and therefore order-dependent, Type II tests each main effect after the other main effects but ignores interactions, and Type III tests each term with all others in the model (and needs sum-to-zero contrasts to be meaningful); on balanced designs all three agree, on unbalanced designs they do not and quoting the default without saying which one is how two analysts get two answers from the same data. This framing is also the bridge to Topic 100: an ANOVA is a regression, a t-test is a regression with one dummy, and both are special cases of the linear model you will regularise later.",
+   "minutes": 15,
+   "resource": {
+    "label": "statsmodels - anova_lm (typ=1/2/3 sums of squares)",
+    "url": "https://www.statsmodels.org/stable/generated/statsmodels.stats.anova.anova_lm.html"
+   }
+  },
+  {
+   "name": "Heteroscedastic and unbalanced ANOVA: Welch's F and Alexander-Govern",
+   "learn": "Classical F assumes equal variances, and it is not robust to violation when group sizes are unequal - the error rate inflates when the small group has the large variance and deflates in the reverse case, so an unbalanced design plus heteroscedasticity is the standard way an ANOVA lies. Use statsmodels.stats.oneway.anova_oneway(data, groups, use_var='unequal') for Welch's F (a weighted between-group statistic with a Brown-Forsythe/Welch adjusted denominator df), or scipy.stats.alexandergovern, and report which you used. Check the design first: print n_j, mean_j and s_j per group before the test, because a group with n_j=3 dominates the df arithmetic and is usually a data-quality problem (a mislabelled cohort, an unfilled category) rather than a real stratum.",
+   "minutes": 15,
+   "resource": {
+    "label": "statsmodels - anova_oneway (use_var='equal' | 'unequal' | 'bf')",
+    "url": "https://www.statsmodels.org/stable/generated/statsmodels.stats.oneway.anova_oneway.html"
+   }
+  },
+  {
+   "name": "Post-hoc comparisons: Tukey HSD, Dunnett, and why you cannot just run k(k-1)/2 t-tests",
+   "learn": "A significant omnibus F says 'not all means are equal' and nothing about which pair differs, so you need a post-hoc procedure that controls the family-wise error rate across all k(k-1)/2 comparisons - scipy.stats.tukey_hsd (or statsmodels pairwise_tukeyhsd) uses the studentized range distribution and returns simultaneous confidence intervals, which are what you show a customer. When every group is compared to a single control (baseline model vs four candidates) use scipy.stats.dunnett, which is more powerful because it makes k-1 comparisons rather than k(k-1)/2. Know why raw pairwise t-tests are wrong: with k=5 groups and alpha=0.05 the chance of at least one false positive is about 1-(0.95)^10 = 40%, and know the honest alternative when you have one pre-registered comparison of interest - state it in advance and skip the omnibus.",
+   "minutes": 15,
+   "resource": {
+    "label": "SciPy docs - scipy.stats.tukey_hsd (simultaneous CIs via the studentized range)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.tukey_hsd.html"
+   }
+  },
+  {
+   "name": "Multiplicity beyond post-hoc: FWER vs FDR, Bonferroni, Holm, Benjamini-Hochberg",
+   "learn": "Distinguish the two error rates and pick deliberately: FWER = P(at least one false rejection), controlled by Bonferroni (alpha/m, valid always, very conservative) or Holm's step-down (uniformly more powerful, same guarantee); FDR = E[V/max(R,1)], the expected fraction of your rejections that are false, controlled by Benjamini-Hochberg at level q (scipy.stats.false_discovery_control, or statsmodels multipletests with method='fdr_bh'). Use FWER when a single false positive is expensive (a regulatory claim, a go/no-go on a deployment) and FDR when you are screening many features or many segments and can tolerate a known false-discovery fraction. The real-world version of this is subgroup analysis: slicing a flat A/B result by 30 segments until one is 'significant' is a 30-test family whether or not you admit it, and the fix is to pre-register the segments or to report BH-adjusted q-values for all of them.",
+   "minutes": 15,
+   "resource": {
+    "label": "SciPy docs - scipy.stats.false_discovery_control (Benjamini-Hochberg / Benjamini-Yekutieli)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.false_discovery_control.html"
+   }
+  },
+  {
+   "name": "Effect size and power: sizing the eval set before you run it",
+   "learn": "Convert an effect into standardised units - Cohen's d = (mu1-mu2)/s_pooled for means, eta^2 = SSB/SST for ANOVA - and invert the two-sample formula n_per_arm approx 2(z_{1-alpha/2} + z_{1-beta})^2 * sigma^2 / delta^2 to see the brutal quadratic: halving the detectable effect quadruples the sample. Use statsmodels TTestIndPower().solve_power(effect_size=d, nobs1=None, alpha=0.05, power=0.8, ratio=1) for means and FTestAnovaPower for k groups, and turn the answer around into the number that actually matters to a customer: the minimum detectable effect at the eval-set size they are willing to label. Do this before the experiment - a post-hoc 'observed power' computed from the observed effect is a deterministic function of the p-value and carries no information, and refusing to run an underpowered eval is a more valuable thing to say in a customer meeting than a non-significant result.",
+   "minutes": 20,
+   "resource": {
+    "label": "statsmodels - TTestIndPower (solve_power for effect size, n, alpha or power)",
+    "url": "https://www.statsmodels.org/stable/generated/statsmodels.stats.power.TTestIndPower.html"
+   }
+  },
+  {
+   "name": "Inference on model metrics: comparing two models without fooling yourself",
+   "learn": "The classic mistake is running a paired t-test across k cross-validation folds as if the folds were independent: they share training data, so the variance is underestimated, the t is inflated and 'model B is significantly better' is manufactured - use a corrected resampled t-test (Nadeau-Bengio) or repeated 5x2cv, and read scikit-learn's worked comparison of grid-search candidates that shows the correction term explicitly. For a single held-out test set, get a CI on accuracy/F1/AUC by bootstrapping the test set (resampling the evaluation unit - the user or document, not the row, when rows are clustered), and use McNemar's test on the discordant-pairs table when two classifiers are scored on the same examples. Always report the metric difference with its interval, and remember that a metric computed on a leaky split has a beautifully tight CI around the wrong number - the interval measures sampling noise, never leakage (Topic 103 goes at this in depth).",
+   "minutes": 15,
+   "resource": {
+    "label": "scikit-learn - Statistical comparison of models using grid search (corrected paired t-test)",
+    "url": "https://scikit-learn.org/stable/auto_examples/model_selection/plot_grid_search_stats.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can implement, in pure NumPy and from the formulas, Welch's t (with Satterthwaite df), the one-way ANOVA F from the SS decomposition, and percentile/basic/BCa bootstrap intervals, and show a pytest suite asserting agreement with scipy.stats.ttest_ind, f_oneway and bootstrap to 1e-6 on three real datasets.",
+  "You can produce a confidence interval for a difference in means two ways - analytically by inverting the Welch statistic and empirically by bootstrap - and explain in one sentence why they agree here and where they would diverge (skew, small n, a non-smooth statistic).",
+  "You can state, for any test you run, the exact null hypothesis, the reference distribution, and the specific assumption you are leaning on, and name the diagnostic (QQ plot, Levene, group-wise n and s table) you used to decide it was tenable.",
+  "You can say precisely what a given p-value licenses and refuse the four standard misreadings out loud, including the case where p<0.001 accompanies an effect too small to be worth deploying.",
+  "You can size an evaluation before it runs: given a minimum effect worth caring about, alpha and power, produce the required n per arm, and given a fixed labelling budget produce the minimum detectable effect instead.",
+  "You can take a multi-group result, decide between classical F, Welch's F and a permutation test, run the correct post-hoc procedure (Tukey HSD or Dunnett), and report simultaneous intervals plus eta^2 rather than a bare p-value.",
+  "You can identify when a comparison is a multiple-testing family, choose FWER or FDR control with a stated reason, and adjust with Holm or Benjamini-Hochberg.",
+  "You can explain why a paired t-test across cross-validation folds is invalid, implement a corrected resampled t-test or bootstrap-over-test-set alternative, and put an honest interval on a reported model-metric difference."
+ ],
+ "failureModes": [
+  "The pilot readout says '0 failures in 40 calls, so reliability is 100%'; the Wald interval collapsed to zero width at phat=0 and the Wilson bound (or the rule of three, ~7.5%) would have shown the honest upper limit before it reached the customer's slide.",
+  "Two models are compared with a paired t-test over 10 cross-validation folds; the folds share training data so the variance is understated, the p-value is manufactured, and the 'significantly better' model loses in production.",
+  "A significant ANOVA F is driven entirely by one cohort with n=3 and huge variance created by a mislabelled category in the source table - a data-quality bug read as a scientific finding because nobody printed n_j, mean_j and s_j before testing.",
+  "A flat A/B result is sliced by 30 customer segments until one comes back at p=0.03; nobody adjusted for the family, and the resulting 'the product works for mid-market healthcare' claim does not replicate in the next quarter.",
+  "The team runs Shapiro-Wilk on 50,000 latency measurements, gets p<1e-20, abandons the t-test for a rank test that answers a different question (stochastic dominance, not means), and then reports the result as a difference in means anyway.",
+  "The bootstrap resamples rows when the data is clustered by user - one heavy user contributes 400 rows - so the interval is several times too narrow and the model's apparent lift survives a resampling check it should have failed.",
+  "The evaluation harness computes p = 1 - f.cdf(F, dfn, dfd) instead of f.sf(F, dfn, dfd); for large F the subtraction cancels to exactly 0.0 in float64, the test suite's 1e-6 comparison against scipy passes on the easy datasets and hides the bug until an extreme statistic appears.",
+  "A pooled Student t-test is used on cohorts of size 900 and 60 where the small cohort has three times the variance; the equal-variance assumption inflates the Type I error, and the resulting 'significant' improvement is an artefact of the imbalance rather than of the model."
+ ],
+ "interviewQuestions": [
+  "Derive Welch's t-statistic and its Satterthwaite degrees of freedom, then tell me exactly when you would use it instead of the pooled Student version and what happens to the false-positive rate if you get that choice wrong.",
+  "Write out the sum-of-squares decomposition for one-way ANOVA and show that F = MSB/MSW. For k=2, what is the relationship between this F and the two-sample t? What does a significant F entitle you to say, and what does it not?",
+  "A customer's data scientist says 'the 95% CI is [1.2, 4.8], so there's a 95% chance the true lift is in that range'. Is that correct? Give the correct interpretation, and describe how you would empirically verify that an interval you wrote actually has 95% coverage.",
+  "Design: we have budget to human-label 2,000 evaluation examples once, and we want to know whether a new retriever beats the incumbent. Specify the design, the estimand, the test, the interval, how many examples you actually need, and how you would present a null result to the customer.",
+  "Debug: an offline eval reports the new model is 4 points better with p=0.004, but the online A/B shows no difference. Walk me through the candidate explanations in the order you would check them, and say which of them a confidence interval would and would not have caught.",
+  "When does the bootstrap fail? Give me at least three concrete cases, and for each one tell me what you would do instead.",
+  "You have 6 model variants and want to know which beat the baseline. Lay out the testing strategy: omnibus or not, which post-hoc procedure, FWER or FDR, and how you would explain the multiplicity correction to a product manager who thinks you are hiding a win."
+ ],
+ "proofOfWork": "A public repo `inference-from-scratch` that goes one step past the deliverable by turning `inference.py` into a falsifiable claim about correctness. Alongside the NumPy implementations of Welch's t, the one-way ANOVA F and percentile/basic/BCa bootstrap intervals, add a simulation harness that empirically measures the two things the formulas promise: a coverage study that draws 20,000 samples from normal, lognormal, t(3) and a 5%-contaminated mixture at n = 10, 30, 200 and reports actual coverage of each interval type (analytic t, percentile, basic, BCa) as a table plus a coverage-vs-n plot, and a Type-I-error study that runs Student, Welch, Mann-Whitney and a permutation test under H0 across equal and unequal variance and unequal group sizes, reporting the realised rejection rate against the nominal 0.05. The README states, in numbers, where each method breaks - the n and the skew at which percentile coverage drops below 90%, the variance ratio and imbalance at which pooled Student's error rate exceeds 8% while Welch holds at 5% - with a short 'which test do I use' decision note written for a customer's analyst. CI runs the pytest suite (matching scipy to 1e-6 on three real datasets) plus a fast, fixed-seed version of both simulations as regression tests, and every figure is regenerated from a recorded seed so the numbers are reproducible."
+}

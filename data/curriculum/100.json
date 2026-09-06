@@ -1,0 +1,228 @@
+{
+ "i": 100,
+ "topic": "Supervised learning I: linear and logistic regression, regularisation, the bias-variance trade-off",
+ "track": "N. Machine Learning Systems",
+ "month": 7,
+ "hours": 6,
+ "why": "Linear and logistic regression are the two models you will actually be allowed to ship inside a regulated customer's decisioning path, and they are the baseline every boosted or neural model must beat by more than a cross-validation standard error before you are allowed to argue for it. The whole job of defending a model in a customer's room reduces to three sentences you can only say if you own this material: here is why the coefficient has that sign, here is why the validation curve looks like that, and here is the lever - more features, a different penalty, or more data - that moves it. Get it wrong and you will confidently present a leakage artefact, or quote an odds ratio that is an artefact of the L2 penalty rather than anything about their business.",
+ "prerequisites": [
+  "Linear algebra from Topic 93: matrix multiplication, rank, orthogonal projection, eigenvalues, and the SVD X = U S V' - the ridge shrinkage argument is pure SVD",
+  "Calculus and optimisation from Topic 94: gradients of quadratic forms, the chain rule, convexity and what it guarantees, and one step of gradient descent on a parameter vector",
+  "Statistical inference from Topic 96: estimators, bias, sampling distributions, standard errors and confidence intervals - you need these to read a statsmodels summary rather than admire it",
+  "Losses as likelihoods from Topic 98: MSE as Gaussian NLL, log loss as Bernoulli NLL, and the fact that class weights change the implied prior",
+  "Numerical computing from Topic 99: float64 epsilon, condition number, and why forming an explicit matrix inverse is the wrong instinct",
+  "Working pandas and scikit-learn: DataFrame indexing, train_test_split, fit/predict/score, ColumnTransformer, and a virtualenv with scikit-learn, statsmodels, numpy, scipy, matplotlib and pytest pinned"
+ ],
+ "subtopics": [
+  {
+   "name": "The linear model, the design matrix, and what OLS actually assumes",
+   "learn": "Write the model as y = Xw + eps with X an N x (p+1) design matrix whose first column is ones, and be precise about the four assumptions behind the Gauss-Markov theorem: linearity in the parameters, E[eps | X] = 0, constant variance Var(eps) = sigma^2 I, and uncorrelated errors. Know exactly what the theorem gives you - OLS is the Best Linear Unbiased Estimator, lowest variance among linear unbiased estimators - and what it does not: it never assumes normal errors (that assumption only buys you exact t and F inference in small samples), it says nothing about causation, and it says nothing about estimators that are allowed to be biased, which is the loophole ridge walks through. Be able to name, for any customer dataset, which of the four fails: repeated measurements per account break independence, revenue targets break homoscedasticity, and an omitted driver correlated with a feature breaks E[eps|X] = 0 and puts the bias straight into the coefficient the customer wants to act on.",
+   "minutes": 15,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - Chapter 06: 01. Classical machine learning",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2006%20-%20machine%20learning/01.%20classical%20machine%20learning.md"
+   }
+  },
+  {
+   "name": "Deriving the normal equations twice: calculus and projection geometry",
+   "learn": "Derive it by calculus first: RSS(w) = ||y - Xw||^2 = y'y - 2w'X'y + w'X'Xw, so the gradient is -2X'(y - Xw), setting it to zero gives the normal equations X'Xw = X'y, and the Hessian 2X'X is positive semi-definite so any stationary point is a global minimum. Then derive the same result geometrically with no calculus at all: the fitted values must be the orthogonal projection of y onto the column space of X, so the residual must satisfy X'(y - Xw) = 0, which is the identical equation. Read the consequences off the hat matrix H = X(X'X)^-1 X': it is symmetric and idempotent, trace(H) = p + 1 is the model's degrees of freedom, h_ii is the leverage of row i, and X'e = 0 means the residuals are orthogonal to every column - which is why residuals summing to zero is a mechanical property of including an intercept and not evidence of a good fit. Be able to do both derivations closed-book in under five minutes.",
+   "minutes": 25,
+   "resource": {
+    "label": "Dive into Deep Learning - Linear Regression (analytic solution and the squared-loss objective)",
+    "url": "https://d2l.ai/chapter_linear-regression/linear-regression.html"
+   }
+  },
+  {
+   "name": "Solving least squares numerically: QR, SVD, condition number, and never inv(X'X)",
+   "learn": "Know why the textbook formula is not the implementation: cond(X'X) = cond(X)^2, so a design matrix with condition number 1e8 - which is what unscaled dollars next to a 0/1 flag next to a year gives you - produces a normal-equations system at 1e16, past float64's machine epsilon of 2.2e-16, and you get coefficients that are pure rounding noise. Solve instead with QR (X = QR, then back-substitute Rw = Q'y) or with the SVD X = U S V', where w = V S^-1 U' y and singular values below a cutoff are dropped - which is exactly what np.linalg.lstsq does via LAPACK gelsd, and what scikit-learn's LinearRegression calls underneath. Understand the rank-deficient case concretely: p > N, or a one-hot encoding that kept every level alongside an intercept, makes X'X singular and the solution set infinite, and lstsq silently returns the minimum-norm member of that set rather than raising. Diagnose with np.linalg.cond(X) and np.linalg.matrix_rank(X) before you believe any coefficient.",
+   "minutes": 15,
+   "resource": {
+    "label": "NumPy - numpy.linalg.lstsq (least-squares solution, rcond and rank)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.linalg.lstsq.html"
+   }
+  },
+  {
+   "name": "Gradient descent for OLS: the update rule, the step-size bound, and conditioning",
+   "learn": "Implement the batch update w <- w - eta * (2/N) X'(Xw - y) and derive the convergence condition rather than tuning eta by superstition: on a quadratic the iteration is stable only for 0 < eta < 2/L, where L is the largest eigenvalue of (2/N) X'X, and the error contracts by roughly ((kappa - 1)/(kappa + 1))^2 per step, with kappa the condition number of that matrix. That single expression explains the zig-zag trajectory on unscaled data - kappa = 10^4 means thousands of iterations - and explains why standardising features is an optimisation fix, not a cosmetic one. Verify empirically that gradient descent converges to the closed-form solution to 1e-6 given enough steps on a well-conditioned problem, and that raising eta past 2/L makes the loss diverge on the second iteration. Know when the closed form stops being an option at all: X'X costs O(N p^2) and its factorisation O(p^3), so at p in the tens of thousands or N that does not fit in memory you move to SGDRegressor with a schedule, early stopping on n_iter_no_change, and mandatory scaling.",
+   "minutes": 25,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - Chapter 06: 02. Gradient machine learning",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2006%20-%20machine%20learning/02.%20gradient%20machine%20learning.md"
+   }
+  },
+  {
+   "name": "The bias-variance decomposition, derived line by line",
+   "learn": "For squared loss at a fixed input x0, derive E_D,eps[(y - f_hat_D(x0))^2] = sigma^2 + (E_D[f_hat_D(x0)] - f(x0))^2 + E_D[(f_hat_D(x0) - E_D[f_hat_D(x0)])^2] by adding and subtracting E_D[f_hat_D(x0)] and showing the cross terms vanish because the noise is independent of the training set. Be exact about what the expectation runs over: the distribution of training sets D, not over the rows of one dataset - which is precisely why you need bootstrap resampling to estimate the terms at all, and why 'variance across CV folds' is a different quantity that people constantly mislabel. Know the boundaries: the decomposition is exact for squared loss and does not carry over cleanly to 0-1 loss or log loss, and sigma^2 is the same irreducible floor you met as H(P) in Topic 98. Finally know the Hoerl-Kennard existence result - for any OLS problem there is some lambda > 0 whose ridge estimator has strictly lower mean squared error - which is the formal reason a deliberately biased estimator is not a compromise but an improvement.",
+   "minutes": 25,
+   "resource": {
+    "label": "Scott Fortmann-Roe - Understanding the Bias-Variance Tradeoff",
+    "url": "https://scott.fortmann-roe.com/docs/BiasVariance.html"
+   }
+  },
+  {
+   "name": "Estimating bias and variance by bootstrap: the plot you commit",
+   "learn": "Build the decomposition numerically: draw B = 200 bootstrap resamples of the training set, fit the same pipeline on each, predict on one fixed evaluation grid, then compute per-point variance as the spread of the B predictions and per-point squared bias as (mean prediction - true f)^2, and average both over the grid. Do it first on a simulated problem where f is known (polynomial degree 1 to 15 on a noisy sine) so all three terms are computable and add up to the measured test error to within Monte-Carlo error, then repeat on the customer-style dataset where f is unknown and be honest that you can only separate variance from the combined bias-plus-noise. Produce the canonical figure - x-axis model complexity or log alpha, three stacked curves for squared bias, variance and total error - and read the crossing point as the operating region rather than a single best model. Compare your numbers with the scikit-learn worked example so you know your estimator is right before you show it to anyone.",
+   "minutes": 15,
+   "resource": {
+    "label": "scikit-learn example - Single estimator versus bagging: bias-variance decomposition",
+    "url": "https://scikit-learn.org/stable/auto_examples/ensemble/plot_bias_variance.html"
+   }
+  },
+  {
+   "name": "Learning curves: reading them and naming the lever",
+   "learn": "Generate them with sklearn.model_selection.learning_curve or LearningCurveDisplay.from_estimator, passing the whole Pipeline (never a pre-fitted, pre-scaled matrix), an explicit cv splitter, train_sizes=np.linspace(0.1, 1.0, 10) and scoring='neg_root_mean_squared_error' - remembering the sign convention, so you negate before plotting. Learn the two shapes and the levers they license. High bias: training and validation error converge to each other at a high value and the curve is flat, so more data is worthless and the lever is capacity - interactions, splines, a lower alpha, or a different model family. High variance: training error is near zero and a large gap persists at the right-hand edge, so the levers are more rows, stronger regularisation, or fewer features. Always plot the band (std across folds), because a 'gap' smaller than the fold-to-fold noise is not a gap, and pair the learning curve with a validation curve over alpha so you can see the trade-off along both axes.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - Learning curves (validation curves and learning_curve)",
+    "url": "https://scikit-learn.org/stable/modules/learning_curve.html#learning-curve"
+   }
+  },
+  {
+   "name": "Ridge: the closed form, the SVD shrinkage view, and effective degrees of freedom",
+   "learn": "Derive w_ridge = (X'X + lambda I)^-1 X'y from the penalised objective ||y - Xw||^2 + lambda ||w||^2 and note the structural gift: adding lambda to every eigenvalue makes the matrix invertible for any lambda > 0, even when p > N, so ridge always has a unique solution where OLS has none. Then plug in the SVD and see what shrinkage actually does: y_hat = sum_j u_j * (d_j^2 / (d_j^2 + lambda)) * u_j'y, so directions with large singular values are barely touched while low-variance principal directions - the ones responsible for wild coefficients under collinearity - are crushed. Define effective degrees of freedom df(lambda) = sum_j d_j^2/(d_j^2 + lambda), which runs smoothly from p at lambda = 0 down to 0, and use it to answer 'how complex is this model really'. Know scikit-learn's exact objective - ||y - Xw||^2_2 + alpha * ||w||^2_2, with no 1/N factor and no penalty on the intercept - because alpha is not portable between libraries or between dataset sizes.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - Ridge regression and classification (objective, solvers, RidgeCV)",
+    "url": "https://scikit-learn.org/stable/modules/linear_model.html#ridge-regression-and-classification"
+   }
+  },
+  {
+   "name": "The ridge coefficient path and choosing alpha from it",
+   "learn": "Fit over alphas = np.logspace(-3, 3, 100) and plot every coefficient against log alpha: the ridge path is smooth, monotone in magnitude for well-conditioned directions, and never reaches exactly zero, and correlated predictors visibly share weight instead of one of them taking it all. Use RidgeCV, which for the default settings computes an efficient leave-one-out generalised cross-validation score over the whole alpha grid at roughly the cost of one fit - understand that this is possible because of the hat-matrix identity for LOO residuals, not magic. Then make the FDE move: defend the chosen alpha from the path, showing which coefficients are stable across two decades of alpha and which flip sign at the slightest shrinkage, because the second group is what the customer must not build a business rule on. Sanity-check the whole thing by confirming that alpha -> 0 reproduces the OLS coefficients and alpha -> infinity drives them all to zero while the intercept stays at mean(y).",
+   "minutes": 15,
+   "resource": {
+    "label": "scikit-learn example - Plot Ridge coefficients as a function of the regularization",
+    "url": "https://scikit-learn.org/stable/auto_examples/linear_model/plot_ridge_path.html"
+   }
+  },
+  {
+   "name": "Lasso: subgradients, soft-thresholding, and coordinate descent by hand",
+   "learn": "Start from scikit-learn's objective (1/(2N)) ||y - Xw||^2 + alpha ||w||_1 - note the 1/(2N) factor, the single most common reason an alpha copied from R's glmnet or a paper produces nonsense. The L1 term is not differentiable at zero, so write the subgradient optimality condition: for w_j = 0 the solution requires |x_j'(y - Xw)| / N <= alpha, and that inequality having slack over an interval is exactly why lasso produces true zeros while ridge cannot. Derive the coordinate-descent update - hold all other coefficients fixed, compute the partial residual rho_j = x_j'(y - X_-j w_-j)/N, and set w_j = S(rho_j, alpha)/z_j where S(a, t) = sign(a) * max(|a| - t, 0) is the soft-thresholding operator and z_j = ||x_j||^2/N equals 1 on standardised features - then implement cyclic coordinate descent with warm starts down a path beginning at alpha_max = max_j |x_j'y|/N, the smallest alpha that zeroes every coefficient. Know the two honest caveats: the objective is convex but not strictly convex when p > N, so the solution need not be unique, and lasso can select at most N variables.",
+   "minutes": 30,
+   "resource": {
+    "label": "Journal of Statistical Software - Regularization Paths for GLMs via Coordinate Descent (Friedman, Hastie, Tibshirani)",
+    "url": "https://www.jstatsoft.org/article/view/v033i01"
+   }
+  },
+  {
+   "name": "Choosing lambda honestly: LassoCV, the one-standard-error rule, AIC and BIC",
+   "learn": "Select alpha with LassoCV (path plus warm starts, so the whole grid costs little more than a few fits) and plot mean CV error against log alpha with error bars across folds. Apply the one-standard-error rule deliberately: pick the largest alpha whose mean CV error is within one standard error of the minimum, which buys a sparser and far more reproducible model at a statistically indistinguishable score - and be able to say why, namely that the CV curve is flat near its minimum and the argmin is itself a noisy statistic. Contrast with the information-criterion route, LassoLarsIC with criterion='aic' or 'bic', which is a single fit but leans on the number of non-zero coefficients as a degrees-of-freedom estimate and on an estimate of sigma^2 that is unreliable when p is close to or larger than N. Finally, internalise the protocol error that makes most reported numbers optimistic: tuning alpha on the same folds you then quote as performance is selection bias, and the fix is nested cross-validation - an inner loop for alpha, an outer loop for the score you say out loud.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn example - Lasso model selection: AIC-BIC vs cross-validation",
+    "url": "https://scikit-learn.org/stable/auto_examples/linear_model/plot_lasso_model_selection.html"
+   }
+  },
+  {
+   "name": "Elastic net, correlated predictors, and the Bayesian reading of a penalty",
+   "learn": "Elastic net minimises (1/(2N))||y - Xw||^2 + alpha * l1_ratio * ||w||_1 + 0.5 * alpha * (1 - l1_ratio) * ||w||^2, and the L2 term buys the grouping effect: correlated predictors enter and leave the model together instead of the lasso's coin-flip between them, and the p > N cap of N selected variables disappears. That instability is not a footnote - refit lasso on 50 bootstrap resamples of a dataset with two features correlated at 0.95 and count how often each is selected, then say the number out loud before any customer treats a lasso's selected set as 'the drivers'. Then take the Bayesian view that makes penalties explainable to a statistician in the room: ridge is the MAP estimate under a Gaussian prior w ~ N(0, tau^2 I) with lambda = sigma^2/tau^2, lasso is the MAP under a Laplace prior, and elastic net is the MAP under a mixture. The practical consequence is that regularisation strength is a claim about plausible effect sizes relative to noise, so it must be re-tuned when N or the noise level changes - it is not a constant you carry between customers.",
+   "minutes": 15,
+   "resource": {
+    "label": "scikit-learn - Elastic-Net (objective, l1_ratio, ElasticNetCV)",
+    "url": "https://scikit-learn.org/stable/modules/linear_model.html#elastic-net"
+   }
+  },
+  {
+   "name": "Standardisation, the intercept, and leakage-safe pipelines",
+   "learn": "Penalties are not scale invariant: ||w||_1 and ||w||^2 are computed in the units you handed the model, so a feature expressed in dollars rather than thousands of dollars is penalised a thousand times less, and your 'feature selection' is really a unit-choice ranking. Standardise with StandardScaler (or the appropriate robust scaler for heavy tails) before any penalised fit, never penalise the intercept - scikit-learn does not - and remember that OLS itself is scale-equivariant, so this is a regularisation requirement, not a general one. Then get the protocol right: every fitted transform (scaler, imputer, target encoder, univariate feature filter) must be fit inside the cross-validation fold, which in practice means one Pipeline object handed to cross_validate or GridSearchCV, because a scaler fit on all rows leaks each validation fold's mean and variance into training and produces a CV score you cannot reproduce on new data. Wrap skewed targets in TransformedTargetRegressor(func=np.log1p, inverse_func=np.expm1) so the inverse transform is automatic and the metric is computed on the scale the customer cares about.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - Common pitfalls: data leakage and how to avoid it",
+    "url": "https://scikit-learn.org/stable/common_pitfalls.html#data-leakage"
+   }
+  },
+  {
+   "name": "Logistic regression: Bernoulli likelihood, gradient, Hessian, IRLS",
+   "learn": "Model the log-odds as linear, log(p/(1-p)) = w'x, so p = sigma(w'x), and write the negative log-likelihood L(w) = -sum_i [y_i log p_i + (1 - y_i) log(1 - p_i)]. Using sigma'(z) = sigma(z)(1 - sigma(z)), derive the gradient in three lines to grad L = X'(sigma(Xw) - y) - identical in shape to the OLS gradient, which is the canonical-link property of the exponential family, not a coincidence - and the Hessian H = X'SX with S = diag(p_i(1 - p_i)). Read the two facts that follow: H is positive semi-definite so the objective is convex with no local minima, and the gradient is non-linear in w so there is no closed form, which is why every implementation iterates. Derive the Newton step w <- w + (X'SX)^-1 X'(y - p) and recognise it as iteratively reweighted least squares - a weighted OLS fit on the adjusted response z = Xw + S^-1(y - p) - then implement it and confirm it reaches the same optimum as gradient descent in far fewer iterations. Interpretation follows straight from the link: a unit increase in x_j multiplies the odds by exp(w_j).",
+   "minutes": 30,
+   "resource": {
+    "label": "scikit-learn - Logistic regression (regularised objective, binary and multinomial case)",
+    "url": "https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression"
+   }
+  },
+  {
+   "name": "scikit-learn's LogisticRegression: C, solvers, separation and convergence",
+   "learn": "Read the API as a set of edits to the objective. It is L2-penalised by default - there is no unpenalised default - and the strength parameter is C = 1/lambda, so smaller C means stronger regularisation and the reflex 'I lowered C to regularise less' is backwards and produces a near intercept-only model. Because the objective is C * sum_i loss_i + 0.5 w'w, the effective regularisation per row shifts with N, so a C tuned on 10k rows is wrong on 200k. Know the solver table: lbfgs (default, L2 or none, handles multinomial), liblinear (L1 or L2 but one-vs-rest only, so its multiclass coefficients are not a softmax), saga (L1, elastic-net, large N, needs scaled data), newton-cholesky (N >> p). Treat a ConvergenceWarning as a bug report and not noise - the usual cause is unscaled features, and raising max_iter until the warning disappears leaves you with coefficients that are wherever the optimiser stopped. Finally, detect quasi-separation: fit the same data unpenalised in statsmodels and watch for a PerfectSeparationError or coefficients of magnitude 1e9 with enormous standard errors, because scikit-learn's default penalty hides that pathology behind a finite, confident-looking number.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - LogisticRegression API (penalty, C, solver, class_weight, max_iter)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html"
+   }
+  },
+  {
+   "name": "Interpreting coefficients without lying: conditional effects, scale, and VIF",
+   "learn": "State the meaning precisely every time: a coefficient is the modelled change in the response (or in log-odds) for a unit change in that feature with all other features in the model held fixed, which means it is conditional on the feature set, changes when a correlated column is added or removed, and is not causal without a design that earns that word (Topic 97). Never rank raw coefficients across differently-scaled features - compare coef_j * std(x_j), or fit on standardised inputs - and never read a coefficient as importance when the feature is collinear with another. Quantify collinearity with the variance inflation factor VIF_j = 1/(1 - R_j^2) from statsmodels.stats.outliers_influence.variance_inflation_factor (values above 5 to 10 warrant a conversation), and demonstrate the instability empirically by refitting across bootstrap resamples and drawing a box plot per coefficient: a whisker that crosses zero is a coefficient nobody should build a rule on. When the customer asks 'is this significant', switch to statsmodels for standard errors from sigma^2 (X'X)^-1 (or the inverse Fisher information (X'SX)^-1 for logistic), because scikit-learn deliberately reports none.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn example - Common pitfalls in the interpretation of coefficients of linear models",
+    "url": "https://scikit-learn.org/stable/auto_examples/inspection/plot_linear_model_coefficient_interpretation.html"
+   }
+  },
+  {
+   "name": "Residual diagnostics: seeing an assumption fail",
+   "learn": "Make four plots a habit before any linear model is presented. Residuals versus fitted values: a funnel is heteroscedasticity, so either model the variance (a log or sqrt target transform, or a Gamma/Poisson GLM) or at minimum report heteroscedasticity-robust standard errors with statsmodels' cov_type='HC3', because plain OLS intervals are too narrow and turn noise into a 'significant driver'. Residuals versus each feature: systematic curvature is missing non-linearity and tells you exactly which column needs a spline. A QQ plot: relevant only to small-sample inference, not to prediction. Residual autocorrelation (Durbin-Watson, or an ACF plot when rows are time-ordered): non-zero autocorrelation means your i.i.d. assumption and therefore your shuffled KFold are both invalid, and the CV must become time-based (Topic 108). Add leverage h_ii and Cook's distance to find the handful of rows driving the fit, and know the formal tests by name - het_breuschpagan, het_white, linear_reset - so you can put a p-value next to the picture when a customer's analyst asks.",
+   "minutes": 15,
+   "resource": {
+    "label": "statsmodels - Regression diagnostics and specification tests",
+    "url": "https://www.statsmodels.org/stable/diagnostic.html"
+   }
+  },
+  {
+   "name": "Basis expansion: polynomials, splines, interactions, and when to escalate",
+   "learn": "Keep the model linear in parameters while making it non-linear in the inputs. PolynomialFeatures(degree=2, interaction_only=True) is the cheap way to test whether interactions matter, but understand the combinatorics - 100 features give 4950 pairwise terms - so it must be paired with ridge and with a genuine hold-out. Prefer SplineTransformer (B-splines with n_knots, degree=3 and an explicit extrapolation policy) over high-degree polynomials, because splines are local: a degree-10 polynomial oscillates wildly at the edges of the data (the Runge phenomenon) and extrapolates to absurd values, which is how a house-price model predicts a negative price for the largest lot in the file. Handle categoricals correctly: for unpenalised OLS use OneHotEncoder(drop='first') to avoid the dummy trap of perfect collinearity with the intercept, but keep every level when a ridge penalty is present since the penalty resolves the degeneracy and dropping a level silently changes what the remaining coefficients mean. Know the escalation criterion to Topic 101: when the residual-versus-feature plots show thresholds and non-monotone interactions across many mixed-type columns, a gradient-boosted tree will win - and the linear model stays as the baseline it must beat by more than the CV standard error.",
+   "minutes": 15,
+   "resource": {
+    "label": "scikit-learn - Polynomial regression: extending linear models with basis functions",
+    "url": "https://scikit-learn.org/stable/modules/linear_model.html#polynomial-regression-extending-linear-models-with-basis-functions"
+   }
+  },
+  {
+   "name": "Double descent: the caveat to the U-curve you must not overstate",
+   "learn": "The classical bias-variance U-curve is a statement about a fixed estimator family at a fixed sample size, not a law of nature. Belkin et al. show a double-descent risk curve: test error rises to a peak at the interpolation threshold where the number of parameters is about equal to the number of samples, then falls again as the model is over-parameterised further, with minimum-norm interpolation acting as an implicit regulariser. Know the mechanism well enough to state it - past the threshold there are many interpolating solutions and the algorithm picks a low-norm one - and know its relevance here: ridge at small alpha near p = N is exactly where you will see the peak in your own experiments, and it is why 'the model has more parameters than rows, so it must overfit' is a sentence that will be corrected by any deep-learning practitioner in the room. The professional position is that the trade-off is a tool for reading a measured validation curve, never a prediction you make instead of measuring one.",
+   "minutes": 10,
+   "resource": {
+    "label": "arXiv - Reconciling modern machine learning practice and the bias-variance trade-off (Belkin et al.)",
+    "url": "https://arxiv.org/abs/1812.11118"
+   }
+  },
+  {
+   "name": "The Kaggle protocol: RMSLE, KFold, and reading the CV-to-leaderboard gap",
+   "learn": "House Prices is scored as RMSLE, which is RMSE on log1p(y), so it measures relative error and penalises under-prediction of expensive houses less harshly than raw RMSE would - fit on log1p(y) through TransformedTargetRegressor and score with root_mean_squared_log_error so the training objective and the metric agree. Use KFold(n_splits=10, shuffle=True, random_state=0) inside a Pipeline, report the mean CV score with its standard error across folds, and treat any difference smaller than that standard error as noise no matter what the leaderboard says. Then use the gap diagnostically rather than competitively: the public leaderboard is a single split of roughly 1459 rows, so its own standard error is large, and a small CV-to-leaderboard difference is sampling noise while a large systematic one means leakage, a fold structure that does not match the split, or drift between the two files. That last habit is the entire transfer to customer work - you defend the CV mean plus its uncertainty, and you use any held-out disagreement as evidence about the data rather than as a scoreboard.",
+   "minutes": 15,
+   "resource": {
+    "label": "scikit-learn - Regression metrics (mean squared logarithmic error)",
+    "url": "https://scikit-learn.org/stable/modules/model_evaluation.html#mean-squared-log-error"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can derive the normal equations both by calculus and by orthogonal projection, closed-book in under five minutes, and state exactly when (X'X)^-1 does not exist and what np.linalg.lstsq returns instead.",
+  "You can implement OLS (closed-form and gradient descent), ridge, lasso by cyclic coordinate descent with soft-thresholding, and logistic regression by gradient descent and by IRLS, in NumPy, and show every one agreeing with scikit-learn's coefficients to 1e-6 on a fixed dataset.",
+  "You can write the bias-variance decomposition from memory, say what each term is an expectation over, estimate bias and variance by bootstrap on a simulated problem where the truth is known, and commit the stacked bias-variance-total figure.",
+  "You can look at a train/validation learning curve and name the correct lever - capacity, penalty, or more rows - and defend the call from the coefficient path and the fold-to-fold error bands rather than from a leaderboard score.",
+  "You can explain ridge versus lasso in three registers - constrained-optimisation geometry, the SVD shrinkage factor d^2/(d^2 + lambda), and the Gaussian versus Laplace MAP prior - and say when elastic net is the right answer for correlated predictors.",
+  "You can build a leakage-free scikit-learn Pipeline with scaling, encoding and target transformation, tune alpha with nested cross-validation, and quote a score with a standard error you would defend under challenge.",
+  "You can derive the logistic gradient X'(sigma(Xw) - y) and Hessian X'SX, prove convexity from the Hessian, explain why there is no closed form, and detect and explain perfect separation instead of shipping the penalty's finite answer as a real coefficient.",
+  "You can hand a customer a coefficient table with correct scaling, VIF values, bootstrap coefficient intervals and residual diagnostics, and state in one sentence which coefficients are stable enough to build a business rule on."
+ ],
+ "failureModes": [
+  "StandardScaler was fit on the full dataset before cross_val_score, so every validation fold's mean and variance leaked into training; the CV RMSE looked excellent, the customer's fresh extract scored 30 percent worse, and it was investigated as data drift for a week.",
+  "Ridge was fitted on unscaled features where lot area is in square feet and a flag is 0/1; the penalty barely touched the large-unit column and crushed the flag, so the coefficient ranking presented as 'the drivers of price' was really a ranking of measurement units.",
+  "A lasso selected twelve of nine hundred features and the deck called them 'the twelve drivers of churn'; the features were pairwise correlated above 0.9, a different random seed selected a different twelve, and the customer had already staffed a team against the first list.",
+  "Someone set C=0.01 in LogisticRegression believing C was a penalty weight rather than its inverse; the model collapsed to nearly the base rate, and because AUC was still 0.62 nobody noticed until an ops threshold was set on the probabilities.",
+  "One-hot encoding kept every level alongside an intercept in an unpenalised OLS; X'X was singular, lstsq quietly returned the minimum-norm solution out of infinitely many, and the coefficients that were compared across two quarterly refits were not even the same estimand.",
+  "A perfectly separating feature - a status flag set only after the outcome - drove logistic coefficients to infinity, but scikit-learn's default L2 returned a tidy finite number with a 0.999 AUC, so a leaked column was presented as a model rather than caught as a bug.",
+  "Residuals fanned out with fitted value and nobody plotted them; the plain OLS standard errors were far too narrow, three 'statistically significant' drivers were reported to the customer, and none survived when HC3 robust errors were finally used.",
+  "Alpha was tuned by GridSearchCV and the best cross-validated score from that same search was quoted as the model's performance; the selection bias was worth several points, and the honest nested-CV number arrived only after the contract had been signed against the optimistic one."
+ ],
+ "interviewQuestions": [
+  "Derive the normal equations, then tell me what happens when X'X is singular, what numpy's lstsq returns in that case, and why you would never implement the estimator as inv(X.T @ X) @ X.T @ y even when it is invertible.",
+  "Explain ridge versus lasso three ways: the constrained-optimisation picture, what the SVD says each one does to a principal direction, and the prior each corresponds to. Then tell me which you would choose for a customer with 4000 rows, 900 heavily correlated features and a mandate to name the drivers - and what you would say about the stability of that list.",
+  "Write down the bias-variance decomposition for squared loss and tell me exactly what the expectation is taken over. Which of the three terms can you estimate from a single customer dataset, which cannot, and how would you get a number for the one that can?",
+  "Derive the gradient and the Hessian of the logistic negative log-likelihood. Why is there no closed-form solution, why is the problem convex, and what does the Hessian tell you about what happens when one feature perfectly separates the classes?",
+  "Debug: cross-validated R-squared is 0.98 but the holdout file the customer sent back scores 0.42. Walk me through your checks in order, and say which candidate causes would show up in the learning curve, which in a feature-versus-target audit, and which only in the pipeline code.",
+  "I show you a learning curve where training error is 0.02, validation error is 0.31, and the gap has not closed by the largest training size. What do you do, and what would have to be different in that plot for 'get more data' to be the wrong recommendation?",
+  "A stakeholder points at a coefficient of 1.8 on 'number of support tickets' in a churn model and asks whether reducing tickets will reduce churn. Answer them, and tell me what you would need to change about the study to be allowed to say yes."
+ ],
+ "proofOfWork": "A public repo `regularisation-clinic` that turns this material into a diagnostic you can run in front of a customer on their own CSV. One command takes a table, a target column and a task type and emits a single-page report: a learning curve with fold-to-fold bands, a validation curve over log alpha, ridge and lasso coefficient paths on shared axes, a bootstrap coefficient-stability panel (box plot per coefficient plus a lasso selection-frequency bar chart over 200 resamples, so the 'these are the drivers' claim is quantified rather than asserted), a VIF table, and a residual diagnostics grid (residual versus fitted, residual versus each top feature, QQ, Cook's distance) with Breusch-Pagan and RESET p-values printed underneath. The report ends with a machine-written lever recommendation - more capacity, more penalty, or more rows - derived from the measured gap and its standard error, plus the nested-CV score that is the only number allowed on the summary line. The repo also ships `leakage_drill.py`, which fits the identical model twice, once with the scaler and a univariate feature filter fit outside the folds and once inside a Pipeline, and prints the inflation in CV score so the cost of the mistake is a number in your own README; `alpha_translation.md`, a one-page table mapping penalty parameterisations across scikit-learn (Ridge alpha with no 1/N, Lasso alpha with 1/(2N), LogisticRegression C = 1/lambda), glmnet and statsmodels, with a worked example showing the same fitted coefficients reached from all three; and `separation_check.py`, which flags quasi-complete separation in a binary design before anyone quotes an odds ratio. CI runs the pytest suite that asserts the from-scratch OLS, ridge, lasso and logistic implementations match scikit-learn to 1e-6, plus property tests that ridge coefficients shrink monotonically in alpha and that lasso at alpha_max is exactly zero."
+}

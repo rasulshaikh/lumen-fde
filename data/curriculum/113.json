@@ -1,0 +1,228 @@
+{
+ "i": 113,
+ "topic": "Computer vision: CNNs, ResNet and EfficientNet, transfer learning, augmentation, detection",
+ "track": "O. Deep Learning and Multimodal",
+ "month": 12,
+ "hours": 10,
+ "why": "Vision is the most common 'can you just...' an FDE gets - count pallets from a warehouse camera, flag a defective part, read a scanned form - and it is the one where a customer hands you 400 labelled images on Monday and expects a demo on Friday. Being able to hand-compute output shapes, parameter counts and receptive fields is what lets you say in the room why a stride-32 backbone cannot see their 14-pixel objects, and reading a per-class mAP table is what lets you say whether the fix is anchor scales, the NMS/IoU threshold, or thirty more images of the rare class - instead of retraining blind for a week. Transfer learning is the only honest answer to 'we have 400 images', and defending it means knowing exactly which layers you froze, why the BatchNorm statistics still moved anyway, and what your augmentation pipeline is implicitly promising about the deployment distribution.",
+ "prerequisites": [
+  "Backpropagation as the chain rule over a computation graph, plus ReLU, softmax and cross-entropy (Topic 110, Neural network foundations) - you will differentiate a convolution by hand in this topic",
+  "The deep-training toolkit from Topic 111: SGD with momentum vs Adam, warmup and decay schedules, batch norm mechanics, mixed precision, and how to read a loss curve that has stopped moving",
+  "PyTorch at depth (Topic 112): tensor shapes and broadcasting, autograd and .backward(), writing a custom nn.Module, Dataset/DataLoader/collate_fn, and torch.profiler",
+  "NumPy vectorisation, stride tricks and float32 vs float64 error behaviour (Topic 99, Numerical computing) - the from-scratch conv2d is a strides-plus-matmul exercise and a gradient check only means something if you understand the tolerance",
+  "Evaluation discipline from Topic 103: stratified and grouped splits, leakage, PR-AUC vs accuracy under class imbalance - detection is imbalance in its most extreme form (thousands of background anchors per object)",
+  "A GPU you can hold for a few hours (Colab T4, a rented A10 or better), torch + torchvision installed, and CIFAR-10 downloadable; CPU-only turns the >90% ResNet-18 target into a multi-day job"
+ ],
+ "subtopics": [
+  {
+   "name": "Convolution as a layer: cross-correlation, weight sharing, shape and parameter count",
+   "learn": "Know that nn.Conv2d computes cross-correlation, not the flipped convolution of signal processing - the flip is absorbed into the learned weights, so it only matters when you read a maths text or write the backward pass. Be able to write from memory H_out = floor((H_in + 2p - d(k-1) - 1)/s) + 1 (identically for W), the parameter count C_out * (C_in/groups * k_h * k_w) + C_out when bias=True, and the MAC count C_out * (C_in/groups) * k_h * k_w * H_out * W_out (FLOPs approximately twice that). Be able to say what the layer buys over a dense layer: translation equivariance (shift the input, the feature map shifts) plus locality and weight sharing, which is why a 3x3 64->128 layer holds 73,728 weights while a dense map over a 32x32x64 activation would hold billions. Verify every hand computation against x.shape and sum(p.numel() for p in layer.parameters()) before you trust it on a whiteboard.",
+   "minutes": 30,
+   "resource": {
+    "label": "Dive into Deep Learning - Convolutions for Images (cross-correlation, feature maps)",
+    "url": "https://d2l.ai/chapter_convolutional-neural-networks/conv-layer.html"
+   }
+  },
+  {
+   "name": "Padding, stride, dilation, groups and the 1x1 convolution",
+   "learn": "Work out what each argument does to shape and cost: padding=(k-1)/2 with odd k and stride 1 preserves H and W (padding='same' is only legal for stride 1 in PyTorch); stride 2 halves the spatial size and quarters the MACs of everything downstream; dilation d makes the effective kernel k_eff = d(k-1)+1 so segmentation nets grow the receptive field without downsampling; groups=C_in makes the layer depthwise, cutting cost by roughly a factor of C_out. Understand the 1x1 convolution as a per-position linear map across channels with zero spatial mixing - it is what makes the ResNet bottleneck (1x1 reduce, 3x3, 1x1 expand) cheap, what projects the shortcut when channel counts change, and what a squeeze-and-excite block uses to produce per-channel gates. Be able to state, for a 256-channel 14x14 activation, the MAC ratio between a 3x3 256->256 and a 1x1 256->256 (9:1) and use it to explain where a network's FLOPs actually sit.",
+   "minutes": 35,
+   "resource": {
+    "label": "Dive into Deep Learning - Multiple Input and Multiple Output Channels (incl. 1x1 convolutions)",
+    "url": "https://d2l.ai/chapter_convolutional-neural-networks/channels.html"
+   }
+  },
+  {
+   "name": "Receptive field arithmetic, effective vs theoretical",
+   "learn": "Compute the receptive field with the two-line recursion: jump j_l = j_{l-1} * s_l starting at j_0 = 1, and r_l = r_{l-1} + (k_l - 1) * j_{l-1} starting at r_0 = 1; carry the centre offset if you need to map a feature-map cell back to an input pixel. Run it over ResNet-18 (7x7/2 stem, 3x3/2 maxpool, four stages of two BasicBlocks with stride 2 at the start of stages 2-4) and state the total stride (32) and theoretical RF (hundreds of pixels) at the last stage. Then know the empirical result that matters in practice: the effective receptive field is far smaller than the theoretical one and roughly Gaussian, decaying from the centre, so a unit whose theoretical RF is 400 px may only be meaningfully driven by ~100 px. This is the arithmetic behind the customer conversation 'your objects are 14 pixels wide, the P5 feature map has stride 32, so the object occupies less than half a cell - we need an FPN, a higher-resolution input, or tiling'.",
+   "minutes": 30,
+   "resource": {
+    "label": "Distill - Computing Receptive Fields of Convolutional Neural Networks",
+    "url": "https://distill.pub/2019/computing-receptive-fields/"
+   }
+  },
+  {
+   "name": "Pooling, global average pooling and the classifier head",
+   "learn": "Implement max pooling and average pooling forward: same output-shape formula as convolution, no learnable parameters, applied per channel. Understand what each gives up - max pooling is a hard argmax that discards everything but the winner and produces sparse gradients, average pooling smooths and keeps all contributions - and why modern nets often replace pooling with a stride-2 convolution so the downsampling is learned. Know that nn.AdaptiveAvgPool2d(1) (global average pooling) is what lets a ResNet accept any input size above the minimum: it collapses C x H x W to C x 1 x 1, so the final nn.Linear(512, num_classes) sees a fixed 512-vector regardless of resolution. Be able to explain why GAP replaced VGG-16's fully connected head - the first 25088->4096 layer alone holds about 103M of the network's ~138M parameters, and the whole head about 124M - and why removing it also made the network far less prone to overfitting a small customer dataset.",
+   "minutes": 20,
+   "resource": {
+    "label": "Dive into Deep Learning - Pooling",
+    "url": "https://d2l.ai/chapter_convolutional-neural-networks/pooling.html"
+   }
+  },
+  {
+   "name": "im2col: implementing conv2d forward in NumPy as one matmul",
+   "learn": "Turn the convolution into GEMM: pad the input, extract every k x k patch to build X_col of shape (C_in * k * k, N * H_out * W_out), reshape the weights to W_row of shape (C_out, C_in * k * k), and compute Y = W_row @ X_col + b, reshaped back to (N, C_out, H_out, W_out). Build the patch extraction with numpy.lib.stride_tricks.sliding_window_view (then slice with [::s, ::s] for stride) rather than four nested Python loops, and know the trade you just made: im2col replicates each input pixel k*k times, so it costs memory proportional to k^2 in exchange for hitting a BLAS kernel. Cross-check your implementation against torch.nn.functional.unfold (which is exactly im2col) and against F.conv2d on the same random tensors to within 1e-6 in float64. Handle the awkward cases explicitly: batch dimension, stride > 1, asymmetric padding, and groups.",
+   "minutes": 35,
+   "resource": {
+    "label": "NumPy docs - sliding_window_view (strided patch extraction)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.lib.stride_tricks.sliding_window_view.html"
+   }
+  },
+  {
+   "name": "The conv and max-pool backward pass, and a gradient check that cannot lie",
+   "learn": "Derive all three gradients in im2col form: dW_row = dY_row @ X_col.T reshaped to the weight shape, db = dY summed over (N, H_out, W_out), and dX_col = W_row.T @ dY_row followed by col2im, which scatter-adds overlapping patches back (np.add.at, not assignment - overlapping receptive fields must accumulate). Recognise that dX is equivalent to a full convolution of dY with the 180-degree rotated kernel, and that stride s > 1 means dY is first dilated by inserting s-1 zeros between elements. Max-pool backward routes the incoming gradient only to the argmax position of each window (store the indices in the forward pass; define a tie rule and stick to it), and average-pool backward divides by the window size. Then check it properly: wrap your op in a torch.autograd.Function, run torch.autograd.gradcheck on float64 inputs with eps=1e-6, atol=1e-5, and non-trivial stride and padding - a check that passes in float32 with a large eps proves nothing and is how a transposed axis in dW survives to training time.",
+   "minutes": 35,
+   "resource": {
+    "label": "PyTorch docs - Gradcheck mechanics (finite differences, tolerances, complex inputs)",
+    "url": "https://docs.pytorch.org/docs/stable/notes/gradcheck.html"
+   }
+  },
+  {
+   "name": "Initialisation: why fan_in and the factor of 2 matter for ReLU nets",
+   "learn": "Derive the variance-propagation argument: for y = Wx with n_in = k*k*C_in independent inputs, Var(y) = n_in * Var(W) * Var(x); requiring Var(y) = Var(x) gives Xavier/Glorot Var(W) = 1/n_in (or 2/(n_in+n_out) for the two-way compromise). ReLU zeroes half the distribution and halves the variance, so He initialisation uses Var(W) = 2/n_in - the difference is a factor of sqrt(2) per layer, which compounds to a 30-layer net whose activations vanish or explode before the first gradient step. In PyTorch this is nn.init.kaiming_normal_(w, mode='fan_out', nonlinearity='relu'); the ResNet paper additionally zero-initialises the final BatchNorm gamma in each residual block so every block starts as the identity. Be able to demonstrate the failure: initialise a 30-layer plain conv net with std=0.01 and print the per-layer activation std on one forward pass, watching it decay geometrically toward zero.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv 1502.01852 - Delving Deep into Rectifiers (He initialisation)",
+    "url": "https://arxiv.org/abs/1502.01852"
+   }
+  },
+  {
+   "name": "Batch normalisation: the exact computation, train vs eval, and where it breaks",
+   "learn": "Write it out: per channel, over the (N, H, W) axes, mu_B and sigma^2_B, then x_hat = (x - mu_B)/sqrt(sigma^2_B + eps) and y = gamma * x_hat + beta, with eps=1e-5 and 2*C learnable parameters. Know the two modes and the state they hide: in train() mode the layer normalises with batch statistics and updates running_mean/running_var as running = (1 - momentum) * running + momentum * batch (PyTorch momentum defaults to 0.1, the opposite convention from optimiser momentum); in eval() mode it uses only the running estimates. Understand the consequences an FDE hits: the loss for one sample depends on the rest of its batch, so tiny batches give noisy statistics (use GroupNorm or SyncBatchNorm instead), the train/eval gap explains models that score well in the training loop and badly at inference, and BatchNorm makes weight decay on gamma/beta meaningless. Also know that the original 'internal covariate shift' explanation has been challenged - the effect that survives is a smoother loss landscape permitting much larger learning rates.",
+   "minutes": 35,
+   "resource": {
+    "label": "arXiv 1502.03167 - Batch Normalization (Ioffe and Szegedy)",
+    "url": "https://arxiv.org/abs/1502.03167"
+   }
+  },
+  {
+   "name": "Residual learning: the degradation problem and what the identity path does to the gradient",
+   "learn": "State the empirical fact the paper opens with: a 56-layer plain CNN has higher TRAINING error than a 20-layer one, so this is an optimisation failure, not overfitting - depth alone does not buy you a strictly larger reachable hypothesis set in practice. The fix is to learn a residual y = F(x, W) + x, so a block that should do nothing only needs F -> 0 rather than fitting an identity through two nonlinear layers. Be able to write the gradient argument from the pre-activation follow-up (He et al. 2016, arXiv 1603.05027): with pure identity shortcuts x_L = x_l + sum F, so dL/dx_l = (dL/dx_L) * (1 + d/dx_l sum F) - the additive 1 means the gradient reaches every earlier layer even when the product of Jacobians is tiny. Know what breaks the guarantee: any shortcut that is not identity (1x1 projection, gating, scaling) reintroduces a multiplicative term, which is why projections are used only where the shape changes.",
+   "minutes": 30,
+   "resource": {
+    "label": "arXiv 1512.03385 - Deep Residual Learning for Image Recognition (ResNet)",
+    "url": "https://arxiv.org/abs/1512.03385"
+   }
+  },
+  {
+   "name": "Building ResNet-18 by hand: the block table, downsample projections and the CIFAR stem",
+   "learn": "Write the architecture from memory: conv7x7/2 to 64 channels, BN, ReLU, maxpool 3x3/2, then stages of [2, 2, 2, 2] BasicBlocks at 64/128/256/512 channels with stride 2 at the first block of stages 2-4, then AdaptiveAvgPool2d(1) and Linear(512, num_classes) - about 11.7M parameters for 1000 classes. A BasicBlock is conv3x3-BN-ReLU-conv3x3-BN, then add the shortcut, then ReLU (the second ReLU goes after the addition, not before); when stride or channel count changes, the shortcut becomes a 1x1 stride-2 conv plus BN. Know why bias=False on every conv followed by BN (the BN beta subsumes it), and why ResNet-50 swaps BasicBlock for Bottleneck (1x1 reduce, 3x3, 1x1 expand by 4) with the stride placed on the 3x3 rather than the first 1x1 in torchvision's ResNet v1.5 variant. For CIFAR-10 at 32x32 you must replace the stem with a 3x3 stride-1 conv and delete the maxpool, or you throw away 8x of resolution before the first block and cap yourself well below 90%.",
+   "minutes": 35,
+   "resource": {
+    "label": "Dive into Deep Learning - Residual Networks (ResNet) and ResNeXt",
+    "url": "https://d2l.ai/chapter_convolutional-modern/resnet.html"
+   }
+  },
+  {
+   "name": "The training recipe: SGD+momentum, decoupled weight decay, warmup+cosine, AMP and throughput",
+   "learn": "Fix the recipe you will defend: SGD momentum 0.9 with nesterov, base LR 0.1 for batch 128 scaled linearly with batch size, weight decay 5e-4 applied to conv and linear weights ONLY (exclude BN gamma/beta and all biases via two param groups - decaying them costs accuracy and is the single most common silent recipe bug), 5 epochs of linear warmup then cosine decay eta_t = eta_min + 0.5(eta_max - eta_min)(1 + cos(pi * t / T)), label smoothing 0.1, ~100-200 epochs for >90% CIFAR-10. Then make it fast: torch.autocast('cuda', dtype=torch.bfloat16 or float16) with GradScaler for fp16, model.to(memory_format=torch.channels_last) which is what actually unlocks tensor cores for convolutions, DataLoader with num_workers = 4-8, pin_memory=True, persistent_workers=True and prefetch, and torch.backends.cudnn.benchmark=True for fixed input shapes. Profile before you optimise: if GPU utilisation sits at 40 percent the bottleneck is your augmentation pipeline, not the model.",
+   "minutes": 40,
+   "resource": {
+    "label": "PyTorch Recipes - Performance Tuning Guide (AMP, channels_last, DataLoader)",
+    "url": "https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html"
+   }
+  },
+  {
+   "name": "Augmentation as an explicit invariance prior, and the transforms v2 API",
+   "learn": "Treat every augmentation as a claim about the deployment distribution: RandomHorizontalFlip says left-right mirrored inputs are equally likely (false for text, road signs and anything chiral), RandomResizedCrop(scale=(0.08, 1.0)) says the object survives an 8-percent crop (false for small-object detection), ColorJitter and RandomGrayscale say lighting varies (true for a warehouse camera, dangerous for colour-coded defects). Build the pipeline with torchvision.transforms.v2, which accepts and correctly transforms tv_tensors.BoundingBoxes and Mask alongside the image - the reason detection augmentation is not a hand-rolled affair - and compose as v2.Compose([...geometry..., v2.ToImage(), v2.ToDtype(torch.float32, scale=True), v2.Normalize(mean, std)]) with normalisation LAST. The train transform and the eval transform are different objects: eval is deterministic Resize + CenterCrop + Normalize, and passing the train transform to the validation Dataset is a metric bug, not a regularisation choice. Know test-time augmentation (average logits over flips/crops) as the cheap last 0.5 points, at the cost of N-times inference latency.",
+   "minutes": 30,
+   "resource": {
+    "label": "torchvision docs - Transforming and augmenting images (v2 API)",
+    "url": "https://docs.pytorch.org/vision/stable/transforms.html"
+   }
+  },
+  {
+   "name": "Mixup, CutMix, RandAugment and label smoothing",
+   "learn": "Mixup constructs x_tilde = lambda*x_i + (1-lambda)*x_j with lambda ~ Beta(alpha, alpha) (alpha typically 0.2-0.4) and trains on the mixed target, implemented as loss = lambda*CE(pred, y_i) + (1-lambda)*CE(pred, y_j) - it enforces linear behaviour between examples, reduces memorisation of corrupt labels and noticeably improves calibration. CutMix instead pastes a rectangular patch from one image into another and sets lambda to the true area ratio, which preserves local statistics and works better with localisation. RandAugment removes the search: two hyperparameters, N operations sampled uniformly from a fixed list at a single global magnitude M. Label smoothing replaces the one-hot target with 1-eps and eps/(K-1), capping the logit gap the network is asked to produce. Know the practical caveats: these all need longer schedules to pay off, mixup interacts badly with metric-learning heads, and torchvision.transforms.v2 provides CutMix and MixUp as batch-level transforms applied in the collate function, not per-sample.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv 1710.09412 - mixup: Beyond Empirical Risk Minimization",
+    "url": "https://arxiv.org/abs/1710.09412"
+   }
+  },
+  {
+   "name": "Transfer learning: freeze vs fine-tune, the BatchNorm trap, discriminative learning rates",
+   "learn": "Load pretrained weights via the modern API (weights=ResNet18_Weights.IMAGENET1K_V1) and use weights.transforms() so your preprocessing matches training exactly - resize 256, centre crop 224, mean [0.485, 0.456, 0.406], std [0.229, 0.224, 0.225]. Linear probe: replace model.fc with nn.Linear(in_features, n_classes), set requires_grad_(False) on the backbone, and pass ONLY the head parameters to the optimiser. Then internalise the trap: requires_grad=False does not freeze BatchNorm - running_mean and running_var keep updating on every forward pass in train() mode, so a truly frozen backbone needs the BN modules put in eval() after model.train(), or the frozen and fine-tuned arms of your ablation will look suspiciously alike. Full fine-tune uses discriminative learning rates (backbone 1e-4, head 1e-3, roughly 10x apart) because the pretrained features need nudging, not relearning. Choose by data size and domain distance: a few hundred near-ImageNet images means linear probe; thousands of X-rays or satellite tiles means full fine-tune with a longer warmup.",
+   "minutes": 35,
+   "resource": {
+    "label": "PyTorch Tutorials - Transfer Learning for Computer Vision",
+    "url": "https://docs.pytorch.org/tutorials/beginner/transfer_learning_tutorial.html"
+   }
+  },
+  {
+   "name": "EfficientNet: compound scaling, MBConv, and what the FLOP count hides",
+   "learn": "Understand the actual claim: scaling depth d = alpha^phi, width w = beta^phi and resolution r = gamma^phi together beats scaling any one, under the constraint alpha * beta^2 * gamma^2 approximately 2 (because FLOPs grow linearly in depth and quadratically in width and resolution), so total FLOPs scale about 2^phi; B0 is a MnasNet-style searched baseline of MBConv blocks - depthwise separable convolution with an inverted residual, squeeze-and-excite, and swish - and B1 to B7 are the same net at increasing phi. Be able to derive the depthwise separable cost ratio 1/C_out + 1/k^2 (about 1/9 for a 3x3 with many channels) and then say what the paper does not: depthwise convolutions are memory-bandwidth bound, so B4 can have fewer FLOPs than ResNet-152 and still be slower on a T4, and higher resolution inflates activation memory quadratically, which is what caps your batch size on the customer's hardware. This is the answer to 'the benchmark says it is 8x more efficient' - efficient in FLOPs and parameters, not necessarily in latency or memory, and you should benchmark on their device before promising a frame rate.",
+   "minutes": 30,
+   "resource": {
+    "label": "arXiv 1905.11946 - EfficientNet: Rethinking Model Scaling for CNNs",
+    "url": "https://arxiv.org/abs/1905.11946"
+   }
+  },
+  {
+   "name": "Detection setup: box formats, IoU, anchors and label assignment",
+   "learn": "Get the plumbing exact first, because most detection bugs are here: xyxy vs xywh vs cxcywh, absolute pixels vs normalised, and COCO's 1-indexed category ids with a background class at 0 in torchvision. Compute IoU = area(intersection)/area(union) and be able to code it vectorised over (N, M) box pairs. Anchors are a dense grid of reference boxes at each feature-map location parameterised by scales and aspect ratios; assignment labels each anchor by its best IoU against ground truth (RPN: >= 0.7 positive, < 0.3 negative, in-between ignored; SSD/RetinaNet typically 0.5/0.4), and the regression head predicts offsets t_x = (x - x_a)/w_a, t_y = (y - y_a)/h_a, t_w = log(w/w_a), t_h = log(h/h_a) so the target is scale-invariant and roughly unit-variance. Understand why this is where recall dies: if no anchor reaches the positive IoU threshold with a 14-pixel object, that object contributes no positive sample and the network is never asked to find it - the fix is anchor scales, feature-pyramid level, or input resolution, not the loss weights.",
+   "minutes": 35,
+   "resource": {
+    "label": "Dive into Deep Learning - Anchor Boxes (IoU, assignment, offset parameterisation)",
+    "url": "https://d2l.ai/chapter_computer-vision/anchor.html"
+   }
+  },
+  {
+   "name": "Two-stage vs one-stage, and the foreground/background imbalance",
+   "learn": "Place the families: two-stage (Faster R-CNN, arXiv 1506.01497 - an RPN proposes ~1-2k regions, RoIAlign crops features, a second head classifies and refines) trades latency for accuracy on small and crowded objects; one-stage (SSD, RetinaNet, YOLO) predicts class and box densely in a single pass and is what you deploy at 30 fps. Understand why the one-stage family lagged: roughly 100k anchors per image are evaluated and fewer than a dozen are foreground, so the summed cross-entropy of easy negatives swamps the gradient. Focal loss fixes it in the loss rather than by sampling: FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t) with gamma = 2 and alpha = 0.25, which down-weights an easy negative at p_t = 0.9 by about 100x; it also requires the classification bias initialised to log(pi/(1-pi)) with pi about 0.01 or the first iterations diverge. Contrast with the two-stage answer (sample a fixed 1:3 positive:negative minibatch of RoIs) and know that modern anchor-free heads (FCOS, DETR-style set prediction) replace assignment with centre-sampling or Hungarian matching.",
+   "minutes": 30,
+   "resource": {
+    "label": "arXiv 1708.02002 - Focal Loss for Dense Object Detection (RetinaNet)",
+    "url": "https://arxiv.org/abs/1708.02002"
+   }
+  },
+  {
+   "name": "NMS, score thresholds and the operating point you actually ship",
+   "learn": "Non-maximum suppression is greedy: sort boxes by score, take the top one, discard every remaining box with IoU above the threshold against it, repeat. Use torchvision.ops.nms(boxes, scores, iou_threshold) and, crucially, batched_nms(boxes, scores, idxs, iou_threshold) which offsets boxes per class so a car is never suppressed by an overlapping person - class-agnostic NMS on a multi-class problem quietly deletes correct detections. Know the two knobs and that they are not the same: the IoU threshold (0.5-0.7 typical) controls duplicate merging and, when too low, deletes genuinely overlapping objects in crowds; the SCORE threshold controls precision/recall and is the operating point. Evaluation runs at score 0.01-0.05 with maxDets=100 to trace the full PR curve, while a demo or production service runs at 0.3-0.5 - so mAP and your live demo are measuring different things unless you say so. Know soft-NMS (decay scores instead of deleting) for crowded scenes, and that NMS is often the latency floor on CPU deployments.",
+   "minutes": 20,
+   "resource": {
+    "label": "torchvision docs - ops (nms, batched_nms, box_iou, RoIAlign)",
+    "url": "https://docs.pytorch.org/vision/stable/ops.html"
+   }
+  },
+  {
+   "name": "mAP: how COCO computes it, and reading a per-class breakdown",
+   "learn": "Follow the pipeline: for one class, sort detections by score, match each greedily to an unmatched ground-truth box above the IoU threshold (matched = TP, unmatched = FP, unmatched ground truth = FN), accumulate precision and recall, interpolate to 101 recall points, average to get AP; COCO's headline AP averages that over IoU 0.50:0.05:0.95, then over classes, and additionally reports AP50, AP75, AP_small/medium/large (area < 32^2, 32^2-96^2, > 96^2) and AR at maxDets 1/10/100. Learn to diagnose from the table alone: high AP50 with low AP75 means localisation is sloppy, not classification; AP_small near zero with AP_large healthy means resolution, feature-pyramid level or anchor scale; one class near zero with the rest fine means labelling or class imbalance, not architecture; AR far above AP means the detector finds the objects but scores or duplicates them badly, which points at NMS or calibration. Run pycocotools COCOeval on your own predictions and reproduce the summary line by hand for one class so you know exactly what the number means when a customer asks.",
+   "minutes": 35,
+   "resource": {
+    "label": "COCO dataset - Detection Evaluation (AP definition, IoU sweep, area ranges, maxDets)",
+    "url": "https://cocodataset.org/#detection-eval"
+   }
+  },
+  {
+   "name": "Debugging vision training: overfit-one-batch, curve reading, Grad-CAM and leakage checks",
+   "learn": "Run the ladder in order, before touching hyperparameters: (1) overfit a single batch of 8 images to near-zero loss - if it cannot, the bug is in the model, the loss or the label plumbing, never the data volume; (2) check the initial loss equals ln(K) for K balanced classes, which catches a wrong reduction or a double softmax; (3) visualise a batch AFTER the full transform pipeline and denormalise it - this is where you see BGR/RGB swaps, all-black images from a bad resize, and masks misaligned with images; (4) plot train vs val loss and separate overfitting (val rises while train falls) from a broken eval path (val flat and high from epoch one, usually train/eval mode or normalisation); (5) attribute with Grad-CAM - weights alpha_k = global-average-pooled dL^c/dA^k over the last conv feature maps, heatmap = ReLU(sum_k alpha_k * A^k) - and confirm the model is looking at the object rather than a watermark, a timestamp overlay or the background texture that happens to correlate with the label. Finish with the split audit: group by source video, patient, device or session, and hash-dedupe images across train and test.",
+   "minutes": 30,
+   "resource": {
+    "label": "arXiv 1610.02391 - Grad-CAM: Visual Explanations from Deep Networks",
+    "url": "https://arxiv.org/abs/1610.02391"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can hand-compute, on a whiteboard in under two minutes with no library, the output H x W, parameter count and theoretical receptive field at every stage of ResNet-18 for a given input size, and say which stage first stops resolving a 16-pixel object.",
+  "You can implement conv2d and max-pool forward and backward in NumPy and have torch.autograd.gradcheck agree with your analytic gradients on float64 with eps=1e-6, including stride 2, padding 1 and a non-square batch.",
+  "You can build ResNet-18 from nn.Conv2d/nn.BatchNorm2d/nn.Linear with no torchvision.models, train it past 90% CIFAR-10 test accuracy, and justify every recipe choice (3x3 stride-1 stem, He init, no weight decay on BN and bias, warmup plus cosine, random crop and flip) with the measured cost of removing each.",
+  "You can explain the degradation problem with the gradient expression for a residual block, and demonstrate it empirically by training a plain-18 and a ResNet-18 to different TRAINING errors under an identical recipe.",
+  "You can state EfficientNet's compound-scaling constraint alpha * beta^2 * gamma^2 approximately 2, derive the depthwise separable cost ratio, and explain why a lower-FLOP model can still miss a latency budget on the customer's specific GPU.",
+  "You can produce a transfer-learning ablation table (frozen backbone vs full fine-tune vs augmentation-off) with fixed seeds and repeat runs, and defend which row you would ship for a given dataset size and domain distance.",
+  "You can read a COCO per-class AP/AR breakdown including AP50/AP75 and AP_small/medium/large and say from the numbers alone whether anchor scales, the NMS IoU threshold, the score threshold or class imbalance is what to change next.",
+  "You can take a model that scored 0.91 offline and 0.40 in a customer pipeline and localise the cause within an hour by checking preprocessing, channel order, resize interpolation, train/eval mode and the split, before touching any weights."
+ ],
+ "failureModes": [
+  "The customer's 4,000 images came from 60 video clips; a random split puts adjacent frames in both train and test, validation accuracy reads 0.98, and the model collapses to 0.62 on next month's footage - the split had to be grouped by clip.",
+  "The frozen-backbone arm of the ablation calls requires_grad_(False) but leaves the model in train() mode, so BatchNorm running_mean and running_var keep adapting to the new domain; the frozen and fine-tuned rows come out nearly identical and the table's headline conclusion is wrong.",
+  "The same transform object is passed to the train and the validation Dataset, so RandomResizedCrop and ColorJitter run at evaluation time; validation accuracy is noisy and several points low, and two days go into tuning a learning rate to fix what is purely a measurement bug.",
+  "Training normalises with ImageNet mean/std after ToTensor while the production service feeds uint8 BGR straight from cv2.imread with a different resize interpolation; accuracy drops from 0.91 to 0.40 and is escalated as a data-quality problem for a week.",
+  "A defect classifier on 3 percent positives is reported at 97 percent accuracy - exactly the always-negative baseline - and the customer signs off on a model that has never flagged a defect, because PR-AUC and per-class recall were never on the slide.",
+  "mAP is computed at score threshold 0.05 with maxDets 100 and reads 0.61, but the shipped service runs at 0.5 and misses half the objects; the evaluation and the deployment are measuring different operating points and nobody says so out loud.",
+  "Default anchor scales of 32-512 px are kept on a dataset whose objects are 10-20 px, so no anchor ever reaches the positive IoU threshold, the box head receives almost no positive samples, recall ceilings near 0.3, and three weeks are spent tuning loss weights that cannot fix it.",
+  "The NumPy conv2d gradient check passes in float32 with eps=1e-2, hiding a transposed axis in the dW accumulation and a missing np.add.at in col2im; the layer still trains, just to a mediocre plateau that looks convincingly like a data problem."
+ ],
+ "interviewQuestions": [
+  "Derive the receptive field at the last conv stage of ResNet-18 for a 224x224 input, showing the jump and RF recursions. The customer's objects are 15 pixels across in a 4K frame - what do you change in the architecture or the input pipeline, and what does each option cost in latency and memory?",
+  "Write the gradients of the loss with respect to the weights and the input for a 3x3, stride-1, padding-1 conv layer. Why is dX a full convolution with the 180-degree rotated kernel, what changes when the stride is 2, and how would you verify your implementation so that passing the check actually means something?",
+  "A 56-layer plain CNN has higher training error than a 20-layer one. That is not overfitting - what is it? Write the gradient expression for a residual block that shows what the identity shortcut fixes, and say what breaks that argument when the shortcut is a 1x1 projection.",
+  "You are fine-tuning an ImageNet ResNet-50 on 800 customer images. Walk me through linear probe vs full fine-tune, exactly what you do with the BatchNorm layers in each case, what learning rates you use per parameter group, and how you would know within one epoch that it is working.",
+  "Debug: detection mAP is 0.61 overall, but AP for one class is 0.08, AP_small is 0.04 while AP_large is 0.72, and AR@100 is 0.79. What do you look at, in what order, and what are your top two hypotheses with the experiment that distinguishes them?",
+  "EfficientNet-B4 has fewer FLOPs and parameters than ResNet-152 but runs slower on the customer's T4. Explain compound scaling, explain precisely why the FLOP count misleads here, and describe how you would choose a backbone against a 30 ms per-frame budget on their hardware.",
+  "Design: a customer wants conveyor-belt defect detection at 20 fps with 300 labelled images and roughly a 2 percent defect rate. Specify the model, the labelling and split strategy, the augmentation policy and what it assumes, the metric you report, the threshold you ship at, and what you would refuse to promise in the SOW."
+ ],
+ "proofOfWork": "A small public tool called conv-arithmetic plus a detection triage report, both in the same repo as the deliverable. The tool is a single module that takes any nn.Module and an input shape and prints a per-layer table of output shape, parameter count, MACs, cumulative stride, theoretical receptive field and the fraction of total FLOPs each layer holds - with every number reproduced independently by your own recursion rather than read from a profiler - and then validates itself two ways: against torch by running the model and comparing shapes and parameter counts layer by layer, and against reality by measuring the EFFECTIVE receptive field empirically (backpropagate a gradient of 1 from a single centre unit of a chosen feature map to the input, plot the magnitude map, and report the radius containing 90 percent of the mass) so the gap between theoretical and effective RF is visible as a figure. Alongside it, run a controlled triage study on a small public detection set: train one baseline, then produce four deliberately broken variants - anchor scales 10x too large, class-agnostic instead of batched NMS, an NMS IoU threshold of 0.3, and a 50:1 class imbalance with plain cross-entropy instead of focal loss - and publish the COCOeval summary table for all five runs side by side, plus a one-page diagnostic key mapping each mAP signature (AP50 vs AP75 gap, AP_small collapse, single-class collapse, AR far above AP) back to its cause. Finish with a two-paragraph handover note written for a customer engineer explaining which single number you would put in an SLA and why the others are not it."
+}

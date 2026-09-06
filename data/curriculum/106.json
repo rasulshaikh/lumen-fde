@@ -1,0 +1,228 @@
+{
+ "i": 106,
+ "topic": "Unsupervised learning: k-means, DBSCAN, hierarchical clustering, PCA, t-SNE, UMAP",
+ "track": "N. Machine Learning Systems",
+ "month": 10,
+ "hours": 7,
+ "why": "A customer's first 'AI' request is very often unlabelled - segment these 40,000 accounts, find the anomalous machines, tell us what these 200k support tickets are about - and there is no held-out accuracy to hide behind, so the only defence of your answer is the objective you optimised, the metric you optimised it under, and evidence that the result survives resampling. An FDE who cannot say why k=6 rather than k=4, or who cannot say out loud that the gap between two blobs in a UMAP plot carries no information, will have their segmentation quietly overruled by whoever brought the prettier picture. This is also where the most expensive silent errors live: an unscaled column that becomes the entire distance metric, a PCA fitted before the split, and a two-dimensional embedding read as though its axes and distances meant something.",
+ "prerequisites": [
+  "Eigendecomposition and the SVD as things you can compute and interpret - A = U S V^T, orthonormal bases, symmetric positive semi-definite matrices, the spectral theorem (Topic 93, Linear algebra for ML)",
+  "NumPy at the level of broadcasting, fancy indexing, argmin over a pairwise distance matrix, and np.linalg.svd / np.linalg.eigh including when eigh is the right call rather than eig (Topic 99, Numerical computing)",
+  "Multivariate Gaussians, covariance matrices, maximum likelihood and KL divergence (Topic 95, Probability and Topic 98, Information theory) - the GMM's EM steps and t-SNE's objective both need them",
+  "Cross-validation, leakage, and the mechanical rule that anything with a fit method is refit inside the training fold (Topic 103, Model evaluation) - the scaler and the PCA are the two most common leaks in an unsupervised pipeline",
+  "Scaling and encoding choices from Topic 104: StandardScaler vs RobustScaler vs QuantileTransformer, and why one-hot columns break Euclidean distance",
+  "The distance-based view of feature space from Topic 102 (k-NN) - DBSCAN, HDBSCAN, t-SNE and UMAP are all built on a k-nearest-neighbour graph"
+ ],
+ "subtopics": [
+  {
+   "name": "What unsupervised learning is claiming, and what it cannot verify",
+   "learn": "Be precise that clustering does not discover 'the' groups: it returns the partition that optimises a stated objective under a stated metric, and a different objective on the same table returns a different, equally valid partition. Write down the three objectives you will be comparing all day - within-cluster sum of squares for k-means, density-connectivity for DBSCAN, a greedy merge criterion for agglomerative - and note that only the first is a global objective with a scalar value comparable across runs. Internalise Kleinberg's impossibility theorem as the reason there is no universal best clustering (no function satisfies scale-invariance, richness and consistency simultaneously), and take the FDE consequence from it: you never defend a clustering with 'the algorithm found it', you defend it with the objective, the metric, and evidence that the structure survives resampling. Decide and state up front which of the two jobs you are doing - exploratory structure discovery, which must be validated by a domain expert, or compression and feature construction, which is validated by the downstream supervised metric.",
+   "minutes": 20,
+   "resource": {
+    "label": "Google ML - Clustering course overview (what clustering is for, similarity, workflow)",
+    "url": "https://developers.google.com/machine-learning/clustering/overview"
+   }
+  },
+  {
+   "name": "Distance is a modelling choice: scaling, metrics and distance concentration",
+   "learn": "Every algorithm in this topic is a function of a distance matrix, so the choice of d is a modelling decision you defend, not a default: Euclidean assumes comparably scaled, roughly isotropic continuous features; Manhattan degrades more gracefully in high dimension; cosine ignores magnitude and is what TF-IDF and embedding vectors want; a Gower or matching distance is what a genuinely mixed-type table needs. Run the experiment that proves scaling is mandatory - put annual_revenue in dollars next to n_employees, cluster, and show the partition is a revenue quantile split, then rerun with StandardScaler - and know that RobustScaler (median and IQR) is the right default on the heavy-tailed columns a customer's table always has. Understand distance concentration: for iid features the ratio (d_max - d_min)/d_min tends to zero as dimension grows, so 'nearest neighbour' loses meaning and DBSCAN's eps stops having a good value; the fix is to reduce dimension first, not to tune harder. Note that one-hot columns make Euclidean distance score every 'different category' as sqrt(2) regardless of how different those categories are, which makes plain k-means over one-hot input a bug rather than a choice.",
+   "minutes": 15,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - ch.01 Vectors, 03. Norms and metrics",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2001%20-%20vectors/03.%20norms%20and%20metrics.md"
+   }
+  },
+  {
+   "name": "k-means: the objective, Lloyd's algorithm, and why it only finds a local minimum",
+   "learn": "Write the objective J = sum over k of sum over i in C_k of ||x_i - mu_k||^2 and derive both update rules as block coordinate descent: with centroids fixed the J-minimising assignment is the nearest centroid, and with assignments fixed dJ/dmu_k = -2 * sum (x_i - mu_k) = 0 gives mu_k as the cluster mean - which is exactly why k-means is tied to squared Euclidean distance, because the arithmetic mean is the minimiser of a sum of squared deviations and of nothing else. Prove that Lloyd's algorithm decreases J monotonically and therefore terminates at a local minimum in finitely many steps, know the per-iteration cost O(n k d), and know that the global problem is NP-hard, which is the entire reason n_init exists and why sklearn returns the restart with the lowest inertia_. Implement it in NumPy using the expansion ||x||^2 - 2 x . c + ||c||^2 to build the (n, k) distance matrix instead of a Python loop, handle the empty-cluster case explicitly by reseeding to the point furthest from its centroid, and stop on a centroid-movement tolerance rather than on exact assignment stability. For n in the millions reach for MiniBatchKMeans, which trades a small inertia penalty for roughly an order of magnitude in wall time.",
+   "minutes": 30,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - ch.06 Machine Learning, 01. Classical machine learning (clustering, k-means, PCA)",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2006%20-%20machine%20learning/01.%20classical%20machine%20learning.md"
+   }
+  },
+  {
+   "name": "k-means++ seeding, n_init, and what the O(log k) guarantee actually says",
+   "learn": "Implement D^2 seeding exactly: pick the first centre uniformly at random, then repeatedly pick x with probability proportional to D(x)^2, the squared distance from x to the nearest already-chosen centre. Know the theorem and its scope - k-means++ gives E[J] <= 8(ln k + 2) * J_opt in expectation before a single Lloyd iteration, so it is a guarantee about the initialisation, not about the answer you finally report. Know what scikit-learn does around it: init='k-means++' is the default, n_init='auto' runs one restart for k-means++ and ten for init='random', and the fitted model is the restart with the lowest inertia_ - so a customer comparing their k=5 run to yours must match random_state and n_init or the entire comparison is seed noise. Verify your implementation empirically rather than by inspection: over 50 seeds on the same data, D^2 seeding should give a materially lower and lower-variance mean inertia than uniform seeding. When k is large or the data lives in Spark, know that k-means|| oversamples O(k) points per round over O(log n) rounds and then reclusters the sample, which is the parallel variant you will actually meet on a customer cluster.",
+   "minutes": 20,
+   "resource": {
+    "label": "arXiv:1203.6402 - Scalable K-Means++ (k-means|| seeding, D^2 sampling and its guarantee)",
+    "url": "https://arxiv.org/abs/1203.6402"
+   }
+  },
+  {
+   "name": "Choosing k: the elbow, the silhouette, the gap statistic, and their disagreements",
+   "learn": "Understand why the elbow is weak but not useless: inertia is non-increasing in k by construction (k=n gives zero), so 'the elbow' is a second-derivative eyeball on a curve that is perfectly smooth whenever clusters overlap - report it, never decide on it alone. Compute the silhouette for point i as s_i = (b_i - a_i)/max(a_i, b_i), with a_i the mean distance to its own cluster and b_i the mean distance to the nearest other cluster; know it lies in [-1, 1], that silhouette_score is the mean over points, and that the per-cluster silhouette plot is far more informative than that mean - one cluster of width 0.05 with a tail of negative-silhouette points hiding behind an average of 0.55 is the usual story. Add the gap statistic (compare log W_k against its expectation under a uniform reference sampled in the PCA-aligned bounding box, and take the smallest k with Gap(k) >= Gap(k+1) - s_{k+1}), Calinski-Harabasz (between-over-within variance ratio, biased towards convex blobs) and Davies-Bouldin (lower is better), and expect them to disagree. The defensible deliverable is a table of k against every index plus a stability score - mean ARI between clusterings of 20 bootstrap resamples - and one sentence on which k the customer can operationalise, because six segments is a marketing plan and forty is not.",
+   "minutes": 30,
+   "resource": {
+    "label": "scikit-learn example - Selecting the number of clusters with silhouette analysis on KMeans",
+    "url": "https://scikit-learn.org/stable/auto_examples/cluster/plot_kmeans_silhouette_analysis.html"
+   }
+  },
+  {
+   "name": "Where k-means is the wrong model, and what to reach for instead",
+   "learn": "The objective encodes assumptions, and you must be able to name them off the plot: squared Euclidean loss induces a Voronoi partition with linear boundaries, which implicitly assumes isotropic clusters of similar variance and similar population. Reproduce the four canonical failures and the diagnostic for each - anisotropically stretched blobs (a linear boundary slices a stretched cluster in half), unequal variances (the wide cluster is consumed by its tight neighbours), unequal cluster sizes (the large cluster is split because splitting it reduces total inertia more than merging the small ones), and non-convex shapes such as two moons or concentric circles (no Voronoi cell can express a ring). Map each failure onto its fix: GaussianMixture with covariance_type='full' for anisotropy and unequal variance, DBSCAN/HDBSCAN or SpectralClustering for non-convex shapes, k-medoids (PAM) when you need an arbitrary metric and the mean is undefined for your data type. State the property that gets abused most in customer work: k-means always returns exactly k non-empty clusters, so it will cheerfully partition uniform noise into k tidy segments and give you a deck to present.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn example - Demonstration of k-means assumptions (anisotropy, unequal variance, unequal sizes)",
+    "url": "https://scikit-learn.org/stable/auto_examples/cluster/plot_kmeans_assumptions.html"
+   }
+  },
+  {
+   "name": "Gaussian mixtures: soft assignment, EM, and choosing components by BIC",
+   "learn": "Read the GMM as the probabilistic generalisation of k-means: p(x) = sum_k pi_k N(x | mu_k, Sigma_k), fitted by EM, where the E-step computes responsibilities gamma_ik = pi_k N(x_i | mu_k, Sigma_k) / sum_j pi_j N(x_i | mu_j, Sigma_j) and the M-step sets mu_k, Sigma_k and pi_k to responsibility-weighted moments. Be able to show that k-means is the limiting case as Sigma_k -> sigma^2 I with sigma -> 0, where the responsibilities become hard 0/1 assignments. Know that EM increases the log-likelihood monotonically but converges to a local optimum, and that it can degenerate - a component collapsing onto a single point sends the likelihood to infinity - which is why sklearn exposes reg_covar and why you initialise from k-means. Treat covariance_type ('full', 'tied', 'diag', 'spherical') as the explicit bias-variance knob: 'full' costs k*d(d+1)/2 parameters and overfits wide tables, 'diag' is usually the right compromise. Select the number of components by BIC = -2 log L + p log n over a grid, which is the only genuinely principled 'choose k' procedure in this whole topic, and know BayesianGaussianMixture can prune unused components via a Dirichlet-process prior instead.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn User Guide - Gaussian mixture models (EM, covariance_type, BIC selection)",
+    "url": "https://scikit-learn.org/stable/modules/mixture.html"
+   }
+  },
+  {
+   "name": "Scoring a clustering against known labels: ARI, AMI and correction for chance",
+   "learn": "When the customer does have some labels - a hand-tagged sample, a legacy segmentation - use external indices, and understand precisely what correction for chance buys: the raw Rand index of two random partitions is nowhere near zero and grows with the number of clusters, so you report ARI = (RI - E[RI]) / (max RI - E[RI]), which is 0 for random labelling, 1 for identical partitions, and can go negative. Know when to prefer AMI: mutual information is likewise inflated by many small clusters, adjusted_mutual_info_score corrects for it, and the standard guidance is AMI when clusters are unbalanced and small, ARI when they are large and roughly equal in size. Understand that homogeneity, completeness and V-measure decompose the same idea (each cluster holds one class, each class sits in one cluster, and their harmonic mean) and that V-measure is not adjusted for chance, so it drifts upward with k. Use these to grade your from-scratch implementations against scikit-learn on identical input - the deliverable's ARI >= 0.95 bar - and remember that all of them are invariant to label permutation, which is exactly what makes them the right tool.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn example - Adjustment for chance in clustering performance evaluation",
+    "url": "https://scikit-learn.org/stable/auto_examples/cluster/plot_adjusted_for_chance_measures.html"
+   }
+  },
+  {
+   "name": "DBSCAN: core points, density-reachability, and the border points that are not deterministic",
+   "learn": "Learn the definitions exactly, because everything else follows from them: p is a core point when |N_eps(p)| >= min_samples (sklearn counts p itself); q is directly density-reachable from a core point p when q lies in N_eps(p); a cluster is a maximal set closed under density-reachability and joined by density-connectivity; anything not reachable from any core point is noise and gets label -1. Understand what that buys and what it costs - clusters take any shape, k is not a parameter, and outliers get an explicit label - but a border point (non-core, yet inside the eps-ball of core points from two different clusters) goes to whichever cluster reaches it first, so the result depends on row order; this is why implementations legitimately differ on those points and why a border-point assignment must never carry business meaning. Know the cost model: roughly O(n log n) with a spatial index in low dimension, degrading towards O(n^2) as dimension rises and the index stops pruning, and note that a large eps blows up memory because sklearn materialises neighbourhoods - mitigate by passing a precomputed sparse radius-neighbours graph as metric='precomputed'. Note finally that DBSCAN has no predict method by design: scoring a new point requires a re-fit or a nearest-core-point rule that you write and document.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - sklearn.cluster.DBSCAN (eps, min_samples, core_sample_indices_, noise label -1)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html"
+   }
+  },
+  {
+   "name": "Setting eps and min_samples from a k-distance plot",
+   "learn": "Fix min_samples first from reasoning rather than search: the standard heuristic is min_samples >= d + 1, often 2*d, and larger for noisy data, and it is directly the answer to 'how many points constitute a cluster rather than noise here'. Then derive eps instead of guessing it: fit NearestNeighbors(n_neighbors=min_samples), take each point's distance to its min_samples-th neighbour, sort those distances in descending order and plot them - the knee where the curve turns sharply upward separates points in dense regions from points in sparse ones, and that y-value is your eps; compute the knee reproducibly with a maximum-distance-to-chord calculation rather than eyeballing it. Validate by sweeping eps across a range around the knee and plotting three curves together - number of clusters, noise fraction, and silhouette computed over non-noise points only - because a defensible eps sits on a plateau, and an eps where the cluster count swings from 3 to 40 over a five percent change is telling you the data has no single density scale (which is the argument for HDBSCAN). Be able to say what the -1 label means to the customer in one sentence: these are not anomalies, they are the points our density threshold could not group - and then check that the noise set is not itself a coherent segment you just deleted.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn example - Demo of DBSCAN clustering algorithm (labels, noise, evaluation)",
+    "url": "https://scikit-learn.org/stable/auto_examples/cluster/plot_dbscan.html"
+   }
+  },
+  {
+   "name": "HDBSCAN: variable density, mutual reachability and the condensed tree",
+   "learn": "When a single eps cannot serve the whole table - dense metropolitan accounts alongside sparse rural ones - HDBSCAN removes eps entirely: define a point's core distance as the distance to its min_samples-th neighbour, define the mutual reachability distance d_mreach(a, b) = max(core_k(a), core_k(b), d(a, b)), which pushes sparse points apart while leaving dense regions untouched, build the minimum spanning tree under that metric, and read a single-linkage hierarchy off it. Understand cluster extraction: condense the tree by enforcing min_cluster_size, then select clusters by excess of mass (cluster_selection_method='eom', the default, which prefers persistent clusters) or 'leaf' (finer, more clusters), with cluster_selection_epsilon as the knob that stops splitting below a distance scale you consider meaningless. Keep the two parameters distinct in your head and in the customer conversation: min_cluster_size is 'the smallest group they would actually act on', min_samples is the conservatism/noise knob - and probabilities_ gives a per-point membership strength, which is a far better artefact than DBSCAN's hard -1. It has shipped in scikit-learn as cluster.HDBSCAN since 1.3, so it costs you no new dependency on a locked-down customer host.",
+   "minutes": 20,
+   "resource": {
+    "label": "hdbscan docs - How HDBSCAN works (mutual reachability, MST, condensed tree, excess of mass)",
+    "url": "https://hdbscan.readthedocs.io/en/latest/how_hdbscan_works.html"
+   }
+  },
+  {
+   "name": "Agglomerative clustering: linkage criteria, Lance-Williams, and Ward",
+   "learn": "The algorithm itself is one line - start with n singletons, repeatedly merge the closest pair, stop at one - so every modelling decision lives in the word 'closest'. Know the four criteria and their signatures: single linkage is the minimum pairwise distance (finds elongated and chained shapes, and suffers the chaining effect where a thread of noise points fuses two real clusters), complete linkage is the maximum (compact clusters of similar diameter, sensitive to outliers), average linkage (UPGMA) is the mean, and Ward merges the pair that minimises the increase in total within-cluster variance, which makes it the hierarchical analogue of k-means and therefore valid only with Euclidean distance - scipy's linkage() will reject method='ward' with metric='cityblock'. Know that all of them are computed incrementally by the Lance-Williams recurrence, which is what makes an O(n^2) memory, O(n^2 log n) time implementation possible without recomputing distances after every merge. Know the practical ceiling: the full distance matrix is n^2, so a laptop tops out around 30-50k rows unless you pass a connectivity matrix from kneighbors_graph to AgglomerativeClustering, which both constrains merges to neighbours and makes the run tractable. Be able to say why you would choose it over k-means at all: you get the whole hierarchy, which is what a customer's taxonomy conversation actually needs.",
+   "minutes": 25,
+   "resource": {
+    "label": "SciPy - scipy.cluster.hierarchy.linkage (methods, Ward formula, the linkage matrix Z)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.linkage.html"
+   }
+  },
+  {
+   "name": "Reading, cutting and validating a dendrogram",
+   "learn": "Read the linkage matrix Z as (n-1) rows of [idx_a, idx_b, merge_distance, n_points_in_new_cluster], and read the plot as merge height = the dissimilarity at which two groups fused, so a long vertical edge below a merge means those two groups stayed distinct over a wide range of thresholds and is the actual evidence for cutting there. Cut with fcluster(Z, t, criterion='distance') for a dissimilarity threshold or criterion='maxclust' for a fixed cluster count, and treat the cut as a decision you defend with the gap between successive merge heights plus the same silhouette and bootstrap-stability evidence you used to pick k - never with the picture alone. Validate the tree itself with the cophenetic correlation coefficient, the Pearson correlation between the original pairwise distances and the merge heights at which each pair first joins (scipy's cophenet): a value near 0.5 means the dendrogram is a poor summary of the real geometry no matter where you cut it. Watch for inversions, a merge occurring at a lower height than one of its children, which cannot happen for single, complete, average or Ward linkage but does for centroid and median - an inversion is the sign that the plot you were about to put in front of a customer is not a valid hierarchy.",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy - scipy.cluster.hierarchy.dendrogram (color_threshold, truncate_mode, reading the tree)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.dendrogram.html"
+   }
+  },
+  {
+   "name": "PCA two ways: the covariance eigenproblem, the SVD, and Eckart-Young",
+   "learn": "Derive it once by hand. For column-centred X (n x d), maximise Var(Xw) = w^T S w subject to ||w|| = 1 with S = X^T X / (n - 1); the Lagrangian gives S w = lambda w, so the loadings are eigenvectors of the covariance matrix and lambda_j is the variance explained by component j. Then derive the same thing from the SVD X = U Sigma V^T: the right singular vectors V are exactly those eigenvectors, the scores are X V = U Sigma, and lambda_j = sigma_j^2 / (n - 1) - and know that every real implementation takes this route, because forming X^T X squares the condition number and loses precision on ill-conditioned data. State the Eckart-Young-Mirsky theorem - truncating to the top r singular triples gives the best rank-r approximation in both the Frobenius and spectral norms - because that is the sentence that makes PCA a compression guarantee rather than an act of faith. Implement it with np.linalg.svd(X_centred, full_matrices=False), reconcile against sklearn's PCA up to a per-component sign flip (the deliverable's 'matching up to sign' clause - resolve it by forcing the largest-magnitude loading in each component to be positive), and confirm for yourself that mean-centring is mandatory while dividing by n-1 rather than n only rescales the eigenvalues.",
+   "minutes": 30,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - ch.02 Matrices, 05. Decompositions (eigendecomposition, SVD, low-rank approximation)",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2002%20-%20matrices/05.%20decompositions.md"
+   }
+  },
+  {
+   "name": "Reading a scree plot, and the four ways PCA misleads",
+   "learn": "Choose the number of components from explained_variance_ratio_ with a rule you can name and defend: the elbow of the scree plot, a cumulative-variance target (80/90/95 percent), Kaiser's eigenvalue-greater-than-one rule on standardised data (well known to over-retain), or parallel analysis, which compares your eigenvalues to those of a column-permuted copy of the same matrix and is the most honest of the four. Then learn where the method lies. It is scale-dependent, so PCA on unstandardised columns is a report about whichever column has the largest units; it maximises variance rather than discriminative or predictive power, so the component you discard may be the one that separates the classes (contrast with LDA); it is linear, orthogonal and global, so a curved manifold needs many components to describe; and it is a least-squares method, so a handful of outliers can rotate the leading components on their own. Fix the interpretation rules in your head: components_ (the loadings) tell you what a component is made of, the sign of each component is arbitrary, and every component after the first is constrained to be orthogonal to its predecessors, which is a mathematical artefact and not a claim about the customer's domain. Use whiten=True only deliberately - it rescales each component to unit variance, which helps downstream distance-based learners and destroys exactly the relative-importance information the scree plot just gave you.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - sklearn.decomposition.PCA (n_components, explained_variance_ratio_, whiten, svd_solver)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.decomposition.PCA.html"
+   }
+  },
+  {
+   "name": "PCA when the matrix is large or the structure is nonlinear",
+   "learn": "Know the four escapes and the trigger for each: svd_solver='randomized' (Halko et al.) computes the top r components by projecting onto a random subspace and is what makes PCA on a 100k x 5k table tractable; IncrementalPCA with partial_fit handles data that does not fit in memory and lets you fit from a generator; TruncatedSVD does not centre the data and is therefore the correct choice for sparse TF-IDF or count matrices, where centring would densify them (this is LSA); and KernelPCA(kernel='rbf') performs PCA in a feature space via the centred kernel matrix, costs O(n^2) memory, and needs fit_inverse_transform=True if you want to project back. Be explicit about when PCA is the right preprocessing for the rest of this topic: reducing to 30-50 components before t-SNE or UMAP denoises the data and speeds up the neighbour search, and is standard practice; reducing before DBSCAN changes the very density structure you are about to measure, so do it consciously and report that you did. Last, remember PCA is a fitted transformer with learned state, so inside any supervised pipeline it must live in the Pipeline and be refit on every training fold.",
+   "minutes": 15,
+   "resource": {
+    "label": "scikit-learn User Guide - Decomposing signals in components (PCA variants, randomized SVD, KernelPCA)",
+    "url": "https://scikit-learn.org/stable/modules/decomposition.html"
+   }
+  },
+  {
+   "name": "t-SNE: the KL objective, perplexity, and the plot you must not over-read",
+   "learn": "Understand the construction end to end: symmetrised conditional Gaussian affinities p_ij in the input space, with a per-point bandwidth sigma_i found by binary search so that the perplexity 2^H(P_i) matches the requested value (an effective neighbour count, typically 5-50); Student-t affinities with one degree of freedom q_ij in the map; and gradient descent on KL(P || Q). Derive why the heavy tail matters - it lets moderately distant points sit far apart in the map at little cost, which is van der Maaten's fix for the crowding problem - and note that the asymmetry of KL(P||Q) makes it expensive to place nearby points far apart and cheap to place distant points nearby, so t-SNE preserves local neighbourhoods and discards global geometry by design, not by accident. Learn the parameters that change the answer: perplexity (run 5, 30 and 50 and trust only what is stable across them), learning_rate (sklearn's 'auto' is n / early_exaggeration / 4, and the old default of 200 is what produced the notorious compressed 'ball' on large n), early_exaggeration, n_iter, and init='pca' rather than 'random', now the default and materially better for global structure. Then adopt the three reading rules permanently: cluster sizes carry no information because the per-point bandwidth equalises density, between-cluster distances carry no information, and convincing clusters appear in pure Gaussian noise at low perplexity - a t-SNE plot is a hypothesis generator, never evidence.",
+   "minutes": 30,
+   "resource": {
+    "label": "Distill - How to Use t-SNE Effectively (perplexity, cluster sizes, distances, noise)",
+    "url": "https://distill.pub/2016/misread-tsne/"
+   }
+  },
+  {
+   "name": "UMAP: the neighbour graph, n_neighbors versus min_dist, and the honest t-SNE comparison",
+   "learn": "Read UMAP operationally rather than categorically: build a k-NN graph, convert distances to fuzzy membership strengths with a per-point local-connectivity normalisation (each point is joined to its nearest neighbour with weight 1, which is the local density-equalisation step), symmetrise by fuzzy union, then lay out a low-dimensional graph by minimising a fuzzy set cross-entropy with negative sampling and SGD - and note that this cross-entropy, unlike t-SNE's KL, penalises both attraction and repulsion errors, which is the technical reason UMAP retains somewhat more global structure. Learn the two parameters that matter and exactly what each controls: n_neighbors trades local against global structure (small values fragment the map into islands, large values smooth toward a manifold-level view), while min_dist controls only how tightly points are packed in the embedding and is therefore a cosmetic parameter that must never be interpreted as cluster tightness. Know the operational advantages that will decide it for you on site - far faster than t-SNE at 10^5-10^6 rows, a real transform() so new points can be embedded into an existing map, and supervised and metric-learning variants - alongside the shared caveat that the 'sizes and distances mean nothing' rules still apply and that results move with random_state and with the approximate neighbour search. Be ready for the strongest criticism too: Chari and Pachter's argument that 2-D embeddings preserve so little of the original distance structure that conclusions drawn from their geometry are unreliable.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv:1802.03426 - UMAP: Uniform Manifold Approximation and Projection (McInnes, Healy, Melville)",
+    "url": "https://arxiv.org/abs/1802.03426"
+   }
+  },
+  {
+   "name": "Measuring what an embedding destroyed: trustworthiness, continuity and stability",
+   "learn": "Stop arguing about which embedding looks better and measure the distortion instead: trustworthiness(X, X_embedded, n_neighbors=k) lies in [0, 1] and penalises points that are k-nearest neighbours in the map but were far apart in the original space (false neighbours - precisely the artefact that creates fake clusters), while its dual, continuity, penalises true neighbours that were torn apart; report both at several values of k, because they trade off against each other. Add the checks that catch the rest: a Shepard diagram correlating original against embedded pairwise distances, which shows explicitly how little global structure survived; three random seeds overlaid so the reader can see which features of the layout are stable; and a run on a column-permuted copy of the data as a null, to see what structure the method invents out of noise. When the customer's real question is 'are these genuinely distinct groups', do not answer it from the picture - cluster in the original or PCA-reduced space, then colour the embedding by that clustering, so the map is used for display while the claim rests on the higher-dimensional analysis. The sentence to carry into the room: the embedding is a lossy visualisation of a neighbour graph, so it can support 'these points are near each other' and can never support 'these two groups are twice as far apart as those'.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - sklearn.manifold.trustworthiness (definition and n_neighbors)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.manifold.trustworthiness.html"
+   }
+  },
+  {
+   "name": "Shipping it: pipeline placement, reproducibility, scoring new points, and drift",
+   "learn": "Assemble the real artefact as a Pipeline of ColumnTransformer -> scaler -> PCA -> clusterer, so every fitted step is refit correctly and one code path serves both the analysis and tomorrow's scoring; and settle the architectural question before choosing the algorithm, because KMeans and GaussianMixture expose predict() while DBSCAN, t-SNE and plain agglomerative do not (HDBSCAN needs approximate_predict), so 'score new accounts nightly' silently rules some of them out. Pin reproducibility explicitly with random_state on KMeans, GaussianMixture, TSNE and UMAP, and know that even then BLAS version and thread count can move results in the last decimals, so what you hand over is a serialised fitted model plus a hash of its training input, not a notebook someone reruns. Monitor drift on quantities that actually move: the distribution of distance-to-assigned-centroid (a growing tail means new structure the model cannot express), cluster population shares, and for density methods the noise fraction - and set the retrain trigger on those rather than on a calendar. Finally, make the labels usable: describe each cluster by the z-scored deviation of its centroid from the global mean in a small profile table, which beats any plot in a customer meeting, and keep a stable cluster-ID mapping across retrains, because cluster 3 becoming cluster 5 after a refit breaks every dashboard downstream without raising a single error.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - Common pitfalls and recommended practices (data transformation, randomness, random_state)",
+    "url": "https://scikit-learn.org/stable/common_pitfalls.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can implement k-means++ with Lloyd, DBSCAN, agglomerative clustering with single/complete/Ward linkage, and PCA via SVD in vectorised NumPy, and reproduce scikit-learn's partition at ARI >= 0.95 and its components to rtol=1e-10 after fixing the per-component sign convention.",
+  "You can derive both k-means update rules by coordinate descent, prove the objective decreases monotonically, and explain from that derivation alone why the method is bound to squared Euclidean distance and the arithmetic mean.",
+  "You can choose k on an unlabelled customer table and defend it with a table of inertia, per-cluster silhouette (not just the mean), gap statistic, Calinski-Harabasz and a bootstrap-ARI stability score, and say which k the customer can actually operationalise.",
+  "You can produce a k-distance plot, read eps off the knee, sweep it to show the plateau in cluster count, noise fraction and non-noise silhouette, and state precisely what DBSCAN's -1 label does and does not say about those rows.",
+  "You can pick between k-means, GMM, DBSCAN, HDBSCAN and Ward agglomerative in under five minutes given a data description, justifying it from cluster shape, density variation, whether new points must be scored, and n.",
+  "You can state the three t-SNE and UMAP reading rules from memory and back them with computed evidence: trustworthiness and continuity at several k, a Shepard diagram, a three-seed overlay, and a permuted-data null.",
+  "You can read a dendrogram, defend a cut with the gap between successive merge heights, report the cophenetic correlation for the tree, and spot an inversion before the plot reaches a customer.",
+  "You can turn anonymous cluster IDs into a z-score profile table a non-technical stakeholder can act on, with a stable-ID mapping across retrains and a named drift trigger beside it."
+ ],
+ "failureModes": [
+  "Columns were not standardised before k-means, so annual_revenue in dollars dominated the squared-Euclidean objective; the 'behavioural segmentation' delivered to marketing was a revenue quantile split with extra steps, and nobody noticed until a segment was defined by a currency conversion.",
+  "The scaler and PCA were fit on the whole table before the downstream classifier's train/test split, so the clustering-derived features carried information from the test rows and the supervised metric was inflated by several points that evaporated in production.",
+  "k was chosen from an elbow that did not exist on a smooth inertia curve; the selected k=4 had a mean silhouette of 0.19 with two clusters containing substantial negative-silhouette membership, and the segmentation did not reproduce on the next quarter's data.",
+  "DBSCAN was run over 60 one-hot columns with the default eps=0.5; distance concentration meant the result was either one giant cluster or 90 percent noise, and eps was tuned until the cluster count looked plausible instead of until the k-distance knee justified it.",
+  "A t-SNE plot with two clean, well-separated blobs went into a customer deck as evidence of two customer types; the same data showed six blobs at perplexity 5 and one at perplexity 50, and a permuted-data null produced visually similar structure.",
+  "Cluster IDs were regenerated on every nightly retrain with no stable-ID mapping, so the dashboard's 'Segment 3' quietly became a different population and every trend line in the customer's QBR deck compared two unrelated groups.",
+  "A border point's DBSCAN assignment was used to justify an account's segment; because border points go to whichever cluster reaches them first, re-running with shuffled row order moved several hundred accounts between segments and the customer found it before the team did.",
+  "PCA was applied before clustering to 'remove noise', with components chosen at 95 percent cumulative variance on unstandardised data; the discarded low-variance directions were exactly the ones separating the two groups the customer cared about, and no downstream algorithm could recover them."
+ ],
+ "interviewQuestions": [
+  "Derive the two k-means update steps from the objective. Why must the distance be squared Euclidean, what does Lloyd's algorithm guarantee about convergence, and what does it explicitly not guarantee?",
+  "I hand you a 200k x 80 table of account behaviour, mixed numeric and categorical, and ask for segments I can act on. Walk me through the preprocessing, the distance, the algorithm, how you choose the number of segments, and what artefact you would show me to convince me the segments are real rather than an artefact of the objective.",
+  "Explain what DBSCAN's eps and min_samples do and how you would set them without grid-searching for a pretty answer. What is a border point, why is its assignment order-dependent, and how do you score a new point tomorrow against a fitted DBSCAN model?",
+  "Derive PCA from both the covariance eigenproblem and the SVD and state what Eckart-Young gives you. Why do real implementations use the SVD rather than forming X^T X, and what exactly does it mean that two implementations' components match 'up to sign'?",
+  "A colleague shows a UMAP plot with two large well-separated islands and one small one, and concludes there are three customer types and that the small one is very different from the others. Which parts of that conclusion are supported by the method, which are not, and what would you compute before it goes in front of the customer?",
+  "Compare Ward linkage with k-means. Under what conditions do they produce similar partitions, why is Ward restricted to Euclidean distance, and when would you pay the O(n^2) memory cost to get the hierarchy instead?",
+  "Debug: your pipeline produced six stable segments in the pilot, and after the customer's next data drop it produces two giant segments plus 30 percent noise. What are the four things you check, in what order, and what would each look like in the data?"
+ ],
+ "proofOfWork": "A public repo `cluster-audit` that turns this topic into something you can run on a customer's unlabelled table on day two of an engagement, and that produces a memo rather than a notebook. It exposes one entry point, audit(df, numeric_cols, categorical_cols, id_col), which emits five panels: a preprocessing panel reporting per-column scale ratios, cardinality, missingness and a measured distance-concentration statistic ((d_max - d_min)/d_min at several dimensionalities) with an explicit recommendation of metric and scaler; a k-selection panel giving inertia, per-cluster silhouette plots, gap statistic against a PCA-aligned uniform reference, Calinski-Harabasz, Davies-Bouldin and a bootstrap-ARI stability curve over 20 resamples for k in a stated range; an algorithm bake-off running KMeans, GaussianMixture (BIC-selected), Ward agglomerative, DBSCAN (eps from an automated knee on the k-distance curve) and HDBSCAN on identical preprocessing, reported side by side with cluster counts, noise fractions, internal indices and pairwise ARI between the algorithms' partitions so disagreement is visible rather than hidden; an embedding-honesty panel producing t-SNE at perplexity 5/30/50 and UMAP at n_neighbors 5/15/50, each with three seeds overlaid, plus trustworthiness and continuity at k = 5, 15 and 50, a Shepard diagram, and the same panel recomputed on a column-permuted null so the reader can see what the method invents from noise; and a handover panel with the z-score centroid profile table, a stable cluster-ID mapping keyed to the previous run, and the drift monitors (distance-to-centroid tail quantiles, population shares, noise fraction) with proposed retrain thresholds. Run it end to end on two public tables with genuinely different structure - one with well-separated convex clusters and one with variable density or non-convex shape, such as a wholesale-customers table and a geospatial or gesture table - and commit the two generated memos. CI asserts the from-scratch implementations still match scikit-learn (ARI >= 0.95 for the clusterers, components to rtol=1e-10 up to sign for PCA), and the README opens with a one-page CLUSTERING-CHECKLIST.md written for a customer's data team: the metric and why, the scaler and why, the algorithm and why, the k and the three pieces of evidence for it, what the noise label means, and the two sentences on what the embedding plot may and may not be used to claim."
+}

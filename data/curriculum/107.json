@@ -1,0 +1,228 @@
+{
+ "i": 107,
+ "topic": "Explainability: SHAP, LIME, permutation importance, partial dependence",
+ "track": "N. Machine Learning Systems",
+ "month": 10,
+ "hours": 6.0,
+ "why": "An FDE is the person in the room when a customer's risk officer, clinician or ops lead points at one prediction and asks why - and the honest answer requires knowing exactly what quantity your explanation estimates, on what data, against what baseline. Explainability is also your fastest debugging tool on someone else's data: leakage, a broken encoder, a proxy for the label and a feature the model never actually reads all show up first in an importance ranking or a dependence plot, weeks before they show up in a held-out metric. Get the estimand wrong and you do worse than nothing - you hand a customer a confident, wrong causal story with your name on it, and they act on it.",
+ "prerequisites": [
+  "A fitted gradient-boosted tabular model you can retrain in under a minute, plus the XGBoost/LightGBM API surface (Topic 101, Supervised learning II) - almost every explanation here is demonstrated on trees",
+  "Honest held-out evaluation: train/validation/test splits, cross-validation, leakage, and the difference between a score and a loss (Topic 103, Model evaluation) - permutation importance is meaningless without a clean held-out set",
+  "Linear and logistic regression with regularisation, including the log-odds link and what a coefficient means (Topic 100, Supervised learning I)",
+  "Expectation, conditional expectation and marginal vs conditional distributions (Topic 95, Probability) - the entire PDP/ALE/SHAP argument is about which expectation you are taking",
+  "NumPy vectorisation, broadcasting, RNG seeding and in-place-copy hazards (Topic 99, Numerical computing) - the from-scratch implementations are 30-line array routines where an aliasing bug silently zeroes results",
+  "matplotlib well enough to draw a grid of curves with a rug plot and a colour dimension, since half of this topic is a plot you have to defend"
+ ],
+ "subtopics": [
+  {
+   "name": "Which question is the customer actually asking",
+   "learn": "Separate the four questions people conflate under 'explain the model': (a) which features does the model rely on overall - global importance; (b) how does the score move as one feature sweeps - global effect, PDP/ALE; (c) why did this row get this score - local attribution, SHAP/LIME; (d) what would have to change to flip it - counterfactual/recourse. Map each to the method and to the quantity it estimates, and be able to say that all four are properties of the fitted model, not of the world: none is a causal claim unless the model was identified causally (Topic 97). Read Lipton's decomposition of transparency (simulatability, decomposability, algorithmic transparency) versus post-hoc interpretability so you can name in a meeting which one is being requested, and know Rudin's counterargument (arXiv 1811.10154) that for high-stakes decisions the right move is sometimes an interpretable model instead of an explanation of a black box.",
+   "minutes": 15,
+   "resource": {
+    "label": "Lipton - The Mythos of Model Interpretability (arXiv 1606.03490)",
+    "url": "https://arxiv.org/abs/1606.03490"
+   }
+  },
+  {
+   "name": "The interpretable baseline: coefficients you can defend",
+   "learn": "Before explaining a GBM, be able to read the model you would otherwise have shipped. For logistic regression, exp(beta_j) is the multiplicative effect on the odds per unit of x_j with the others held fixed; know that standardising changes the units of beta but not the fitted probabilities, that L2 with one-hot dummies spreads one effect across correlated columns, and that a coefficient's sign can flip when a collinear feature enters. Reproduce the sklearn pitfalls example: plot coefficient variability across cross-validation folds, show a huge coefficient on a near-zero-variance feature, and show OLS coefficients swinging fold to fold on correlated inputs while ridge stays put. Carry the lesson into SHAP: an unstable attribution is usually the data's collinearity, not a bug in the method.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - Common pitfalls in the interpretation of coefficients of linear models",
+    "url": "https://scikit-learn.org/stable/auto_examples/inspection/plot_linear_model_coefficient_interpretation.html"
+   }
+  },
+  {
+   "name": "Impurity importance (MDI) and why the library default lies",
+   "learn": "MDI for feature j is the sum over all nodes split on j of the sample-weighted impurity decrease, averaged over trees and normalised to sum to 1. Know its two structural biases: it favours high-cardinality and continuous features because they offer more candidate split points (a random UUID or a timestamp ranks near the top), and it is computed on training data, so it rewards exactly what the model overfits. Reproduce the sklearn example where an injected random column outranks a real predictor under MDI and collapses to zero under permutation importance on the held-out fold. Know that XGBoost's importance_type variants disagree with each other - 'weight' counts splits, 'gain' averages loss reduction, 'cover' weights by hessian mass - and that plot_importance defaults to 'weight', the least defensible of the three.",
+   "minutes": 15,
+   "resource": {
+    "label": "scikit-learn - Permutation Importance vs Random Forest Feature Importance (MDI)",
+    "url": "https://scikit-learn.org/stable/auto_examples/inspection/plot_permutation_importance.html"
+   }
+  },
+  {
+   "name": "Permutation importance: the estimator, implemented from the definition",
+   "learn": "Implement PFI_j = (1/K) * sum_k L(y, f(X with column j permuted by pi_k)) - L(y, f(X)), evaluated on held-out data with a loss you chose deliberately (log loss for a probabilistic model, MAE for a regressor, ROC AUC only if ranking is the product). In NumPy: save the column, rng.permutation it, score, restore in place - and never permute an already-permuted column, an aliasing bug that silently zeroes every later feature. Report mean and standard deviation over n_repeats: the null is centred near zero, so a feature whose interval straddles zero is indistinguishable from noise and negative values are normal, not a bug. Reconcile digit-for-digit with sklearn.inspection.permutation_importance(model, X_test, y_test, n_repeats=30, random_state=0, scoring='neg_log_loss'), matching both the RNG and the sign convention (sklearn reports baseline minus permuted for a score, so larger is more important).",
+   "minutes": 30,
+   "resource": {
+    "label": "scikit-learn User Guide - Permutation feature importance",
+    "url": "https://scikit-learn.org/stable/modules/permutation_importance.html"
+   }
+  },
+  {
+   "name": "Correlated features: why the ranking moves, and how to fix the question",
+   "learn": "With two near-duplicate columns the model can read either one, so permuting one alone barely hurts the loss and both look unimportant - the importance is split or hidden, never shared. Diagnose it the way the sklearn example does: Spearman rank correlation, convert to a distance, hierarchical cluster with Ward linkage, cut the dendrogram at a threshold, then permute whole clusters jointly and report 'the block {tenure, months_active, days_since_first_seen} is worth 0.08 log loss' instead of three misleading zeros. Understand the second, distinct effect: shuffling one of two dependent columns manufactures impossible rows (age 20 with retired=1), so part of the measured loss increase is extrapolation error rather than reliance, and it inflates rather than deflates the number.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - Permutation Importance with Multicollinear or Correlated Features",
+    "url": "https://scikit-learn.org/stable/auto_examples/inspection/plot_permutation_importance_multicollinear.html"
+   }
+  },
+  {
+   "name": "When permutation is the wrong estimator: LOCO, drop-column, conditional variants",
+   "learn": "Distinguish reliance of this fitted model (permutation: one fit, cheap, answers 'what does the deployed model read') from importance to the learning problem (drop-column / LOCO: refit without feature j, M+1 fits, answers 'can we stop collecting this field'). Read Hooker and Mentch's argument that permutation evaluates f far off the data manifold and their proposed alternatives - conditional permutation within strata of the correlated features, and permute-then-relearn - and adopt the operating rule: if your recommendation is to remove a field from the customer's pipeline, LOCO is the estimate that supports it; if you are debugging what the shipped model uses, permutation is correct. Whichever you compute, be able to state in one sentence which of the two quantities your number is.",
+   "minutes": 15,
+   "resource": {
+    "label": "Hooker & Mentch - Please Stop Permuting Features (arXiv 1905.03151)",
+    "url": "https://arxiv.org/abs/1905.03151"
+   }
+  },
+  {
+   "name": "Partial dependence: the marginal expectation and its Monte-Carlo estimator",
+   "learn": "Derive PD_S(x_S) = E_{X_C}[f(x_S, X_C)] and its estimator (1/n) * sum_i f(x_S, x_C^(i)): the model is evaluated once per observed complement row per grid point, which is why the plot costs |grid| * n forward passes and why it fabricates impossible rows whenever x_S and X_C are dependent. Implement it in NumPy on a percentile grid (5th to 95th, to keep tail noise out), add decile ticks or a rug so the customer can see where there is no data, and state the assumption out loud: PD is a causal effect only if the complement features are not confounders. Reconcile with sklearn.inspection.partial_dependence(est, X, features=[i], kind='average', grid_resolution=50), and know that method='recursion' for trees skips the data pass, is far faster, and answers a different question (training-distribution conditional) than method='brute'.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn User Guide - Partial dependence and individual conditional expectation",
+    "url": "https://scikit-learn.org/stable/modules/partial_dependence.html"
+   }
+  },
+  {
+   "name": "ICE and centred ICE: the heterogeneity the average destroys",
+   "learn": "An ICE curve is f(x_S, x_C^(i)) for one fixed row i as x_S sweeps the grid; the PDP is exactly the pointwise mean of them. Learn to read the shapes: parallel curves mean no interaction with the complement, fanning or crossing curves mean interaction, and a flat PDP with half the curves rising and half falling means two subpopulations cancelling. Use centred ICE (subtract each curve's value at an anchor x_S = x*) so slopes rather than levels are compared. Produce it with PartialDependenceDisplay.from_estimator(est, X, features, kind='both', centered=True, subsample=200), and the moment you see fanning, colour the curves by a candidate feature and find the interaction - that coloured c-ICE panel, not the PDP, is what belongs in the customer deck.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - Partial Dependence and Individual Conditional Expectation Plots",
+    "url": "https://scikit-learn.org/stable/auto_examples/inspection/plot_partial_dependence.html"
+   }
+  },
+  {
+   "name": "Interactions: two-dimensional PDPs and Friedman's H-statistic",
+   "learn": "H^2_jk = sum_i [PD_jk(x_j^i, x_k^i) - PD_j(x_j^i) - PD_k(x_k^i)]^2 / sum_i PD_jk(x_j^i, x_k^i)^2 is the share of the two-way partial dependence not explained by the two additive parts; the one-versus-all variant H_j does the same against the full prediction. Be able to compute it for one pair and to state its two practical limits: cost is O(n^2) model evaluations per pair so you must subsample rows, and the denominator can be near zero, which produces H values above 1 and unstable rankings on small samples - always recompute on a second subsample before you believe it. Confirm every H flag against a 2-D PDP contour or a SHAP interaction value before telling a customer that two of their fields interact.",
+   "minutes": 15,
+   "resource": {
+    "label": "Friedman & Popescu - Predictive Learning via Rule Ensembles (H-statistic, arXiv 0811.1679)",
+    "url": "https://arxiv.org/abs/0811.1679"
+   }
+  },
+  {
+   "name": "ALE plots: the fix when features are correlated",
+   "learn": "Instead of averaging over the marginal of X_C, ALE splits x_j into quantile intervals, computes the local difference f(z_k, x_C) - f(z_{k-1}, x_C) using only rows whose x_j actually falls in that interval, then accumulates and centres - so the model is never evaluated off the data manifold. Learn the three-line contrast you will say out loud: PDP is a marginal expectation, an M-plot is a conditional expectation and therefore mixes in the effects of correlated features, ALE accumulates conditional differences and isolates the effect of x_j. Know the costs: piecewise output, noisy with too many bins, no ICE analogue, and second-order ALE that is hard to read. Operating rule: when |Spearman| between x_j and any other feature exceeds roughly 0.6, show ALE alongside the PDP and explain the gap rather than hoping nobody asks.",
+   "minutes": 20,
+   "resource": {
+    "label": "Apley & Zhu - Visualizing the Effects of Predictor Variables in Black Box Supervised Learning Models (ALE, arXiv 1612.08468)",
+    "url": "https://arxiv.org/abs/1612.08468"
+   }
+  },
+  {
+   "name": "Shapley values: the axioms and the exact combinatorial formula",
+   "learn": "Treat one prediction as a cooperative game with value function v(S) = E[f(X) | X_S = x_S] and derive phi_j = sum over S subset of M\\{j} of |S|!(M-|S|-1)!/M! * [v(S union {j}) - v(S)] as the unique attribution satisfying efficiency (sum_j phi_j = f(x) - E[f(X)]), symmetry, dummy and linearity. Be able to do this by hand for a three-feature model over all eight coalitions and to verify efficiency numerically. Read Lundberg and Lee's framing of LIME, DeepLIFT and layer-wise relevance propagation as one class of additive feature-attribution methods, and internalise the cost that motivates everything after this subtopic: exact Shapley needs 2^M coalitions, so every practical method is an approximation - coalition sampling, KernelSHAP, or exploiting model structure as TreeSHAP does.",
+   "minutes": 30,
+   "resource": {
+    "label": "Lundberg & Lee - A Unified Approach to Interpreting Model Predictions (arXiv 1705.07874)",
+    "url": "https://arxiv.org/abs/1705.07874"
+   }
+  },
+  {
+   "name": "KernelSHAP: Shapley values as a weighted least-squares problem",
+   "learn": "Sample coalitions z in {0,1}^M, map them back to inputs (present = the row's value, absent = drawn from the background set), and fit a weighted linear model minimising sum_z pi(z) [f(h_x(z)) - (phi_0 + sum_j phi_j z_j)]^2 with the Shapley kernel pi(z) = (M-1) / (C(M,|z|) * |z| * (M-|z|)); the fitted coefficients are the Shapley values. Implement it: enumerate all coalitions when M <= 12, otherwise draw by subset size from the kernel's extremes inward, impose the all-zeros and all-ones coalitions as hard constraints so phi_0 = E[f] and sum phi = f(x), add a small ridge term to keep the design matrix invertible, and count model calls as nsamples * |background|. Compare with shap.KernelExplainer(f, shap.sample(X_bg, 100)).shap_values(x, nsamples=2048), watch convergence as nsamples grows, and report the run-to-run variance, because KernelSHAP is a stochastic estimate that will disagree with itself in the third digit.",
+   "minutes": 25,
+   "resource": {
+    "label": "SHAP docs - shap.KernelExplainer API",
+    "url": "https://shap.readthedocs.io/en/latest/generated/shap.KernelExplainer.html"
+   }
+  },
+  {
+   "name": "TreeSHAP: exact attributions in polynomial time, and its two estimands",
+   "learn": "For tree ensembles, phi can be computed exactly in roughly O(T*L*D^2) by pushing all coalitions through the tree simultaneously and tracking what fraction of each subset flows to each leaf - this is why SHAP is affordable on the customer's XGBoost model and KernelSHAP is not. Know the two flavours and that they give different numbers: path-dependent uses the trees' training cover counts to define the conditional expectation and needs no background data, and can assign non-zero credit to a feature the model never splits on if it correlates with one that it does; interventional (feature_perturbation='interventional') requires a background dataset and computes the marginal/interventional expectation, which is the game the SHAP axioms are usually stated for. Also note model_output='raw' returns log-odds for a classifier, so sum(phi) + base reconciles to the margin, not to the probability.",
+   "minutes": 15,
+   "resource": {
+    "label": "Lundberg et al. - Consistent Individualized Feature Attribution for Tree Ensembles (TreeSHAP, arXiv 1802.03888)",
+    "url": "https://arxiv.org/abs/1802.03888"
+   }
+  },
+  {
+   "name": "The background dataset is a modelling decision, not a default",
+   "learn": "Every phi is defined relative to a baseline E[f], so 100 random rows, a shap.kmeans summary, an all-zeros row and a curated 'typical approved applicant' produce different explanations of the same prediction - and change the sentence you say from 'compared with the average applicant' to 'compared with an applicant like you'. Read Chen et al. on true-to-the-model (interventional/marginal: breaks feature dependence, credits only features the model actually uses, correct for debugging) versus true-to-the-data (conditional: spreads credit across correlated features, closer to a scientific claim), and be able to state which you chose and what the other would have shown. Pin the background set with a seed, version it as an artifact alongside the model, and record it in the model card - an explanation regenerated against a different background is not reproducible and cannot be defended six months later.",
+   "minutes": 20,
+   "resource": {
+    "label": "Chen, Janizek, Lundberg & Lee - True to the Model or True to the Data? (arXiv 2006.16234)",
+    "url": "https://arxiv.org/abs/2006.16234"
+   }
+  },
+  {
+   "name": "Reading one local explanation and proving it adds up",
+   "learn": "For a single row, render the waterfall from E[f(X)] to f(x) and assert efficiency numerically: np.allclose(expl.values.sum() + expl.base_values, model.predict(x, output_margin=True), atol=1e-6). When that assertion fails, the cause is one of a short list - link-function mismatch (log-odds versus probability), the wrong background set, or an approximate explainer that has not converged - and you must identify which before the number reaches a slide. Then narrate the row properly: the base rate, the three features that pushed up, the two that pushed down, in the correct units, plus the explicit sentence that this is the model's arithmetic and not a causal claim. Remember that force and waterfall plots for a classifier default to log-odds space, so '+0.9' is not 0.9 probability, and contributions are not additive after the sigmoid.",
+   "minutes": 15,
+   "resource": {
+    "label": "SHAP docs - waterfall plot example",
+    "url": "https://shap.readthedocs.io/en/latest/example_notebooks/api_examples/plots/waterfall.html"
+   }
+  },
+  {
+   "name": "Global summaries built from local values, and what they are not",
+   "learn": "mean(|phi_j|) across a dataset - the beeswarm's row ordering - summarises attribution magnitude, not loss degradation; it never looks at y, so it can rank highly a feature the model leans on that carries no held-out predictive value. Present permutation importance (loss-based, needs labels, answers 'does it help') beside mean|SHAP| (model-based, needs no labels, answers 'does it move the score') and explain any disagreement instead of hiding it. Read Kumar et al. on why the Shapley axioms do not transfer to feature-importance claims: the additive model over coalitions is not the model, credit depends on the assumed feature distribution, and phi_j = 0 does not mean the feature is unused. Use the SHAP dependence plot (phi_j against x_j, coloured by the strongest interacting feature) as the honest global-effect plot and cross-check it against the PDP.",
+   "minutes": 15,
+   "resource": {
+    "label": "Kumar et al. - Problems with Shapley-value-based explanations as feature importance measures (arXiv 2002.11097)",
+    "url": "https://arxiv.org/abs/2002.11097"
+   }
+  },
+  {
+   "name": "LIME: the local surrogate and everything you must pin down",
+   "learn": "Implement it: perturb around x (tabular LIME discretises features and samples from training marginals, then measures similarity in the original space), weight each sample by the exponential kernel exp(-D(x,z)^2 / sigma^2), fit a K-sparse ridge or lasso on the interpretable binary representation, and report both the coefficients and the surrogate's local R^2 - the fidelity that most tutorials never print, and without which the explanation is unfalsifiable. Know the four knobs that change the answer: kernel width sigma (default sqrt(n_features) * 0.75, essentially arbitrary), num_samples, the discretiser (quartile by default, so 'age > 43.0' is a bin edge, not a threshold the model uses), and the seed - run the same explanation five times and show the top-3 moving. State what LIME buys you over SHAP: a human-readable rule-like local model, paid for with no efficiency guarantee, since its weights do not sum to the prediction.",
+   "minutes": 25,
+   "resource": {
+    "label": "Ribeiro, Singh & Guestrin - Why Should I Trust You? (LIME, arXiv 1602.04938)",
+    "url": "https://arxiv.org/abs/1602.04938"
+   }
+  },
+  {
+   "name": "Fragility: explanations can be adversarial, and methods disagree",
+   "learn": "Understand the Slack et al. scaffolding attack: because KernelSHAP and LIME query the model on off-manifold perturbed points, an adversary can wrap a biased model in a detector that recognises synthetic inputs and returns an innocuous surrogate on them - producing a clean explanation for a discriminatory deployment. Take the operational lessons rather than the paranoia: check whether your perturbations are in-distribution (train a quick classifier to separate perturbed rows from real ones), prefer interventional TreeSHAP or background sets drawn from real data, and never accept an explanation produced by an untrusted third party as evidence. Learn the disagreement problem too: on the same row, permutation importance, SHAP and LIME frequently rank differently, and the professional response is to name the estimand each answers and show all three, not to quietly pick the one that supports the story.",
+   "minutes": 15,
+   "resource": {
+    "label": "Slack et al. - Fooling LIME and SHAP: Adversarial Attacks on Post hoc Explanation Methods (arXiv 1911.02508)",
+    "url": "https://arxiv.org/abs/1911.02508"
+   }
+  },
+  {
+   "name": "Counterfactual explanations and actionable recourse",
+   "learn": "The question after every SHAP waterfall is 'so what do I change?', and that is a counterfactual, not an attribution. Formulate it as x' = argmin over x' of (f(x') - y')^2 + lambda * d(x, x') with d a MAD-weighted L1 distance, and know the four properties a usable counterfactual needs: validity (it really flips the model), proximity, sparsity (few features changed) and actionability (no immutable attributes, no changes that violate a monotone or logical constraint). Counterfactuals need no model internals and no background dataset, which makes them the easiest explanation to defend in a regulated setting; they are also non-unique, so generate a diverse set and let the customer choose. Say the caveat out loud: a counterfactual is recourse only when the features are causally manipulable - 'raise your credit score by 40 points' is not advice.",
+   "minutes": 15,
+   "resource": {
+    "label": "Wachter, Mittelstadt & Russell - Counterfactual Explanations without Opening the Black Box (arXiv 1711.00399)",
+    "url": "https://arxiv.org/abs/1711.00399"
+   }
+  },
+  {
+   "name": "Shipping it: explainer choice, compute budget and the handover artifact",
+   "learn": "Choose the explainer from the model and the SLA rather than habit: TreeExplainer (exact, milliseconds, tree ensembles), LinearExplainer, PermutationExplainer (model-agnostic, roughly 2M+1 forward passes per row at max_evals), the auto-dispatching Explainer(model, masker), GPUTree for large ensembles - and compute the budget as rows * background_size * coalitions model calls before promising per-request explanations behind an API. Design the serving path deliberately: precompute and store phi during batch scoring, cache the background summary and base value as versioned artifacts next to the model, pin explainer + background + model together, and set a latency budget (a 2-second KernelSHAP call inside a 200 ms endpoint is an outage, not a feature). The handover artifact is a model-card section naming the method, the estimand, the background set, the uncertainty of the numbers, and one worked row with the exact sentence you would say to the customer.",
+   "minutes": 15,
+   "resource": {
+    "label": "SHAP docs - API reference (explainers, maskers, plots)",
+    "url": "https://shap.readthedocs.io/en/latest/api.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can implement permutation importance, PDP + ICE and KernelSHAP in NumPy straight from their definitions and reconcile each against sklearn.inspection and the shap library to a stated tolerance, explaining every remaining difference (RNG stream, background sample, brute vs recursion, log-odds vs probability).",
+  "You can compute Shapley values by hand for a three-feature model over all eight coalitions, verify sum(phi) = f(x) - E[f(X)] numerically, and derive the Shapley kernel as the weighting that makes a weighted least-squares fit return those same values.",
+  "You can demonstrate with numbers on one dataset that MDI ranks an injected random column near the top, permutation importance on the test fold does not, and joint permutation of a correlated cluster recovers importance that both single-column permutations reported as zero.",
+  "You can look at a c-ICE panel and state whether an interaction exists, identify the interacting feature by colouring the curves, and confirm or refute it with a 2-D PDP or an H-statistic computed on two independent subsamples.",
+  "You can choose between path-dependent and interventional TreeSHAP for a given customer question, justify the background dataset in one sentence, and state how the attributions would shift under the other choice.",
+  "You can produce a one-page defensible explanation of a single high-stakes prediction: base value, top contributions in correct units, a passing additivity assertion, a fidelity or convergence statistic, a counterfactual for recourse, and an explicit statement of what the explanation does not claim.",
+  "You can state the per-row compute cost of each explainer, pick one that fits a latency budget, and design the precompute/caching/versioning path that keeps a stored explanation reproducible months later.",
+  "You can show SHAP, LIME and permutation importance disagreeing on the same row and explain the disagreement in terms of the different estimands, instead of selecting the ranking that supports a preferred narrative."
+ ],
+ "failureModes": [
+  "Permutation importance is computed on the training set for a deep, barely regularised ensemble; every feature looks important because the model memorised, the customer trusts the ranking, drops the one feature you called weak, and held-out AUC falls.",
+  "monthly_spend and annual_spend/12 are both in the frame; each permuted alone costs the model almost nothing, both score near zero, the team removes both to simplify the pipeline, and recall drops six points overnight.",
+  "xgboost.plot_importance is pasted into a deck with the default importance_type='weight', so the chart is really a split-count ranking dominated by a high-cardinality near-identifier, and the customer's team spends a sprint investigating a column that carries no signal.",
+  "A PDP over a feature correlated at 0.9 with another is presented as 'raising price from 10 to 200 does nothing to churn'; the flat curve came from scoring rows that cannot exist (price 200 with plan='free'), and the ALE plot on the same data shows a steep effect.",
+  "TreeSHAP is run with the default path-dependent perturbation and the output is described to a compliance reviewer as each field's contribution to the decision; two correlated fields split credit for a decision the model actually made on only one of them.",
+  "A waterfall reading '+1.4 for income' is quoted as a probability change when the explainer returned raw log-odds, so the real effect is about five percentage points, and the correction arrives after the deck is already with the customer's risk committee.",
+  "LIME explanations for a disputed case are regenerated a week later with a different seed and num_samples; the top three features change, the customer sees two versions of the same explanation, and nobody had ever printed the local R^2 of 0.18 that would have shown the surrogate never fit in the first place.",
+  "The KernelSHAP background was shap.sample(X_train, 100) with no seed and was never saved; six months later, during a dispute, the stored attributions cannot be reproduced and there is no way to show the explanation attached to that decision was ever correct."
+ ],
+ "interviewQuestions": [
+  "Derive the Shapley value from its axioms, then show how KernelSHAP recovers it as a weighted linear regression. What is the Shapley kernel, why does it diverge at |z| = 0 and |z| = M, and how does a correct implementation handle those two coalitions?",
+  "Your permutation importance ranking on the test set contradicts the customer's domain expert, who insists feature X drives their business. Walk me through the diagnosis: what do you check, in what order, and what does each outcome tell you?",
+  "Explain the difference between a PDP, an M-plot and an ALE plot for a feature correlated at 0.8 with another. Which do you show the customer, and what exactly do you say about the other two?",
+  "Debug: your from-scratch KernelSHAP values sum to 0.31 for a row where the model's margin minus the base value is 0.44. Give me four candidate causes ranked by likelihood, and the single check that distinguishes each one.",
+  "Design: a fraud model scores 40 million transactions a day and compliance wants a per-decision explanation retained for seven years. What do you compute, when do you compute it, what exactly do you store, and what do you tell them the stored numbers do and do not mean?",
+  "After seeing your partial dependence plot, a stakeholder asks whether increasing X will increase Y. What is your answer, and under precisely what assumptions would the PDP support a causal statement?",
+  "Give me two distinct mechanisms by which a SHAP value of zero does not mean the model ignored that feature, and say how you would detect each one."
+ ],
+ "proofOfWork": "An `explanation-audit` pack built on a public high-stakes tabular dataset (UCI Adult or the Home Credit / Lending Club style credit data) that is deliberately shaped like something you would leave behind with a customer's risk team rather than a notebook. It contains: one LightGBM model plus one monotone-constrained variant, so you can show what changes in the explanations when the constraint makes the effect true by construction; a disagreement table for twenty sampled rows listing the top-3 features under permutation importance, mean|SHAP|, interventional TreeSHAP, path-dependent TreeSHAP and LIME, with a written paragraph explaining each disagreement in terms of estimand rather than bug; a PDP/ALE/c-ICE panel for the three most correlated features with the Spearman matrix that motivated showing ALE; a reproduced scaffolding attack from the Fooling LIME and SHAP paper on this dataset, with the innocuous explanation next to the biased model's actual behaviour; and a pytest suite that regenerates every attribution from pinned artifacts (seed, background set hash, model hash, library versions) and fails CI when any stored phi moves by more than 1e-6 or the efficiency assertion breaks. The README states the compute cost per explainer measured on your hardware, the latency budget it would fit, and a one-page model-card section written in the language you would actually use in the room."
+}

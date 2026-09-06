@@ -1,0 +1,228 @@
+{
+ "i": 116,
+ "topic": "Fine-tuning at depth: full fine-tune vs LoRA, QLoRA and PEFT, DPO, and evaluating the result",
+ "track": "O. Deep Learning and Multimodal",
+ "month": 13,
+ "hours": 10,
+ "why": "A customer with 8,000 labelled tickets and one 24 GB GPU asks 'can you make the model do this?', and the professional answer is arithmetic, not enthusiasm: 16 bytes per parameter for a mixed-precision full fine-tune versus a 20 MB adapter, a defensible r, lora_alpha and target_modules, and a number for the expected quality gap. Almost every fine-tuning result that gets quietly walked back in month two was never a result at all - the eval set was a paraphrase of the training set, the judge preferred the longer answer, the loss was computed over the prompt tokens, or DPO taught the model a bullet-point format rather than a preference. An FDE who can write the LoRA forward pass on a whiteboard, derive the DPO loss from Bradley-Terry well enough to say what beta buys, and then present a length-controlled win rate with a confidence interval is the person the customer's ML lead stops second-guessing.",
+ "prerequisites": [
+  "Transformer internals from Topic 115: what q_proj/k_proj/v_proj/o_proj and the MLP gate/up/down matrices are and their shapes, because target_modules is a list of exactly those names and the parameter count you quote is computed from those dimensions",
+  "PyTorch at depth (Topic 112): nn.Module, named_modules/named_parameters, requires_grad_, state_dicts, autograd graph lifetime, and torch.cuda.max_memory_allocated for measuring peak VRAM",
+  "Optimisers and training dynamics from Topic 111: AdamW's two fp32 moment buffers per parameter, warmup plus cosine schedules, gradient clipping, bf16 versus fp16 + GradScaler, and what a broken loss curve looks like",
+  "Cross-entropy, KL divergence and maximum likelihood from Topic 98 - the SFT loss is a token-level MLE and the DPO loss is a logistic loss over a KL-regularised reward difference, so neither is memorisable without this",
+  "Evaluation discipline from Topic 103 (leakage, grouped splits, metric choice) and interval estimation from Topic 96 (binomial proportions, paired tests) - half of this topic is those two applied to free-form generation",
+  "One GPU with at least 16 GB (Colab T4/L4 or a rented A10) plus a Hugging Face account and token; the QLoRA and DPO subtopics cannot be done CPU-only"
+ ],
+ "subtopics": [
+  {
+   "name": "The decision: prompt, RAG, LoRA, QLoRA or full fine-tune",
+   "learn": "Fix the decision rule before touching code. Fine-tuning reliably buys format, style, tone, tool-call syntax, latency and prompt-token cost; it does not reliably buy new facts, which is RAG's job, and it cannot fix a task the base model cannot do at all in a 20-shot prompt. Then price the three options for the model in front of you: mixed-precision full fine-tune costs roughly 16 bytes per parameter of static state (2 bf16 weights + 2 bf16 grads + 4+4 AdamW moments + 4 fp32 master copy) before a single activation, LoRA drops grads and optimiser state to the adapter only (megabytes) but still pays full activation memory, and QLoRA additionally shrinks the frozen base to about 4.13 bits per parameter. Carry the empirical prior from 'LoRA Learns Less and Forgets Less' (arXiv 2405.09673): on instruction/format adaptation LoRA is close to full fine-tuning, on large domain shift (a new programming language, continued pretraining) it lags, and it forgets the base capabilities noticeably less.",
+   "minutes": 30,
+   "resource": {
+    "label": "Hugging Face blog - Parameter-Efficient Fine-Tuning using PEFT",
+    "url": "https://huggingface.co/blog/peft"
+   }
+  },
+  {
+   "name": "What SFT actually optimises: token cross-entropy under a chat template",
+   "learn": "Write the objective explicitly: L = -(1/|Y|) * sum_t log p_theta(y_t | y_<t, x), teacher-forced, computed only over completion tokens. That last clause is a code detail with a large blast radius: labels must be -100 on every prompt/system token (completion-only loss) or the model spends capacity memorising your system prompt and the train loss looks better while the deployed model starts echoing instructions. Apply tokenizer.apply_chat_template with the base model's own template, verify by decoding a batch that special tokens are not doubled (add_special_tokens plus a template that already emits BOS is the classic duplicate), that add_generation_prompt is used at inference and not in training targets, and that EOS is inside the label span or the model will never stop generating. Know what sequence packing does (concatenate samples to fill max_length for throughput) and that it needs either an attention mask that blocks cross-sample attention or the acceptance that samples bleed into each other.",
+   "minutes": 30,
+   "resource": {
+    "label": "Transformers docs - Chat templates",
+    "url": "https://huggingface.co/docs/transformers/en/chat_templating"
+   }
+  },
+  {
+   "name": "Dataset construction and a held-out split that cannot leak",
+   "learn": "Order the operations correctly: normalise, then near-duplicate detect (MinHash/LSH or embedding cosine above ~0.95), then split - deduplicating after splitting is how paraphrases end up on both sides. Split by group, not by row: GroupShuffleSplit or GroupKFold keyed on ticket id, document id or customer, because ten paraphrases of one ticket straddling the split inflate every metric; use a time-ordered split when the data has a timestamp and production will always be predicting the future. Keep three disjoint sets - SFT train, a preference set whose prompts the SFT model has not memorised (DPO pairs drawn from prompts already in SFT train carry almost no signal), and a frozen golden set of 100-300 prompts touched by neither training nor hyperparameter selection. Prefer quality over volume: a curated 1k-example set in the LIMA style routinely beats 50k of scraped noise, and you can read 1k examples yourself.",
+   "minutes": 30,
+   "resource": {
+    "label": "scikit-learn User Guide - Cross-validation (incl. grouped and time-series splitters)",
+    "url": "https://scikit-learn.org/stable/modules/cross_validation.html"
+   }
+  },
+  {
+   "name": "The full fine-tune baseline: TrainingArguments and the knobs that matter",
+   "learn": "Run the full fine-tune first on the small model so you have a ceiling to compare adapters against. Set learning_rate 1e-5 to 2e-5 for full fine-tuning versus 1e-4 to 3e-4 for LoRA - roughly a 10x difference, because the adapter starts at zero and its update is rescaled by alpha/r - with lr_scheduler_type='cosine', warmup_ratio 0.03, max_grad_norm 1.0, weight_decay applied to matrices but not to biases and norms, and bf16=True. Compute the effective batch as per_device_train_batch_size * gradient_accumulation_steps * world_size and quote that number, not the microbatch, when you compare runs. Use num_train_epochs 1-3 (small instruction sets overfit by epoch 2), eval_strategy='steps' with load_best_model_at_end and metric_for_best_model, save_total_limit to survive a small disk, and pin seed and data_seed so a rerun reproduces.",
+   "minutes": 30,
+   "resource": {
+    "label": "Transformers docs - Trainer and TrainingArguments",
+    "url": "https://huggingface.co/docs/transformers/en/main_classes/trainer"
+   }
+  },
+  {
+   "name": "The memory ledger: predicting peak VRAM before you launch",
+   "learn": "Be able to produce the ZeRO-style accounting on demand, per parameter: 2 bytes bf16 weight + 2 bytes bf16 gradient + 12 bytes of fp32 optimiser state (4 exp_avg + 4 exp_avg_sq + 4 master weight) = 16 bytes/param for mixed-precision AdamW full fine-tuning; a 0.6B model is therefore about 9.6 GB static before any activation, and a 7B model is about 112 GB, which is the whole reason PEFT exists. For LoRA the frozen base contributes only its 2 bytes/param, and grads plus optimiser state apply to the adapters alone - r*(d_in+d_out) per adapted matrix, typically 0.1-1% of the model. Activations are the term people forget: they scale with batch * seq_len * hidden * layers and are paid in full by LoRA and QLoRA too, since the backward still flows through every frozen layer to reach the adapters. Predict peak VRAM in writing, then verify with torch.cuda.max_memory_allocated() and explain any gap - if optimiser state dominates, halving the batch size will not save you.",
+   "minutes": 30,
+   "resource": {
+    "label": "arXiv 1910.02054 - ZeRO: Memory Optimizations Toward Training Trillion Parameter Models (the 2+2+12 bytes/param accounting)",
+    "url": "https://arxiv.org/abs/1910.02054"
+   }
+  },
+  {
+   "name": "Activation checkpointing, mixed precision and gradient accumulation",
+   "learn": "Gradient checkpointing stores only block boundaries and recomputes the interior during backward, trading roughly 30% extra compute for a large activation saving; enable it with gradient_checkpointing=True plus gradient_checkpointing_kwargs={'use_reentrant': False}. Learn the trap that follows: when the base model is frozen (LoRA) or quantized, no input to a checkpointed block requires grad, the recomputed graph is empty, and the adapters receive no gradient at all - the fix is model.enable_input_require_grads() (which prepare_model_for_kbit_training does for you), and the symptom is a perfectly flat loss that looks like a data problem. Prefer bf16 (fp32 exponent range, no GradScaler) over fp16 + GradScaler on Ampere and later. With accumulation, know that averaging per-microbatch mean losses over microbatches with unequal token counts silently upweights short samples; normalise by total tokens in the accumulation window when the sequence lengths vary.",
+   "minutes": 30,
+   "resource": {
+    "label": "PyTorch docs - torch.utils.checkpoint (activation checkpointing, use_reentrant)",
+    "url": "https://pytorch.org/docs/stable/checkpoint.html"
+   }
+  },
+  {
+   "name": "LoRA: the maths you must be able to write from memory",
+   "learn": "The claim is that the weight update during adaptation has low intrinsic rank, so parametrise it as delta_W = (alpha/r) * B @ A with A in R^(r x d_in) initialised from a small Gaussian (Kaiming-uniform in the reference implementation) and B in R^(d_out x r) initialised to zero, giving h = W0 @ x + (alpha/r) * B @ (A @ x). Be able to state each consequence: delta_W = 0 at initialisation so the model starts exactly as the base and the first steps cannot damage it; rank(delta_W) <= r; trainable parameters per adapted matrix are r*(d_in + d_out) instead of d_in*d_out; the scalar alpha/r decouples the useful learning rate from r (rsLoRA argues alpha/sqrt(r) is the stable scaling as r grows); and because the update is additive and linear, W0 + (alpha/r)BA can be folded back into the base weight so inference latency is unchanged, which is not true of serial bottleneck adapters. Derive the gradients: with g = dL/dh, dL/dB = (alpha/r) * g @ (A x)^T and dL/dA = (alpha/r) * B^T @ g @ x^T, and note W0 receives no gradient at all.",
+   "minutes": 40,
+   "resource": {
+    "label": "arXiv 2106.09685 - LoRA: Low-Rank Adaptation of Large Language Models",
+    "url": "https://arxiv.org/abs/2106.09685"
+   }
+  },
+  {
+   "name": "Implementing LoRA from scratch as a plain nn.Module wrapper",
+   "learn": "Write class LoRALinear(nn.Module) holding the frozen base nn.Linear plus lora_A = nn.Parameter(torch.empty(r, in_features)), lora_B = nn.Parameter(torch.zeros(out_features, r)) and scaling = alpha/r, with forward returning base(x) + dropout(x) @ lora_A.T @ lora_B.T * scaling. Inject it by walking named_modules(), splitting the dotted name to fetch the parent with a getattr chain, and setattr-ing the wrapper in place; then freeze everything with p.requires_grad_('lora_' in name) and assert the trainable count with sum(p.numel() for p in model.parameters() if p.requires_grad) against your hand-computed r*(d_in+d_out)*n_matrices. Implement merge() that does base.weight.data += scaling * (lora_B @ lora_A) and prove correctness by asserting the max absolute logit difference between merged and unmerged models is below 1e-4 on a fixed batch. Keep dtype discipline: adapters in fp32/bf16 even when the base is 4-bit, and cast x to the adapter dtype inside forward. Compare your wrapper against torch.nn.utils.parametrize, which expresses the same reparametrisation idiomatically.",
+   "minutes": 40,
+   "resource": {
+    "label": "PyTorch tutorial - Parametrizations (reparametrising module weights)",
+    "url": "https://pytorch.org/tutorials/intermediate/parametrizations.html"
+   }
+  },
+  {
+   "name": "Choosing r, lora_alpha, target_modules, dropout and the learning rate",
+   "learn": "target_modules must name real submodules - ['q_proj','k_proj','v_proj','o_proj'] is the cheap attention-only default, and adding ['gate_proj','up_proj','down_proj'] is usually what closes most of the remaining gap to full fine-tuning; 'all-linear' is the shortcut, and a typo (Llama/Qwen names on a model that calls it 'query_key_value', or vice versa) either raises or matches nothing useful. Pick r in 8-64 with lora_alpha commonly 2r (scaling 2), lora_dropout 0.0-0.1, learning rate 1e-4 to 3e-4, and know the refinements by name and mechanism: use_rslora=True switches the scaling to alpha/sqrt(r), rank_pattern/alpha_pattern give per-layer ranks, LoRA+ (arXiv 2402.12354) uses a larger LR for B than A, DoRA splits the update into magnitude and direction. Add modules_to_save=['embed_tokens','lm_head'] whenever you add tokens, or the new embeddings stay random. Always call print_trainable_parameters() and read the percentage out loud before starting a long run.",
+   "minutes": 30,
+   "resource": {
+    "label": "PEFT docs - LoRA developer guide (initialisation, rank_pattern, rslora, DoRA, merging)",
+    "url": "https://huggingface.co/docs/peft/en/developer_guides/lora"
+   }
+  },
+  {
+   "name": "PEFT mechanics and shipping the adapter",
+   "learn": "LoraConfig(task_type='CAUSAL_LM', r=..., lora_alpha=..., target_modules=[...]) plus get_peft_model wraps the model; save_pretrained writes adapter_model.safetensors and adapter_config.json, typically a few megabytes, and PeftModel.from_pretrained(base, path) reconstitutes it - so pin the base model repo AND revision hash in the config, because an adapter silently loaded onto a different base revision produces degraded output with no error. For serving choose deliberately: merge_and_unload() returns a plain transformers model that vLLM or TGI can load with zero adapter overhead, versus keeping adapters live so one base can serve many tenants with set_adapter per request. Combine adapters with add_weighted_adapter using TIES or DARE when you have several task adapters. The sharp edge: merging into a 4-bit base is lossy (dequantize, add, requantize), so merge into the fp16/bf16 base, and re-run evaluation after any merge rather than assuming it is a no-op.",
+   "minutes": 30,
+   "resource": {
+    "label": "PEFT docs - Model merging (TIES, DARE, add_weighted_adapter)",
+    "url": "https://huggingface.co/docs/peft/en/developer_guides/model_merging"
+   }
+  },
+  {
+   "name": "Quantization maths: blockwise absmax, NF4 and double quantization",
+   "learn": "Start from blockwise absmax quantization: split the weight vector into blocks of 64, store c = max|x| per block as the scale, and encode q_i = round(x_i / c * k) so dequantization is x_hat = q_i * c / k - the error is controlled by block size, and one outlier in a block wrecks the resolution of the other 63 values, which is exactly the outlier problem LLM.int8() addressed. NF4 replaces the uniform grid with the 16 quantiles of a standard normal, which is information-theoretically optimal when the weights are approximately zero-mean Gaussian, so each of the 16 codes carries equal probability mass. Double quantization then quantizes the per-block fp32 scales themselves (blocks of 256, 8-bit), cutting the constant overhead from about 0.5 to about 0.127 bits per parameter, giving roughly 4.13 bits/param overall - compute that number for your model and compare it to the measured checkpoint size. Paged optimizers use unified memory so optimiser state can page to host RAM during transient spikes instead of OOM-ing the run.",
+   "minutes": 35,
+   "resource": {
+    "label": "arXiv 2305.14314 - QLoRA: Efficient Finetuning of Quantized LLMs (NF4, double quantization, paged optimizers)",
+    "url": "https://arxiv.org/abs/2305.14314"
+   }
+  },
+  {
+   "name": "QLoRA end to end in code",
+   "learn": "BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type='nf4', bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=torch.bfloat16) at from_pretrained time, then prepare_model_for_kbit_training(model) - which upcasts layer norms and the lm_head to fp32, enables gradient checkpointing and turns on input grads - then get_peft_model with your LoraConfig. Understand the runtime consequence: weights are stored in NF4 but dequantized to compute_dtype block by block for every matmul, so QLoRA is typically 1.3-2x slower per step than bf16 LoRA even though it uses far less VRAM; that trade is the whole point and you should quote both numbers to a customer. Use optim='paged_adamw_8bit' when optimiser spikes are the failure. Expect a small quality cost relative to a 16-bit base with the same adapter, and never merge the adapter into the 4-bit base for serving.",
+   "minutes": 35,
+   "resource": {
+    "label": "PEFT docs - Quantization (bitsandbytes 4-bit, prepare_model_for_kbit_training)",
+    "url": "https://huggingface.co/docs/peft/en/developer_guides/quantization"
+   }
+  },
+  {
+   "name": "Reading the run: loss curves, grad norm, and what a broken fine-tune looks like",
+   "learn": "Before any long run, do the wiring test: overfit 8 examples until train loss is near zero - if it cannot, the bug is in masking, dtype or the frozen-parameter setup, not in the data. Then read the real run against known shapes: a smooth decay to a plateau is healthy; train loss collapsing while eval loss turns up after epoch 1 is memorisation, so stop at 1-2 epochs; a step-function drop exactly at each epoch boundary means the model is memorising examples rather than learning the task; a completely flat loss from step 0 means no gradient is reaching the trainable parameters; loss that goes to NaN means LR too high or fp16 overflow. Watch grad_norm as a first-class metric - if clipping is active on nearly every step, the LR is too high. Sweep the learning rate over a decade before spending money on epochs, and log a decoded sample of input_ids and label_ids side by side so you can see the mask boundary with your own eyes.",
+   "minutes": 30,
+   "resource": {
+    "label": "Google Research - Deep Learning Tuning Playbook",
+    "url": "https://github.com/google-research/tuning_playbook"
+   }
+  },
+  {
+   "name": "Preference data and the Bradley-Terry model",
+   "learn": "Bradley-Terry states P(y_w preferred over y_l | x) = sigma(r(x,y_w) - r(x,y_l)), so fitting a reward model by maximum likelihood on preference pairs is logistic regression on the reward difference - and the reward is identified only up to an additive constant per prompt, which is precisely the freedom DPO later exploits. Draw the practical consequences: absolute reward values are meaningless and only differences matter; annotator agreement of 65-75% puts a ceiling on achievable pairwise accuracy, so a reward model at 72% may already be at the noise ceiling rather than undertrained; ties must be either dropped or modelled, not coerced into a winner. How pairs are generated decides whether any of this works - pairs sampled on-policy from your own SFT model teach it where its own distribution is wrong, while pairs harvested from a much stronger model are off-policy and mostly teach style.",
+   "minutes": 25,
+   "resource": {
+    "label": "Bradley-Terry model (definition and maximum-likelihood estimation)",
+    "url": "https://en.wikipedia.org/wiki/Bradley%E2%80%93Terry_model"
+   }
+  },
+  {
+   "name": "Deriving DPO, and what beta actually does",
+   "learn": "Do this derivation until you can reproduce it in ten minutes on a whiteboard. Start from the KL-regularised objective max_pi E_{y~pi}[r(x,y)] - beta*KL(pi || pi_ref); the closed-form optimum is pi*(y|x) = (1/Z(x)) * pi_ref(y|x) * exp(r(x,y)/beta); invert it to r(x,y) = beta*log(pi*(y|x)/pi_ref(y|x)) + beta*log Z(x); substitute into Bradley-Terry and observe that the intractable log Z(x) cancels because it depends only on x, leaving L_DPO = -E log sigma(beta*[log(pi(y_w|x)/pi_ref(y_w|x)) - log(pi(y_l|x)/pi_ref(y_l|x))]). Read the gradient: the per-pair weight is sigma(-beta*margin), so pairs the implicit reward model currently ranks wrongly dominate the update. Then say what beta controls: beta -> 0 removes the reference anchor and the policy drifts into degenerate text, large beta pins the policy to pi_ref and nothing changes; 0.05-0.5 is the working range, 0.1 the usual default. Note that these log-probabilities are sums over completion tokens - that single fact is where length bias enters.",
+   "minutes": 45,
+   "resource": {
+    "label": "arXiv 2305.18290 - Direct Preference Optimization: Your Language Model is Secretly a Reward Model",
+    "url": "https://arxiv.org/abs/2305.18290"
+   }
+  },
+  {
+   "name": "DPO with TRL and the reward diagnostics",
+   "learn": "Feed DPOTrainer a dataset of {prompt, chosen, rejected} and a DPOConfig with beta, loss_type, max_prompt_length and max_length (silent truncation of long chosen answers is a real and common bug). Always DPO from your SFT checkpoint and use that same SFT model as the reference; with a PEFT policy you can omit ref_model entirely and TRL computes reference log-probs by disabling the adapter, which halves memory. Use a much lower LR than SFT - 5e-7 to 5e-6 - and 1-2 epochs. Then read the logged metrics correctly: rewards/chosen and rewards/rejected are beta * log-ratios and both normally drift negative, so their absolute values mean nothing; rewards/margins is the quantity that must rise; rewards/accuracies starts near 0.5 and is the fraction of pairs with positive margin. Treat accuracies near 1.0 with a still-modest margin, or logps/chosen falling steeply, as a warning that the model is lowering the likelihood of good answers faster than bad ones. Reach for label_smoothing (cDPO) when annotations are noisy.",
+   "minutes": 35,
+   "resource": {
+    "label": "TRL docs - DPOTrainer (config, reference model, logged reward metrics)",
+    "url": "https://huggingface.co/docs/trl/en/dpo_trainer"
+   }
+  },
+  {
+   "name": "The alternatives, and when online RLHF still wins",
+   "learn": "Place DPO on the map. Classic RLHF (InstructGPT) trains a reward model, then optimises the policy with PPO under a per-token KL penalty against the SFT model; it is on-policy, so the reward model keeps scoring fresh samples, which is why it can still beat DPO when your preference pairs are stale or off-policy - at the cost of holding policy, reference, reward and value models in memory and tuning a notoriously touchy loop. Know the offline variants by the data they need: KTO (arXiv 2402.01306) takes unpaired binary desirable/undesirable labels, which is exactly the thumbs-up/thumbs-down telemetry a customer already has; ORPO (arXiv 2403.07691) folds an odds-ratio penalty into SFT so there is one stage and no reference model; SimPO (arXiv 2405.14734) uses a length-normalised, reference-free reward; IPO addresses DPO's overfitting when preferences are near-deterministic. State the routing rule to a customer in one line: pairs -> DPO, thumbs -> KTO, one cheap stage -> ORPO, programmatically verifiable rewards (tests pass, JSON parses) -> reinforcement learning with verifiable rewards, not preference learning at all.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv 2203.02155 - Training language models to follow instructions with human feedback (InstructGPT: RM + PPO + KL penalty)",
+    "url": "https://arxiv.org/abs/2203.02155"
+   }
+  },
+  {
+   "name": "Length and format artifacts: how a fine-tune fakes a win",
+   "learn": "The DPO implicit reward is a sum of token log-probabilities, so lengthening completions is a cheap way to move the margin, and both human raters and LLM judges have a strong measured preference for longer, more heavily formatted answers - which means 'longer' and 'better' are entangled by default. Defend with three measurements you report every time: mean and median completion token count for base versus tuned, the win rate restricted to length-matched pairs, and a length-controlled win rate in the AlpacaEval 2.0 sense, where the preference is regressed on the length difference and the effect is reported at zero delta. Separately check for format capture - if the tuned model answers every question with a numbered list because the preferred responses did, you have learned a template, not a capability - and re-check degenerate repetition and EOS behaviour after DPO, since a model that stops emitting EOS will score well on verbosity-biased judges and terribly in production.",
+   "minutes": 30,
+   "resource": {
+    "label": "arXiv 2404.04475 - Length-Controlled AlpacaEval: A Simple Way to Debias Automatic Evaluators",
+    "url": "https://arxiv.org/abs/2404.04475"
+   }
+  },
+  {
+   "name": "Held-out task metrics without contamination",
+   "learn": "Score the base model and every tuned checkpoint through one harness, with identical prompts, few-shot count, decoding settings (greedy or temperature 0), max_new_tokens and seed - a comparison where the tuned model was sampled at temperature 0.8 and the base at 0 is not a comparison. Pin and record the harness version, because task definitions and prompt formats change scores between releases. Write a task definition over your own frozen golden set rather than leaning on MMLU as a proxy for a customer task, and run an explicit contamination audit: exact plus near-duplicate matching of every eval prompt against the training mixture, with the overlap percentage published in the README next to the score. Report at least one out-of-domain task alongside the target task so capability loss is visible - full fine-tuning degrades unrelated abilities more than LoRA does (arXiv 2405.09673), and a customer will find that regression before you do if you do not measure it.",
+   "minutes": 30,
+   "resource": {
+    "label": "EleutherAI - lm-evaluation-harness (task definitions, reproducible LLM scoring)",
+    "url": "https://github.com/EleutherAI/lm-evaluation-harness"
+   }
+  },
+  {
+   "name": "Pairwise win-rate, judges, and whether the delta is real",
+   "learn": "Generate one completion per frozen-set prompt from base and tuned, present each pair to a judge in randomised order, and record win/tie/loss. Control the documented judge pathologies: position bias (run both orders and count only the verdicts that agree with themselves), verbosity bias, and self-enhancement bias when the judge and the candidate share a family; calibrate the judge against 50 human-labelled pairs and report its agreement rate before quoting anything it produces. Then treat the win rate as what it is - a binomial proportion: 60 wins out of 100 has a 95% interval of roughly 50-70%, so it is not evidence, and you should compute the interval with scipy.stats.binomtest or a bootstrap and pre-compute the sample size needed for the effect you intend to claim. For paired judgments use the discordant pairs (McNemar) rather than comparing two independent rates. Present win rate, tie rate, interval, mean length delta and the 20 worst regressions verbatim - the regressions are what earn the customer's trust.",
+   "minutes": 35,
+   "resource": {
+    "label": "arXiv 2306.05685 - Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (position, verbosity and self-enhancement bias)",
+    "url": "https://arxiv.org/abs/2306.05685"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can write h = W0x + (alpha/r)BAx from memory, state that A is Gaussian-initialised and B is zero so delta_W starts at zero, compute the trainable parameter count for a given r and target_modules, and derive dL/dA and dL/dB.",
+  "You can produce, before launching, a written per-parameter memory ledger for full fine-tune, LoRA and QLoRA on a named model and GPU, predict peak VRAM within about 20%, and confirm it with torch.cuda.max_memory_allocated().",
+  "You can implement LoRALinear as a plain nn.Module with no peft dependency, inject it by walking named_modules, train it to the same eval loss as the peft implementation, merge it, and assert the max absolute logit difference between merged and unmerged is under 1e-4.",
+  "You can derive the DPO loss from the KL-regularised objective and Bradley-Terry in under ten minutes on a whiteboard, explain why log Z(x) cancels, and say concretely what changes between beta = 0.01 and beta = 0.5.",
+  "You can look at a TRL DPO run's rewards/chosen, rewards/rejected, rewards/margins and rewards/accuracies plus the mean output length and state whether the model learned a preference or a length/format artifact.",
+  "You can report a pairwise win-rate with a confidence interval, a tie rate, position-swap-consistent judgments and a length-controlled variant, and correctly refuse to claim an improvement when the interval includes 50%.",
+  "You can run a contamination audit that near-duplicate-matches every evaluation prompt against the training mixture and publish the overlap percentage next to the score.",
+  "You can hand a customer a one-page recommendation with numbers: method, adapter size in MB, peak VRAM, wall-clock and dollar cost per run, quality delta with an interval, forgetting check, and the serving story (merged weights versus multi-adapter)."
+ ],
+ "failureModes": [
+  "Eval rows were paraphrases of training rows from the same tickets and the split was random rather than grouped by ticket id; the tuned model scores 18 points above base on the held-out set and is worse than base on genuinely new tickets in week one of the pilot.",
+  "Labels were never masked to -100 over the prompt, so the loss rewards reproducing the system prompt; train loss looks excellent, and the deployed model starts answering by restating the instructions before it gets to the customer's question.",
+  "target_modules named the wrong projections for the architecture, so few or no modules matched; print_trainable_parameters was never read, the run trained a fraction of what was intended, and the team concluded 'LoRA does not work for this task' and quoted a full fine-tune.",
+  "LoRA was launched with the full fine-tune learning rate of 2e-5 instead of 2e-4; the loss barely moves over three epochs and the result is presented as evidence that the base model cannot learn the task.",
+  "Gradient checkpointing was enabled on a frozen 4-bit base without prepare_model_for_kbit_training or enable_input_require_grads, so no input required grad, the adapters received no gradient, and a perfectly flat loss curve was debugged for two days as a data-quality problem.",
+  "DPO drove rewards/accuracies to 0.95 while mean completion length doubled; the LLM judge, which prefers longer answers, reported a 68% win rate, and the customer's support team complained the assistant now waffles - the entire gain was length.",
+  "The adapter was merged into the 4-bit quantized base for serving and evaluation was never rerun; the dequantize-merge-requantize round trip cost several points that showed up only as user complaints about the production model being worse than the demo.",
+  "Base was evaluated greedily while the tuned model was sampled at temperature 0.8 with no fixed seed, so run-to-run noise of plus or minus 4 points swamped the claimed 3-point improvement, and the gain vanished when the customer reran the script."
+ ],
+ "interviewQuestions": [
+  "Derive DPO starting from the KL-regularised RL objective and the Bradley-Terry model. Where does the partition function go and why is that the key step? What does beta control, and what does the per-pair gradient weight look like?",
+  "A customer has one 24 GB GPU, a 7B base model and 12,000 labelled examples. Do the memory arithmetic for full fine-tune, LoRA and QLoRA in bytes per parameter, tell me what you would run, and defend your r, lora_alpha, target_modules and learning rate.",
+  "Write the LoRA forward pass and its parameter count. Why is B initialised to zero? Why does the alpha/r scaling exist and what does rsLoRA change about it? What exactly goes wrong if you merge the adapter into a 4-bit base?",
+  "Debug: a DPO run reports rewards/accuracies of 0.93, steadily rising rewards/margins, and a 58% win rate against base judged by a strong LLM. The customer says the model got worse. What do you check, in what order, and what would convince you either way?",
+  "Debug: a QLoRA run's training loss is flat from step 0 and never moves. Give me five distinct causes and how you would distinguish them in under twenty minutes.",
+  "Design the evaluation you would put in front of the customer's VP to justify shipping a fine-tune. Which datasets, which metrics, which statistics, how you control judge bias, and what result would make you recommend against shipping.",
+  "When do you tell a customer that fine-tuning is the wrong tool? Name the signals in their request that trigger that call, and say what you would propose instead and how you would prove it was the better choice."
+ ],
+ "proofOfWork": "A public repo `finetune-forensics` that is the diagnostic companion to the three-way training repo: six numbered, self-contained scripts, each a minimal reproduction of one silent fine-tuning failure on the same small base model - the unmasked prompt loss that produces a beautiful curve and an instruction-echoing model, the target_modules mismatch that trains 0.02% of what the config claims, gradient checkpointing on a frozen quantized base with no input grads (flat loss, no error), a DPO run driven to a 68% judge win-rate purely by doubling output length, a randomly-split eval set whose paraphrase overlap with training data inflates the score by double digits, and a base-versus-tuned comparison whose 'improvement' is smaller than its own decoding-seed variance. Each script prints the plausible-but-wrong artifact first, then the one diagnostic that catches it. Ship alongside them three reusable tools: `vram_ledger.py`, a ~40-line function that takes parameter count, dtype, optimiser, batch and sequence length and prints predicted peak VRAM per method with the measured value from a real run beside it; `leak_audit.py`, a MinHash near-duplicate check between the training mixture and the frozen golden set that emits the overlap percentage and the offending pairs; and `winrate.py`, which runs position-swapped judging, drops self-inconsistent verdicts, and reports win/tie/loss with a bootstrap confidence interval, a McNemar p-value and the mean length delta. Finish with a two-page customer-facing decision memo template that a non-ML stakeholder can read - method chosen, cost, quality delta with interval, forgetting check, serving plan - filled in with the real numbers from the deliverable's runs."
+}

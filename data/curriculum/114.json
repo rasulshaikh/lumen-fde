@@ -1,0 +1,228 @@
+{
+ "i": 114,
+ "topic": "Sequence models: RNNs, LSTMs, GRUs, seq2seq and the road to attention",
+ "track": "O. Deep Learning and Multimodal",
+ "month": 12,
+ "hours": 8,
+ "why": "Sequence models are where an FDE stops being able to blame the data: when a customer's extraction, forecasting or log-anomaly model plateaus on long inputs, the cause is almost always a gradient-path or a masking problem, and unless you can point at the product of Jacobians and name the exact gate that fixes it, the meeting ends at 'we'll try more epochs'. Every architectural argument in the LLM era - why attention exists at all, why the context window is a real constraint, why a KV cache is even possible - is the answer to a failure you can only feel by having built the seq2seq that fails at token 25. And GRUs and LSTMs are still shipping in production for streaming, on-device and low-latency time-series work, so 'just use a Transformer' is a recommendation you have to be able to defend with a latency number or refuse in front of the customer's ML team.",
+ "prerequisites": [
+  "Reverse-mode autodiff, the batched backward pass, finite-difference gradient checking and per-layer gradient-norm diagnostics from Topic 110 (Neural network foundations) - the recurrence here is the same chain rule applied T times",
+  "Optimisers, learning-rate schedules, global gradient clipping and reading a bad loss curve from Topic 111 (Training deep networks)",
+  "PyTorch at depth from Topic 112: tensor shapes and views, autograd graph lifetime and .detach(), Dataset/DataLoader with a custom collate_fn, and torch.no_grad() at eval",
+  "Linear algebra from Topic 93: singular values, spectral radius, and what repeated multiplication by a matrix does to a vector's norm - this is literally the vanishing-gradient argument",
+  "Cross-entropy, NLL and perplexity from Topic 98 (Information theory and loss functions), plus log-sum-exp stability from Topic 99 (Numerical computing)",
+  "Leakage-aware evaluation from Topic 103, adapted to sequences: splitting by whole sequence or by time, never by shuffled timestep, and holding out a length band you never trained on"
+ ],
+ "subtopics": [
+  {
+   "name": "Sequence data, the autoregressive factorisation and Markov truncation",
+   "learn": "Write the joint as p(x_1..x_T) = prod_t p(x_t | x_1..x_{t-1}) and recognise that every sequence model is just a choice of how to summarise the history: an order-n Markov model keeps the last n tokens (parameter count grows like |V|^n), a feedforward net over a fixed window does the same with sharing, and an RNN replaces the window with a learned fixed-size state h_t. State the three properties that break tabular habits - variable length, order carries information, and the i.i.d. assumption behind a shuffled train/test split is false, so you split by whole sequence or by time and hold out a length band. Know the two evaluation quantities cold: mean per-token cross entropy in nats and perplexity exp(mean NLL), and that a uniform model over |V| symbols has perplexity exactly |V|, which is your loss-at-initialisation sanity check before any training question is on the table.",
+   "minutes": 20,
+   "resource": {
+    "label": "d2l.ai - Working with Sequences (autoregressive models, Markov assumption)",
+    "url": "https://d2l.ai/chapter_recurrent-neural-networks/sequence.html"
+   }
+  },
+  {
+   "name": "Text to tensors: vocabulary, special tokens, lengths and batch layout",
+   "learn": "Build the exact pipeline the date-normalisation deliverable needs: a character-level vocabulary with reserved ids <pad>=0, <bos>, <eos>, <unk>; encode '3rd of March, 2001' to source ids and '2001-03-03' to target ids wrapped in <bos>/<eos>; pad each batch to its own max length in a collate_fn and carry a lengths tensor alongside, never a global max. Know the two tensor layouts and never mix them - PyTorch RNNs default to (T, B, H) and require batch_first=True for (B, T, H) - because a silently transposed batch does not crash when T happens to equal B, it just trains to garbage. Use nn.Embedding(V, d, padding_idx=0) so the pad row's gradient is zeroed and its vector stays at zero, and know that teacher-forced decoder input is the target shifted right by one, which is the single most common off-by-one in a seq2seq.",
+   "minutes": 20,
+   "resource": {
+    "label": "d2l.ai - Converting Raw Text into Sequence Data (tokenisation, vocabulary, special tokens)",
+    "url": "https://d2l.ai/chapter_recurrent-neural-networks/text-sequence.html"
+   }
+  },
+  {
+   "name": "The vanilla RNN: recurrence, weight sharing, unrolling",
+   "learn": "Implement h_t = tanh(W_xh x_t + W_hh h_{t-1} + b_h) and o_t = W_hq h_t + b_q, and be explicit that W_xh, W_hh and W_hq are shared across all T steps - that sharing is why the model accepts variable length and why every parameter gradient is a SUM over timesteps rather than a single term. Get the shapes automatic: x_t is (B, d), W_xh is (d, H), W_hh is (H, H), h_t is (B, H), and the whole step is one fused matmul of cat([x_t, h_{t-1}], dim=1) against a (d+H, H) weight. Know the h_0 conventions and when each is right - zeros for independent sequences, a learned nn.Parameter when sequences share a prior, and carrying the previous batch's detached h across a contiguous corpus in language modelling - and be able to say in one sentence why 'the entire history is compressed into a fixed-size vector' is simultaneously the RNN's O(T*d^2) efficiency and its hard ceiling.",
+   "minutes": 25,
+   "resource": {
+    "label": "d2l.ai - Recurrent Neural Networks (hidden state recurrence, parameter sharing)",
+    "url": "https://d2l.ai/chapter_recurrent-neural-networks/rnn.html"
+   }
+  },
+  {
+   "name": "Deriving backpropagation through time by hand",
+   "learn": "Unroll the graph and derive, for L = (1/T) sum_t l(o_t, y_t), the three results without notes: dL/dW_hq = sum_t (dl_t/do_t) h_t^T; the hidden-state recursion dL/dh_t = W_hq^T (dl_t/do_t) + W_hh^T diag(1 - h_{t+1}^2) dL/dh_{t+1} (the two terms are the local loss at t and everything downstream of t); and dL/dW_hh = sum_t diag(1 - h_t^2) (dL/dh_t) h_{t-1}^T. The two facts you must be able to defend on a whiteboard are that gradients for shared weights ACCUMULATE across timesteps because W_hh is a fan-out node used T times, and that dL/dh_t contains the factor prod_{k=t+1..T} W_hh^T diag(1 - h_k^2), whose length grows with the temporal distance. Write that product down explicitly and keep it: the LSTM, the GRU, gradient clipping and attention are all four responses to this one expression.",
+   "minutes": 35,
+   "resource": {
+    "label": "d2l.ai - Backpropagation Through Time (full computational-graph derivation)",
+    "url": "https://d2l.ai/chapter_recurrent-neural-networks/bptt.html"
+   }
+  },
+  {
+   "name": "Where the gradient dies: the Jacobian product and the spectral radius",
+   "learn": "Take norms of that product: ||dh_T/dh_t|| <= (sigma_1(W_hh) * max|phi'|)^(T-t), so with tanh (max|phi'| = 1) the behaviour is decided by the largest singular value of W_hh - sigma_1 = 0.9 over 100 steps gives a factor of 2.7e-5, sigma_1 = 1.1 gives 1.4e4. Reproduce Pascanu et al.'s statement precisely: sigma_1 < 1/max|phi'| is SUFFICIENT for vanishing, sigma_1 > 1/max|phi'| is NECESSARY (not sufficient) for exploding, and be able to explain why vanishing is a representational failure rather than a slow-optimiser failure - the long-range term is buried under short-range terms in the same sum, so no learning rate recovers it. Diagnose it empirically rather than by faith: for a fixed batch, log ||dL/dh_t|| against t on a log axis and read off the decay constant; explosion instead shows as a loss cliff followed by NaN at a specific step.",
+   "minutes": 30,
+   "resource": {
+    "label": "Pascanu, Mikolov & Bengio, \"On the difficulty of training Recurrent Neural Networks\" (arXiv:1211.5063)",
+    "url": "https://arxiv.org/abs/1211.5063"
+   }
+  },
+  {
+   "name": "Truncated BPTT, gradient clipping and the detached hidden state",
+   "learn": "Know the three operational knobs and what each does NOT fix. Truncated BPTT backpropagates only k steps and detaches the carried state (h = h.detach()) at the boundary, bounding memory at O(k * B * H) at the price of never learning dependencies longer than k; forget the detach and you re-backprop through the whole history and get 'Trying to backward through the graph a second time' on step two. Gradient clipping rescales g <- g * min(1, theta/||g||) on the GLOBAL norm over all parameters via torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0), called after backward() and before optimizer.step() (and after scaler.unscale_ under AMP) - global clipping shortens the step without rotating it, per-parameter clipping changes the descent direction. Internalise the asymmetry: clipping cures exploding gradients completely and does exactly nothing for vanishing ones, which is why gates and not clipping are the answer to long-range memory.",
+   "minutes": 20,
+   "resource": {
+    "label": "PyTorch docs - torch.nn.utils.clip_grad_norm_ (global-norm clipping)",
+    "url": "https://pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html"
+   }
+  },
+  {
+   "name": "The LSTM cell: four gates, the cell state, the constant error carousel",
+   "learn": "Write all six equations from memory: i_t = sigmoid(W_i [x_t, h_{t-1}] + b_i), f_t = sigmoid(W_f [.] + b_f), o_t = sigmoid(W_o [.] + b_o), g_t = tanh(W_g [.] + b_g), then c_t = f_t (*) c_{t-1} + i_t (*) g_t and h_t = o_t (*) tanh(c_t), where (*) is elementwise. The entire point is the ADDITIVE cell-state recursion: dc_t/dc_{t-1} = diag(f_t), so the gradient along the cell path is a product of forget gates in [0,1] rather than a product of W_hh Jacobians - with f_t near 1 the path is near-identity (Hochreiter's 'constant error carousel') and error signal survives hundreds of steps unattenuated. Be able to name each gate's job in customer English (forget = what to erase, input = what to write, candidate = what to write it with, output = how much of memory to expose to the rest of the net), and to note that c_t is unbounded while h_t is squashed by tanh, which is why an exploding LSTM usually shows up first as a huge c.",
+   "minutes": 35,
+   "resource": {
+    "label": "d2l.ai - Long Short-Term Memory (LSTM): gate equations and memory cell",
+    "url": "https://d2l.ai/chapter_recurrent-modern/lstm.html"
+   }
+  },
+  {
+   "name": "The GRU: update and reset gates as a convex interpolation",
+   "learn": "Write r_t = sigmoid(W_r [x_t, h_{t-1}]), z_t = sigmoid(W_z [x_t, h_{t-1}]), h~_t = tanh(W_h [x_t, r_t (*) h_{t-1}]), h_t = z_t (*) h_{t-1} + (1 - z_t) (*) h~_t, and state the convention you are using out loud because the roles of z and (1 - z) are swapped between papers and textbooks. Read the last line as a convex interpolation between carrying and overwriting: z_t = 1 copies h_{t-1} exactly, giving an identity Jacobian and a preserved gradient, z_t = 0 replaces the state entirely - so the update gate is the GRU's whole answer to vanishing gradients, while the reset gate controls how much history is even allowed into the candidate. Count the trade you will have to explain: 3 gate matrices instead of 4 and a single state tensor instead of an (h, c) tuple, so roughly 25 percent fewer parameters and less memory traffic per step, with near-identical accuracy on most tasks - which is exactly the argument for a GRU when the customer's constraint is latency on CPU.",
+   "minutes": 25,
+   "resource": {
+    "label": "d2l.ai - Gated Recurrent Units (GRU): reset and update gates",
+    "url": "https://d2l.ai/chapter_recurrent-modern/gru.html"
+   }
+  },
+  {
+   "name": "Implementing the cells from tensor ops: fusion, forget-gate bias, gate ablations",
+   "learn": "Implement LSTMCell and GRUCell with a SINGLE fused matmul - concatenate [x_t, h_{t-1}] once, multiply by a (d+H, 4H) weight, then torch.chunk(gates, 4, dim=1) and apply sigmoid/sigmoid/sigmoid/tanh - because four small matmuls per timestep is where a from-scratch cell loses several times over to a fused kernel. Get the details that decide whether it trains: initialise the forget-gate bias to 1.0 (Gers/Jozefowicz) so the cell starts in remember mode, assert every gate is (B, H) before the elementwise ops, and note that in the GRU r_t multiplies h_{t-1} BEFORE the candidate matmul, which is why the three GRU gates cannot all share one fused matmul the way the LSTM's four can (cuDNN sidesteps this with the reset-after variant, and that is why weights are not interchangeable between implementations). Then run the Greff et al. ablations on your own cell - remove the forget gate, remove the output gate, couple input and forget - and confirm empirically that the forget gate is the one whose removal destroys the model.",
+   "minutes": 35,
+   "resource": {
+    "label": "Greff et al., \"LSTM: A Search Space Odyssey\" (gate ablation study, arXiv:1503.04069)",
+    "url": "https://arxiv.org/abs/1503.04069"
+   }
+  },
+  {
+   "name": "Gradient-checking a recurrent cell against autograd",
+   "learn": "Write the unit test the deliverable requires: instantiate your cell in float64, wrap the forward as a closure of (x, h, c, weights) with requires_grad=True, and call torch.autograd.gradcheck(fn, inputs, eps=1e-6, atol=1e-5); then add a second, independent test that copies your weight tensors into torch.nn.LSTMCell (respecting its w_ih/w_hh layout and the i,f,g,o chunk order) and asserts torch.allclose on both the outputs and every .grad. Unroll at least 5 timesteps inside the checked function, because a cell can be correct for one step and wrong in how it threads the (h, c) tuple through the loop - the classic bug is returning h_t while feeding c_{t-1} forward, which still trains, just worse. Know why gradcheck insists on float64 (the centred difference has O(eps^2) truncation error and O(machine_eps/eps) roundoff, and in float32 there is no eps where both are small) and what a pass proves: your backward matches your forward, not that your forward is an LSTM - the nn.LSTMCell comparison is what proves the second half.",
+   "minutes": 25,
+   "resource": {
+    "label": "PyTorch docs - Gradcheck mechanics (numerical vs analytical Jacobian)",
+    "url": "https://pytorch.org/docs/stable/notes/gradcheck.html"
+   }
+  },
+  {
+   "name": "Depth and direction: stacked RNNs, bidirectional encoders, and what bidirectionality forbids",
+   "learn": "Stack by feeding h_t^(l) as the input of layer l+1, and know that nn.LSTM(num_layers=2, dropout=0.3) applies dropout BETWEEN layers only and silently ignores the argument when num_layers=1 - people report having 'tried dropout' when they have not. A bidirectional RNN runs a second recurrence right-to-left and concatenates, so the encoder output per position is 2*H wide and encodes both sides of the token; this is legal for an ENCODER (the whole source is available) and illegal for a decoder, a language model or any streaming task, because h_t would depend on future tokens - bidirectional=True in a causal model is a leakage bug whose signature is a spectacular validation perplexity and a model that is useless at inference. For the deliverable, use a bi-LSTM encoder and a unidirectional decoder, and be deliberate about how you build the decoder's h_0 from the two final directions (concatenate then project with a Linear(2H, H) and a tanh, or sum) rather than silently dropping the backward half.",
+   "minutes": 20,
+   "resource": {
+    "label": "d2l.ai - Bidirectional Recurrent Neural Networks (and why they cannot be used causally)",
+    "url": "https://d2l.ai/chapter_recurrent-modern/bi-rnn.html"
+   }
+  },
+  {
+   "name": "Regularising recurrent nets: variational dropout, weight tying, LayerNorm",
+   "learn": "Understand why naive per-step dropout on the recurrent connection destroys memory: a fresh Bernoulli mask at every timestep injects noise that compounds multiplicatively over T steps, so the state is scrambled rather than regularised. Gal and Ghahramani's variational dropout samples ONE mask per sequence and reuses it at every timestep (justified as an approximate-Bayesian posterior over weights), which is exactly what nn.LSTM's dropout argument does NOT do - it only drops between stacked layers, so getting true recurrent dropout means writing the loop yourself. Know the AWD-LSTM recipe that actually holds up in practice - DropConnect on the hidden-to-hidden matrix, embedding dropout, variational input/output dropout, weight tying between the input embedding and the output projection (halves parameters and usually improves perplexity), plus activation and temporal-activation regularisation - and know that LayerNorm inside the cell is the sequence-safe normaliser because batch statistics over a padded, variable-length time axis are meaningless.",
+   "minutes": 25,
+   "resource": {
+    "label": "Gal & Ghahramani, \"A Theoretically Grounded Application of Dropout in Recurrent Neural Networks\" (arXiv:1512.05287)",
+    "url": "https://arxiv.org/abs/1512.05287"
+   }
+  },
+  {
+   "name": "Packed sequences, masking, and the padded-loss bug",
+   "learn": "Use pack_padded_sequence(x, lengths.cpu(), batch_first=True, enforce_sorted=False) -> rnn -> pad_packed_sequence so the cell never steps on pad positions and the returned h_n is each sequence's state at its TRUE final timestep; without packing, h_n is the state after however many pad tokens that batch happened to contain, which makes your encoder summary a function of batch composition rather than of the sentence. On the loss side, either pass ignore_index=pad_id to nn.CrossEntropyLoss or multiply by an explicit mask and divide by mask.sum() - averaging over padded positions makes batches of long sequences look better than batches of short ones and makes the reported validation loss depend on how you sorted the data. Prove you have it right the way an FDE proves anything: run the same trained model over the same validation set at batch size 1 and batch size 64 and show the loss is identical to floating-point noise; if it is not, you have a masking bug, not a variance issue.",
+   "minutes": 25,
+   "resource": {
+    "label": "PyTorch docs - torch.nn.utils.rnn.pack_padded_sequence",
+    "url": "https://pytorch.org/docs/stable/generated/torch.nn.utils.rnn.pack_padded_sequence.html"
+   }
+  },
+  {
+   "name": "seq2seq and the fixed-length context bottleneck",
+   "learn": "Build the Sutskever architecture exactly as published - an encoder RNN reads the source and emits a single context vector c = h_T^enc, the decoder is initialised with c and generates until <eos> - and then state the information problem precisely: c is a fixed d-dimensional vector whether the source is 5 tokens or 50, so per-token capacity falls like 1/T and the encoder is forced to choose what to discard before it knows what the decoder will need. Learn the empirical signature so you can name it in a room rather than investigate for a week: quality is flat and acceptable up to roughly the training length distribution and then falls off a cliff, and the errors are OMISSIONS and repetitions from the middle of long inputs rather than grammatical failures. Know the historical mitigations and why each only postpones the failure - reversing the source sequence (Sutskever reported +4.7 BLEU purely from shortening the average path between corresponding tokens), deeper stacks, and a wider d - because 'make the bottleneck bigger' is the answer a customer will propose and you need the argument for why it does not scale.",
+   "minutes": 30,
+   "resource": {
+    "label": "Sutskever, Vinyals & Le, \"Sequence to Sequence Learning with Neural Networks\" (arXiv:1409.3215)",
+    "url": "https://arxiv.org/abs/1409.3215"
+   }
+  },
+  {
+   "name": "Teacher forcing, exposure bias and scheduled sampling",
+   "learn": "During training the decoder is fed the GROUND-TRUTH previous token, which turns generation into T parallel conditional predictions computable in one batched pass; at inference it is fed its own prediction, so the input distribution it sees is one it never trained on - that mismatch is exposure bias, and its signature is a model with excellent training loss that degenerates into a repetition loop or drifts irrecoverably after one early mistake. Implement a teacher_forcing_ratio and know Bengio et al.'s scheduled sampling (sample the model's own token with a probability annealed upward during training) along with the standard objection that the resulting estimator is not consistent for the true conditional distribution. The rule that keeps your numbers honest: training may be teacher-forced, validation and reporting must ALWAYS be free-running - a teacher-forced validation metric on a date-normalisation model can read 99 percent while free-running exact match is 60 percent, and that gap is the whole reason people are surprised in production.",
+   "minutes": 20,
+   "resource": {
+    "label": "Bengio et al., \"Scheduled Sampling for Sequence Prediction with Recurrent Neural Networks\" (arXiv:1506.03099)",
+    "url": "https://arxiv.org/abs/1506.03099"
+   }
+  },
+  {
+   "name": "Bahdanau additive attention: derive the alignment equations",
+   "learn": "Write and be able to derive the four equations at a whiteboard: e_{t,i} = v_a^T tanh(W_a s_{t-1} + U_a h_i) scoring decoder state s_{t-1} against every encoder state h_i; alpha_{t,i} = softmax over i of e_{t,i}; c_t = sum_i alpha_{t,i} h_i; s_t = f(s_{t-1}, y_{t-1}, c_t). Name the three things this removes: the context is recomputed per OUTPUT step so capacity no longer decays as 1/T; the gradient path from the loss at step t back to encoder state h_i is O(1) hops through alpha_{t,i} instead of O(T) hops through the recurrence, which is the vanishing-gradient argument being defeated structurally; and alpha_t is a genuine probability distribution over source positions that you can plot. Get the shapes right - W_a is (d_s, d_a), U_a is (2*d_h, d_a) for a bi-encoder, v_a is (d_a,), alpha is (B, T_src) - and mask pad positions by setting e to -inf BEFORE the softmax, never by zeroing alpha afterwards, because zeroing after leaves the distribution unnormalised.",
+   "minutes": 35,
+   "resource": {
+    "label": "Bahdanau, Cho & Bengio, \"Neural Machine Translation by Jointly Learning to Align and Translate\" (arXiv:1409.0473)",
+    "url": "https://arxiv.org/abs/1409.0473"
+   }
+  },
+  {
+   "name": "Luong multiplicative attention and the 1/sqrt(d_k) scaling",
+   "learn": "Contrast the two families: Bahdanau's additive score is a small MLP with a learned v_a, computed from s_{t-1} and fed back into the RNN input, while Luong's multiplicative scores are dot (s^T h), general (s^T W h) and concat, computed from s_t and fed to the output layer - multiplicative reduces to one batched matmul over the whole source, which is why it is the form that survived into every modern architecture. Then derive the scaling factor yourself: if q and k have i.i.d. zero-mean unit-variance components then Var(q . k) = d_k, so logits grow like sqrt(d_k), the softmax saturates towards one-hot and its Jacobian diag(p) - p p^T goes to zero - hence the 1/sqrt(d_k) in scaled dot-product attention, and hence the observation that additive beats unscaled multiplicative at large d_k. Know Luong's local (windowed) attention and input feeding as the two ideas that did not survive, and be able to write torch.nn.functional.scaled_dot_product_attention's signature as the modern one-liner your hand-rolled version reproduces.",
+   "minutes": 25,
+   "resource": {
+    "label": "Luong, Pham & Manning, \"Effective Approaches to Attention-based Neural Machine Translation\" (arXiv:1508.04025)",
+    "url": "https://arxiv.org/abs/1508.04025"
+   }
+  },
+  {
+   "name": "Attention heat maps as a diagnostic instrument",
+   "learn": "Save the (T_tgt, T_src) alpha matrix for held-out examples and render it with matplotlib imshow, source characters on x and generated characters on y - on the date task a healthy model shows a sharp alignment that is monotonic in blocks with jumps, where the row generating '2001' lights up the year characters in the input and the row generating the month digits lights up 'March'. Learn to read the four failure patterns by sight: a uniform grey map means attention is not being used at all (usually a mask bug, or a decoder whose own state already suffices for a short task), a single hot column repeated on every row means collapse onto one source position, a clean diagonal shifted by one means you scored s_t where you should have scored s_{t-1}, and heat on pad columns means the -inf mask never ran. Treat the heat map as a customer-facing artefact rather than a debugging convenience: it is the cheapest interpretability story in deep learning and it is what makes an alignment claim checkable by a domain expert who cannot read your code.",
+   "minutes": 20,
+   "resource": {
+    "label": "Olah & Carter, \"Attention and Augmented Recurrent Neural Networks\" (Distill, attention visualisations)",
+    "url": "https://distill.pub/2016/augmented-rnns/"
+   }
+  },
+  {
+   "name": "Decoding and evaluation: beam search, length normalisation, exact match and BLEU",
+   "learn": "Implement greedy decoding, then beam search with width k: keep k hypotheses, expand each by the vocabulary, score by the SUM of log probabilities, prune back to k, and finish a hypothesis when it emits <eos>. Because log p is negative, longer sequences always score worse, so divide by |Y|^alpha with alpha around 0.75 or apply the GNMT length penalty, otherwise beam search systematically returns truncated output and a larger beam makes the model look worse - a genuinely counter-intuitive result you will have to explain. Choose the metric honestly per task: date normalisation is judged by free-running exact-match string accuracy plus per-character accuracy and a confusion breakdown by input format, not by BLEU; for translation use sacreBLEU because corpus BLEU is a modified n-gram precision with a brevity penalty that is not comparable across tokenisations, and know that BLEU-4 is exactly 0 for any sentence with no matching 4-gram, so on short outputs and small eval sets it behaves like a step function rather than a measurement.",
+   "minutes": 30,
+   "resource": {
+    "label": "d2l.ai - Beam Search (greedy vs exhaustive vs beam, length normalisation)",
+    "url": "https://d2l.ai/chapter_recurrent-modern/beam-search.html"
+   }
+  },
+  {
+   "name": "The road to Transformers: what recurrence costs once you have attention",
+   "learn": "State the two costs recurrence pays that attention removes. First, h_t = f(h_{t-1}) is inherently sequential, so training and inference need O(T) sequential operations no matter how many GPUs you have, while self-attention needs O(1) sequential depth. Second, the maximum path length between two positions is O(T) in an RNN versus O(1) with attention, which is the same product-of-Jacobians argument from the vanishing-gradient subtopic, now solved by construction rather than by gating. Reproduce Vaswani et al.'s complexity table from memory: self-attention is O(T^2 * d) work with O(1) sequential depth and O(1) path length; recurrence is O(T * d^2) work with O(T) depth and O(T) path length - so attention wins on work whenever T < d, which covers most sentences and explains both why the Transformer displaced the RNN and why long-document and streaming settings keep pulling people back to linear-time and recurrent-flavoured alternatives. Be able to give the one-line history to a customer: attention was invented as a patch for the seq2seq bottleneck, and the Transformer is what you get when you delete the RNN and keep only the patch.",
+   "minutes": 20,
+   "resource": {
+    "label": "Vaswani et al., \"Attention Is All You Need\" (arXiv:1706.03762) - see Section 4, Why Self-Attention",
+    "url": "https://arxiv.org/abs/1706.03762"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can derive backpropagation through time on a whiteboard for a vanilla RNN - dL/dh_t recursion, dL/dW_hh as a sum over t, and the explicit product prod_k W_hh^T diag(1 - h_k^2) - and point at the exact factor that vanishes.",
+  "You can write the LSTM's six equations and the GRU's four from memory, and show that dc_t/dc_{t-1} = diag(f_t) for the LSTM and that h_t = z_t h_{t-1} + (1 - z_t) h~_t gives an identity Jacobian at z_t = 1, naming these as the specific fixes for the specific factor above.",
+  "You can implement LSTMCell and GRUCell from tensor ops only (fused matmul, chunked gates, forget-gate bias 1.0) and have them pass both torch.autograd.gradcheck in float64 and an allclose comparison against torch.nn.LSTMCell with copied weights, as a pytest test in CI.",
+  "You can build a Bahdanau-attention encoder-decoder, write e_{t,i} = v_a^T tanh(W_a s_{t-1} + U_a h_i) with correct shapes and a pre-softmax -inf pad mask, and produce an attention heat map whose alignment a non-ML reader can verify against the input.",
+  "You can take a seq2seq whose quality collapses past ~20 tokens, demonstrate empirically that the cause is the fixed-length context vector (quality versus source length, with and without attention, on a held-out length band), and quantify the recovery.",
+  "You can name and fix the four silent sequence bugs on sight: unmasked loss over pad positions, h_n taken after padding instead of packing, teacher-forced validation, and bidirectional layers in a causal model.",
+  "You can implement beam search with length normalisation, explain why a larger beam without the penalty produces shorter and worse output, and choose between exact match, per-character accuracy and sacreBLEU with a stated reason for the task in front of you.",
+  "You can advise a customer on GRU versus LSTM versus Transformer for a given sequence length, latency budget and hardware, backed by the O(T*d^2) versus O(T^2*d) work-and-depth argument and a measured throughput number from your own benchmark."
+ ],
+ "failureModes": [
+  "The loss is averaged over every position in the padded tensor instead of over mask.sum(); batches that happen to contain long sequences look better, validation loss changes when you change batch size, and the model that wins the sweep is the one whose batches were most padded.",
+  "The encoder uses the RNN's h_n without pack_padded_sequence, so the 'sentence summary' handed to the decoder is the state after k pad tokens; the model still trains, but its quality depends on how the DataLoader happened to bucket lengths and never reproduces on the customer's differently sorted data.",
+  "Validation is run teacher-forced because the same forward() is reused for train and eval; the notebook reports 98 percent, the demo in front of the customer free-runs and produces repetition loops, and the gap is diagnosed as a deployment bug rather than exposure bias.",
+  "bidirectional=True is left on a decoder or a next-token language model; validation perplexity collapses to near 1 because every position sees its own future, the result is presented as a breakthrough, and the model cannot be run causally at inference at all.",
+  "Attention alpha is masked by multiplying by zero AFTER the softmax rather than adding -inf before it, so the distribution no longer sums to one, mass silently drains as batch padding grows, and the heat map looks plausible while the context vector is systematically shrunk.",
+  "The from-scratch LSTM returns h_t but keeps feeding c_{t-1} through the loop; the gradient check still passes because forward and backward agree with each other, and the model trains to a mediocre plateau that is blamed on the dataset being too small.",
+  "Gradient clipping is applied per-parameter-tensor rather than on the global norm; the descent direction is rotated at every spike, training becomes erratic in a way that looks like a bad learning rate, and the LR sweep comes back flat and uninformative.",
+  "Beam search is added with beam=10 and no length normalisation; outputs get systematically shorter, exact match drops below the greedy baseline, and the conclusion recorded is that beam search does not help on this task."
+ ],
+ "interviewQuestions": [
+  "Derive backpropagation through time for a vanilla RNN with tanh. Show me the term that vanishes, state the condition on W_hh in terms of its singular values, and then tell me exactly which part of the LSTM and which part of the GRU cancels that term.",
+  "Write the LSTM equations. Now compute dc_t/dc_{t-1} and explain why that expression, and not the number of parameters, is why LSTMs learn long-range dependencies. Where does the gradient still vanish in an LSTM?",
+  "A customer's seq2seq translation model scores well on their test set but collapses on anything over about twenty tokens. Walk me through your diagnosis, and write the equations for the fix. What would you plot to prove the diagnosis before you change any code?",
+  "Explain teacher forcing and exposure bias. Design a validation protocol for a sequence-to-sequence model that cannot be gamed by teacher forcing, and tell me what you would report to the customer alongside the headline number.",
+  "Why is dot-product attention divided by sqrt(d_k)? Derive it. Then tell me what happens to the softmax Jacobian if you omit it at d_k = 512, and what the observable training symptom would be.",
+  "Design: the customer needs to classify streaming sensor sequences on an edge device with 200 ms of budget and no GPU. Argue for or against a GRU versus a small Transformer, using complexity, memory and the streaming constraint, and say what you would measure before committing.",
+  "Debug: a from-scratch LSTM passes a float64 gradcheck at 1e-7 but trains to a worse loss than nn.LSTM with identical hyperparameters and copied initial weights. What does the passing gradcheck rule out, what does it not rule out, and what are the first three things you check?"
+ ],
+ "proofOfWork": "A companion repo, recurrence-forensics, that turns the theory of this topic into two reproducible experiments a customer's ML team can rerun. The first is a long-range memory benchmark on synthetic tasks with a controllable dependency distance - the adding problem and a copy/recall task at T in {10, 30, 100, 300} - training a vanilla RNN, your from-scratch LSTM, your from-scratch GRU, and an LSTM with the forget gate ablated, each over three seeds, and emitting for every run the loss curve, the per-timestep gradient norm ||dL/dh_t|| plotted against t on a log axis, and the largest singular value of W_hh tracked across training; the README reads that plot back as the prediction from the theory (decay constant approximately sigma_1 per step for the vanilla RNN, near-flat for the LSTM) rather than as a picture. The second is a bottleneck ablation on the date-normalisation task: identical encoder-decoder trained with and without Bahdanau attention, evaluated free-running on a held-out length band longer than anything seen in training, reporting exact-match accuracy as a function of source length with confidence intervals, plus paired attention heat maps for the same three examples under both models. Ship it with a microbenchmark table of tokens per second and peak memory for your fused-matmul cell versus four separate matmuls versus nn.LSTM on CPU and GPU, a pytest suite in GitHub Actions running the gradcheck and the nn.LSTMCell equivalence test, and a one-page note written for a non-ML engineer explaining, with the two plots and no equations, why their long-document model gets worse in the middle and what attention changes."
+}

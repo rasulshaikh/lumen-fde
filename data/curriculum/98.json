@@ -1,0 +1,228 @@
+{
+ "i": 98,
+ "topic": "Information theory and loss functions: entropy, KL, cross-entropy, maximum likelihood",
+ "track": "M. Mathematical Foundations",
+ "month": 4,
+ "hours": 6,
+ "why": "Every loss you will ever ship to a customer - logistic regression's log loss, a transformer's next-token cross-entropy, a gradient-boosted Poisson deviance on their count data - is a negative log-likelihood, and the number it prints has a unit, a floor and a direction that their data scientist will ask you about in the room. Without this topic you cannot say whether a validation loss of 1.9 nats is good, whether the loss that stopped falling is irreducible label noise H(P) or model error KL(P||Q), or why a model that looks fine on AUC is quietly overconfident on the minority class the customer actually cares about. With it you can derive the objective on their whiteboard in five minutes, name which divergence and which direction it minimises, and tell the difference between a data ceiling, a leakage artefact and a training bug - which is most of what defending a model in front of a customer consists of.",
+ "prerequisites": [
+  "Probability at Topic 95 level: discrete and continuous distributions, joint/conditional/marginal factorisation, Bayes' rule, and independence vs conditional independence",
+  "Calculus and optimisation from Topic 94: partial derivatives, the chain rule, what convexity buys you, and what one gradient-descent step does to a parameter vector",
+  "Statistical inference from Topic 96: estimators and their bias, and the habit of reading the likelihood as a function of parameters with the data held fixed",
+  "Logs and exponentials at speed: log(ab), log(a/b), change of base log2(x) = ln(x)/ln(2), Jensen's inequality for a convex function, and the fact that log is monotone so argmax is preserved",
+  "NumPy fluency: broadcasting, axis= reductions, float32 vs float64 accumulation, and np.testing.assert_allclose (Topic 99 goes deeper on the stability side)",
+  "Enough PyTorch to run a forward and backward pass and read a loss tensor: shapes, .backward(), an optimiser step (Topic 112 goes deeper)"
+ ],
+ "subtopics": [
+  {
+   "name": "Self-information, units, and the code-length reading of a log",
+   "learn": "Define surprisal I(x) = -log p(x) and know why the log is forced rather than chosen: additivity over independent events, continuity in p, and monotonicity in 1/p pin it down up to the base. Fix your units and say them out loud every single time - log base 2 gives bits, natural log gives nats, 1 nat = 1/ln(2) = 1.4427 bits - because every library hides a different default (scipy.stats.entropy is base e unless you pass base=2; torch cross_entropy is always nats) and a large fraction of 'our loss is 2.1' arguments are pure unit confusion. Connect it to Kraft's inequality and Shannon's source coding theorem: an optimal prefix code spends about -log2 p(x) bits on symbol x, so entropy is not a metaphor for compressed size, it is the achievable average code length in the limit. Be able to state that a fair 8-sided die costs exactly 3 bits per roll and that no code beats it.",
+   "minutes": 15,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - Chapter 05 Probability, 05. Information Theory",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2005%20-%20probability/05.%20information%20theory.md"
+   }
+  },
+  {
+   "name": "Shannon entropy: the formula, its bounds, and hand computation",
+   "learn": "Compute H(P) = -sum_x p(x) log p(x) by hand for at least three distributions before you touch a library: uniform over 4 outcomes (2 bits, the maximum for a 4-symbol alphabet), a point mass (0 bits), and the skewed [0.5, 0.25, 0.125, 0.125] (1.75 bits, and note the code lengths 1, 2, 3, 3 that make it exact). Know the properties you will use as sanity checks forever: 0 <= H(P) <= log|X| with equality on the right iff P is uniform, H is concave in P, and the 0 log 0 = 0 convention - which is precisely why your implementation must use np.where or scipy.special.xlogy rather than adding a global epsilon to every probability. Reproduce all three by hand and with scipy.stats.entropy(pk, base=2), then be able to tell a customer that 'the model cannot get below 1.31 bits here' is a statement about their labels, not about your architecture.",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy - scipy.stats.entropy (Shannon entropy and the two-argument KL form)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.entropy.html"
+   }
+  },
+  {
+   "name": "Joint and conditional entropy, the chain rule, and mutual information",
+   "learn": "Derive H(X,Y) = H(X) + H(Y|X) from the definitions in three lines, and note that H(Y|X) = sum_x p(x) H(Y|X=x) is an average over x, not the entropy of one conditional slice you happened to pick. Define mutual information I(X;Y) = H(X) - H(X|Y) = H(Y) - H(Y|X) = KL(P(x,y) || P(x)P(y)) >= 0, with equality iff X and Y are independent, and read it as 'bits of X you learn by observing Y'. Know that MI sees arbitrary nonlinear dependence where Pearson correlation reports zero (y = x squared on a symmetric x), which is exactly why sklearn.metrics.mutual_info_score and mutual_info_classif are the right first screen when a customer says a feature 'has no correlation with the target'. Compute I on a 2x2 contingency table by hand and confirm it against sklearn.",
+   "minutes": 15,
+   "resource": {
+    "label": "scikit-learn - sklearn.metrics.mutual_info_score",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.mutual_info_score.html"
+   }
+  },
+  {
+   "name": "KL divergence: Gibbs' inequality, asymmetry, and where it becomes infinite",
+   "learn": "Define KL(P||Q) = sum_x p(x) log(p(x)/q(x)) and prove KL >= 0 in four lines from Jensen applied to the convex function -log: -sum p log(q/p) >= -log sum p (q/p) = -log 1 = 0, with equality iff P = Q wherever P has mass. Internalise that KL is not a metric - KL(P||Q) is not KL(Q||P) and the triangle inequality fails - so 'the distance between the two distributions' is the wrong sentence in a customer meeting and you should say 'divergence' and name the direction. Know the support condition cold: KL(P||Q) = +infinity whenever q(x) = 0 while p(x) > 0, which is the same mathematics behind a saturated softmax returning inf loss on the true class and behind a binned drift monitor exploding the first time a reference bin is empty. Implement it with scipy.special.rel_entr and summing, and know why that is the numerically sane route rather than hand-writing p*log(p/q).",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy - scipy.special.rel_entr (elementwise relative entropy)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.rel_entr.html"
+   }
+  },
+  {
+   "name": "The identity CE(P,Q) = H(P) + KL(P||Q) and the irreducible floor",
+   "learn": "Derive the decomposition in two lines: CE(P,Q) = -sum p log q = -sum p log p + sum p log(p/q) = H(P) + KL(P||Q). Read the consequence straight off the page: for a fixed data distribution P, minimising cross-entropy over Q minimises KL exactly, because H(P) contains no parameters - it is the irreducible loss floor set by label noise and by any two identical feature rows carrying different labels. Verify it numerically on two 4-outcome distributions and check the three numbers agree to 1e-12 in float64, in both bits and nats. This identity is the single sentence you will repeat most often on site: 'your loss cannot go below about 0.42 nats because 12 percent of your rows are labelled inconsistently, and everything above that line is our model'.",
+   "minutes": 20,
+   "resource": {
+    "label": "Dive into Deep Learning - Softmax Regression (cross-entropy loss and its information-theory basics)",
+    "url": "https://d2l.ai/chapter_linear-classification/softmax-regression.html"
+   }
+  },
+  {
+   "name": "From maximum likelihood to cross-entropy in a few lines",
+   "learn": "Start with i.i.d. rows and write the log-likelihood l(theta) = sum_i log q_theta(y_i | x_i); divide by N and it becomes an expectation under the empirical distribution P_hat, so -l/N = CE(P_hat, Q_theta) = H(P_hat) + KL(P_hat || Q_theta). Conclude the two things that matter: maximum likelihood is minimising the forward KL from the empirical distribution to the model, and 'cross-entropy loss' is nothing but NLL written as an expectation over one-hot targets, where the one-hot collapses -sum_c p_c log q_c into the single term -log q_{y_i}. Be able to reproduce this whole derivation on a whiteboard, closed book, in under five minutes. Then be precise about what it does not assume: no Gaussianity, no linearity, only that your model emits a normalised distribution over the label space and that rows are independent given x - which is exactly the assumption that fails on the customer's clustered, repeated-measures or time-ordered data.",
+   "minutes": 30,
+   "resource": {
+    "label": "Dive into Deep Learning - Maximum Likelihood (appendix)",
+    "url": "https://d2l.ai/chapter_appendix-mathematics-for-deep-learning/maximum-likelihood.html"
+   }
+  },
+  {
+   "name": "Softmax, logits, and the log-sum-exp trick",
+   "learn": "Write softmax(z)_c = exp(z_c) / sum_j exp(z_j), show it is shift-invariant so softmax(z + a) = softmax(z), and use that to derive the stable form log_softmax(z)_c = z_c - logsumexp(z) where logsumexp(z) = m + log sum_j exp(z_j - m) with m = max(z). Derive the gradient of NLL with respect to the logits and commit the result to memory: dL/dz = softmax(z) - y_onehot, which is why the backward pass of a classifier is a subtraction and why fusing log_softmax with NLL is a correctness fix, not just a speed-up. Know exactly what you are avoiding: exp(800) overflows to inf and exp(-800) underflows to 0 in float32, so computing log(softmax(z)) in two steps returns -inf and then nan gradients, while log_softmax returns a finite number. Implement logsumexp yourself and check it against scipy.special.logsumexp on inputs of magnitude 1e3.",
+   "minutes": 25,
+   "resource": {
+    "label": "SciPy - scipy.special.logsumexp (numerically stable log-sum-exp)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.logsumexp.html"
+   }
+  },
+  {
+   "name": "Bernoulli likelihood, binary cross-entropy, and the logistic gradient",
+   "learn": "Write the one-row Bernoulli log-likelihood log p(y|x) = y log sigma(z) + (1-y) log(1 - sigma(z)) with sigma(z) = 1/(1 + exp(-z)), then derive dL/dz = sigma(z) - y and dL/dw = (sigma(z) - y) x - the same shape as the linear-regression gradient, which is not a coincidence but the canonical link of the exponential family. Show the loss is convex in w by rewriting it as log(1 + exp(-(2y-1) z)), so logistic regression has a unique optimum and any 'it did not converge' is a scaling or solver bug rather than a landscape problem. In code, always reach for torch.nn.BCEWithLogitsLoss rather than sigmoid followed by BCELoss: it folds in the log-sum-exp stabilisation and carries pos_weight for imbalance. Confirm for yourself that BCE on one logit and CrossEntropyLoss on two logits give the same number for the same problem.",
+   "minutes": 20,
+   "resource": {
+    "label": "PyTorch - torch.nn.BCEWithLogitsLoss",
+    "url": "https://docs.pytorch.org/docs/stable/generated/torch.nn.BCEWithLogitsLoss.html"
+   }
+  },
+  {
+   "name": "Regression losses are likelihoods too: Gaussian to MSE, Laplace to MAE, Poisson and Tweedie",
+   "learn": "Plug the Gaussian density into the negative log-likelihood and watch the constants fall out: -log N(y; f(x), s^2) = (y - f(x))^2 / (2 s^2) + log s + 0.5 log(2 pi), so minimising MSE is exactly maximum likelihood under homoscedastic Gaussian noise and under nothing else. Do the same algebra for the Laplace density and get MAE (which fits the conditional median, hence its outlier robustness), for the Poisson and get the deviance term y_hat - y log y_hat used on count targets, and for the Tweedie family which covers the zero-inflated positive targets that dominate insurance, usage and revenue data. The rule you will apply on customer data: pick the loss from the conditional distribution of the target and use the matching link - sklearn's PoissonRegressor and TweedieRegressor and XGBoost's count:poisson objective exist precisely because squared error on right-skewed counts fits the mean of the wrong noise model and happily predicts negative demand.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - Generalized Linear Models (Poisson, Gamma, Tweedie deviances and links)",
+    "url": "https://scikit-learn.org/stable/modules/linear_model.html#generalized-linear-models"
+   }
+  },
+  {
+   "name": "torch.nn.CrossEntropyLoss in practice: the arguments that silently change your objective",
+   "learn": "Know the contract exactly: it consumes raw logits of shape (N, C) - never softmax outputs - plus either integer class indices or a full probability target, and applies log_softmax followed by NLL internally. Read every argument as an edit to the objective rather than a convenience: weight= rescales per-class terms and therefore changes the implied class prior, ignore_index= removes padding from both the numerator and the denominator, label_smoothing= replaces the one-hot target entirely, and reduction='mean' averages over non-ignored elements - so a mean loss over a batch with 40 percent padding is not comparable with one over a batch with 10 percent. For sequence models the tensor must be (N, C, L) or flattened to (N*L, C), and the perennial bug is forgetting to shift logits and labels by one position, which produces a loss that trains down beautifully while the model learns to copy. Prove you understand it by reproducing F.cross_entropy's exact value with your own NumPy implementation on the same batch to 1e-6.",
+   "minutes": 20,
+   "resource": {
+    "label": "PyTorch - torch.nn.CrossEntropyLoss (weight, ignore_index, label_smoothing, reduction)",
+    "url": "https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html"
+   }
+  },
+  {
+   "name": "Forward vs reverse KL: mode-covering, mode-seeking, and the ELBO",
+   "learn": "Contrast the two directions on a bimodal target P fitted by a single Gaussian Q. Forward KL(P||Q) is mode-covering and zero-avoiding, because any x where p > 0 and q is near 0 costs an unbounded penalty, so Q smears across both modes and puts mass in the empty valley between them. Reverse KL(Q||P) is mode-seeking and zero-forcing, because the expectation is taken under Q, so Q collapses onto one mode and pays nothing for ignoring the other. Map that onto objectives you will actually meet: supervised training and MLE minimise forward KL; variational inference and the ELBO (E_q[log p(x|z)] - KL(q(z|x) || p(z))) minimise reverse KL, which is why an under-powered VAE produces blurry averages and why posterior collapse is a thing; RLHF and DPO-style penalties hold a policy near a reference in reverse KL. For any objective a customer shows you, state the direction and predict the bias: over-smoothing or collapse.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv - Auto-Encoding Variational Bayes (Kingma and Welling, the ELBO and its KL term)",
+    "url": "https://arxiv.org/abs/1312.6114"
+   }
+  },
+  {
+   "name": "JS divergence, f-divergences, and what a GAN is actually minimising",
+   "learn": "Define JSD(P||Q) = 0.5 KL(P||M) + 0.5 KL(Q||M) with M = (P + Q)/2, and note the three properties that make it useful in production: it is symmetric, it is bounded by log 2 (one bit), and it stays finite even on disjoint supports where KL is infinite; its square root is a genuine metric. Know the original GAN result that against an optimal discriminator the generator is minimising 2 JSD(P_data || P_g) - log 4, and the consequence that when the supports barely overlap JSD sits pinned at log 2 with a vanishing gradient - the motivation for the Wasserstein alternatives. Place both inside the f-divergence family D_f(P||Q) = sum q f(p/q), where KL, reverse KL, JS, total variation and chi-squared are just choices of f. In practice you will use JSD as your bounded, symmetric drift statistic between last month's feature histogram and this month's, exactly where KL would return inf on one newly empty bin.",
+   "minutes": 15,
+   "resource": {
+    "label": "arXiv - Generative Adversarial Networks (Goodfellow et al., the JSD result in Section 4)",
+    "url": "https://arxiv.org/abs/1406.2661"
+   }
+  },
+  {
+   "name": "Perplexity and bits-per-character: reporting a loss that means something",
+   "learn": "Perplexity is exp(mean NLL in nats) = 2^(mean NLL in bits), and it reads as an effective branching factor: a character model at 2.45 nats/char has perplexity 11.6, meaning it is as uncertain as a uniform choice among 11.6 characters out of the 27 available. Convert in both directions at speed, and always state the unit and the tokenisation, because perplexity is only comparable across models that share a vocabulary - a byte-level and a BPE model on the same corpus give different numbers for identical underlying quality, which is why bits-per-byte or bits-per-character is the honest cross-tokeniser metric. Learn the sliding-window evaluation protocol for long contexts and why naive non-overlapping chunking inflates the score by scoring the first tokens of each chunk with almost no context. For the bigram deliverable, report the same model in nats, in bits/char and as perplexity, and show the counting table and the gradient-trained softmax landing on all three identically.",
+   "minutes": 20,
+   "resource": {
+    "label": "HuggingFace Transformers - Perplexity of fixed-length models (sliding-window evaluation)",
+    "url": "https://huggingface.co/docs/transformers/perplexity"
+   }
+  },
+  {
+   "name": "Proper scoring rules, calibration, and temperature scaling",
+   "learn": "A scoring rule is proper when its expectation is minimised by reporting the true probability; log loss and the Brier score are proper, accuracy and F1 are not, which is how a model improves on accuracy while getting worse at every decision you would actually make with a probability. Decompose log loss and Brier into calibration plus refinement, and understand why two models with identical AUC can have wildly different log loss: AUC only sees ranking and is invariant to any monotone transform of the scores. Build a reliability diagram with sklearn's calibration_curve, summarise it as expected calibration error, and know the two fixes and their trade-offs - post-hoc temperature scaling (one scalar T fitted on held-out logits, cannot change the argmax so accuracy is untouched) versus isotonic or Platt scaling through CalibratedClassifierCV, which can. Be able to state the Guo et al. finding that modern deep networks are systematically overconfident and that the remedy is a single parameter, because 'the model says 0.99' is a claim you will be asked to defend.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv - On Calibration of Modern Neural Networks (Guo et al., reliability diagrams, ECE, temperature scaling)",
+    "url": "https://arxiv.org/abs/1706.04599"
+   }
+  },
+  {
+   "name": "Label smoothing: editing the target distribution on purpose",
+   "learn": "Label smoothing replaces the one-hot target with (1 - eps) * onehot + eps/K * uniform, so the minimiser is no longer an infinite logit gap but a finite one - that is the entire mechanism, and it is why it caps confidence and acts as a regulariser. Derive what it does to the objective: cross-entropy against a smoothed target equals (1 - eps) CE(onehot, Q) + eps CE(uniform, Q), which is the original loss plus a term pulling Q toward uniform, equivalently a KL-to-uniform penalty up to an additive constant. Know the trade-off Mueller et al. document: it usually improves accuracy and calibration but it erases the class-similarity geometry in the penultimate layer, which measurably degrades any teacher you then distil from. Never compare a smoothed training loss against an unsmoothed validation loss - the floor has moved, and this is a recurring cause of 'why is my validation loss below my training loss' panics.",
+   "minutes": 15,
+   "resource": {
+    "label": "arXiv - When Does Label Smoothing Help? (Mueller, Kornblith, Hinton)",
+    "url": "https://arxiv.org/abs/1906.02629"
+   }
+  },
+  {
+   "name": "Class weights, focal loss, and prior shift",
+   "learn": "Reweighting class c by w_c is mathematically a change of the assumed label prior: you have fitted the model to a reweighted P, so its outputs are calibrated for that reweighted world and not for the customer's one-in-five-hundred base rate. Know the correction and apply it before quoting a probability to anyone - for a binary model the logit shift back to the true prior is log(pi_train/(1 - pi_train)) - log(pi_true/(1 - pi_true)), added to the logit. Contrast with focal loss FL(p_t) = -(1 - p_t)^gamma log(p_t), which leaves the prior alone and instead down-weights already-easy examples so gradient mass moves to the hard ones; know gamma around 2 with alpha-balancing as the Lin et al. defaults, and that it is not a proper scoring rule, so you must calibrate afterwards. Have a defensible answer ready for 'should we just SMOTE it?': resampling changes the prior and usually the calibration for no ranking gain, and the way to settle it is a PR-AUC plus a reliability plot before and after.",
+   "minutes": 20,
+   "resource": {
+    "label": "arXiv - Focal Loss for Dense Object Detection (Lin et al.)",
+    "url": "https://arxiv.org/abs/1708.02002"
+   }
+  },
+  {
+   "name": "Knowledge distillation: cross-entropy against a soft teacher",
+   "learn": "Distillation minimises the KL (equivalently the cross-entropy up to the teacher's fixed entropy) between the student and a temperature-softened teacher: L = alpha * T^2 * KL(softmax(z_t/T) || softmax(z_s/T)) + (1 - alpha) * CE(onehot, softmax(z_s)), where the T^2 factor restores the gradient magnitude that dividing logits by T removes. Understand why it works in information terms: the teacher's soft distribution carries the relative probabilities of the wrong classes, so each example delivers many more bits than a one-hot label does. In PyTorch, torch.nn.KLDivLoss expects log-probabilities as the input and probabilities as the target with reduction='batchmean'; the two most common bugs in a distillation script are passing raw logits and leaving reduction='mean', which divides by N*C and shrinks the term by a factor of the vocabulary size. This is the standard lever when a customer wants the accuracy of a large model at the latency budget of a small one.",
+   "minutes": 15,
+   "resource": {
+    "label": "PyTorch - torch.nn.KLDivLoss (log-probability input, batchmean reduction)",
+    "url": "https://docs.pytorch.org/docs/stable/generated/torch.nn.KLDivLoss.html"
+   }
+  },
+  {
+   "name": "Estimating entropy and MI from finite samples: bias, binning, and high-cardinality traps",
+   "learn": "The plug-in estimator from empirical counts is biased downward - roughly (K-1)/(2N) nats for K bins - so entropy comes out too small and mutual information too large on small samples, and the bias grows with cardinality. That single fact is the mechanism behind the classic leak: a near-unique identifier column scores enormous mutual_info_classif because every level 'predicts' its own single row perfectly. For continuous features scikit-learn's mutual_info_classif and mutual_info_regression use the Kraskov k-nearest-neighbour estimator (n_neighbors=3 by default, with jitter added, so results are not reproducible without random_state) rather than histogram binning, and the choice of k or bin width is a real hyperparameter of the answer you report. The discipline: compute MI on the training split only, permute the target to build a null distribution, and treat any feature whose MI clears that null by an implausible margin as a leakage suspect rather than a discovery.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - Feature selection (univariate selection and mutual-information estimators)",
+    "url": "https://scikit-learn.org/stable/modules/feature_selection.html"
+   }
+  },
+  {
+   "name": "Building infotheory/ in NumPy and proving it correct to 1e-6",
+   "learn": "Implement entropy, cross_entropy, kl_divergence and js_divergence reducing over the last axis, with an explicit base= argument, correct broadcasting, and a normalisation check that raises on a vector summing to 0.97 rather than silently renormalising it. Handle the edge cases deliberately: 0 log 0 = 0 via np.where or scipy.special.xlogy (never a global epsilon added to every probability, which perturbs every value including the good ones), q = 0 with p > 0 returning inf rather than a clipped lie, and float64 accumulation for the reduction. Test with np.testing.assert_allclose(rtol=1e-6) against scipy.stats.entropy in both its one-argument and two-argument forms, against scipy.spatial.distance.jensenshannon (note it returns the square root of JS and defaults to base e despite what people assume - a classic factor-of-confusion), and against torch.nn.functional.cross_entropy on random logits. Add property tests: H <= log K, KL >= 0, KL(P||P) == 0, JS <= log 2, and CE(P,Q) == H(P) + KL(P||Q).",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy - scipy.spatial.distance.jensenshannon (returns the JS distance, i.e. the square root)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.distance.jensenshannon.html"
+   }
+  },
+  {
+   "name": "Bigram character LM: counting MLE, gradient descent, and smoothing as a Dirichlet prior",
+   "learn": "Build the 27x27 bigram count matrix N, normalise each row to get the closed-form MLE q(next|prev) = N[i,j] / sum_j N[i,j], and score the corpus with the mean NLL. Then fit the same model as a one-hot input times a weight matrix through a softmax, trained by gradient descent, and watch the loss descend to the same number - because the counting solution is the unique minimiser of the identical cross-entropy objective, which is the cleanest demonstration you will ever get that for this family 'training' and 'counting' are the same estimator. Add-k smoothing is not a hack: N + k is the posterior mean under a Dirichlet(k+1) prior, and in the gradient version it is equivalent to an L2 penalty pulling the logits toward uniform - verify that claim numerically by matching a k against a weight-decay value. Report the final figure in nats and bits/char, and show that the unsmoothed model assigns probability 0, hence infinite loss, to any bigram unseen in training.",
+   "minutes": 25,
+   "resource": {
+    "label": "Dive into Deep Learning - Language Models (n-gram counting, Laplace smoothing, perplexity)",
+    "url": "https://d2l.ai/chapter_recurrent-neural-networks/language-model.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can derive cross-entropy loss from maximum likelihood on a whiteboard, closed book, in under five minutes - i.i.d. log-likelihood, division by N, empirical distribution, CE(P_hat, Q_theta) = H(P_hat) + KL(P_hat || Q_theta) - and state which assumptions you used and which you did not.",
+  "You can hand-compute H, KL and CE for two small discrete distributions in both bits and nats, confirm CE(P,Q) = H(P) + KL(P||Q) to 1e-12 in NumPy, and convert any of those numbers to perplexity and back.",
+  "You can look at any objective put in front of you - MLE, an ELBO, a GAN loss, a distillation term, an RLHF KL penalty - and name the divergence, the direction, and the bias it will produce (mode-covering over-smoothing or mode-seeking collapse).",
+  "You can choose a loss from the conditional distribution of a customer's target - Bernoulli, categorical, Gaussian, Laplace, Poisson, Tweedie - and justify it as a likelihood with the matching link rather than as a preference.",
+  "You can ship an infotheory/ module whose entropy, cross-entropy, KL and JS agree with scipy.stats.entropy, scipy.spatial.distance.jensenshannon and torch.nn.functional.cross_entropy to 1e-6, with 0 log 0, zero-support and unnormalised-input cases tested explicitly.",
+  "You can derive dNLL/dlogits = softmax(z) - y, implement a stable log_softmax with the max-subtraction trick, and explain why fusing log_softmax with NLL is a correctness requirement and not merely an optimisation.",
+  "You can decide whether a plateaued training loss is an irreducible H(P) floor from inconsistent labels or a model and optimisation gap, and put a number on the label-noise floor from a duplicate-feature-row audit.",
+  "You can produce a reliability diagram and an ECE for a model, fit a temperature on held-out logits, and show log loss improving while accuracy and AUC are unchanged - and explain to a customer exactly why those two did not move."
+ ],
+ "failureModes": [
+  "A team reports 'loss 2.1' with no unit; the model was training in nats while the published baseline was in bits/char, so a real gap of nothing at all was chased for a month across a factor of 1.4427.",
+  "The training script does softmax, then log, then NLL instead of log_softmax plus NLL; one logit reaches 90 on a hard example, the softmax underflows to exactly 0 on the true class, the loss becomes inf and the gradients nan - and because the nan appears mid-epoch it gets filed as a corrupt data batch.",
+  "Class weights were added for imbalance and never undone; the model is calibrated for a 50/50 world, the customer's ops team sets a 0.5 threshold on the raw output, and a review queue sized for 20 cases a day receives 900.",
+  "Mutual-information feature screening put a near-unique transaction identifier at the top of the list because the plug-in estimator's finite-sample bias rewards high cardinality; the column survived into training, cross-validation looked superb, and the model was worthless in production.",
+  "label_smoothing=0.1 was set on the training criterion but not on the evaluation criterion, so validation loss came out below training loss, the team concluded the model was underfitting and burned three more days of GPU on a larger one.",
+  "A drift monitor computed KL(current || reference) over binned features; one reference bin was empty, KL returned inf, the dashboard clamped it to its axis maximum, and a genuine distribution shift a fortnight later was invisible because it produced the identical clamped value.",
+  "A distillation script passed raw student logits into torch.nn.KLDivLoss with reduction='mean'; the loss was divided by N*C so the distillation term shrank by a factor of the vocabulary size, contributed nothing to the gradient, and the student quietly trained on hard labels only while the config claimed otherwise.",
+  "Model selection was done on AUC because 'the customer only cares about ranking', but the customer's actual decision multiplies the predicted probability by transaction value; the winning model was badly overconfident, and every expected-cost figure they acted on was wrong by roughly a factor of three until log loss and a reliability plot were finally checked."
+ ],
+ "interviewQuestions": [
+  "Derive cross-entropy loss from maximum likelihood. Then, using CE(P,Q) = H(P) + KL(P||Q), tell me which term your optimiser can reduce and which it cannot, and what that means for a model whose validation loss has been stuck at 0.42 nats for twenty epochs.",
+  "KL is not symmetric. Sketch the result of fitting a single Gaussian to a bimodal target by minimising KL(P||Q) and then by minimising KL(Q||P), and tell me which direction a VAE's ELBO uses and which one ordinary supervised training uses.",
+  "Debug: your language model's loss goes 3.1, 3.0, 2.9, then nan at step 4000. Walk me through what you check and in what order, and say which candidate causes would show up in the logits, which in the data loader, and which only in the loss implementation itself.",
+  "Design: a customer has a fraud label with a 0.2 percent base rate and wants a number they can multiply by transaction value to set a review threshold. What loss do you train, what do you do about the imbalance, and how do you guarantee that what you hand them is a probability rather than a score?",
+  "Explain why perplexity is not comparable between two models with different tokenisers and what you would report instead. Then tell me what a perplexity of 11.6 on a 27-symbol character model actually says about that model.",
+  "A stakeholder says 'the model is 99 percent confident'. What do you check before letting that sentence leave the room, what plot do you produce, and what is the cheapest correct fix if the number is wrong?",
+  "Someone rebalanced the classes by reweighting and reports better recall. Explain what the reweighting did to the implied prior, write down the logit correction that returns the outputs to the true base rate, and tell me when you would reach for focal loss instead."
+ ],
+ "proofOfWork": "A public repo `loss-function-forensics` that takes the infotheory/ module past unit tests and into a customer-facing diagnostic kit. It ships `label_noise_floor.py`, which estimates the irreducible H(P) on any tabular dataset by grouping exact-duplicate feature rows (plus near-duplicates via a hashed or k-NN key), computing the empirical label entropy within each group, and reporting the count-weighted average as the loss floor - then plots a trained model's validation cross-entropy against that floor so 'we are 0.11 nats above the ceiling of this dataset' becomes a number rather than an opinion. It adds `divergence_zoo.ipynb`, which fits a single Gaussian to one fixed bimodal mixture three times - minimising forward KL, reverse KL and JS with the same optimiser - and overlays the three fits on one figure with the numeric divergences in the legend, which is the mode-covering versus mode-seeking picture you will draw on a customer's whiteboard. `calibration_report.py` takes any scikit-learn or PyTorch classifier plus a held-out set and emits log loss, Brier, ECE, a reliability diagram and the fitted temperature, with a before/after table showing accuracy and AUC unchanged while log loss improves. Finally `units.md` is a one-page conversion table for nats, bits, perplexity and bits-per-character alongside the exact library defaults (scipy.stats.entropy is base e, scipy.spatial.distance.jensenshannon returns the square root, torch.nn.functional.cross_entropy is nats and mean-reduced over non-ignored elements), written so a customer's data scientist can settle a units argument in thirty seconds. CI runs the property tests (H <= log K, KL >= 0, JS <= log 2, CE = H + KL, KL(P||P) = 0) plus the 1e-6 agreement tests against SciPy and PyTorch on every push."
+}

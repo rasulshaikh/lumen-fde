@@ -1,0 +1,228 @@
+{
+ "i": 101,
+ "topic": "Supervised learning II: decision trees, random forests, gradient boosting with XGBoost and LightGBM",
+ "track": "N. Machine Learning Systems",
+ "month": 7,
+ "hours": 8,
+ "why": "Gradient-boosted trees are what actually wins on the data a customer hands you: churn, fraud, demand, pricing and propensity all live in a CSV of forty mixed-type columns with missing values, and a tuned LightGBM beats the neural network they read about in a blog post while fitting in ninety seconds on a laptop. The FDE difference is not calling .fit() - it is standing at their screen, looking at one train/validation curve, and saying 'that is overfit, cut num_leaves before you touch n_estimators' or 'that AUC of 0.99 is a leaked column and here is which one', instead of launching another overnight grid search. And when their data scientist asks why you chose a Poisson objective, what min_child_weight actually thresholds, or whether the SHAP plot about to go in a board deck means what they think it means, you need the derivation on the whiteboard, not the vocabulary.",
+ "prerequisites": [
+  "Topic 100 (Supervised learning I): the bias-variance decomposition, L1/L2 regularisation, and the habit of never reading a number off the training set",
+  "Topic 98 (Information theory and loss functions): a loss is a negative log-likelihood, log loss versus squared error, and dL/dz = sigma(z) - y for the logistic case - you will differentiate it again here, twice",
+  "Topic 99 (Numerical computing): NumPy argsort, cumsum, boolean masking, broadcasting, and float32-versus-float64 accumulation, because the from-scratch booster is a vectorisation exercise as much as a maths one",
+  "Calculus at Topic 94 level: a second-order Taylor expansion around a point, and minimising a one-dimensional quadratic a*w^2 + b*w in closed form - that single step is the entire XGBoost leaf value",
+  "pandas at working speed: dtypes, categoricals, groupby, and the ability to say what the grain of a row is before you model it",
+  "A pinned environment with scikit-learn, xgboost, lightgbm, matplotlib and optuna installed, plus one real tabular dataset with a genuine train/valid/test split (not iris) to run every diagnostic against"
+ ],
+ "subtopics": [
+  {
+   "name": "CART: greedy recursive partitioning and the split search",
+   "learn": "Write the algorithm out before reading any library: at a node holding rows S, for every feature j and every candidate threshold t, form S_L = {x_j <= t} and S_R, score the split by the impurity decrease Delta = I(S) - (|S_L|/|S|) I(S_L) - (|S_R|/|S|) I(S_R), take the argmax over (j, t), recurse until a stopping rule fires. Candidate thresholds are the midpoints between consecutive distinct sorted values, so a continuous feature with a million distinct values offers a million candidates unless you bin it - which is the whole motivation for histogram methods later. Know the cost model: sort each column once at O(n log n) and carry the order downward, and the per-node scan is O(n) per feature; re-sorting at every node is the difference between a two-second fit and an hour, and this is exactly the loop you will write for the deliverable. Internalise that the search is greedy and myopic - it never backtracks, and it cannot find an XOR-style interaction that only pays off two levels down, which is precisely why an ensemble of many shallow trees outperforms one deep tree.",
+   "minutes": 25,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - Chapter 06 Machine Learning, 01. Classical Machine Learning",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2006%20-%20machine%20learning/01.%20classical%20machine%20learning.md"
+   }
+  },
+  {
+   "name": "Impurity criteria and the piecewise-constant geometry of a tree",
+   "learn": "For regression the impurity is the node variance and the optimal leaf constant is the mean, which falls straight out of setting d/dc sum (y_i - c)^2 = 0; swap to absolute error and the optimal constant is the median, which is where the robustness comes from. For classification, Gini 1 - sum p_k^2 versus entropy -sum p_k log p_k rank splits almost identically - Gini is the second-order approximation of entropy about the uniform point - and Gini is the sklearn default because there is no log to evaluate. Understand the axis-aligned consequence physically: every boundary is a union of axis-parallel boxes, so a 45-degree separating line is approximated by a staircase and consumes many splits, while any monotone transform of a single feature (log, standardisation, rank) changes nothing at all, which is why you never scale features for trees and why a StandardScaler in a tree pipeline is a tell. Know the extrapolation failure cold: outside the training range of a feature the prediction is frozen at the boundary leaf's constant, so a booster trained on 2023 prices can never predict a 2025 price above the highest it ever saw - the single most common surprise on a time-trending target, and the reason you detrend or model deltas.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - Decision Trees (user guide: criteria, mathematical formulation, tips)",
+    "url": "https://scikit-learn.org/stable/modules/tree.html"
+   }
+  },
+  {
+   "name": "Capacity control on a single tree: pre-pruning knobs versus cost-complexity pruning",
+   "learn": "max_depth, min_samples_split, min_samples_leaf, max_leaf_nodes and min_impurity_decrease are all pre-pruning: they halt the recursion early and are therefore greedy about capacity in the same way the split search is greedy about structure, so they can stop just before a split that would have unlocked a strong one below it. Minimal cost-complexity pruning is the principled post-pruning alternative: define R_alpha(T) = R(T) + alpha * |leaves(T)|; for each alpha there is a unique smallest subtree minimising it, and cost_complexity_pruning_path(X, y) hands you the finite ladder of effective alphas with their impurities so you can choose alpha by cross-validation rather than by eye. Fit the whole ladder once, plot test score against alpha, and see the classic hump - that picture is the cleanest demonstration of the bias-variance trade-off you will ever draw for a customer. Then be able to say why boosting almost never uses ccp_alpha: the base learners are deliberately weak (depth 3 to 8), so capacity is governed by the number of trees and the learning rate, not by pruning any one of them.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - Minimal cost-complexity pruning (R_alpha(T), effective alphas, pruning path)",
+    "url": "https://scikit-learn.org/stable/modules/tree.html#minimal-cost-complexity-pruning"
+   }
+  },
+  {
+   "name": "Bagging and the bootstrap: the variance formula and its ceiling",
+   "learn": "Derive the one equation that explains every ensemble: for B identically distributed predictors each with variance sigma^2 and pairwise correlation rho, Var(mean) = rho * sigma^2 + ((1 - rho)/B) * sigma^2. Read both terms out loud - the second vanishes as B grows, so more trees never hurt accuracy and only cost time and memory; the first does not, so rho is a hard floor that no number of trees can break through, and lowering rho is therefore the only remaining lever. Bagging leaves bias roughly unchanged, which is why its base learners should be deep, unpruned, low-bias/high-variance trees - the exact opposite of a boosting base learner, and a distinction people get backwards constantly. Know that a bootstrap sample of size n contains about 1 - (1 - 1/n)^n -> 1 - 1/e = 63.2 percent distinct rows, so roughly 36.8 percent are out-of-bag, which is where the free validation estimate comes from. BaggingRegressor/BaggingClassifier(estimator=..., n_estimators, max_samples, max_features, bootstrap) generalises the whole idea to any base estimator, which is worth knowing when the customer's model is not a tree.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - Bagging meta-estimator",
+    "url": "https://scikit-learn.org/stable/modules/ensemble.html#bagging-meta-estimator"
+   }
+  },
+  {
+   "name": "Random forests: decorrelation via max_features, and what OOB is worth",
+   "learn": "The random forest's entire addition over bagging is one line inside the split search - sample max_features columns at each node, not once per tree - and its sole purpose is to lower rho in the variance formula so that one dominant feature cannot make every tree the same tree. Know the current defaults and why they differ by task: max_features=1.0 for RandomForestRegressor and 'sqrt' for RandomForestClassifier; treat max_features as the primary tuning knob and min_samples_leaf as the second, and treat n_estimators as a budget rather than a hyperparameter because the OOB curve flattens monotonically and never turns up. oob_score=True gives a held-out estimate from the ~36.8 percent of rows each tree never saw, but it is valid only for i.i.d. rows: on grouped data (many rows per customer) or time-ordered data it is optimistic by a wide margin and will flatter you into shipping. Extra Trees draw the threshold at random within a feature as well, trading a little more bias for less variance and a substantially faster fit - a good default when n is large and you need a baseline in one minute.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - Random forests (max_features, OOB, extremely randomized trees)",
+    "url": "https://scikit-learn.org/stable/modules/ensemble.html#random-forests"
+   }
+  },
+  {
+   "name": "Feature importance: why MDI lies, and what permutation importance costs",
+   "learn": "feature_importances_ on any sklearn tree ensemble is mean decrease in impurity, accumulated on the training set, and it is structurally biased toward high-cardinality and continuous features because such features offer more candidate thresholds and can therefore reduce impurity by chance alone - the canonical demonstration adds a random unique-ID column to the Titanic data and watches it outrank sex. permutation_importance(model, X_val, y_val, n_repeats=10, random_state=0) instead measures the drop in a chosen scoring metric when one column is shuffled, on held-out data, so it answers 'does this model rely on it to generalise' rather than 'did the fitting procedure split on it'. Know permutation importance's own failure mode: correlated features split the credit and both look unimportant because the model recovers the signal from the twin - the fix is to cluster features by Spearman rank correlation and permute whole groups together. Never hand a customer an MDI bar chart captioned 'the drivers of churn'; it is a statement about the fitting procedure, not about their business, and it is the single most common way a model briefing goes wrong.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - Permutation Importance vs Random Forest Feature Importance (MDI)",
+    "url": "https://scikit-learn.org/stable/auto_examples/inspection/plot_permutation_importance.html"
+   }
+  },
+  {
+   "name": "Forward stagewise additive modelling: deriving the squared-error update by hand",
+   "learn": "Write F_m(x) = F_{m-1}(x) + nu * h_m(x) and the greedy step h_m = argmin_h sum_i L(y_i, F_{m-1}(x_i) + h(x_i)), then make the key move: the steepest-descent direction in function space at row i is the negative gradient g_i = -[dL/dF] evaluated at F_{m-1}(x_i), so you fit a regression tree to the pseudo-residuals r_i = -g_i by squared error and then set each leaf value by a line search over the rows that land in it. Do the squared-error case completely: L = 0.5 (y - F)^2 gives dL/dF = F - y, so r_i = y_i - F_{m-1}(x_i) is literally the residual and the line-search leaf value is the mean residual in the leaf, with F_0 = mean(y) as the constant minimiser. Do the same for absolute error and watch the leaf value become the median of the residuals while the fitted tree still uses squared error on the pseudo-residuals - the two are separate choices, and confusing them is a classic implementation bug. Write that whole chain on paper before you write a line of code, then verify your implementation reproduces sklearn's GradientBoostingRegressor to float noise on a small dataset at the same seed, same depth and subsample=1.0.",
+   "minutes": 35,
+   "resource": {
+    "label": "scikit-learn - Gradient-boosted trees (mathematical formulation, loss functions, shrinkage)",
+    "url": "https://scikit-learn.org/stable/modules/ensemble.html#gradient-boosted-trees"
+   }
+  },
+  {
+   "name": "Second-order boosting: gradients, Hessians and the Newton leaf value for log loss",
+   "learn": "Expand the loss to second order around the current prediction: L(y, F + h) ~= L(y, F) + g*h + 0.5*k*h^2 with g_i = dL/dF and k_i = d2L/dF2. For a fixed tree structure, leaf j containing rows I_j emits a single constant w_j, so the objective is separable per leaf and quadratic in w_j and solves in closed form: w_j* = -(sum_{i in I_j} g_i) / (sum_{i in I_j} k_i + lambda). Now do log loss entirely by hand: with p = sigmoid(F), L = -[y log p + (1-y) log(1-p)] gives g = p - y and k = p(1-p), hence w_j = -sum(p - y) / (sum p(1-p) + lambda) - Friedman's leaf value - and F_0 = log(pbar / (1 - pbar)), the base logit, which is why an XGBoost binary model starts from base_score in log-odds space rather than at 0.5. Read off the two consequences you will use in front of a customer: rows the model is already confident about have k -> 0 and stop contributing curvature, so one loud outlier can dominate a leaf's weight; and min_child_weight is a threshold on sum(k) in a child - a minimum amount of remaining uncertainty, not a row count. Squared error has k = 1 identically, so min_child_weight degenerates to a row count there, which is why the same numeric value means completely different things on a regression job and a classification job.",
+   "minutes": 35,
+   "resource": {
+    "label": "XGBoost docs - Introduction to Boosted Trees (second-order expansion, leaf weight, structure score)",
+    "url": "https://xgboost.readthedocs.io/en/stable/tutorials/model.html"
+   }
+  },
+  {
+   "name": "XGBoost's regularised objective: structure score, split gain, gamma and lambda",
+   "learn": "Substitute w_j* back into the quadratic and you get the structure score Obj = -0.5 * sum_j (G_j^2 / (H_j + lambda)) + gamma*T, where G_j and H_j are the summed gradients and Hessians in leaf j - the only principled 'how good is this tree shape' number in the field, and lower is better. The split gain follows in one line: Gain = 0.5 * [ G_L^2/(H_L + lambda) + G_R^2/(H_R + lambda) - (G_L + G_R)^2/(H_L + H_R + lambda) ] - gamma, and a split is accepted only when Gain > 0, so gamma is literally a minimum gain threshold measured in loss units and lambda is ridge shrinkage on leaf weights that also damps splits on small, high-variance leaves. Map maths to flags so you can tune without guessing: lambda = reg_lambda (default 1), alpha = reg_alpha (L1 on leaf weights, default 0), gamma = min_split_loss (default 0), plus max_depth, min_child_weight and max_delta_step as the rest of the capacity budget. Read Section 2 of the paper for this derivation and Sections 3-4 for the systems work - the sparsity-aware split, the weighted quantile sketch, the cache-aware block layout - because 'why is it so fast' is a question you will get and 'it is written in C++' is not an answer.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv - XGBoost: A Scalable Tree Boosting System (Chen and Guestrin)",
+    "url": "https://arxiv.org/abs/1603.02754"
+   }
+  },
+  {
+   "name": "Shrinkage and stochastic subsampling: two independent regularisers",
+   "learn": "The learning rate nu multiplies every leaf value, so nu and n_estimators trade off close to hyperbolically - halving nu roughly doubles the trees needed to reach the same training loss - and a small nu with many trees generalises better because each step commits less to the current residual pattern. Fix the protocol you will use forever: pick a small nu (0.05, or 0.03 when you have the compute), set n_estimators absurdly high, and let early stopping choose the count; never put nu and n_estimators on the same grid, because you are then searching a one-dimensional curve in two dimensions and paying quadratically for it. Row subsampling (XGBoost subsample, LightGBM bagging_fraction with bagging_freq) injects bagging-style noise but applies it per boosting iteration rather than per model; column subsampling in XGBoost is three separate knobs - colsample_bytree, colsample_bylevel, colsample_bynode - and they multiply, so setting all three to 0.5 leaves each split searching 12.5 percent of the columns, which is a much harsher regulariser than anyone intends. Know that subsample < 1 makes the validation curve visibly noisy and the run non-deterministic without a fixed seed, and that column subsampling is the most effective single defence when you have many weakly informative correlated features.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - Shrinkage via learning rate (and subsampling)",
+    "url": "https://scikit-learn.org/stable/modules/ensemble.html#shrinkage-via-learning-rate"
+   }
+  },
+  {
+   "name": "Writing the NumPy booster: prefix sums, the split loop, and where it will diverge",
+   "learn": "Plan the implementation before writing it. Presort every column once with np.argsort and carry the ordering down the tree; at each node accumulate G and H with np.cumsum over the sorted rows so every candidate threshold's (G_L, H_L) is one array lookup and an entire feature is scored in a single vectorised expression rather than a Python loop - this is the difference between a toy and something you can actually benchmark. Handle the details that silently produce wrong gains: skip candidate positions where consecutive x values are equal (tied values must fall on the same side), enforce min_child_weight against sum(k) rather than a row count, respect max_depth in the recursion, apply row and column subsampling per tree, and multiply every leaf by the learning rate exactly once. Then expect the divergence from the libraries and be able to explain each source: hist-based XGBoost and LightGBM split on bin edges rather than exact midpoints, their default base_score/init differs, sklearn does a per-leaf line search rather than the Newton form, and float32 accumulation in the libraries against your float64 moves the fourth decimal. Benchmark honestly - RMSE and wall-clock fit time in the same table - and expect to be 50 to 500 times slower, which is the point of the exercise.",
+   "minutes": 30,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - Chapter 06 Machine Learning, 02. Gradient Machine Learning",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2006%20-%20machine%20learning/02.%20gradient%20machine%20learning.md"
+   }
+  },
+  {
+   "name": "Histogram split-finding: tree_method, max_bin, and the approximation you agreed to",
+   "learn": "Exact greedy scans every distinct value at every node; hist buckets each feature into max_bin buckets (256 by default) exactly once, after which split-finding is a scan over 256 bins instead of n rows, turning the per-node cost from O(n) into O(bins) and making the inner loop cache-resident. Know the flags: tree_method in {auto, exact, approx, hist}, with hist the default from XGBoost 2.0 and the only method carrying GPU support via device='cuda'; LightGBM's equivalents are max_bin and min_data_in_bin. Be explicit about what you traded away: thresholds can now only land on bin edges, so a genuinely important cut at the 0.3rd percentile of a heavily skewed feature can be invisible at max_bin=256 - raise max_bin when a feature is skewed and memory allows, lower it deliberately as a regulariser on small noisy data. The histogram subtraction trick - compute the histogram for the smaller child and obtain the sibling by subtracting it from the parent's - is why one child of every split is effectively free, and it is the main structural reason modern GBDT libraries scale to tens of millions of rows on one machine.",
+   "minutes": 20,
+   "resource": {
+    "label": "XGBoost docs - Tree Methods (exact, approx, hist)",
+    "url": "https://xgboost.readthedocs.io/en/stable/treemethod.html"
+   }
+  },
+  {
+   "name": "LightGBM: leaf-wise growth, num_leaves, GOSS and EFB",
+   "learn": "XGBoost grows level-wise by default (every node at depth d before any at depth d+1); LightGBM grows leaf-wise, always splitting whichever leaf anywhere in the tree has the highest gain, so at an equal leaf count it reaches a strictly lower training loss - and on small or noisy data it reaches that loss by growing one deep unbalanced branch that memorises a handful of rows. The tuning consequence is concrete: num_leaves is your capacity knob, not max_depth, the guardrail is num_leaves <= 2^max_depth (approaching that bound is just level-wise growth again), and min_data_in_leaf is what actually stops the pathological branch. GOSS is not plain subsampling: it keeps all large-gradient rows, randomly samples a fraction of the small-gradient ones, and multiplies the sampled ones by (1-a)/b to keep the gain estimate unbiased - importance sampling of the gradient. EFB bundles mutually exclusive sparse columns (one-hot blocks that are rarely non-zero together) into a single feature so a ten-thousand-column sparse matrix is scanned as if it had a few hundred. State the rule out loud: leaf-wise plus histogram wins on wide, large-n data; below roughly ten thousand rows, or on a very noisy target, level-wise XGBoost at max_depth 3-6 is the safer default.",
+   "minutes": 30,
+   "resource": {
+    "label": "LightGBM docs - Features (leaf-wise growth, GOSS, EFB, histogram optimisation)",
+    "url": "https://lightgbm.readthedocs.io/en/stable/Features.html"
+   }
+  },
+  {
+   "name": "Reading train/validation curves and naming the knob to turn first",
+   "learn": "This is the diagnostic skill the whole topic exists for. Pull the per-iteration losses out of evals_result_ / evals_result() and plot training and validation together against boosting round, then classify. Both still falling at the final iteration is underfit: raise n_estimators first because it is nearly free, then depth/num_leaves, then lower the regularisation. Training loss near zero while validation turned upward hundreds of rounds ago is overfit, and the order is capacity first: cut max_depth or num_leaves, then raise min_child_weight / min_data_in_leaf, then lower subsample and colsample, then raise reg_lambda, and only then reduce the learning rate - which mostly buys a finer-grained version of the same trade-off rather than a different one. A validation curve that is flat and high from round one is not a tuning problem at all: it is a feature or a target-definition problem, and more compute will not touch it. A validation curve sitting below the training curve means the validation split is easier, is leaking, or a train-only regulariser like DART dropout is active. Work through LightGBM's own 'deal with over-fitting' list so you can cite a source in front of the customer's data scientist instead of asserting a preference.",
+   "minutes": 30,
+   "resource": {
+    "label": "LightGBM docs - Parameters Tuning (faster speed, better accuracy, deal with over-fitting)",
+    "url": "https://lightgbm.readthedocs.io/en/stable/Parameters-Tuning.html"
+   }
+  },
+  {
+   "name": "Early stopping mechanics and the eval-set contract",
+   "learn": "Use xgb.train(..., evals=[(dtrain,'train'), (dvalid,'valid')], callbacks=[xgb.callback.EarlyStopping(rounds=50, save_best=True, maximize=False)]) or the equivalent LightGBM lgb.early_stopping(stopping_rounds=50) callback, and know the sharp edge: stopping watches the LAST entry in the evals list, so an evals list that ends with the training set will never stop and you will silently train to the cap. After the fit, best_iteration and best_score are the only numbers to trust, and prediction must use iteration_range=(0, best_iteration + 1) unless the model was saved with save_best - forgetting this ships the overfit tail of the ensemble to production. The discipline that separates honest work from cheating: the early-stopping set is a third split, not your test set, because you have now used it to select n_estimators, so any metric reported on it is optimistically biased and the number you hand the customer must come from data that no fitting decision touched. With subsample < 1 the validation curve is noisy, so rounds=10 will stop on a fluctuation and 50 is a sane floor; and always check whether the run stopped early or simply exhausted n_estimators, because those are opposite diagnoses.",
+   "minutes": 20,
+   "resource": {
+    "label": "XGBoost docs - Callback Functions (EarlyStopping, best_iteration)",
+    "url": "https://xgboost.readthedocs.io/en/stable/python/callbacks.html"
+   }
+  },
+  {
+   "name": "Missing values: the sparsity-aware default direction",
+   "learn": "Trees are one of the few model families that handle NaN natively and correctly, and knowing this stops you from destroying information at the front of the pipeline. XGBoost's sparsity-aware split learns a default direction per node by evaluating the gain twice - all missing rows sent left, then all sent right - and keeping the better one, so missingness itself becomes a usable signal; sklearn's HistGradientBoosting does the same, and LightGBM exposes use_missing and zero_as_missing. The implication for customer pipelines: median-imputing before a booster usually removes information rather than adding it, and a -999 sentinel works but is strictly worse than a learned direction because it also distorts the split candidates. The trap to audit for: when missingness is informative and its mechanism changes between training and production - a source system that starts populating a field in March - the learned direction becomes silently wrong for that feature, so track per-feature missingness rate by time period on both sides of the deployment boundary. Note that plain sklearn DecisionTree and RandomForest only gained NaN support in recent versions, so check the version in the customer's environment rather than assuming.",
+   "minutes": 15,
+   "resource": {
+    "label": "scikit-learn - Histogram-based gradient boosting: missing values support",
+    "url": "https://scikit-learn.org/stable/modules/ensemble.html#missing-values-support"
+   }
+  },
+  {
+   "name": "Categorical features: native handling versus the target-encoding leak",
+   "learn": "One-hot encoding a 5000-level column is a disaster for trees: each dummy is near-constant, the gain of splitting on it is tiny, and the level's signal is smeared across 5000 weakly informative columns that column subsampling then throws away. Know the three real options and their controls: LightGBM's native categorical_feature (Fisher-style optimal partitioning on categories sorted by their accumulated gradient statistics, with min_data_per_group and cat_smooth to stop it carving out single-row categories), XGBoost's enable_categorical=True with max_cat_to_onehot, and target/mean encoding. If you encode, encode with cross-fitting: sklearn's TargetEncoder uses an internal cross-fitting scheme inside fit_transform precisely so a row's encoding is never computed from that row's own target, and it shrinks rare categories toward the global mean via a smoothing factor. Naive target encoding computed over the whole training set before the split is one of the highest-frequency leaks in real tabular work - the model reads the target back out of the feature, cross-validation looks superb, production does not - and it is worth being able to spot it in someone else's notebook in under a minute. Finally, decide explicitly what an unseen category maps to at inference time, because the default is often a crash.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - TargetEncoder (cross-fitting, smoothing)",
+    "url": "https://scikit-learn.org/stable/modules/preprocessing.html#target-encoder"
+   }
+  },
+  {
+   "name": "Tuning honestly: search order, budget, and the bias of the winning score",
+   "learn": "Fix a search order instead of a grid: learning rate small and fixed, n_estimators by early stopping, then num_leaves/max_depth, then min_child_weight / min_data_in_leaf, then subsample and colsample, then reg_lambda and reg_alpha. Random or Bayesian search dominates full grid search in any space above three dimensions; Optuna's default TPESampler models p(params | good trials) and p(params | bad trials) and samples where their ratio is large, and suggest_float(..., log=True) is mandatory for the learning rate and the regularisation terms because they act multiplicatively. Pair it with a pruner so hopeless trials die at round 50 rather than round 5000, which is usually a 5-10x effective budget increase. Then apply the statistical discipline that most people skip: the CV score of the best of 300 trials is the maximum of 300 noisy numbers and is therefore biased upward by roughly the spread of the fold noise, so quote a nested-CV or untouched-holdout number instead; and choose the split scheme from the data's dependence structure - GroupKFold when many rows share a customer, TimeSeriesSplit when deployment runs forward in time - because a plain KFold on either inflates every figure you are about to present. Topic 103 goes deeper on the evaluation protocol itself.",
+   "minutes": 25,
+   "resource": {
+    "label": "Optuna - TPESampler (Tree-structured Parzen Estimator)",
+    "url": "https://optuna.readthedocs.io/en/stable/reference/samplers/generated/optuna.samplers.TPESampler.html"
+   }
+  },
+  {
+   "name": "Choosing the objective: Poisson, Tweedie, quantile and custom losses",
+   "learn": "The objective is a modelling decision, not a default. reg:squarederror fits the conditional mean under Gaussian noise and will cheerfully predict negative counts; count:poisson uses the log link and needs max_delta_step to keep the exponential from exploding, and it is the right call for demand and event counts; reg:tweedie with tweedie_variance_power in (1, 2) covers the zero-inflated positive targets that dominate insurance, usage and revenue data; reg:absoluteerror fits the median; and reg:quantileerror with quantile_alpha (LightGBM: objective='quantile', alpha=) gives you a prediction interval by fitting the 0.1 and 0.9 quantiles as separate models - which is usually what a customer actually means by 'how confident is it'. For anything else, supply a custom obj returning (grad, hess) per row, and respect the two rules that make it work: the Hessian must be strictly positive (clip it away from zero or the leaf weights blow up), and you must also supply a custom feval and set disable_default_eval_metric because the built-in metric no longer corresponds to your loss. Always validate a custom objective by reimplementing a built-in one first and matching its loss curve round for round.",
+   "minutes": 20,
+   "resource": {
+    "label": "XGBoost docs - Custom Objective and Evaluation Metric (grad, hess, feval)",
+    "url": "https://xgboost.readthedocs.io/en/stable/tutorials/custom_metric_obj.html"
+   }
+  },
+  {
+   "name": "Defending the model: monotonic constraints, TreeSHAP and calibration",
+   "learn": "Three things convert a booster from a black box into something a customer will sign off on. Monotonic constraints (monotone_constraints=(1, 0, -1), or LightGBM's monotone_constraints with monotone_constraints_method) enforce at split time that the model is non-decreasing in price or non-increasing in tenure; they cost a little accuracy and buy a model that cannot produce the embarrassing non-monotone counterexample their domain expert will hunt for in the first ten minutes, and interaction constraints do the same for which features may co-occur on a root-to-leaf path. TreeSHAP computes exact Shapley values for tree ensembles in O(T * L * D^2) rather than exponential time, and its additivity property means every prediction decomposes as base_value plus per-feature contributions that sum exactly to the model output - that exact-sum property is what makes a per-row explanation defensible in a dispute. State the caveat out loud rather than being caught by it: SHAP attributions are conditional on the model, not causal, and the interventional (background-dataset) and tree_path_dependent variants genuinely disagree when features are correlated, so name which one you ran. Finally, a booster stopped at an arbitrary iteration is usually not calibrated - check a reliability curve and fit a sigmoid or isotonic CalibratedClassifierCV on a held-out split before anyone multiplies your output by a dollar amount.",
+   "minutes": 25,
+   "resource": {
+    "label": "Interpretable Machine Learning (Molnar) - SHAP, including TreeSHAP and its caveats",
+    "url": "https://christophm.github.io/interpretable-ml-book/shap.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can derive the gradient-boosting update on a whiteboard, closed book, in under ten minutes for both squared error (g = F - y, so pseudo-residuals are literal residuals and the leaf value is their mean) and log loss (g = p - y, k = p(1-p), leaf value -sum(g)/(sum(k) + lambda), F_0 = the base logit).",
+  "You can write the XGBoost structure score and split-gain formula from memory, and use it to explain in one sentence what gamma does, what lambda does, and why min_child_weight means a row count under squared error but an uncertainty budget under log loss.",
+  "You can ship a NumPy-only gradient-boosted regression tree with vectorised cumsum split-finding, shrinkage, row and column subsampling and early stopping, match sklearn's GradientBoostingRegressor to within float noise at matched settings, and name every remaining source of divergence against XGBoost and LightGBM.",
+  "You can look at one train/validation curve and state within thirty seconds whether the model is overfit, underfit, or has a data problem, and name the single knob you would turn first and why - depth/num_leaves, learning rate, n_estimators, subsample or min_child_weight.",
+  "You can say when LightGBM's leaf-wise histogram growth beats XGBoost's level-wise growth (wide, large-n, many weak features) and when it overfits instead (small n, noisy target, num_leaves unconstrained by min_data_in_leaf), and defend the choice with the variance and capacity argument rather than a benchmark anecdote.",
+  "You can produce a benchmark table on one real tabular dataset with RMSE and wall-clock fit time for a from-scratch booster, sklearn RandomForest, XGBoost and LightGBM at comparable capacity, and explain every gap in it.",
+  "You can spot target-encoding leakage, a high-cardinality ID feature riding the MDI chart, and an i.i.d. CV split on grouped or time-ordered data in someone else's notebook, and state what each one does to the reported metric.",
+  "You can hand a customer a defensible model briefing: permutation importance on held-out data rather than MDI, a monotonic constraint on the feature their domain expert cares about, a TreeSHAP explanation for one specific row with the variant named, and a reliability curve showing the outputs are probabilities."
+ ],
+ "failureModes": [
+  "Mean target encoding was computed over the entire training set before the CV split, so each row's feature encodes its own label; cross-validated AUC came in at 0.97, the model shipped, and production AUC was 0.61 with no code change to blame.",
+  "num_leaves was left at LightGBM's default 31 on an 8000-row dataset with min_data_in_leaf untouched; leaf-wise growth drove one branch deep enough to isolate individual rows, training loss went to nearly zero, and the model memorised the training set while every default-looking parameter appeared reasonable in the config.",
+  "The evals list passed to xgb.train ended with the training set rather than the validation set, so EarlyStopping watched training loss, never triggered, and the run trained to the 5000-round cap - the log looked clean and nobody noticed until inference latency tripled.",
+  "feature_importances_ from a random forest was presented to the customer's leadership as 'the drivers of churn'; the top feature was a near-unique account identifier whose MDI score came from cardinality bias, and a quarter of retention budget was reallocated on the strength of an artefact of the fitting procedure.",
+  "A booster was validated with a plain KFold on data holding dozens of rows per customer and months of history; the same customer appeared in train and validation folds, every metric was inflated, and the model that won selection was the one best at recognising customers rather than predicting behaviour.",
+  "Predictions were generated with the full ensemble instead of iteration_range=(0, best_iteration + 1) after an early-stopped fit, so the overfit tail of trees was included at inference; scores drifted from the validated numbers by a few points and the discrepancy was investigated for a week as a feature-pipeline mismatch.",
+  "A demand model was trained with reg:squarederror on right-skewed daily counts and predicted negative demand for low-volume SKUs, which the downstream ordering system clipped to zero; the clipping hid the misspecification, and the real problem - the wrong noise model, needing count:poisson or a Tweedie objective - went undiagnosed for a full planning cycle.",
+  "A booster trained on two years of prices was asked to forecast a period above the historical maximum; because a tree's prediction is the boundary leaf's constant, every forecast flatlined at the highest observed value, and the flat line was read as a stable market rather than an extrapolation failure."
+ ],
+ "interviewQuestions": [
+  "Derive the gradient-boosting leaf value for log loss from a second-order expansion. Start from L = -[y log p + (1-y) log(1-p)], get g and the Hessian, write w_j* = -G/(H + lambda), and then tell me what min_child_weight is thresholding and why that value means something completely different on a regression problem.",
+  "Write the split-gain formula XGBoost uses and explain from it, not from documentation, what gamma and lambda each do to the resulting tree. What happens to gain when a candidate child contains only rows the model already predicts confidently?",
+  "Debug: training RMSE is 0.02 and validation RMSE is 1.4 and rising after round 300, on 6000 rows with 400 features. Give me the order in which you turn knobs and the reason for each, and tell me which of those changes you expect to help least.",
+  "When would you pick LightGBM over XGBoost and when would that choice actively hurt you? Explain leaf-wise versus level-wise growth in terms of capacity and variance, and give me the parameter that is your guardrail in each library.",
+  "Design: a customer has three years of daily demand per SKU, 40 features, heavy zero-inflation, and wants a number their ordering system can act on plus an interval. What objective, what validation split, what do you do about categorical SKU identifiers, and what do you hand them to show the model is trustworthy?",
+  "A colleague shows you a random forest with 0.99 cross-validated AUC and a feature-importance chart. What are the first four things you check, and for each one say what the symptom would look like and what it would do to the reported number?",
+  "Explain why bagging needs deep unpruned trees while boosting needs shallow ones. Use the Var(mean) = rho*sigma^2 + ((1-rho)/B)*sigma^2 decomposition in your answer, and say what random forests change to attack which term."
+ ],
+ "proofOfWork": "A public repo `boosting-forensics` that turns the from-scratch booster into a diagnostic kit you could hand to a customer's data team. On top of the NumPy GBRT it adds `curve_triage.py`, which takes any fitted XGBoost or LightGBM booster plus its evals_result, plots train and validation loss against boosting round, and emits a one-line verdict with a ranked knob list - 'overfit from round 310: cut num_leaves 63 to 31, then raise min_data_in_leaf, then lower colsample_bytree' - so the diagnosis is reproducible rather than a feeling. It ships `leak_hunt.py`, which runs the four checks that catch most tabular disasters: per-feature permutation importance on held-out data compared against MDI to expose cardinality bias, a target-shuffle null so any feature whose importance clears the permuted-target distribution by an implausible margin is flagged, a group- and time-overlap detector that reports whether the CV split leaks entities or future rows, and a train-versus-serve missingness-rate and category-set diff. `objective_zoo.ipynb` fits the same zero-inflated count target five ways - squared error, Poisson, Tweedie at two variance powers, and a pair of quantile models - and tabulates RMSE, the count of negative predictions, and interval coverage, which is the table that settles the 'why not just use RMSE' argument in one screen. `newton_check.py` is the correctness harness: it asserts that the hand-derived leaf value -G/(H + lambda) matches XGBoost's dumped leaf weights on a single-tree, lambda-fixed fit to five decimal places, and that the structure score computed from the model dump reproduces the reported training loss - the test that proves the derivation and the library agree. The README carries the benchmark table (RMSE and fit time for the NumPy booster, RandomForest, XGBoost and LightGBM at matched capacity) with a written explanation of every gap, plus a one-page `MODEL-BRIEFING.md` template containing the held-out metric, the reliability curve, the monotonic constraints applied and why, and a TreeSHAP explanation of one specific row with the SHAP variant named. CI runs the newton_check assertions and the leak-hunt unit tests against a synthetic dataset with a deliberately planted leak on every push."
+}

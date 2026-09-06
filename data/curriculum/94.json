@@ -1,0 +1,228 @@
+{
+ "i": 94,
+ "topic": "Calculus and optimisation: gradients, chain rule, convexity, gradient descent variants",
+ "track": "M. Mathematical Foundations",
+ "month": 1,
+ "hours": 8,
+ "why": "Every model an FDE ships - a logistic regression scoring the customer's leads, an XGBoost ranker, a LoRA fine-tune - is a loss function being walked downhill, and when the walk goes wrong the customer sees 'the AI does not work' while you have to say in the room whether it is the learning rate, the feature scaling, a leaking label, or a backward pass that has been silently zero since Tuesday. Optimisation is the only part of ML where the failure is usually a mechanical fact you can prove in ten minutes with a finite-difference check and a log-scale loss plot, rather than a matter of opinion. It is also the layer where you either can or cannot answer 'why is Adam better here than SGD, and what would you have to change about the data to make SGD fine?' - which is exactly the question that separates someone who runs training scripts from someone a customer trusts with their model.",
+ "prerequisites": [
+  "Linear algebra at the level of Topic 93: quadratic forms x^T A x, symmetric positive-definite matrices, eigendecomposition, spectral norm and why lambda_max/lambda_min is a meaningful ratio",
+  "Single-variable derivative rules from memory: product, quotient, chain, and the derivatives of exp, log, x^n, sigmoid and tanh",
+  "NumPy fluency: broadcasting, axis semantics, dtype (float32 vs float64) and machine epsilon (Topic 99 goes deeper on floating point; you need enough here to choose a finite-difference step)",
+  "Python packaging and pytest from Topic 39, plus matplotlib, because the deliverable is a tested module with convergence plots, not a notebook",
+  "Enough ML framing to know what a loss is a function of: a parameter vector theta, a dataset, and a scalar output (Topic 100, supervised learning, builds directly on this)",
+  "Comfort reading summation notation and index notation for matrix products, since every backward-pass derivation is an index-bookkeeping exercise"
+ ],
+ "subtopics": [
+  {
+   "name": "The derivative as local linearisation: Taylor, and the descent lemma",
+   "learn": "Stop thinking of f'(x) as 'the slope' and start thinking of it as the coefficient of the best local linear model: f(x + d) = f(x) + f'(x)d + O(d^2). Write the first-order multivariate Taylor expansion f(x + d) ~= f(x) + grad f(x)^T d + (1/2) d^T H d and derive the descent lemma for an L-smooth f: f(x - eta * grad f) <= f(x) - eta(1 - L*eta/2)||grad f||^2, so any eta in (0, 2/L) strictly decreases f and eta = 1/L gives the guaranteed decrease ||grad f||^2 / (2L). You should be able to say, from that one inequality, why 'the loss went up' is either eta > 2/L or a bug, with nothing in between.",
+   "minutes": 20,
+   "resource": {
+    "label": "Maths, CS & AI Compendium - Chapter 03.01 Differential calculus",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2003%20-%20calculus/01.%20differential%20calculus.md"
+   }
+  },
+  {
+   "name": "Gradient, directional derivative, Jacobian, Hessian - and their shapes",
+   "learn": "Fix the shape algebra once so you never lose an hour to a transpose: for f: R^n -> R the gradient is n x 1 and points in the direction of steepest ascent (prove it from the directional derivative D_u f = grad f^T u maximised at u = grad f / ||grad f||); for g: R^n -> R^m the Jacobian J is m x n; the Hessian H is n x n and symmetric for C^2 functions (Schwarz/Clairaut). Know that grad(a^T x) = a, grad(x^T A x) = (A + A^T)x = 2Ax for symmetric A, and that the Hessian of (1/2)||Xw - y||^2 is X^T X - which is where the condition number of your data walks straight into the optimiser. Be able to compute grad and H by hand for least squares and for logistic regression's negative log-likelihood.",
+   "minutes": 25,
+   "resource": {
+    "label": "Maths, CS & AI Compendium - Chapter 03.03 Multivariate calculus",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2003%20-%20calculus/03.%20multivariate%20calculus.md"
+   }
+  },
+  {
+   "name": "The chain rule on a real network: softmax + cross-entropy end to end",
+   "learn": "Derive, on paper, the gradient of L = -sum_k y_k log p_k with p = softmax(z), z = W2 * relu(W1 x + b1) + b2. Get to the two results you should never look up again: dL/dz = p - y (the softmax Jacobian diag(p) - p p^T collapses against the cross-entropy gradient, which is why frameworks fuse them into one kernel and why torch.nn.CrossEntropyLoss takes logits, not probabilities), and dL/dW = delta * a^T with delta backpropagated as delta_1 = (W2^T delta_2) * 1[pre-activation > 0]. Write out every shape at every step. This derivation, closed-book, is a standard whiteboard ask and is also the exact code you will debug in Topic 110.",
+   "minutes": 30,
+   "resource": {
+    "label": "Dive into Deep Learning - Calculus (gradients, chain rule, shapes)",
+    "url": "https://d2l.ai/chapter_preliminaries/calculus.html"
+   }
+  },
+  {
+   "name": "Reverse-mode autodiff: VJPs, the cost asymmetry, and when forward mode wins",
+   "learn": "Understand autodiff as an ordering choice on a chain of Jacobian products J_n ... J_2 J_1. Forward mode computes J v (a JVP) in one sweep per input direction, costing n sweeps for n parameters; reverse mode computes v^T J (a VJP) in one sweep per output, so a scalar loss over 10^9 parameters costs one forward plus one backward - roughly 2-3x the forward pass in FLOPs, at the price of storing every activation. That asymmetry is the entire reason deep learning is trainable, and the reason memory, not compute, is what OOMs your customer's fine-tune. Know that jacrev/jacfwd (or torch.func.jacrev/jacfwd) let you pick, and that Hessian-vector products are cheap as forward-over-reverse without ever materialising H.",
+   "minutes": 25,
+   "resource": {
+    "label": "JAX - The Autodiff Cookbook (JVPs, VJPs, forward vs reverse)",
+    "url": "https://docs.jax.dev/en/latest/notebooks/autodiff_cookbook.html"
+   }
+  },
+  {
+   "name": "Building the tape: a scalar reverse-mode engine",
+   "learn": "Implement a Value class holding data, grad, _prev (parents) and a _backward closure; overload __add__, __mul__, __pow__, exp, log, tanh and relu so each records its local derivative; then backward() does a topological sort of the DAG and walks it in reverse, accumulating with += rather than = so a value used twice (weight sharing, residual connections) gets both contributions. Know why accumulation is the default in PyTorch too, hence why the loop needs optimizer.zero_grad(). Understand what detach() and torch.no_grad() do to the tape, and be able to explain why calling .item() or converting to NumPy mid-graph silently severs gradient flow.",
+   "minutes": 25,
+   "resource": {
+    "label": "karpathy/micrograd - a 100-line scalar autograd engine",
+    "url": "https://github.com/karpathy/micrograd"
+   }
+  },
+  {
+   "name": "Gradient checking: central differences, step size, and relative error",
+   "learn": "The check is (f(x + h e_i) - f(x - h e_i)) / (2h) versus your analytic partial, compared as relative error |a - b| / max(|a|, |b|, 1e-8). Central differences have O(h^2) truncation error against O(eps/h) roundoff, so the optimum is h ~ eps^(1/3) ~ 6e-6 in float64 (forward differences are O(h) and want h ~ sqrt(eps) ~ 1e-8) - and in float32 the whole exercise is worthless because eps = 1.19e-7 swamps the signal, so cast the model to float64 first. Accept < 1e-7 in float64, treat 1e-4 as a bug not noise, and never check at a kink: relu, abs, max-pool and hinge loss have no derivative at 0, so perturb away from the kink or the check will flag a correct gradient. Use scipy.optimize.check_grad and torch.autograd.gradcheck rather than hand-rolling once you know what they do.",
+   "minutes": 25,
+   "resource": {
+    "label": "SciPy - scipy.optimize.check_grad",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.check_grad.html"
+   }
+  },
+  {
+   "name": "Convexity: definitions, certificates, and which ML losses are actually convex",
+   "learn": "State all three characterisations and know which one you would use in an argument: the chord definition f(theta x + (1-theta) y) <= theta f(x) + (1-theta) f(y); the first-order condition f(y) >= f(x) + grad f(x)^T (y - x), i.e. every tangent plane is a global underestimator, which is why grad f = 0 implies a global minimum; and the second-order condition H psd. Build the certificate toolkit - nonneg combination, composition with an affine map, pointwise max, and the fact that a convex function of an affine function of w stays convex in w. Then classify honestly: least squares, ridge, logistic NLL, hinge/SVM and Lasso are convex in the parameters; a neural network with one hidden layer, k-means, matrix factorisation and anything with a learned nonlinearity inside are not. Know Jensen's inequality E[f(X)] >= f(E[X]) because it reappears in Topic 98 as the ELBO.",
+   "minutes": 30,
+   "resource": {
+    "label": "Dive into Deep Learning - Convexity (Jensen, local minima, constraints)",
+    "url": "https://d2l.ai/chapter_optimization/convexity.html"
+   }
+  },
+  {
+   "name": "Smoothness, strong convexity, the condition number, and convergence rates",
+   "learn": "Learn the two constants that govern everything: L-smoothness (grad is L-Lipschitz, i.e. H <= L I) upper-bounds curvature and caps the step at 2/L; mu-strong convexity (H >= mu I) lower-bounds it and buys a linear rate. Their ratio kappa = L/mu is the condition number, equal to lambda_max/lambda_min of the Hessian for a quadratic. Memorise the rate table: convex + smooth GD gives O(1/t); strongly convex + smooth GD gives (1 - 1/kappa)^t, so ~kappa*log(1/eps) iterations; Nesterov's accelerated method gives (1 - 1/sqrt(kappa))^t, so ~sqrt(kappa)*log(1/eps); plain SGD gives O(1/sqrt(t)) with a fixed noise floor. The practical upshot you will say out loud to a customer: kappa = 10^6 in your features means a million-fold more iterations, and rescaling the columns is a cheaper fix than a bigger GPU.",
+   "minutes": 25,
+   "resource": {
+    "label": "Boyd & Vandenberghe - Convex Optimization (free full text; ch.9 unconstrained minimisation, condition number and convergence)",
+    "url": "https://web.stanford.edu/~boyd/cvxbook/"
+   }
+  },
+  {
+   "name": "Gradient descent on a quadratic: deriving the zigzag",
+   "learn": "Take f(x) = (1/2) x^T A x with A symmetric positive-definite. In the eigenbasis the update x <- x - eta*A*x decouples into x_i <- (1 - eta*lambda_i) x_i, so convergence requires |1 - eta*lambda_i| < 1 for every i, i.e. eta < 2/lambda_max; the best fixed step is eta = 2/(lambda_min + lambda_max) with contraction (kappa - 1)/(kappa + 1). Derive that and you have derived the zigzag: the step is set by the steepest direction while progress is limited by the flattest, so the iterate oscillates across the narrow valley and creeps along it. Implement it in NumPy for kappa = 1, 10, 1000 and plot the iterate trajectory over contours - this plot is the single best asset for explaining 'why is training slow' to a non-specialist.",
+   "minutes": 25,
+   "resource": {
+    "label": "Dive into Deep Learning - Gradient Descent (learning rate, local minima, ill-conditioning)",
+    "url": "https://d2l.ai/chapter_optimization/gd.html"
+   }
+  },
+  {
+   "name": "SGD: the gradient as an estimator, its variance, and step-size conditions",
+   "learn": "The minibatch gradient is an unbiased estimator of the full gradient when the batch is sampled i.i.d. - E[g_B] = grad f - with covariance scaling as 1/B, so halving the batch doubles the gradient variance and roughly doubles the noise floor SGD settles at. That is why a constant step size does not converge to the optimum but to a ball around it of radius proportional to eta*sigma^2, and why the Robbins-Monro conditions sum(eta_t) = infinity and sum(eta_t^2) < infinity (satisfied by eta_t = eta_0 / t^a with a in (0.5, 1]) are what buy asymptotic convergence. Know the two ways the i.i.d. assumption breaks in customer data - a sorted-by-class or sorted-by-time file with shuffle=False, and duplicated rows from a bad join - and that both make the estimator biased within an epoch while every metric still looks plausible.",
+   "minutes": 30,
+   "resource": {
+    "label": "Dive into Deep Learning - Stochastic Gradient Descent (noise, dynamic learning rates)",
+    "url": "https://d2l.ai/chapter_optimization/sgd.html"
+   }
+  },
+  {
+   "name": "Momentum and Nesterov acceleration",
+   "learn": "Heavy ball: v <- beta*v + g; x <- x - eta*v, which in steady state takes an effective step of eta/(1 - beta), so beta = 0.9 is a hidden 10x on the learning rate - changing beta without changing eta is changing two things at once. Understand it as an exponentially weighted average that cancels the oscillating component across the valley and reinforces the consistent component along it, i.e. it partly buys back the kappa penalty. Nesterov evaluates the gradient at the look-ahead point x - eta*beta*v, which acts as a correction term and is what gets the provable (1 - 1/sqrt(kappa)) rate on smooth strongly convex problems. Know that PyTorch's SGD uses the 'v <- beta*v + g, x <- x - eta*v' convention (not the 'v <- beta*v + (1-beta)*g' one), so the same beta means different things across frameworks and blog posts.",
+   "minutes": 25,
+   "resource": {
+    "label": "Distill - Why Momentum Really Works",
+    "url": "https://distill.pub/2017/momentum/"
+   }
+  },
+  {
+   "name": "AdaGrad and RMSProp: diagonal preconditioning",
+   "learn": "AdaGrad accumulates s <- s + g*g and steps x <- x - eta * g / (sqrt(s) + epsilon), which is a diagonal approximation to a preconditioner: coordinates with historically large gradients get small steps. Its guarantee is for convex problems and its defect is mechanical - s is monotonically nondecreasing, so the effective step decays like 1/sqrt(t) forever and a long deep-learning run stalls before it converges. RMSProp fixes exactly that by making it a leaky average s <- gamma*s + (1 - gamma)*g*g with gamma ~ 0.9, giving a stationary scale. Be able to say why AdaGrad is still the right answer for sparse features (a rare one-hot column gets a large step precisely when it finally fires) and why epsilon lives outside the sqrt in the reference implementations.",
+   "minutes": 25,
+   "resource": {
+    "label": "Dive into Deep Learning - AdaGrad (preconditioning, sparse features)",
+    "url": "https://d2l.ai/chapter_optimization/adagrad.html"
+   }
+  },
+  {
+   "name": "Adam: derive the bias correction and know what the first step does",
+   "learn": "Adam is RMSProp plus momentum plus a correction: m <- b1*m + (1-b1)*g; v <- b2*v + (1-b2)*g*g; mhat = m/(1 - b1^t); vhat = v/(1 - b2^t); x <- x - eta * mhat / (sqrt(vhat) + eps). Derive the correction: with m_0 = 0, E[m_t] = (1 - b1^t) E[g], so early estimates are shrunk toward zero and the divisor undoes it exactly - without it, with b2 = 0.999, the second-moment estimate is ~1000x too small at t = 1 and the first step explodes. Then compute the first step by hand: at t = 1, mhat = g and sqrt(vhat) = |g|, so the update is exactly -eta * sign(g) per coordinate, independent of gradient magnitude. That single fact explains both Adam's robustness to bad loss scaling and why it happily takes a full-size step on pure noise, which is the argument for warmup. Read the paper for the bounds and know AMSGrad exists because the original convergence proof was wrong.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv 1412.6980 - Adam: A Method for Stochastic Optimization (Kingma & Ba)",
+    "url": "https://arxiv.org/abs/1412.6980"
+   }
+  },
+  {
+   "name": "Weight decay vs L2, and why AdamW is not a cosmetic change",
+   "learn": "For plain SGD, adding (lambda/2)||w||^2 to the loss and adding lambda*w to the gradient are the same thing. For Adam they are not: the L2 term enters g, so it is divided by sqrt(vhat) along with everything else, and coordinates with large gradient history get *less* decay - the opposite of the intended regularisation, and the reason 'Adam generalises worse' was folklore for years. AdamW decouples it: x <- x - eta * (mhat/(sqrt(vhat)+eps) + lambda*x). Know that torch.optim.Adam(weight_decay=) is the coupled L2 form while torch.optim.AdamW is the decoupled one, that decoupled lambda does not transfer numerically from a tuned coupled one, and that you should exclude biases and LayerNorm/BatchNorm gain-and-bias parameters from decay via parameter groups.",
+   "minutes": 20,
+   "resource": {
+    "label": "arXiv 1711.05101 - Decoupled Weight Decay Regularization (Loshchilov & Hutter)",
+    "url": "https://arxiv.org/abs/1711.05101"
+   }
+  },
+  {
+   "name": "Learning-rate schedules, warmup, and the LR range test",
+   "learn": "Know the shapes and what each is for: step/multistep decay, exponential, polynomial, cosine annealing (with and without warm restarts), one-cycle, and inverse-sqrt for transformers. Understand linear warmup as a variance argument - adaptive second moments are unreliable for the first few hundred steps, so you ramp eta from ~0 rather than let Adam take sign-sized steps on noise - and the linear scaling rule (multiply eta by k when you multiply the batch by k, with a few epochs of warmup) that makes large-batch training match small-batch. Run an LR range test: sweep eta geometrically over one epoch, plot loss against eta on a log x-axis, and take roughly an order of magnitude below the minimum as the max LR. In PyTorch know the trap that scheduler.step() belongs per-epoch for most schedulers but per-batch for OneCycleLR and warmup schedules.",
+   "minutes": 25,
+   "resource": {
+    "label": "Dive into Deep Learning - Learning Rate Scheduling (warmup, cosine, factor schedulers)",
+    "url": "https://d2l.ai/chapter_optimization/lr-scheduler.html"
+   }
+  },
+  {
+   "name": "Conditioning as a modelling choice: scaling, normalisation, and what BatchNorm buys",
+   "learn": "The condition number of X^T X, not the optimiser, is usually what makes a customer's tabular model slow to train: one column in dollars (1e6) next to one in [0,1] gives kappa around 1e12 and a plain SGD run that looks broken. Standardising columns (sklearn StandardScaler inside a Pipeline so the statistics are fit on train folds only - this is a leakage vector, see Topic 103) is a preconditioner that costs nothing. Understand normalisation layers as the same idea applied to activations mid-network, and know the honest state of the argument: the BatchNorm paper attributes the gain to reduced 'internal covariate shift', while later work argues the real mechanism is a smoother loss surface (smaller effective L). Be able to state the deployment consequences an FDE owns: BatchNorm's train/eval behaviour differs, it breaks with batch size 1 and with non-i.i.d. batches, and LayerNorm or GroupNorm is what you use when the customer's serving path is one row at a time.",
+   "minutes": 20,
+   "resource": {
+    "label": "arXiv 1502.03167 - Batch Normalization (Ioffe & Szegedy)",
+    "url": "https://arxiv.org/abs/1502.03167"
+   }
+  },
+  {
+   "name": "Reading a bad loss curve: an ordered diagnostic",
+   "learn": "Build the decision tree and rehearse it until it is reflex. Check the initial loss first: multiclass cross-entropy must start at ln(C) (2.3026 for 10 classes) and binary at ln(2) = 0.693 - a different starting value means the head is initialised wrong or the labels are misaligned. Loss exactly flat from step 0: no gradient reaching the parameters (requires_grad False, a detach, an optimizer constructed over the wrong parameter list, eta ~ 0). Loss to NaN/inf within tens of steps: eta above 2/L, a log(0) or division in the loss, or fp16 overflow. Smooth decrease then a sudden jump: one pathological batch or an exploding step - check grad-norm history, not just loss. Sawtooth that never descends: eta too high by ~10x. Slow monotone crawl with a huge grad-norm ratio between layers: ill-conditioning, fix by scaling/normalisation before touching the optimiser. And the master test that separates bug from hyperparameter: overfit a single batch of 8 examples to near-zero loss - if that fails, no learning rate will save you.",
+   "minutes": 30,
+   "resource": {
+    "label": "CS231n - Neural Networks Part 3: Learning and Evaluation (gradient checks, sanity checks, babysitting the learning process)",
+    "url": "https://cs231n.github.io/neural-networks-3/"
+   }
+  },
+  {
+   "name": "Beyond first order: Newton, Gauss-Newton, and L-BFGS",
+   "learn": "Newton's step is d = -H^{-1} grad f, which is affine-invariant (immune to kappa) and quadratically convergent near the optimum, but costs O(n^3) and is undefined when H is indefinite - hence damping/trust regions. For least squares, Gauss-Newton approximates H by J^T J (dropping the residual-curvature term) and Levenberg-Marquardt adds lambda*I to interpolate toward gradient descent. L-BFGS builds an implicit inverse-Hessian from the last m ~ 10-20 (s, y) pairs via the two-loop recursion, needs no matrix, and is the right default for smooth deterministic problems with up to ~10^5 parameters - which is why scipy.optimize.minimize(method='L-BFGS-B') and sklearn's LogisticRegression(solver='lbfgs') use it. Know precisely why it fails on deep learning: the curvature pairs assume a consistent objective, and minibatch noise makes s^T y unreliable, so the line search and the Hessian estimate both degrade.",
+   "minutes": 25,
+   "resource": {
+    "label": "SciPy - scipy.optimize.minimize (BFGS, L-BFGS-B, Newton-CG, trust-region methods)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.minimize.html"
+   }
+  },
+  {
+   "name": "Non-smooth and constrained: subgradients, proximal steps, projection, and clipping",
+   "learn": "|w| has no derivative at 0; its subdifferential is [-1, 1], and the optimality condition 0 in subdiff f(x*) is what makes Lasso produce exact zeros. Plain subgradient descent is slow (O(1/sqrt(t))) and never produces exact sparsity in floating point, so use the proximal step: prox for eta*lambda*||w||_1 is soft-thresholding, sign(w)*max(|w| - eta*lambda, 0) - that one line is ISTA and explains sklearn's coordinate-descent Lasso output. For constraints, projected gradient descent is x <- Proj_C(x - eta*grad f), and the KKT conditions (stationarity, primal/dual feasibility, complementary slackness) are the constrained analogue of grad f = 0. Recognise that torch.nn.utils.clip_grad_norm_(params, c) is literally a projection of the gradient onto the L2 ball of radius c - g <- g * min(1, c/||g||) - which is why it changes the descent direction not at all but the step length a lot, and why you log ||g|| before clipping to know whether it is firing.",
+   "minutes": 25,
+   "resource": {
+    "label": "CMU 10-725 Convex Optimization - lecture notes (subgradients, proximal gradient, KKT)",
+    "url": "https://www.stat.cmu.edu/~ryantibs/convexopt/"
+   }
+  },
+  {
+   "name": "Benchmarking optimisers honestly: Rosenbrock, ill-conditioned quadratics, and log-scale plots",
+   "learn": "Build the two-function test bench you will use for the deliverable: a quadratic (1/2)x^T A x with A = diag(1, kappa) so you can dial conditioning and know f* = 0 exactly, and Rosenbrock f(x,y) = (1 - x)^2 + 100(y - x^2)^2, whose minimum is (1,1) with a curved narrow valley that defeats fixed-step first-order methods (scipy.optimize.rosen, rosen_der and rosen_hess give you reference implementations to check against). Plot suboptimality f(x_t) - f* on a log y-axis against iterations - a linear axis makes every optimiser look identical once they are all 'near zero' while one is 100x closer - and separately plot against wall-clock and against gradient evaluations, because Adam's per-step cost is not L-BFGS's. Fix the seed, the init and the budget across methods, sweep eta per method rather than sharing one, and report the best-tuned curve for each: a benchmark that compares a tuned Adam with an untuned SGD is worse than no benchmark.",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy - scipy.optimize.rosen (with rosen_der and rosen_hess)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.rosen.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can derive, closed-book on a whiteboard in under 15 minutes, dL/dz = p - y for softmax + cross-entropy and then backpropagate through a two-layer MLP with every tensor shape stated, explaining why frameworks fuse the softmax into the loss.",
+  "You can implement a scalar reverse-mode autodiff engine (Value, topological sort, accumulate with +=) from an empty file and gradient-check it against central differences in float64 to relative error below 1e-7.",
+  "You can write down, from memory, the update rules for SGD, momentum, Nesterov, AdaGrad, RMSProp, Adam and AdamW, derive Adam's bias correction, and state what Adam's very first step equals and why.",
+  "You can compute the condition number of a quadratic's Hessian, predict the number of GD iterations to a target accuracy from kappa, and demonstrate empirically that momentum and Nesterov recover roughly the sqrt(kappa) improvement on a diag(1, 1000) problem.",
+  "You can look at a loss curve and a grad-norm log and say, with a named next experiment for each, whether the cause is learning rate, momentum, conditioning, a data-ordering violation of i.i.d., or a backward-pass bug - and you use the overfit-one-batch test to separate the last from the rest.",
+  "You can explain to a customer's engineer, without jargon, why standardising their two features changed training from 40,000 iterations to 200, and show the contour-plus-trajectory plot that proves it.",
+  "You can state which of a given list of losses (MSE, ridge, logistic NLL, hinge, Lasso, k-means objective, a one-hidden-layer MLP) are convex, give the certificate for each convex one, and say what that changes about how you would tune it.",
+  "You can choose between L-BFGS and a first-order method for a stated problem, justify it by problem size, smoothness and gradient noise, and name the specific failure of L-BFGS under minibatching."
+ ],
+ "failureModes": [
+  "The gradient check is run on a float32 model with h = 1e-8, so roundoff dominates and every partial disagrees by ~1e-2; the engineer concludes 'finite differences are just noisy', ships a sign error in one backward path, and the model trains to a worse-but-plausible loss that nobody questions.",
+  "The gradient check is done at a point where a relu or an abs is exactly at its kink, the central difference straddles two different linear pieces and reports a huge mismatch, and a correct backward implementation gets 'fixed' into a wrong one.",
+  "optimizer.zero_grad() is missing inside the training loop, so PyTorch's accumulate-by-default behaviour makes the effective step grow with every iteration; the loss looks fine for 200 steps then diverges, and a day is spent hunting for a bad batch in the customer's data.",
+  "L2 regularisation is added into the loss while training with Adam and called 'weight decay'; the adaptive denominator scales it per coordinate so the highest-gradient weights receive the least decay, the model overfits anyway, and the diagnosis lands on 'we need more data' instead of switching to AdamW.",
+  "Features arrive on wildly different scales (revenue in dollars beside a 0-1 flag), kappa is around 1e12, plain SGD zigzags and plateaus, and the team reports back that 'a linear model does not work on this data' - a conclusion about optimisation dressed up as a conclusion about the domain.",
+  "scheduler.step() is called once per epoch while using OneCycleLR (or a per-batch warmup), so the learning rate completes its whole schedule in the first few hundred steps, training silently stalls at a mediocre plateau, and the run is reported as converged.",
+  "The training file is sorted by label or by date and the DataLoader is built with shuffle=False, so each minibatch gradient is a biased estimate of the full gradient; loss still decreases, validation on an equally sorted split still looks fine, and the model is systematically worse on the customer's live traffic.",
+  "Optimiser comparison plots use a linear y-axis on raw loss over 50 epochs, so three methods look indistinguishable at 'about zero' while one is two orders of magnitude closer to the optimum; the slowest method is adopted because its curve happened to look smoothest."
+ ],
+ "interviewQuestions": [
+  "Derive the gradient of the cross-entropy loss with respect to the logits when the model ends in a softmax. Show the softmax Jacobian explicitly, show what cancels, and explain why PyTorch's CrossEntropyLoss takes logits rather than probabilities.",
+  "Write down Adam's update and derive the bias-correction terms from first principles. What exactly is the magnitude of Adam's first step for a single coordinate, and what does that imply about warmup and about Adam's tolerance for badly scaled losses?",
+  "Define the condition number of a smooth strongly convex problem and state gradient descent's convergence rate in terms of it. Why does momentum help, what rate does Nesterov achieve, and what would you change about the data instead of the optimiser to get the same win?",
+  "Debug: a customer's training run produces NaN loss at step 40. Give me your ordered checklist, what you would log, and how you would distinguish a learning rate that is too large from a numerically unstable loss from an fp16 problem.",
+  "A customer says 'your model does not learn'. Design the experiment sequence that determines whether the problem is a bug in the gradients, an optimisation problem, or a data problem - and tell me which single experiment you run first and why it is the most informative.",
+  "When would you reach for L-BFGS instead of Adam, and what specifically breaks about L-BFGS under stochastic minibatch gradients? What problem sizes and smoothness assumptions make it the right default?",
+  "Explain what makes a loss convex, give me the certificate for logistic regression's negative log-likelihood, and then explain why non-convexity in a neural network is not the practical obstacle people assume it is."
+ ],
+ "proofOfWork": "A public write-up and companion repo, `optimiser-forensics`, that turns the deliverable's optimiser module into a diagnostic instrument rather than a study exercise. Take one small real model - logistic regression plus a two-layer MLP on a tabular dataset - and inject, one at a time, seven reproducible pathologies: a sign flip in one layer's backward pass, a missing zero_grad, unscaled features giving kappa around 1e10, a label-sorted loader with shuffle=False, coupled L2 under Adam instead of AdamW, a per-epoch scheduler.step() with OneCycleLR, and a learning rate 20x above 2/L. For each, commit the loss curve, the per-layer gradient-norm trace, the parameter-update-to-weight ratio, and the result of the overfit-one-batch test, then write the two-sentence diagnosis and the one-line fix. Include a `python -m forensics diagnose run.jsonl` CLI that reads a training log and emits the ranked hypothesis list from the ordered diagnostic in this topic, plus a notebook that reproduces the contour-and-trajectory figures for GD, momentum, Nesterov and Adam on diag(1, kappa) for kappa in {1, 10, 1000} and on Rosenbrock, all on log-suboptimality axes with per-method tuned learning rates. Finish with a one-page 'why your training is slow' explainer written for a customer's non-ML engineer, using only those figures."
+}

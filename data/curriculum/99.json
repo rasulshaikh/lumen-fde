@@ -1,0 +1,228 @@
+{
+ "i": 99,
+ "topic": "Numerical computing: NumPy vectorisation, floating point, numerical stability",
+ "track": "M. Mathematical Foundations",
+ "month": 4,
+ "hours": 6,
+ "why": "Every model you defend in front of a customer is a pile of floating-point arithmetic, and the failure that gets you paged is almost never a stack trace - it is a variance that came out negative, a loss that went nan at step 4000, a distance matrix that ranked the wrong neighbours, a column of gradients that a test declared 'close enough' at atol=1e-8. This topic is what lets you say in the room whether the wrong number is their data, the conditioning of the problem itself, or a bug in your algorithm - three different conversations with three different owners, and the senior move is knowing which one you are in before you promise a fix. It is also the difference between a demo notebook and a pipeline that survives their 200 million rows: vectorised NumPy is the only Python fast enough to preprocess at that scale, and being able to state the peak memory of a broadcast before you press enter is what keeps you from OOM-ing the customer's box live on a screenshare.",
+ "prerequisites": [
+  "Working NumPy, not read-about NumPy: array creation, slicing, axis= reductions, dtype and astype, and having already written something non-trivial with it",
+  "Linear algebra from Topic 93: singular values and the SVD, because the condition number is sigma_max/sigma_min and np.linalg.lstsq is an SVD solve",
+  "Calculus from Topic 94: gradients and the chain rule, so that 'the backward pass, not the forward pass, produced the nan' is a statement you can reason about",
+  "Softmax, cross-entropy and log-likelihood from Topic 98, which is where the stable log-sum-exp is used in anger rather than as an exercise",
+  "pytest and np.testing from Topic 39, because every claim in the deliverable is a test that must fail on the naive implementation and pass on yours",
+  "Enough PyTorch to run a training loop, register a forward hook and read a loss tensor (Topic 112 goes deeper on the framework itself)"
+ ],
+ "subtopics": [
+  {
+   "name": "What a float actually is: IEEE 754 binary64, binary32, and np.finfo",
+   "learn": "Decompose a float into sign, exponent and significand, and be able to say from first principles why 0.1 has no exact binary representation and why 0.1 + 0.2 prints 0.30000000000000004. Memorise the four numbers per dtype and read them off np.finfo rather than from memory when it matters: float64 carries a 53-bit significand, eps = 2^-52 = 2.22e-16, max about 1.8e308, smallest normal about 2.2e-308; float32 carries 24 bits, eps = 2^-23 = 1.19e-7, max 3.4e38, smallest normal 1.18e-38; float16 tops out at 65504 with eps about 9.8e-4; bfloat16 keeps float32's exponent range but only 8 significand bits. Derive the integer ceiling that follows - consecutive integers are exact only up to 2^53 in float64 and 2^24 = 16777216 in float32 - so a Unix-epoch timestamp held as float32 is quantised to 128-second steps and an ID column cast to float32 silently collides. Print np.spacing(x) at 1e0, 1e6 and 1e9 so you can quote the absolute resolution at the magnitude the customer's data actually lives at.",
+   "minutes": 20,
+   "resource": {
+    "label": "NumPy - numpy.finfo (eps, max, tiny, resolution per dtype)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.finfo.html"
+   }
+  },
+  {
+   "name": "Machine epsilon, ulps, and comparing floats without lying",
+   "learn": "Distinguish absolute error |a-b|, relative error |a-b|/|b| and distance in units in the last place, and default to relative error for everything except quantities that legitimately pass through zero. Know the two different default tolerances you will meet in the same afternoon: np.isclose and np.allclose test |a-b| <= atol + rtol*|b| with rtol=1e-5, atol=1e-8 - asymmetric in b, and that atol declares every gradient of magnitude 1e-9 equal to zero - while np.testing.assert_allclose uses rtol=1e-7, atol=0 and reports the maximum relative mismatch and its index. Set tolerances from the computation rather than from taste: a float32 reduction over n terms accumulates on the order of n*1.2e-7 relative error naively, so 1e-6 is a defensible rtol for a float32 layer and 1e-12 is a test that will flake on someone else's BLAS. Write assertions whose failure message names the element and the size of the miss, and never write `assert a == b` on floats outside exact integer arithmetic.",
+   "minutes": 20,
+   "resource": {
+    "label": "NumPy - numpy.testing.assert_allclose (rtol/atol semantics and mismatch reporting)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.testing.assert_allclose.html"
+   }
+  },
+  {
+   "name": "The three archetypes: overflow, underflow and subnormals, catastrophic cancellation",
+   "learn": "Learn the three failure shapes and their exact thresholds so you can name one from the wrong answer alone. Overflow: np.exp returns inf above 709.78 in float64 and above 88.7 in float32, which is why a logit of 100 kills a naive softmax only after someone enables mixed precision. Underflow: results below the smallest normal degrade into subnormals, losing significand bits gradually and running an order of magnitude slower on some CPUs before flushing to zero, so a product of 500 probabilities is exactly 0.0 long before it stops being meaningful. Catastrophic cancellation: subtracting two nearly equal numbers annihilates the leading digits and promotes rounding noise into the result - the mechanism behind mean(x^2) - mean(x)^2 returning a negative variance on data centred at 1e9, behind the naive quadratic formula, and behind sklearn's known float32 euclidean-distance error when it expands ||x-y||^2 as ||x||^2 - 2xy + ||y||^2. Reproduce all three in five lines each before you go further.",
+   "minutes": 20,
+   "resource": {
+    "label": "Fundamentals of Numerical Computation - Floating-point numbers",
+    "url": "https://fncbook.com/floating-point"
+   }
+  },
+  {
+   "name": "Conditioning: when the problem, not your code, is the problem",
+   "learn": "Define the condition number as the factor by which relative input error is amplified into relative output error: kappa = |x f'(x)/f(x)| for a scalar function, kappa(A) = sigma_max/sigma_min for a linear system, which is Topic 93's SVD read as an error-amplification statement. Learn the digit-counting rule and use it out loud: float64 buys about 16 decimal digits, so kappa = 1e8 leaves you 8 and kappa = 1e16 leaves you none no matter how careful your algorithm is. Separate conditioning - a property of the problem, fixable only by reformulating, rescaling or regularising - from stability, a property of your algorithm, which you can fix by rewriting; being able to say which one you are facing is the difference between 'we will ship a patch' and 'your matrix is singular and we need to talk about the features'. Compute np.linalg.cond on the customer's design matrix and quote the number instead of saying the data is 'a bit collinear'.",
+   "minutes": 20,
+   "resource": {
+    "label": "Fundamentals of Numerical Computation - Problems and conditioning",
+    "url": "https://fncbook.com/conditioning"
+   }
+  },
+  {
+   "name": "Stability in the wild: normal equations vs QR/SVD, and why scaling is numerical",
+   "learn": "Reproduce the canonical instability yourself: forming X^T X squares the condition number, so kappa(X) = 1e8 becomes 1e16 and solving the normal equations in float64 returns coefficients that are noise, while np.linalg.lstsq (an SVD/gelsd solve, with rcond truncating singular values below a threshold) on the same X returns the right answer. Generalise it into the rule you will apply weekly: never form a Gram matrix, an explicit inverse or a squared quantity when a factorisation will do - use lstsq or np.linalg.solve, never inv(A) @ b, and prefer scipy.linalg.cho_solve or solve_triangular over an inverse you built yourself. Connect it to modelling decisions: unscaled features (dollars beside fractions) inflate kappa, which is why gradient descent zigzags and why a hand-rolled least squares disagrees with sklearn's LinearRegression on the same data; ridge with penalty alpha adds alpha to every eigenvalue of X^T X and therefore caps the condition number, making regularisation a numerical statement as well as a statistical one.",
+   "minutes": 20,
+   "resource": {
+    "label": "NumPy - numpy.linalg.lstsq (SVD least squares, rcond, singular-value truncation)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.linalg.lstsq.html"
+   }
+  },
+  {
+   "name": "NaN and inf semantics, and turning silence into an exception",
+   "learn": "Know the arithmetic cold: nan != nan (so equality-based dedup, sorts and np.unique all misbehave), every comparison with nan is False, 0/0 and inf-inf and 0*inf produce nan while 1/0 produces inf, and one nan poisons every reduction downstream - np.mean returns nan, np.nanmean does not and quietly changes the denominator you are dividing by. NumPy's defaults are divide='warn', over='warn', under='ignore', invalid='warn', and a RuntimeWarning is printed once per location and then never again, which is exactly how a nan factory runs unnoticed for two hours in a notebook. In anything you own, wrap the numeric core in `with np.errstate(divide='raise', over='raise', invalid='raise')` or call np.seterr in conftest.py so the first bad operation raises FloatingPointError with a traceback rather than a warning that scrolls away. Add `assert np.isfinite(x).all()` at every module boundary: one pass over the array converts a three-day bisect into a stack trace.",
+   "minutes": 15,
+   "resource": {
+    "label": "NumPy - numpy.errstate (raise on divide, overflow, invalid)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.errstate.html"
+   }
+  },
+  {
+   "name": "The ndarray memory model: dtype, strides, C vs F order, contiguity",
+   "learn": "An ndarray is a data pointer, a dtype, a shape and a strides tuple, and every performance and aliasing question you will be asked is answered from those four. Predict strides without running anything: a C-order (1000, 100) float64 array has strides (800, 8); .T is a view with the strides swapped and is therefore F-contiguous, not C-contiguous; a reshape that cannot be expressed as a stride change copies silently. Know the consequences you pay for: walking the slow axis fetches a 64-byte cache line (8 float64) per element used, np.ascontiguousarray before a BLAS call is occasionally the entire optimisation, and dtype promotion decides your memory bill - under NEP 50 a float32 array plus a Python float stays float32, but float32 plus a float64 array upcasts everything and doubles the footprint. Inspect with arr.strides, arr.flags, arr.nbytes and arr.dtype rather than guessing, and put arr.nbytes in your log lines so an OOM has a paper trail.",
+   "minutes": 20,
+   "resource": {
+    "label": "NumPy - The N-dimensional array (memory layout, strides, flags)",
+    "url": "https://numpy.org/doc/stable/reference/arrays.ndarray.html"
+   }
+  },
+  {
+   "name": "Views vs copies: the aliasing bugs that give a wrong number, not a crash",
+   "learn": "Internalise the one rule that generates most of them: basic slicing returns a view that shares memory, while fancy (integer or boolean) indexing returns a copy. From it fall the two classics - `b = a[mask]; b += 1` leaves a untouched while `a[mask] += 1` does not, and `a[idx] += 1` with a repeated index increments that element exactly once, because a read-modify-write is not an accumulate; when you mean scatter-add use np.add.at (the ufunc .at method) or np.bincount and accept that .at is slow by design. Diagnose with np.shares_memory(a, b), arr.base and arr.flags['OWNDATA'] rather than id(). The related trap that reaches production: `X -= X.mean(0)` inside a 'preprocess' helper mutates the caller's array in place, so you have standardised the customer's backing store and the second call in the notebook produces different numbers - take a copy at the boundary or document the mutation in the signature.",
+   "minutes": 15,
+   "resource": {
+    "label": "NumPy - Copies and views",
+    "url": "https://numpy.org/doc/stable/user/basics.copies.html"
+   }
+  },
+  {
+   "name": "Broadcasting, and predicting the temporaries before you press enter",
+   "learn": "Apply the rule mechanically: right-align the shapes, each dimension must be equal or 1, missing leading dimensions are treated as 1, and the output takes the maximum in each position. Then do the arithmetic that prevents the OOM: the pairwise-difference idiom (X[:, None, :] - Y[None, :, :]) with X and Y of shape (50000, 100) materialises 50000*50000*100 float64 = 2 TB, and the same line at (5000, 100) is 20 GB - say the number out loud before running it, then reach for the gemm-based expansion (with the float64 upcast that keeps it stable) or scipy.spatial.distance.cdist. Learn the diagnostics: np.broadcast_shapes(...) checks compatibility without allocating, and the mismatch that does not raise is the dangerous one - adding a (n,) array to an (n, 1) array yields (n, n) rather than (n,), which is how a residual vector silently becomes a matrix and a loss becomes the mean of n^2 terms while still decreasing smoothly. Annotate every shape in expressions with more than three operands.",
+   "minutes": 20,
+   "resource": {
+    "label": "NumPy - Broadcasting (rules and examples)",
+    "url": "https://numpy.org/doc/stable/user/basics.broadcasting.html"
+   }
+  },
+  {
+   "name": "Killing the loop: ufuncs, axis reductions, masks and where",
+   "learn": "Build the rewriting vocabulary until the broadcast form is what you type first: elementwise ufuncs, reductions along an explicit axis with keepdims=True, np.where for branchless conditionals, boolean masks for filtering, np.clip, np.cumsum and prefix-sum tricks, np.diff, and the ufunc methods .reduce, .accumulate, .outer and .at. Never write a Python-level loop over rows to build a feature. Know the two cases where vectorising is not automatically right: arrays below roughly a thousand elements are dominated by microsecond-scale ufunc dispatch overhead so the loop can genuinely win, and an algorithm with a real sequential dependency (an EWMA, a Kalman filter, a bisection) needs scipy.signal.lfilter, a restructured recurrence or numba rather than a fake vectorisation that hides an O(n^2) materialisation. For the deliverable, time each rewrite against the loop it replaces and record both the speedup and the peak memory, because the honest answer is sometimes 'the loop was fine'.",
+   "minutes": 20,
+   "resource": {
+    "label": "NumPy - Universal functions (ufunc): broadcasting, out=, casting, reduce/accumulate/at",
+    "url": "https://numpy.org/doc/stable/reference/ufuncs.html"
+   }
+  },
+  {
+   "name": "Index-driven algorithms: argsort, searchsorted, bincount, unique",
+   "learn": "Learn the vectorised replacements for the loops that actually appear in customer data work: np.argsort plus np.take for a permutation, np.searchsorted for as-of joins and bucketing (side='left' versus 'right' is exactly the include-the-boundary decision), np.bincount(labels, weights=w) for a group-by sum, np.unique(..., return_inverse=True, return_counts=True) to factorise a categorical column, np.digitize for histogram bins, and a matmul against a one-hot matrix when the aggregation is really a linear map. Know the complexity and the memory you are buying: searchsorted is O(log n) per query on a pre-sorted array, while bincount is O(n) but allocates max(label)+1 slots, so passing a raw customer ID as the label allocates gigabytes and looks like a memory leak. Remember that all of these return copies, so the aliasing rules from the previous subtopic apply to every result.",
+   "minutes": 15,
+   "resource": {
+    "label": "NumPy - Indexing on ndarrays (basic slicing vs advanced indexing)",
+    "url": "https://numpy.org/doc/stable/user/basics.indexing.html"
+   }
+  },
+  {
+   "name": "Why vectorised code is fast: SIMD, cache lines, bandwidth, the interpreter tax",
+   "learn": "Be able to explain a speedup, not merely observe it. A Python-level loop pays roughly 50-100 ns per element in interpreter dispatch and scalar boxing; a ufunc pays about one cache-line fetch and one SIMD instruction per 8 float32 lanes on AVX2, so 10-100x is the expected order of magnitude and a claimed 10000x means you accidentally changed the algorithm or timed a lazily-allocated array. Know which regime you are in: large elementwise work is memory-bandwidth bound, so `a*b + c` costs four passes over memory (three reads, one write) and the fix is fusing with out= or tiling to L2-resident chunks, not a faster CPU; matmul is compute bound at O(n^3) work over O(n^2) data, which is why BLAS wins there and nowhere else. Measure with timeit.repeat and take the minimum of several runs rather than the mean (the mean measures your laptop's other processes), warm up once first, and never benchmark inside a notebook cell that also allocates.",
+   "minutes": 15,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - Chapter 16 SIMD and GPU programming, 01. hardware fundamentals",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2016%20-%20SIMD%20and%20GPU%20programming/01.%20hardware%20fundamentals.md"
+   }
+  },
+  {
+   "name": "Memory discipline: out=, temporaries, sliding windows, chunking",
+   "learn": "Count the allocations in an expression before you run it: `x = (a - b) ** 2 / c` allocates three full-size temporaries, so peak memory is several times the size of the result, and the fix in a hot path is np.subtract(a, b, out=buf); buf **= 2; buf /= c with buf reused across iterations. Use np.lib.stride_tricks.sliding_window_view for rolling windows: it is a zero-copy strided view, so a 1e7-point series with a 100-step window costs nothing until a reduction materialises it, and it is returned read-only precisely because overlapping writes would be nonsense. When the natural expression does not fit in memory, chunk it and carry an accumulator - which is what sklearn does inside pairwise_distances_chunked and StandardScaler.partial_fit, and what the Welford update below makes exact. Instrument with tracemalloc.get_traced_memory() or resource.getrusage so the benchmark table in the deliverable reports a measured peak rather than an estimate.",
+   "minutes": 20,
+   "resource": {
+    "label": "NumPy - sliding_window_view (zero-copy strided rolling windows)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.lib.stride_tricks.sliding_window_view.html"
+   }
+  },
+  {
+   "name": "matmul, einsum and BLAS: where the FLOPs and the nondeterminism live",
+   "learn": "Know that @ and np.dot dispatch 2-D float32/float64 arrays to BLAS sgemm/dgemm and send everything else - integer dtypes, object dtype, awkward strides - to a much slower NumPy fallback, so a matmul that suddenly takes 40x longer is nearly always an accidental dtype or a non-contiguous input. Use np.einsum whenever there are more than two operands or the axes deserve names, but pass optimize=True: without it einsum contracts in the order you wrote and can be asymptotically worse, and np.einsum_path prints the chosen order with its FLOP count. Control threads explicitly with threadpoolctl or OMP_NUM_THREADS, because the BLAS thread count changes the reduction order and therefore the last bits of the result - which is why 'it gives different numbers on the customer's 64-core box' is a real and explainable phenomenon rather than a bug. When the inner dimension runs to millions in float32, accumulate in float64 or chunk the contraction, since sgemm accumulates in float32.",
+   "minutes": 15,
+   "resource": {
+    "label": "NumPy - numpy.einsum (subscripts, optimize=, einsum_path)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.einsum.html"
+   }
+  },
+  {
+   "name": "Summation error: naive, pairwise, Kahan and fsum",
+   "learn": "Naive left-to-right summation has error bounded by roughly n * eps * sum|x_i|, which is why summing 1e8 float32 ones in a Python loop stops dead at exactly 16777216: once the running total exceeds 2^24, adding 1 lands below half an ulp and rounds to nothing. NumPy's reductions use pairwise summation over contiguous fast axes, dropping the bound to about log2(n) * eps - so np.sum beats the loop on accuracy as well as speed - but that guarantee weakens along a strided axis or in a hand-rolled .accumulate. Implement Kahan (or Neumaier) compensated summation yourself and know the four lines by heart: y = x[i] - c; t = s + y; c = (t - s) - y; s = t, recovering near-full precision for about 4x the arithmetic. Use math.fsum when you want the exactly rounded result and speed is irrelevant, and remember the cheapest production fix of all: np.sum(a32, dtype=np.float64) accumulates a float32 array in a float64 accumulator for almost nothing and deletes the entire bug class.",
+   "minutes": 20,
+   "resource": {
+    "label": "Python docs - math.fsum (exactly rounded floating-point summation)",
+    "url": "https://docs.python.org/3/library/math.html#math.fsum"
+   }
+  },
+  {
+   "name": "Welford: streaming mean, variance and covariance that do not blow up",
+   "learn": "Derive and implement the online update until you can write it from memory: for each new x, n += 1; delta = x - mean; mean += delta / n; M2 += delta * (x - mean) - the second delta uses the already-updated mean, which is the whole trick - then var = M2 / n for the population and M2 / (n - 1) for the sample. Be able to explain precisely why the textbook shortcut E[x^2] - E[x]^2 fails: on data centred at 1e9 the two terms agree to about 18 significant digits, float64 carries 16, so the difference is rounding noise, is often negative, and np.sqrt of it is nan - and that nan then propagates through your standardiser into every feature. Learn Chan's parallel merge formula for combining per-chunk (n, mean, M2) triples so the same estimator works over a chunked or distributed pass, which is how you compute normalisation statistics for a dataset that does not fit in memory. While you are here, note the ddof trap: np.std defaults to ddof=0 and pandas .std() to ddof=1, so the same column standardised in two places differs by sqrt(n/(n-1)) - small, systematic, and enough to move a decision threshold.",
+   "minutes": 20,
+   "resource": {
+    "label": "Algorithms for calculating variance (naive, two-pass, Welford, Chan parallel merge)",
+    "url": "https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance"
+   }
+  },
+  {
+   "name": "log-sum-exp, softmax and cross-entropy: the max-subtraction trick",
+   "learn": "Derive log sum_j exp(z_j) = m + log sum_j exp(z_j - m) with m = max(z) and note that it is an exact identity, not an approximation - the shift cancels algebraically, but numerically every exponent is now <= 0 so nothing overflows and the largest term is exactly 1. Use it to write softmax as exp(z - logsumexp(z)) and cross-entropy as -(z_y - logsumexp(z)), which is why F.log_softmax followed by nll_loss, or F.cross_entropy directly, is a correctness fix rather than an optimisation (Topic 98 derives the loss itself). Handle the all -inf row explicitly: for a fully masked attention row m is -inf, m - m is nan, and that is the actual mechanism behind nan losses in padded transformer batches - the standard fixes are masking with a large finite negative in float32 rather than -inf, or scipy.special.logsumexp with its b= weights and return_sign. Implement your own logsumexp and check it against SciPy on inputs of magnitude 1e3 where the naive expression returns inf and then nan gradients.",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy - scipy.special.logsumexp (stable log-sum-exp with weights)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.logsumexp.html"
+   }
+  },
+  {
+   "name": "log1p, expm1, log-space arithmetic and stable sigmoids",
+   "learn": "When x is small, forming 1 + x rounds away x's low bits, so log(1+x) loses relative precision while np.log1p(x) keeps it - and symmetrically np.expm1(x) versus exp(x) - 1. This is not academic: it is the difference between a correct and a worthless log-return, compound-growth or small-probability calculation on a customer's financial data. Multiply probabilities in log space with np.logaddexp / logsumexp instead of clipping products at 1e-300. Write the branch-free stable sigmoid (1/(1+exp(-z)) for z >= 0, exp(z)/(1+exp(z)) for z < 0, which is scipy.special.expit) and the stable softplus max(z, 0) + log1p(exp(-|z|)), and be able to explain why. Know that np.clip(p, 1e-15, 1 - 1e-15) before a log is a blunt instrument that biases every value rather than only the bad ones - acceptable inside a reported metric such as sklearn's log_loss, not acceptable inside a training objective where the gradient is what you are corrupting.",
+   "minutes": 15,
+   "resource": {
+    "label": "NumPy - numpy.log1p (accurate log(1+x) for small x; see expm1, logaddexp)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.log1p.html"
+   }
+  },
+  {
+   "name": "Precision in training: float64, float32, TF32, bf16, fp16 and loss scaling",
+   "learn": "Choose precision from the range and resolution you need, not from habit. float32 is the training default because float64 doubles memory and is anywhere from 2x to 64x slower on consumer and datacentre GPUs; fp16 has max 65504 and smallest normal 6.1e-5, so activations overflow and small gradients underflow to exactly zero - which is the entire reason torch.amp.GradScaler exists: it multiplies the loss by a scale factor, unscales before clipping, and skips the step and halves the scale when it observes inf or nan. bf16 keeps float32's exponent range with only 8 significand bits, so no scaler is needed but every accumulation must remain in float32. TF32 on Ampere and later silently truncates matmul inputs to 10 mantissa bits under torch.backends.cuda.matmul.allow_tf32, a 1e-3-level perturbation and a legitimate suspect when a ported model's numbers move in the third decimal. The sentence to give a customer: compute in reduced precision, accumulate and keep master weights in float32, and never compute an evaluation metric in fp16.",
+   "minutes": 20,
+   "resource": {
+    "label": "PyTorch - torch.amp: Automatic Mixed Precision (autocast, GradScaler, dtype coverage)",
+    "url": "https://docs.pytorch.org/docs/stable/amp.html"
+   }
+  },
+  {
+   "name": "Debugging a nan in a live training loop",
+   "learn": "Run a fixed triage instead of guessing. First establish direction: log the step and determine whether the loss went inf before the gradients went nan (a forward problem - overflow, log(0), a division by a zero denominator) or the gradients went nan with a finite loss (a backward problem). Bisect the forward pass by registering a hook on every module that asserts torch.isfinite(out).all(), which hands you the first offending layer and batch index; dump that batch, because roughly half the time the input already carried a nan produced upstream by a division by a zero count. Then run one iteration under torch.autograd.set_detect_anomaly(True) to get the backward operation that produced the nan with the forward traceback attached, accepting the large slowdown for a single run. Memorise the operators with a finite forward and an infinite backward: sqrt at exactly 0 (hence the norm of a zero vector, and the eps inside every LayerNorm and Adam denominator), x**p for 0 < p < 1, and any division by a mask sum that can be zero. Finally rule out the non-numerical causes with the same evidence - a learning-rate spike, an unclipped gradient, a fully masked row, a corrupt shard.",
+   "minutes": 20,
+   "resource": {
+    "label": "PyTorch - Autograd anomaly detection (set_detect_anomaly, nan-producing backward ops)",
+    "url": "https://docs.pytorch.org/docs/stable/autograd.html#anomaly-detection"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can look at a nan, an inf or a silently-wrong number in a training loop and name the cause and the fix on the spot - subtract-the-max in logsumexp, log_softmax instead of log(softmax(z)), log1p instead of log(1+x), Welford instead of E[x^2]-E[x]^2, a float64 accumulator instead of float32 - and say whether the evidence points at the forward pass, the backward pass or the data loader.",
+  "You can rewrite any Python loop over an array as a broadcast NumPy expression, and before running it state the expected speedup to an order of magnitude and the peak memory of the temporaries to within a factor of two, then confirm both with timeit.repeat and tracemalloc.",
+  "You can implement stable logsumexp, softmax and cross-entropy in NumPy, prove they agree with scipy.special.logsumexp and torch.nn.functional.cross_entropy to 1e-6, and produce a test where the naive version returns inf or nan in float32 while yours does not.",
+  "You can implement Welford streaming variance and Kahan summation from memory, and demonstrate the naive alternatives failing concretely: a negative variance on data centred at 1e9, and a float32 loop sum that stalls at exactly 16777216.",
+  "You can compute np.linalg.cond on a customer's design matrix, predict how many decimal digits survive, show the normal equations and np.linalg.lstsq disagreeing on an ill-conditioned X, and explain in two sentences which part is the problem's conditioning and which part is your algorithm's stability.",
+  "You can locate the first non-finite tensor in an unfamiliar PyTorch model using forward hooks plus torch.autograd.set_detect_anomaly, name the offending operator, and distinguish a genuine numerical failure from a bad batch.",
+  "You can set defensible tolerances in a numerical test - relative rather than absolute, sized from the dtype and the length of the reduction - and explain why np.allclose's default atol=1e-8 would have passed a gradient check on a gradient that was silently zero.",
+  "You can explain to a customer's engineer why the same script produces different last bits on their 64-core machine, name the three usual sources (BLAS thread count and reduction order, TF32 or mixed precision, non-deterministic GPU kernels), and say which are acceptable and which must be pinned."
+ ],
+ "failureModes": [
+  "A standardiser computes variance as mean(x^2) - mean(x)^2 on a Unix-timestamp column near 1.7e9; catastrophic cancellation makes the result slightly negative, np.sqrt returns nan, the whole feature becomes nan, the imputer replaces it with the column mean of 0, and the model trains happily on a constant column while the feature-importance chart still lists it.",
+  "An ID column is cast to float32 somewhere in a Spark-to-pandas hop; above 2^24 consecutive integers are no longer representable, distinct customer IDs collide onto the same value, the train/test split leaks, and offline AUC beats production by fifteen points.",
+  "A residual is computed as y - yhat where y has shape (n,) and yhat has shape (n, 1); broadcasting yields an (n, n) matrix, the loss becomes the mean of n^2 terms, it still decreases smoothly during training, and nobody notices until the deployed model's predictions are off by a constant factor.",
+  "Feature counts are accumulated with `counts[idx] += 1` where idx contains repeats; the read-modify-write applies once per unique index, so every count above one is wrong, the pipeline runs clean, and the downstream frequency-encoded feature is quietly garbage until np.add.at is used instead.",
+  "A metric helper clips probabilities to [1e-15, 1-1e-15] before taking a log, so a model that outputs hard 0 and 1 predictions scores a finite, respectable log loss instead of infinity; the clip flatters the very overconfidence the metric was supposed to expose.",
+  "An attention mask fills padded positions with -inf; a row that is entirely padding makes max(z) = -inf, so z - max is nan inside softmax, the loss becomes nan at a random step deep into training, and the incident is filed for two days as a corrupt data shard.",
+  "A nearest-neighbour or RAG retrieval computes squared distances in float32 via the ||x||^2 - 2xy + ||y||^2 expansion on high-magnitude embeddings; cancellation leaves the small true distances as rounding noise, the returned neighbours are wrong but plausible, and the retrieval quality drop is blamed on the embedding model.",
+  "A gradient check passes because np.allclose's default atol=1e-8 declares an analytic gradient of 1e-9 equal to a numeric gradient of 3e-9; a whole branch of the backward pass is effectively dead, training converges to a worse optimum, and it is never revisited because there is a green test."
+ ],
+ "interviewQuestions": [
+  "Derive the log-sum-exp trick and show it is an exact identity, not an approximation. Then tell me what happens when an entire row of logits is -inf, why that occurs in a padded transformer batch, and what you would change in the masking to fix it.",
+  "Your training loss goes 3.1, 3.0, 2.9 and then nan at step 4000. Walk me through your triage in order, and say which candidate causes would show up in the forward activations, which only in the backward pass, and which in the data loader - and how you would tell them apart with evidence rather than intuition.",
+  "Why can var = mean(x^2) - mean(x)^2 return a negative number in float64? Write the Welford update on the whiteboard, tell me what M2 is, and extend it to a merge formula so I can compute the variance of a 400 GB dataset in parallel chunks.",
+  "A customer's linear model gives different coefficients from ours on the same data. Their code solves the normal equations, ours calls np.linalg.lstsq. Explain what the condition number of X has to do with it, how many digits each approach retains, and what you would tell them to change in their feature preparation.",
+  "Here is a Python loop that computes pairwise distances over 50000 rows of 100 features. Rewrite it as a broadcast NumPy expression, tell me the peak memory before you run it, then tell me why the fast gemm-based version is numerically dangerous in float32 and what you would do instead.",
+  "The same script on my laptop and on the customer's 64-core server agrees to only seven decimal places. Give me every mechanism that could explain that, say which ones are acceptable to ship, and describe how you would pin the ones that are not.",
+  "When is vectorising a loop the wrong move? Give me two concrete situations, and tell me how you would benchmark to make that case to a teammate who believes all loops are bugs."
+ ],
+ "proofOfWork": "A public `numerics-triage-kit` repo that turns the from-scratch library into something you can run on a customer's box during an incident. It ships `nan_hunt.py`, a drop-in that registers forward hooks asserting torch.isfinite on every module output, records the first offending (step, module, batch_index), dumps that batch to disk, and then re-runs exactly that batch under torch.autograd.set_detect_anomaly to print the backward operator responsible - demonstrated on three deliberately planted bugs (a sqrt-at-zero norm, an all -inf masked attention row, and an fp16 activation overflow that only appears under autocast). It adds `precision_audit.py`, which takes any NumPy or pandas table and reports per-column the magnitude, the resolution at that magnitude, whether the column survives a float32 round-trip (integer collisions above 2^24, timestamps quantised to 128-second steps), and the condition number of the resulting design matrix with the digit-loss estimate spelled out in plain English for the customer's data engineer. `vectorisation_ladder.ipynb` takes one real preprocessing task up five rungs - Python loop, list comprehension, naive broadcast, out=/in-place fused, chunked with a Welford accumulator - with a predicted-versus-measured table of wall time (minimum of timeit.repeat) and peak memory (tracemalloc), including at least one rung where the prediction was wrong and a written explanation of why. Finally `STABILITY-CHECKLIST.md` is a one-page review sheet a customer's team can apply to their own code: no log without a stable form, no exp without a max subtraction, no variance without Welford, no float32 reduction without a float64 accumulator, no inverse where a factorisation exists, no float equality assertion, and np.errstate set to raise in every test suite. CI runs the whole thing on every push and fails if any naive-versus-stable regression test stops failing on the naive path."
+}

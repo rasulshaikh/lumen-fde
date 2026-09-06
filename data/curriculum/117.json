@@ -1,0 +1,229 @@
+{
+ "i": 117,
+ "topic": "Multimodal learning: CLIP, vision-language models, shared embedding spaces",
+ "track": "O. Deep Learning and Multimodal",
+ "month": 13,
+ "hours": 8,
+ "why": "Every customer with an image catalogue, a document scanner or a product taxonomy eventually asks for 'search my pictures with words', and the honest answer is a dual encoder whose whole behaviour is decided by one loss, one learned temperature and how many negatives fit in a batch - so if you cannot write the symmetric InfoNCE from memory you cannot say why their demo returns the wrong shoe. This is also the topic where the model looks like it works: retrieval returns plausible images, cosine similarities are all in a comfortable band, and the actual defects (false negatives from duplicate captions, a batch too small to make the loss mean anything, a modality gap that makes every similarity threshold you copied from a text system nonsense) never raise an exception. Every VLM the customer is excited about - LLaVA, BLIP-2, whatever ships next quarter - is a frozen CLIP-style tower plus a projector, so its grounding ceiling is set by material in this topic, and you are the person who has to say that out loud in the room.",
+ "prerequisites": [
+  "Transformers derived and built from scratch (Topic 115): scaled dot-product attention, multi-head projections, positional encoding, and the residual/LayerNorm block - both CLIP towers are transformers",
+  "PyTorch at depth (Topic 112): broadcasting and shape discipline, autograd, Dataset/DataLoader with workers, AMP, and reading a torch.profiler table, because the (N,d) x (d,N) logit matrix and the N-by-N label trick are exactly where silent shape bugs live",
+  "Cross-entropy as negative log-likelihood, KL divergence and mutual information from Topic 98 (Information theory and loss functions) - InfoNCE is a categorical NLL over a batch, and its log N ceiling is an information-theoretic statement",
+  "Optimiser and stability machinery from Topic 111: AdamW, warmup plus cosine, gradient clipping, fp16 loss scaling and bf16 - contrastive training is unusually good at producing NaNs in fp16",
+  "Transfer learning and image augmentation from Topic 113 (Computer vision), plus a working ViT or ResNet backbone you can instantiate and freeze",
+  "Bi-encoder retrieval vocabulary from Topic 53 (RAG at depth): embedding, ANN index, recall@k, and why a bi-encoder is not a cross-encoder; and honest held-out discipline from Topic 103 (Model evaluation), since every R@K in the deliverable is a held-out number on a stated gallery",
+  "One CUDA GPU with at least 16 GB (Colab T4/A10 class is enough for Flickr8k at batch 256), plus disk for Flickr8k and a pretrained open_clip / OpenAI ViT-B/32 checkpoint to compare against"
+ ],
+ "subtopics": [
+  {
+   "name": "The dual-encoder contract: what a 'shared embedding space' actually is",
+   "learn": "State the object precisely: two independent encoders f_img: images -> R^{d_i} and f_txt: text -> R^{d_t}, two linear projections W_i and W_t into a common d (512 for ViT-B/32), then L2 normalisation, so the only thing tying the modalities together is a scalar inner product. Understand what that buys and what it forbids - retrieval and zero-shot classification become a single matmul plus argmax, which is why 400M pairs are trainable and why a 1M-image index is one FAISS call, but there is no cross-attention between the modalities, so no per-token grounding, no counting, no 'is the red cube left of the blue one'. Be able to contrast it in one breath with a cross-encoder (scores one pair at a time, far more accurate, O(N) forward passes per query, unusable as an index) and with a captioning/generative model, and state CLIP's actual scale (400M pairs, batch 32768, 32 epochs) so a customer's '5,000 labelled images' is immediately in perspective.",
+   "minutes": 25,
+   "resource": {
+    "label": "Radford et al., \"Learning Transferable Visual Models From Natural Language Supervision\" (CLIP, arXiv:2103.00020)",
+    "url": "https://arxiv.org/abs/2103.00020"
+   }
+  },
+  {
+   "name": "InfoNCE from first principles, and the log N ceiling",
+   "learn": "Derive the loss as what it is: a softmax classifier over the batch that must pick the true partner out of N candidates, L_N = -E[log( exp(s_pos/tau) / sum_{j=1}^{N} exp(s_j/tau) )], which is exactly categorical cross-entropy with the diagonal as the label. Then derive the two consequences that decide every practical choice later: at initialisation, with random embeddings, every row of the softmax is uniform so the loss starts at log N (a run that does not start near log N has a bug, not a hyperparameter problem), and the van den Oord/CPC bound I(x;y) >= log N - L_N caps the mutual information you can estimate at log(batch size) - so batch size is not an engineering knob, it is the resolution of the objective. Be able to say why InfoNCE is a lower-bound estimator rather than a divergence you are minimising directly, and why 'the loss went down' is therefore weaker evidence than 'R@1 went up'.",
+   "minutes": 30,
+   "resource": {
+    "label": "van den Oord et al., \"Representation Learning with Contrastive Predictive Coding\" (InfoNCE, arXiv:1807.03748)",
+    "url": "https://arxiv.org/abs/1807.03748"
+   }
+  },
+  {
+   "name": "The symmetric loss in fifteen lines, and dL/dlogits by hand",
+   "learn": "Write it closed-book: I = F.normalize(img_proj, dim=-1); T = F.normalize(txt_proj, dim=-1); logits = logit_scale.exp() * I @ T.t(); labels = torch.arange(N, device=...); loss = 0.5*(F.cross_entropy(logits, labels) + F.cross_entropy(logits.t(), labels)). Know why the labels are arange(N) (the k-th image's partner is the k-th caption, so the target class index equals the row index), why the two directions are averaged rather than added (image->text and text->image are different classification problems over the same matrix, and halving keeps the loss comparable to log N), and that F.cross_entropy consumes raw logits so an extra softmax is the same silent bug as in Topic 110. Derive the gradient: for a row with softmax p, dL/ds_ij = (p_ij - 1[i=j]) / N, so gradient mass on a negative is exactly its softmax probability - which is the sentence that explains temperature, batch size and hard negatives all at once. Assert in a test that a random batch gives loss ~= log N and that swapping two rows of T raises it.",
+   "minutes": 30,
+   "resource": {
+    "label": "PyTorch docs - torch.nn.CrossEntropyLoss (logit input, class-index targets, reduction)",
+    "url": "https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html"
+   }
+  },
+  {
+   "name": "L2 normalisation, cosine similarity, and the alignment/uniformity decomposition",
+   "learn": "Know why F.normalize before the dot product is load-bearing and not cosmetic: on the unit sphere s = u.v = cos(theta) is bounded in [-1, 1], so the temperature alone sets the softmax sharpness; drop the normalisation and the model can reduce the loss by inflating embedding norms instead of learning, producing a beautifully decreasing curve and a useless index. Then learn the geometry: Wang and Isola show the contrastive loss asymptotically decomposes into alignment, E ||f(x) - f(y)||^2 over positive pairs, and uniformity, log E exp(-t ||f(x_i) - f(x_j)||^2) over all pairs, and that both are measurable on your own checkpoint in ten lines. Be able to read the two numbers as a diagnosis: alignment good and uniformity bad means representation collapse (everything points the same way, retrieval returns the same hub images for every query); uniformity good and alignment bad means the positives were never learned, usually too high a temperature or too few epochs. Also know ||a - b||^2 = 2 - 2 a.b on the sphere, which is why an L2 index and an inner-product index rank identically once vectors are normalised.",
+   "minutes": 25,
+   "resource": {
+    "label": "Wang and Isola, \"Understanding Contrastive Representation Learning through Alignment and Uniformity on the Hypersphere\" (arXiv:2005.10242)",
+    "url": "https://arxiv.org/abs/2005.10242"
+   }
+  },
+  {
+   "name": "The learned temperature: logit_scale, its gradient, and the clamp",
+   "learn": "Understand the parameterisation CLIP actually uses: a single scalar logit_scale stored in log space and initialised to log(1/0.07) ~= 2.6593, multiplied in as logit_scale.exp(), clamped each step to at most log(100) so tau cannot fall below 0.01. Reason about the limits from dL/ds_ij = p_ij - 1[i=j]: as tau -> 0 the row softmax approaches an argmax, so essentially all gradient mass lands on the single hardest negative - fast early progress, huge gradient variance, and catastrophic sensitivity to a mislabelled or duplicated pair, because one false negative now owns the update; as tau -> infinity the softmax flattens, every negative gets ~1/N of the mass, the loss sits at log N and the encoders drift toward uniformity with no alignment. Know that because tau is learned it will happily run to the clamp on a small or easy batch (the model discovers that sharpening is free when negatives are trivial), which is why an unclamped logit_scale plus fp16 is a reliable NaN. Do the experiment: freeze a trained checkpoint, sweep tau over a fixed batch, and plot both the loss and the fraction of gradient norm attributable to the top-1 negative.",
+   "minutes": 30,
+   "resource": {
+    "label": "Wang and Liu, \"Understanding the Behaviour of Contrastive Loss\" (temperature, hardness-awareness, the uniformity-tolerance dilemma, arXiv:2012.09740)",
+    "url": "https://arxiv.org/abs/2012.09740"
+   }
+  },
+  {
+   "name": "Batch size is the loss: in-batch negatives and how to fake a big batch",
+   "learn": "Internalise that each anchor sees exactly N-1 negatives, all of them sampled uniformly from the data, so as N grows the hardest in-batch negative gets harder and the log N bound rises - CLIP's 32768 is a modelling decision, not an infrastructure one, and a Flickr8k run at batch 64 will plateau for reasons no learning-rate sweep can fix. Know why the naive memory cost is activations for N images (the N-by-N logit matrix itself is tiny: 32768^2 fp16 is 2 GB, but the ViT activations are what OOMs), and learn the three escapes with their real costs: gradient caching (a no_grad pass to collect all embeddings, compute the loss and cache dL/d(embedding), then a second pass in sub-batches that backprops with the cached gradients - mathematically identical, roughly 2x compute), a MoCo-style momentum queue (cheap, but the negatives are stale embeddings from an older encoder), and simply more GPUs. Verify your implementation the only way that counts: assert the cached-gradient parameter update matches a naive full-batch update to 1e-5 on a small model in float64.",
+   "minutes": 35,
+   "resource": {
+    "label": "Gao et al., \"Scaling Deep Contrastive Learning Batch Size under Memory Limited Setup\" (GradCache, arXiv:2101.06983)",
+    "url": "https://arxiv.org/abs/2101.06983"
+   }
+  },
+  {
+   "name": "Distributed contrastive loss: all_gather, local_loss, and the gradient that silently vanishes",
+   "learn": "Read open_clip's ClipLoss line by line, because it encodes the bug you will otherwise ship: torch.distributed.all_gather is not an autograd-aware op, so the gathered tensors from other ranks carry no graph, and if you also overwrite your own rank's slice with the gathered copy, your local embeddings receive zero gradient and the model trains as if world_size were 1 while every log looks healthy. Know the two correct patterns - gather_with_grad (an all_gather with a registered backward that reduces gradients back to the owning rank) and local_loss (each rank computes cross-entropy for its own rows against the full gathered set of columns, with labels offset by rank * local_batch_size) - and be able to say why the second is the memory-cheap default at scale and why the label offset is the classic off-by-one. Confirm empirically: same seed, same data order, run 1 GPU at batch 256 versus 4 GPUs at local batch 64, and assert the losses and gradients match within tolerance.",
+   "minutes": 20,
+   "resource": {
+    "label": "open_clip source - src/open_clip/loss.py (ClipLoss, gather_features, local_loss, gather_with_grad)",
+    "url": "https://github.com/mlfoundations/open_clip/blob/main/src/open_clip/loss.py"
+   }
+  },
+  {
+   "name": "Hard negatives, false negatives, and the duplicate-caption trap",
+   "learn": "Separate the two things people conflate. Hard negatives are genuinely non-matching pairs with high similarity, and the temperature already up-weights them; explicit mining (sampling negatives with probability proportional to exp(beta * s)) accelerates convergence at small batch and is how you get useful behaviour from batch 256 instead of 32768. False negatives are true matches sitting in the denominator, and they are actively harmful because the gradient pushes a correct pair apart: on Flickr8k each image has five captions, so the naive Dataset that yields one row per (image, caption) puts up to five true partners in the same batch, and the loss punishes the model for retrieving them. Fix it deliberately - sample exactly one caption per image per epoch, or build the mask yourself and set the duplicate entries to -inf before the softmax - then run the ablation and report the R@1 delta, because that number is the cheapest credibility you will ever buy in a customer review. Know that the same trap appears in every enterprise catalogue where two SKUs share a description.",
+   "minutes": 25,
+   "resource": {
+    "label": "Robinson et al., \"Contrastive Learning with Hard Negative Samples\" (arXiv:2010.04592)",
+    "url": "https://arxiv.org/abs/2010.04592"
+   }
+  },
+  {
+   "name": "The image tower: ViT patchification, the CLS token, and resolution",
+   "learn": "Be able to write the ViT-B/32 forward from memory: a 224x224x3 image is cut into 7x7 = 49 non-overlapping 32x32 patches, each flattened to 3072 and linearly projected to width 768 (implemented as a stride-32 Conv2d), a learned class token is prepended and learned positional embeddings are added to all 50 tokens, then 12 pre-LN transformer blocks, then LayerNorm on the class token, then the projection to the shared d=512. Know the levers and their cost: patch size dominates compute because token count scales as (H/P)^2 and attention as its square, so ViT-B/16 is roughly 4x the FLOPs of B/32 at the same resolution; changing input resolution requires interpolating the positional embeddings, which is the standard silent accuracy loss when someone feeds 336px into a 224px checkpoint. Know why the ResNet variants of CLIP replace global average pooling with an attention-pooling head, and why a customer's 4000x3000 document photo downsampled to 224 loses exactly the small text they wanted searched.",
+   "minutes": 25,
+   "resource": {
+    "label": "Dosovitskiy et al., \"An Image is Worth 16x16 Words\" (ViT, arXiv:2010.11929)",
+    "url": "https://arxiv.org/abs/2010.11929"
+   }
+  },
+  {
+   "name": "The text tower: tokenisation, the 77-token cap, and which vector you pool",
+   "learn": "Know exactly how a caption becomes one vector in each of the two implementations you will touch. OpenAI CLIP: byte-pair encoding, 49152 vocab, a fixed 77-token context with SOT/EOT sentinels and causal masking, and the sequence representation is taken from the hidden state at the EOT position (argmax of the token ids) before LayerNorm and projection - so anything past 77 tokens is silently truncated, which quietly destroys retrieval on the customer's 300-word product descriptions. DistilBERT (what the deliverable uses): 6 layers, hidden 768, no token_type embeddings, and critically no next-sentence-prediction objective, so its [CLS] vector was never trained as a sentence representation - mean-pooling over the attention mask (sum(h * mask) / sum(mask), not a plain .mean() that averages padding into the answer) is the pooling that works. Be able to state the tokenizer contract: padding='max_length', truncation=True, and that the mask must reach the pooling function, because forgetting it makes batch composition change the embedding of an unchanged sentence.",
+   "minutes": 25,
+   "resource": {
+    "label": "HuggingFace Transformers - CLIP model docs (CLIPTextModel, pooled output at the EOS token, CLIPProcessor)",
+    "url": "https://huggingface.co/docs/transformers/model_doc/clip"
+   }
+  },
+  {
+   "name": "Projection heads, and why the best features are the ones you throw away",
+   "learn": "Understand the head as a small map g: R^{d_backbone} -> R^{d_shared} that exists so the two towers can meet, and know CLIP uses a single linear layer with no bias and no nonlinearity while SimCLR-style work uses a 2-layer MLP. Then absorb the finding that changes how you serve the model: the representation before the projection head is consistently better for downstream linear probes than the one after, because the head is trained to discard everything the contrastive task is invariant to (colour, exact pose, style), and that discarded information is often precisely what the customer's classifier needs. The operational rule: use post-projection normalised embeddings for anything cross-modal (retrieval, zero-shot), use pre-projection backbone features for a same-modality linear probe or clustering, and never mix vectors from the two spaces in one index. Verify it yourself on the deliverable: train a logistic regression on both and report the two accuracies.",
+   "minutes": 20,
+   "resource": {
+    "label": "Chen et al., \"A Simple Framework for Contrastive Learning of Visual Representations\" (SimCLR - projection head ablation, arXiv:2002.05709)",
+    "url": "https://arxiv.org/abs/2002.05709"
+   }
+  },
+  {
+   "name": "The modality gap: two cones, not one sphere",
+   "learn": "Learn the empirical fact and its cause, because it is the single most misread number in a CLIP demo: image and text embeddings do not interleave on the unit sphere, they occupy two narrow, well-separated cones, so the cosine similarity between an image and its own correct caption is typically ~0.2-0.3 while two unrelated images sit at 0.6-0.8. The gap is created at random initialisation by the cone effect of deep nonlinear networks and is then preserved rather than closed by the contrastive objective, since InfoNCE only needs the diagonal to beat the off-diagonal within a row - a constant offset between modalities is free. Know the consequences you must design around: absolute similarity thresholds copied from a text-only system reject every correct match, a single index containing both modalities returns only same-modality neighbours, and shifting embeddings along the gap direction measurably changes both zero-shot accuracy and fairness metrics. Measure it on your own checkpoint and on ViT-B/32: centroid distance ||mean(I) - mean(T)||, overlapping histograms of the diagonal s_ii against the off-diagonal s_ij, and a 2-D PCA scatter coloured by modality - that plot is what you put in front of the customer.",
+   "minutes": 30,
+   "resource": {
+    "label": "Liang et al., \"Mind the Gap: Understanding the Modality Gap in Multi-modal Contrastive Representation Learning\" (arXiv:2203.02053)",
+    "url": "https://arxiv.org/abs/2203.02053"
+   }
+  },
+  {
+   "name": "Zero-shot classification as retrieval, and prompt ensembling",
+   "learn": "Build the classifier explicitly rather than calling a helper: embed one prompt per class, L2-normalise, stack into W of shape (d, C), and classify an image as argmax over normalised_image @ W - a zero-shot classifier is literally a nearest-text lookup with the class names as the gallery. Learn how much of the headline number is prompt engineering: bare class names underperform 'a photo of a {label}.' by several points, CIFAR-10's raw label 'plane' should be 'airplane', and OpenAI's 80-template ensemble (average the normalised embeddings across templates, then re-normalise - average embeddings, not logits) is worth roughly 3-5 points on ImageNet at zero inference cost. Know why 'a photo of a {c}' works at all: it moves the text distribution closer to the caption distribution the model was trained on. Report your zero-shot CIFAR-10 number three ways - raw names, single template, ensemble - so nobody can accuse the comparison against ViT-B/32 of being rigged in either direction.",
+   "minutes": 25,
+   "resource": {
+    "label": "OpenAI CLIP repo - Prompt_Engineering_for_ImageNet.ipynb (the 80 templates and the class-name fixes)",
+    "url": "https://github.com/openai/CLIP/blob/main/notebooks/Prompt_Engineering_for_ImageNet.ipynb"
+   }
+  },
+  {
+   "name": "Retrieval evaluation done honestly: R@K, gallery size, and the five-caption asymmetry",
+   "learn": "Define the two metrics separately and state the convention every time you quote them. Text-to-image R@K: for each test caption, rank the whole image gallery by cosine similarity and count a hit if the one correct image is in the top K. Image-to-text R@K: for each test image, rank all captions and count a hit if ANY of its five captions is in the top K - the standard convention, and roughly a 2x optimistic distortion if you silently apply it to the other direction. Know that R@K is meaningless without the gallery size (R@1 against 1000 Flickr8k test images is not comparable to R@1 against a 5000-image gallery, and a paper's number always specifies which), that you must use a fixed published-style split rather than a fresh random one so the pretrained baseline is measured on the same rows, and that median rank plus mean rank are worth reporting because they expose a long tail that R@10 hides. Implement it as one matmul plus argsort over the whole test set, and add a leakage assertion that no test image id appears in the training pair list.",
+   "minutes": 25,
+   "resource": {
+    "label": "Karpathy and Fei-Fei, \"Deep Visual-Semantic Alignments for Generating Image Descriptions\" (the retrieval splits and R@K protocol, arXiv:1412.2306)",
+    "url": "https://arxiv.org/abs/1412.2306"
+   }
+  },
+  {
+   "name": "Adapting to a customer: zero-shot, linear probe, locked-image tuning, full fine-tune",
+   "learn": "Build the decision table you will actually be asked for, ordered by how much labelled data it needs and how much robustness it costs. Zero-shot: no labels, strong on common concepts, useless on the customer's internal vocabulary. Linear probe on frozen pre-projection features: hundreds of labels, minutes on CPU with sklearn LogisticRegression, cannot fix a backbone that never saw the domain. LiT-style locked-image tuning: freeze the image tower, train only the text tower on the customer's pairs - usually the best value when the images are natural photographs but the language is domain-specific jargon. Full fine-tune: best in-domain, and it demonstrably destroys out-of-distribution robustness, which is why WiSE-FT exists - weight-space ensembling theta = (1-alpha) theta_zeroshot + alpha theta_finetuned recovers most of the shift robustness at no inference cost, with alpha swept on held-out data. Be able to say the sentence that protects the account: 'fine-tuning on your 3,000 pairs will raise this category and quietly lower every category you add next quarter, unless we ensemble the weights and keep the zero-shot eval in CI.'",
+   "minutes": 25,
+   "resource": {
+    "label": "Wortsman et al., \"Robust fine-tuning of zero-shot models\" (WiSE-FT, arXiv:2109.01903)",
+    "url": "https://arxiv.org/abs/2109.01903"
+   }
+  },
+  {
+   "name": "Compositionality: why CLIP behaves like a bag of words",
+   "learn": "Know the concrete failure and its cause. CLIP assigns nearly identical scores to 'the horse is eating the grass' and 'the grass is eating the horse', and shuffling the word order of a caption barely changes retrieval - because the training objective only ever required the true caption to beat random other captions in the batch, and random negatives almost never share the same bag of words, so word order was never a useful feature to learn. Learn the benchmarks that turn this from an anecdote into a number: ARO (attribution, relation and order probes built by perturbing real captions) and Winoground (pairs of images and captions using identical words in different orders, where strong models score near chance). Know the fix and its shape: add hard negative captions constructed by swapping relations and attributes (the NegCLIP recipe) so the loss finally has to look at order. Then apply the judgement: if the customer's queries are 'red running shoe' the bag-of-words limit is harmless, and if their queries are 'invoice with the stamp on the left page' a dual encoder is the wrong architecture and you should say so before the pilot, not after.",
+   "minutes": 25,
+   "resource": {
+    "label": "Yuksekgonul et al., \"When and why vision-language models behave like bags-of-words, and what to do about it\" (ARO, arXiv:2210.01936)",
+    "url": "https://arxiv.org/abs/2210.01936"
+   }
+  },
+  {
+   "name": "Data is the model: web pairs, filtering, dedup and test-set contamination",
+   "learn": "Understand that at fixed architecture and compute, the dataset filtering strategy is the dominant variable - the DataComp result is that a well-filtered 140M subset beats a raw 400M one, and the filters that matter are simple (CLIP-score thresholding against an existing model, English-language detection, image resolution and aspect floors, caption length, near-duplicate removal by perceptual hash or embedding). Know the alignment-noise reality of alt-text: a large fraction of web captions do not describe the image at all, which is exactly the label noise that a low temperature amplifies into the hardest-negative gradient. Take contamination seriously as an evaluation issue rather than an ethics footnote: a web-scale corpus contains many standard benchmark images, so zero-shot numbers must be reported alongside a de-duplication analysis (CLIP's paper does one), and on a customer engagement the equivalent question is whether their 'holdout' images are near-duplicates of training frames from the same shoot. Also know the documented harms in LAION-scale corpora, because 'where did the training data come from' is a procurement question you will be asked under a legal team's eye.",
+   "minutes": 25,
+   "resource": {
+    "label": "Gadre et al., \"DataComp: In search of the next generation of multimodal datasets\" (arXiv:2304.14108)",
+    "url": "https://arxiv.org/abs/2304.14108"
+   }
+  },
+  {
+   "name": "SigLIP: replacing the softmax with a pairwise sigmoid",
+   "learn": "Write the alternative loss and know exactly what it changes: instead of a softmax normalised over the batch, SigLIP treats every one of the N^2 pairs as an independent binary problem, L = -(1/N) sum_i sum_j log sigmoid( z_ij (t' x_i . y_j + b) ) with z_ij = +1 on the diagonal and -1 off it, a learned scale t' and a learned bias b initialised around -10 to counteract the fact that at initialisation there are N positives against N^2 - N negatives. The consequences are the interesting part: with no global normaliser the loss is separable over pairs, so a distributed implementation only needs to pass embedding chunks around the ring instead of materialising and all-gathering the full similarity matrix, memory stops being the batch-size ceiling, and the method works notably better than InfoNCE at small and medium batch - which is precisely the regime of a customer engagement on two GPUs. Be able to say when you would still use softmax InfoNCE (parity with a published baseline, or an existing checkpoint you must match) and implement both behind one flag so the comparison is a single ablation row.",
+   "minutes": 25,
+   "resource": {
+    "label": "Zhai et al., \"Sigmoid Loss for Language Image Pre-Training\" (SigLIP, arXiv:2303.15343)",
+    "url": "https://arxiv.org/abs/2303.15343"
+   }
+  },
+  {
+   "name": "From dual encoder to VLM: the Q-Former, the LLaVA projector, and where grounding comes from",
+   "learn": "Trace how the same frozen tower becomes a chat model. BLIP-2: freeze a CLIP-style image encoder and freeze an LLM, and train only a Q-Former - a small transformer holding 32 learned query embeddings that cross-attend to the image patch features and emit 32 vectors into the LLM's input space - in two stages (representation learning against the frozen encoder, then generative learning against the frozen LLM). LLaVA: even simpler, a projection (a single linear layer in v1, a 2-layer MLP in v1.5) mapping CLIP ViT-L/14 patch features directly into the LLM token embedding space, trained on instruction data, with the image occupying a few hundred token positions. The FDE-relevant conclusion: a VLM's visual ceiling is its frozen encoder's - if CLIP at 224px cannot read the serial number, no amount of prompting the language model will, and 'the model hallucinated' is usually 'the encoder never had the pixels'. Know that this is why high-resolution tiling and AnyRes-style schemes exist, and be able to test the hypothesis cheaply by scoring the crop directly with CLIP before blaming the LLM.",
+   "minutes": 30,
+   "resource": {
+    "label": "Li et al., \"BLIP-2: Bootstrapping Language-Image Pre-training with Frozen Image Encoders and Large Language Models\" (arXiv:2301.12597)",
+    "url": "https://arxiv.org/abs/2301.12597"
+   }
+  },
+  {
+   "name": "Serving the retrieval demo: normalised vectors, IndexFlatIP, and the failure surface",
+   "learn": "Ship it correctly: L2-normalise once at write time, store float32 C-contiguous arrays, and use faiss.IndexFlatIP so inner product is cosine - IndexFlatL2 on the same normalised vectors ranks identically since ||a-b||^2 = 2 - 2 a.b, but on unnormalised vectors it ranks by norm and you get the same handful of hub images for every query. Know when to move to IVF or HNSW and that the only honest way to tune nlist/nprobe or efSearch is to measure recall against the flat index on your own queries rather than trusting defaults. Then rehearse the demo failure surface, because these are the ones that happen live in front of a customer: typographic attacks - a piece of paper reading 'iPod' taped to an apple flips the zero-shot label, a consequence of the multimodal neurons that fire for a concept in photographs, drawings and rendered text alike; near-duplicate collapse where one product shoot dominates every result; and out-of-vocabulary internal jargon that lands nowhere useful in the text cone. Have a fallback ready for each - a cross-encoder or VLM rerank over the top 50, dedup by embedding similarity, and a curated prompt-template file the customer can edit.",
+   "minutes": 20,
+   "resource": {
+    "label": "FAISS wiki - Getting started (index types, IndexFlatIP vs IndexFlatL2, add/search)",
+    "url": "https://github.com/facebookresearch/faiss/wiki/Getting-started"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can write the symmetric InfoNCE loss from memory and implement it in about fifteen lines of PyTorch (F.normalize, logit_scale.exp(), a single I @ T.t(), labels = arange(N), 0.5 times the mean of the two cross-entropies), with a pytest that asserts the loss on a random batch equals log N to three decimal places and that permuting the text rows raises it.",
+  "You can derive dL/ds_ij = (p_ij - 1[i=j])/N on a whiteboard, state analytically where the gradient mass goes as tau -> 0 and as tau -> infinity, and back it with a measured temperature sweep plotting loss and the share of gradient norm carried by the single hardest negative.",
+  "You can train a dual encoder on Flickr8k and report text-to-image and image-to-text R@1/R@5/R@10 next to a pretrained ViT-B/32 baseline, stating the gallery size, the caption-sampling rule and the any-of-five hit convention explicitly, with a leakage assertion that no test image appears in the training pairs.",
+  "You can measure the modality gap on your own checkpoint and on OpenAI CLIP (centroid distance, overlapping s_ii versus s_ij histograms, a PCA scatter coloured by modality) and use it to decide whether a bad retrieval result is a gap problem, a false-negative problem or a batch-size problem.",
+  "You can build a zero-shot CIFAR-10 classifier as a text-embedding matmul and report the accuracy delta across raw class names, a single 'a photo of a {label}.' template, and an 80-template ensemble averaged in embedding space.",
+  "You can raise the effective contrastive batch beyond one GPU's memory with gradient caching or a gradient-aware all_gather, and prove correctness by asserting the resulting parameter update matches the naive full-batch update to 1e-5.",
+  "You can implement SigLIP's pairwise sigmoid loss behind the same interface as InfoNCE, train both at batch 256 on identical seeds and data order, and report the R@1 difference with the learned scale and bias trajectories.",
+  "You can recommend, for a customer with N labelled pairs and a stated query distribution, one of zero-shot / linear probe / locked-image tuning / full fine-tune plus WiSE-FT, and state the robustness cost of the choice in one sentence they will remember."
+ ],
+ "failureModes": [
+  "The Dataset yields one row per (image, caption) on Flickr8k, so up to five true partners for the same image land in one batch and the loss actively pushes correct pairs apart; training converges, the curve looks textbook, and R@1 sits several points below where it should for reasons no learning-rate sweep will find.",
+  "F.normalize is omitted on one tower (or applied before the projection instead of after), so the loss can be reduced by growing embedding norms rather than by aligning pairs; the loss falls smoothly, the temperature stops meaning anything, and the retrieval index ranks by magnitude.",
+  "logit_scale is left learnable but unclamped, runs past 100 on an easy batch, the softmax saturates and the run NaNs under fp16 at epoch three - which is then debugged for a day as a corrupt-image problem in the dataloader.",
+  "Multi-GPU training gathers embeddings with a plain torch.distributed.all_gather and overwrites the local slice, so gradients flow for only one rank's share of the negatives; the 8-GPU run reaches exactly the 1-GPU quality at 8x the cost and the team concludes 'contrastive scaling does not work for us'.",
+  "Image-to-text R@K is computed with the any-of-five-captions convention and text-to-image with the one-correct-image convention, then the two are quoted side by side as if symmetric, or the model's R@1 on a 1000-image gallery is compared to a published R@1 on 5000 - the headline number is roughly double what it should be and the customer's own test reproduces none of it.",
+  "Zero-shot CIFAR-10 is evaluated with the raw label 'plane' and no prompt template, comes in ten points below the published baseline, and the gap is attributed to the training run rather than to the prompt - so a week is spent tuning a model that was never the problem.",
+  "A similarity threshold of 0.5, copied from a sentence-embedding service, is used to decide whether a retrieved image is a match; the modality gap puts true image-caption pairs at 0.25 and unrelated image-image pairs at 0.75, so the system rejects every correct result while confidently deduplicating distinct products.",
+  "The whole dual encoder is fine-tuned on the customer's 3,000 in-domain pairs with no weight-space ensembling and no frozen zero-shot regression suite in CI; the pilot category improves, every other category silently degrades, and the failure surfaces two months later as 'the model got worse after your update'."
+ ],
+ "interviewQuestions": [
+  "Write the symmetric InfoNCE loss for a batch of N image-text pairs from memory, then derive the gradient with respect to the logits. Why is the loss log N at initialisation, and what exactly does the learned temperature do to that gradient as it goes to zero and as it grows?",
+  "A customer's text-to-image demo returns plausible but wrong images. Walk me through your diagnosis in order: what do you measure to distinguish too-few-negatives, false negatives in the batch, hubness or representation collapse, and the modality gap - and what single plot do you put in front of them?",
+  "Why is contrastive batch size a property of the objective rather than an infrastructure detail? State the bound it relates to, then give me three ways to get 32k negatives on four GPUs and tell me what each one costs in compute, staleness or correctness.",
+  "Explain the modality gap: where does it come from, why does contrastive training not close it, and name one concrete production decision it changes. How would you measure it on a checkpoint you were handed this morning?",
+  "SigLIP replaces the batch softmax with a per-pair sigmoid. Write both losses, explain what changes under data parallelism, why the bias term is initialised strongly negative, and when you would still choose softmax InfoNCE.",
+  "Design: 40,000 product photos, a one-line merchandiser description each, no labels, one A10, and the customer wants natural-language search live in three weeks. Zero-shot pretrained, locked-image tuning, or train from scratch? Name the eval you would agree with them up front, and say what you would do if R@1 came back at 12 percent.",
+  "CLIP scores 'a horse eating grass' and 'grass eating a horse' almost identically. Explain why the training objective permits this, how you would measure it on the customer's own query distribution, and what you would change in training or in the serving architecture to fix it."
+ ],
+ "proofOfWork": "A companion repo `contrastive-forensics` that turns the mini-clip training run into a diagnostic instrument a customer's ML team can audit. It ships (a) one shared trainer with the defect switched on or off by flag - duplicate-caption false negatives, missing L2 normalisation, unclamped logit_scale, a plain non-differentiable all_gather, pre- versus post-projection features in the index, and unnormalised vectors in an L2 FAISS index - each producing the same six artefacts per run (loss curve against the log N reference line, learned temperature trajectory, overlapping s_ii versus s_ij histograms, alignment and uniformity values, a modality-gap PCA scatter, and text-to-image and image-to-text R@1/5/10 with the gallery size stamped into the filename); (b) a correctness suite that asserts the loss equals log N at init, that gradient-cached and naive full-batch updates agree to 1e-5, that a 4-rank distributed run matches a single-GPU run at the same global batch, and that no test image id leaks into the training pairs; (c) an ablation table with three seeds and standard deviations covering batch size 64/128/256/512, temperature fixed at 0.07 versus learned, one-caption-per-image versus all five, InfoNCE versus SigLIP, and prompt raw / single-template / 80-template ensemble for zero-shot CIFAR-10 - every row a held-out number rather than a claim; and (d) a two-page handover note written for a non-ML stakeholder that states in plain language what the model can and cannot do, shows the typographic-attack demo failing on purpose, gives the recommended similarity operating point derived from the measured s_ii/s_ij distributions rather than a copied 0.5, and specifies the frozen zero-shot regression suite that must stay green in CI before any fine-tune ships."
+}

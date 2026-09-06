@@ -1,0 +1,230 @@
+{
+ "i": 115,
+ "topic": "Transformers from scratch: attention maths, positional encoding, build a small GPT",
+ "track": "O. Deep Learning and Multimodal",
+ "month": 13,
+ "hours": 12,
+ "why": "Every LLM feature you deploy for a customer sits on one architecture, and the difference between an FDE who can only call an API and one the customer trusts is whether you can answer 'why did it do that?' at the level of the attention pattern, the context window and the KV cache rather than at the level of the prompt. When a fine-tune diverges, when a long-context feature degrades past the training length, when a customer asks whether their 40k-token document actually fits, the answer is a property of softmax attention, positional encoding and the causal mask - and you will be asked to give it live, on a call, without looking it up. Writing the ~250 lines yourself is the only reliable way to make the maths load-bearing instead of decorative: after this you can read a model card, a config.json or a training log and know exactly which knob it is describing.",
+ "prerequisites": [
+  "Matrix calculus and the chain rule applied to composed linear maps and softmax (Topic 94, Calculus and optimisation), plus matrix shapes, inner products and low-rank factorisation (Topic 93, Linear algebra for ML)",
+  "Cross-entropy as negative log-likelihood, entropy and KL, so 'loss = 4.17 nats' is a number you can interpret (Topic 98, Information theory and loss functions)",
+  "Backpropagation, initialisation schemes and why activation/gradient variance must be controlled layer to layer (Topic 110, Neural network foundations)",
+  "PyTorch fluency: autograd, .backward(), Dataset/DataLoader, device placement, nn.Module and nn.Parameter registration, torch.profiler (Topic 112, PyTorch at depth)",
+  "Optimiser behaviour and LR schedules, mixed precision, and reading a bad loss curve (Topic 111, Training deep networks)",
+  "Seq2seq with RNN encoder-decoder plus Bahdanau attention, and the specific bottleneck it removed (Topic 114, Sequence models)",
+  "Floating-point behaviour: fp32 vs bf16 range and precision, catastrophic cancellation, why softmax needs a max-subtraction (Topic 99, Numerical computing)",
+  "A GPU with >= 8 GB (or a Colab/Modal runtime) plus PyTorch 2.x, because the ablation table needs three full training runs"
+ ],
+ "subtopics": [
+  {
+   "name": "The residual stream and the shape contract of a decoder block",
+   "learn": "Before any maths, fix the tensor contract: x is (B, T, d_model) at every point in the network, every sublayer is a function d_model -> d_model added back into x, and the model is `x = x + attn(ln1(x)); x = x + mlp(ln2(x))` repeated n_layer times. Understand the residual stream as a fixed-width communication channel that each block reads from and writes to additively, which is why the residual path carries an identity gradient and why depth does not, by itself, cause vanishing gradients. Write down the parameter count by hand for a config (n_layer, n_head, d_model, vocab, block_size): 4*d_model^2 per attention block (Q, K, V, O), 8*d_model^2 per MLP at 4x expansion, plus vocab*d_model for embeddings - then check it against `sum(p.numel() for p in model.parameters())` and account for every discrepancy.",
+   "minutes": 25,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - Ch.07 Computational Linguistics, 04. Transformers and language models",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2007%20-%20computational%20linguistics/04.%20transformers%20and%20language%20models.md"
+   }
+  },
+  {
+   "name": "Scaled dot-product attention: derive it on paper, then implement it in five lines",
+   "learn": "Derive Attention(Q, K, V) = softmax(QK^T / sqrt(d_k)) V from the retrieval story: queries q_i in R^{d_k}, keys k_j in R^{d_k}, a similarity score s_ij = q_i . k_j, a softmax over j turning scores into convex weights a_ij summing to 1, and an output o_i = sum_j a_ij v_j that is a convex combination of value vectors. Be able to state every shape - Q is (B, h, T, d_k), K^T is (B, h, d_k, T), the score matrix is (B, h, T, T), the output is (B, h, T, d_v) - and to say that the T x T score matrix is why memory and FLOPs are O(T^2) in sequence length and why doubling the context window quadruples attention cost. Implement it as a standalone function on random tensors and assert row sums of the weight matrix equal 1 and that permuting the key/value order permutes nothing in the output (attention is permutation-equivariant without positional information - this is the fact that motivates the next-but-one subtopic).",
+   "minutes": 45,
+   "resource": {
+    "label": "Dive into Deep Learning 11.3 - Attention Scoring Functions (scaled dot product, masked softmax)",
+    "url": "https://d2l.ai/chapter_attention-mechanisms-and-transformers/attention-scoring-functions.html"
+   }
+  },
+  {
+   "name": "Why 1/sqrt(d_k): the variance argument and softmax saturation",
+   "learn": "Do the derivation: if q and k have independent components with mean 0 and variance 1, then q . k = sum over d_k terms has mean 0 and variance d_k, so its standard deviation grows as sqrt(d_k); dividing by sqrt(d_k) restores unit variance so the logits entering softmax stay O(1) regardless of head dimension. Then say what goes wrong without it: large-magnitude logits push softmax into a near one-hot regime, and since d(softmax)/dz = diag(a) - a a^T, a saturated a makes the Jacobian nearly zero, so gradients through the attention weights vanish and the head stops learning. Verify empirically - sample q, k for d_k in {8, 64, 512}, plot the histogram of logits and the max softmax weight with and without the scale, and measure the attention entropy -sum a log a in both cases. Know the practical corollary: fp16 overflow in the score matrix and 'attention collapsed to the first token' bugs are usually a missing or wrong scale, not a data problem.",
+   "minutes": 35,
+   "resource": {
+    "label": "Vaswani et al., Attention Is All You Need (arXiv:1706.03762) - Sec. 3.2.1 and footnote on the scaling factor",
+    "url": "https://arxiv.org/abs/1706.03762"
+   }
+  },
+  {
+   "name": "Multi-head attention: head splitting, the reshape/transpose, and einsum",
+   "learn": "Understand multi-head as h independent low-rank attention operations in parallel subspaces: one fused Linear(d_model, 3*d_model) produces Q, K, V, each is viewed as (B, T, h, d_head) with d_head = d_model // h, transposed to (B, h, T, d_head), attended per head, transposed back and reshaped to (B, T, d_model), then passed through W_O. Be able to write the reshape both ways - `x.view(B, T, h, d_head).transpose(1, 2)` and the einsum `torch.einsum('bhqd,bhkd->bhqk', q, k)` - and to say why `.view` after `.transpose` needs `.contiguous()` or `.reshape()`. Know that total FLOPs are roughly independent of h (you split d_model rather than adding capacity), that h must divide d_model, and that the classic head-splitting bug - reshaping to (B, T, d_head, h) or forgetting the transpose - trains to a *plausible* loss curve because the model can partially compensate, which is exactly what makes it so hard to spot. Diagnose it by checking that a single-head model and an h-head model with h=1 produce bitwise-identical outputs.",
+   "minutes": 40,
+   "resource": {
+    "label": "Dive into Deep Learning 11.5 - Multi-Head Attention",
+    "url": "https://d2l.ai/chapter_attention-mechanisms-and-transformers/multihead-attention.html"
+   }
+  },
+  {
+   "name": "QK and OV circuits: what the four projection matrices actually parameterise",
+   "learn": "Rewrite a head so the weights appear as two composed matrices rather than four: the attention pattern depends only on W_Q W_K^T (the QK circuit, a bilinear form on the residual stream deciding *where* to look), and the contribution written back depends only on W_O W_V (the OV circuit, deciding *what* is copied). Note that both are rank <= d_head, so each head is a low-rank read-write operation on a d_model-wide stream - this is the cleanest justification for d_head = d_model / h and for why heads are interpretable as somewhat independent. Be able to say what this buys you in front of a customer: 'attention weights show where the model looked, not what it concluded', because a high weight paired with a near-zero OV contribution moves nothing. Use the framing to explain induction heads (a previous-token head feeding a match-and-copy head) as the mechanism behind in-context learning and few-shot prompting.",
+   "minutes": 30,
+   "resource": {
+    "label": "Anthropic - A Mathematical Framework for Transformer Circuits (QK/OV circuits, induction heads)",
+    "url": "https://transformer-circuits.pub/2021/framework/index.html"
+   }
+  },
+  {
+   "name": "The causal mask: the -inf trick, leakage, and off-by-one",
+   "learn": "Build the mask as `torch.tril(torch.ones(T, T)).view(1, 1, T, T)` registered with `register_buffer` (not a Parameter, and it must move with `.to(device)`), and apply it as `scores.masked_fill(mask[:, :, :T, :T] == 0, float('-inf'))` *before* softmax so masked positions get exactly zero weight. Know why -inf and not a large negative constant in fp16 (-1e9 overflows to -inf anyway, but -65504 does not mask reliably), and why a fully-masked row (all -inf) yields NaN out of softmax - the failure mode when you combine a causal mask with a padding mask on a fully-padded row. Understand the leakage tests you must be able to run on demand: change token t and assert logits at positions < t are bitwise unchanged; train, then check that val loss is implausibly low (a no-mask model gets near-zero loss because position t can read token t itself); and confirm the mask is `tril` including the diagonal, since excluding it shifts the whole prediction task by one. Know how `is_causal=True` and `attn_mask` interact in F.scaled_dot_product_attention and that passing both is an error you will hit.",
+   "minutes": 40,
+   "resource": {
+    "label": "PyTorch docs - torch.nn.functional.scaled_dot_product_attention (attn_mask, is_causal, backends)",
+    "url": "https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html"
+   }
+  },
+  {
+   "name": "Softmax numerics, log-sum-exp, and attention entropy as a diagnostic",
+   "learn": "Write softmax(z)_i = exp(z_i - max z) / sum_j exp(z_j - max z) and prove the max subtraction is exact, not an approximation; then write log-softmax as z_i - logsumexp(z) and explain why frameworks fuse softmax into cross-entropy (F.cross_entropy takes logits) instead of exposing probabilities that can underflow to 0 and produce -inf in the log. Know the softmax Jacobian diag(a) - a a^T and read from it the two degenerate regimes: uniform a (no signal, gradient small and undiscriminating) and one-hot a (saturated, gradient ~0). Instrument your model to log per-layer, per-head attention entropy H = -sum_j a_ij log a_ij over training - entropy collapsing to ~0 in early steps means the scale or init is wrong; entropy pinned at log(T) for every head means the heads are dead and the model is running on the MLP path alone.",
+   "minutes": 25,
+   "resource": {
+    "label": "Dive into Deep Learning 4.5 - Softmax Regression Revisited (LogSumExp trick, numerical stability)",
+    "url": "https://d2l.ai/chapter_linear-classification/softmax-regression-concise.html"
+   }
+  },
+  {
+   "name": "Sinusoidal positional encoding: derive the linear-shift property",
+   "learn": "Start from the fact you proved earlier - self-attention is permutation-equivariant, so without position the model sees a bag of tokens - then define PE(pos, 2i) = sin(pos / 10000^(2i/d)) and PE(pos, 2i+1) = cos(pos / 10000^(2i/d)). Prove the key property on paper: for a fixed offset k, [sin(w(pos+k)), cos(w(pos+k))] is a fixed 2x2 rotation matrix applied to [sin(w pos), cos(w pos)], so relative position by offset k is a *linear* function of the encoding, which is what lets a linear QK circuit express 'attend k tokens back'. Implement it, plot the (T, d) heatmap, and compute the dot product PE(pos) . PE(pos+k) as a function of k to see the monotone-ish decay. Contrast with `nn.Embedding(block_size, d_model)` learned positions: strictly better in-distribution, but undefined beyond block_size - which is exactly the customer question 'what happens if I paste in 200k tokens?'.",
+   "minutes": 40,
+   "resource": {
+    "label": "Dive into Deep Learning 11.6 - Self-Attention and Positional Encoding",
+    "url": "https://d2l.ai/chapter_attention-mechanisms-and-transformers/self-attention-and-positional-encoding.html"
+   }
+  },
+  {
+   "name": "RoPE and ALiBi: how modern models actually encode position",
+   "learn": "Rotary position embedding applies a position-dependent rotation to q and k *inside each head* (pairs of dimensions rotated by angle m*theta_i, theta_i = base^(-2i/d)) rather than adding a vector to the residual stream, with the consequence that the score q_m . k_n depends only on m - n: relative position falls out of the dot product algebraically. Know the levers you will meet in real configs - `rope_theta` (10000 vs 500000), NTK-aware and linear position-interpolation scaling for context extension, and that RoPE is applied to q and k but not v. Know ALiBi as the cheaper alternative: add a per-head linear bias -m * |i - j| to the scores, no embedding at all, with better length extrapolation. Be able to answer, from architecture rather than folklore, why a model 'gets worse past 8k tokens' - the positions were never trained, so RoPE frequencies land outside the fitted range and attention logits go out of distribution.",
+   "minutes": 35,
+   "resource": {
+    "label": "Su et al., RoFormer: Enhanced Transformer with Rotary Position Embedding (arXiv:2104.09864)",
+    "url": "https://arxiv.org/abs/2104.09864"
+   }
+  },
+  {
+   "name": "LayerNorm, RMSNorm, and pre-LN vs post-LN",
+   "learn": "Write LayerNorm out: mu and sigma^2 computed over the *feature* axis per token (not over the batch - this is the whole reason it works with variable sequence lengths and batch size 1 at inference, unlike BatchNorm), then y = gamma * (x - mu)/sqrt(sigma^2 + eps) + beta with learnable gamma, beta of size d_model. Understand RMSNorm as LayerNorm without mean subtraction and without beta (x / rms(x) * gamma), which is what most modern LLMs use. Then the placement question that decides whether your run survives: post-LN (`x = LN(x + attn(x))`, the original paper) puts the normaliser on the residual path, so gradient magnitude at initialisation grows with depth and you *must* have LR warmup; pre-LN (`x = x + attn(LN(x))`) keeps the residual path clean, gives well-behaved gradients at init, and trains stably without warmup - at a small cost in final quality. Your ablation must show post-LN diverging or needing warmup where pre-LN does not, and you should be able to point at the residual-path argument as the reason.",
+   "minutes": 40,
+   "resource": {
+    "label": "Xiong et al., On Layer Normalization in the Transformer Architecture (arXiv:2002.04745)",
+    "url": "https://arxiv.org/abs/2002.04745"
+   }
+  },
+  {
+   "name": "The position-wise feed-forward network and the activation choice",
+   "learn": "The MLP is Linear(d_model, 4*d_model) -> nonlinearity -> Linear(4*d_model, d_model), applied independently and identically to every position - it does no mixing across tokens at all, which is why attention and MLP are complementary: attention moves information between positions, the MLP transforms it in place. Know that the MLP holds roughly two thirds of a standard transformer's parameters (8 d^2 vs 4 d^2), so 'make the model bigger' usually means widening this. Understand GELU (x * Phi(x), a smooth gate by the input's own value) versus ReLU, and SwiGLU as a gated variant (Swish(xW) * (xV))W_2 where the 4x factor is reduced to ~8/3 to keep the parameter count constant - the arrangement in Llama-family models. Implement the block, then verify the 'position-wise' claim empirically by feeding a batch, shuffling the time axis, and asserting the MLP output shuffles identically.",
+   "minutes": 30,
+   "resource": {
+    "label": "Shazeer, GLU Variants Improve Transformer (arXiv:2002.05202)",
+    "url": "https://arxiv.org/abs/2002.05202"
+   }
+  },
+  {
+   "name": "Tokenisation: BPE, vocabulary, and why perplexity is not comparable across tokenizers",
+   "learn": "Start with the character-level vocabulary Tiny Shakespeare gives you (65 symbols, trivially reversible) so the GPT is simple, then implement BPE properly at least once: initialise on bytes, count adjacent pair frequencies, merge the most frequent pair, append to the merge list, repeat to the target vocab size; encoding replays the merges in learned order. Know the consequences you will explain to a customer: token count is not word count and varies 2-3x across languages and code, a 128k-token vocabulary buys shorter sequences (cheaper O(T^2) attention) at the cost of a bigger embedding matrix and softmax, and cross-entropy per *token* is only comparable between models sharing a tokenizer - convert to bits-per-byte if you must compare across. Be able to name the classic tokenisation artefacts: leading-space tokens changing behaviour, numbers split inconsistently so arithmetic degrades, and glitch tokens that appear in the vocabulary but never in training.",
+   "minutes": 35,
+   "resource": {
+    "label": "Hugging Face NLP Course - Byte-Pair Encoding tokenization (training and encoding algorithm)",
+    "url": "https://huggingface.co/learn/nlp-course/chapter6/5"
+   }
+  },
+  {
+   "name": "Embeddings, the unembedding, and weight tying",
+   "learn": "Token embedding is `nn.Embedding(vocab, d_model)` - a lookup that is exactly a one-hot matmul, with a dense gradient only on the rows that appeared in the batch; know `padding_idx` and that the embedding table is often the single largest parameter block in a small model. The unembedding is `Linear(d_model, vocab, bias=False)` producing (B, T, vocab) logits. Weight tying (`lm_head.weight = tok_emb.weight`) shares one matrix for both, cutting parameters by vocab*d_model and usually improving small-model loss; be able to state the reason it is defensible (the same token-identity subspace is used to read in and to read out) and the one thing to check (initialisation scale, since the tied matrix now serves two roles). Initialise embeddings with std 0.02 and scale the residual-projection weights by 1/sqrt(2*n_layer) so the variance of the residual stream does not grow linearly with depth; know that logits at step 0 should be near zero, giving loss ~ ln(vocab).",
+   "minutes": 25,
+   "resource": {
+    "label": "PyTorch docs - torch.nn.Embedding",
+    "url": "https://docs.pytorch.org/docs/stable/generated/torch.nn.Embedding.html"
+   }
+  },
+  {
+   "name": "The objective: next-token cross-entropy, the shift, and perplexity",
+   "learn": "The loss is `F.cross_entropy(logits.view(B*T, V), targets.view(B*T))` where targets are the inputs shifted left by one - `x = data[i:i+T]`, `y = data[i+1:i+T+1]` - so every one of the T positions contributes a prediction and the causal mask is what makes that legitimate in a single forward pass. Derive that this is maximum likelihood under an autoregressive factorisation p(x_1..x_T) = prod p(x_t | x_<t), that the loss is in nats per token, and that perplexity = exp(loss). Know the reference numbers cold: a uniform model over vocab V has loss ln(V) (about 4.17 for the 65-character Shakespeare vocabulary), so a loss at step 0 far from ln(V) means broken initialisation, and a loss below the unigram entropy after ten steps means leakage. Use `ignore_index` for padding, and know that averaging over a padded batch without it silently optimises the model to predict pad tokens.",
+   "minutes": 30,
+   "resource": {
+    "label": "PyTorch docs - torch.nn.functional.cross_entropy (logits input, ignore_index, reduction)",
+    "url": "https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.cross_entropy.html"
+   }
+  },
+  {
+   "name": "Optimisation: AdamW, warmup + cosine decay, gradient clipping, no-decay groups",
+   "learn": "Write the Adam update from memory - m_t = b1 m_{t-1} + (1-b1) g, v_t = b2 v_{t-1} + (1-b2) g^2, bias-corrected m_hat = m_t/(1-b1^t) and v_hat = v_t/(1-b2^t), step = -lr * m_hat / (sqrt(v_hat) + eps) - and explain the bias correction as fixing the zero-initialisation of the moments. Understand AdamW's actual contribution: L2 penalty added to the gradient gets divided by sqrt(v_hat) and so is *not* uniform weight decay in Adam, whereas decoupled decay applies -lr * wd * theta directly, which is why you pass `weight_decay` to AdamW and put LayerNorm gains, biases and embeddings in a `weight_decay=0.0` param group. Implement linear warmup over the first few hundred steps then cosine decay to ~10% of peak, clip global grad norm to 1.0 with `clip_grad_norm_` (which returns the pre-clip norm - log it, a spike to 100x is the signature of a bad batch), and set betas (0.9, 0.95) with eps 1e-8 as the LLM default rather than the torch default 0.999.",
+   "minutes": 45,
+   "resource": {
+    "label": "Loshchilov & Hutter, Decoupled Weight Decay Regularization (arXiv:1711.05101)",
+    "url": "https://arxiv.org/abs/1711.05101"
+   }
+  },
+  {
+   "name": "Debugging a training run: the diagnostics ladder in order",
+   "learn": "Run the ladder before touching hyperparameters: (1) fix all seeds and check loss at init equals ln(vocab) to two decimals; (2) overfit a single batch of 8 sequences to loss ~0 - if it cannot, the bug is in the model or the loss, never in the data or the LR; (3) `torch.autograd.set_detect_anomaly(True)` on a short run to localise the first NaN; (4) assert every parameter has a non-None grad after backward (a missing one means a tensor was created outside the graph or a module was never registered); (5) log global grad norm, per-block activation RMS, attention entropy and the LR each step; (6) only then tune. Learn the signature of each classic bug: loss stuck exactly at ln(V) = dead forward path; loss drops to near zero immediately = mask leakage or targets not shifted; loss is fine but generation is garbage = positional encoding not added, or a train/inference mask mismatch; loss spikes then NaN = LR too high, no warmup with post-LN, or fp16 overflow in the score matrix; train loss falls while val loss rises from step 1 = the val split overlaps the train split.",
+   "minutes": 50,
+   "resource": {
+    "label": "Karpathy - A Recipe for Training Neural Networks",
+    "url": "https://karpathy.github.io/2019/04/25/recipe/"
+   }
+  },
+  {
+   "name": "Designing the ablation table: no-PE, no-causal-mask, post-LN",
+   "learn": "Turn each architectural claim into a controlled experiment rather than a paragraph of prose: hold seed, data, steps, batch size, LR schedule and parameter count fixed, change exactly one flag, and report final val loss plus a 50-token sample. Predict each result *before* running it and record the prediction - no-PE should reach a noticeably worse but non-trivial val loss (character bigram statistics still carry signal) and produce locally-plausible, globally-incoherent text; no-causal-mask should reach an absurdly low val loss and yet generate nonsense autoregressively, because at inference the future it trained on does not exist; post-LN at your LR should either need warmup or diverge. Report mean and spread over three seeds so a 0.01 difference is not presented as a finding, and state the compute cost per run. Read nanoGPT to see the reference implementation of the same block you wrote and to diff your design choices against it deliberately.",
+   "minutes": 35,
+   "resource": {
+    "label": "karpathy/nanoGPT - reference decoder-only GPT (model.py, train.py, config)",
+    "url": "https://github.com/karpathy/nanoGPT"
+   }
+  },
+  {
+   "name": "Attention-head heatmaps: producing them and reading them honestly",
+   "learn": "Return the post-softmax (B, h, T, T) weights from your attention module behind a flag (never in the hot path), pick a fixed probe string, and render a lower-triangular heatmap per head per layer with token labels on both axes. Learn to recognise the recurring patterns - a diagonal-adjacent band (previous-token head), a vertical stripe on position 0 (an attention sink, where a head parks probability mass when it has nothing to contribute, and a normal thing to see), a broad uniform triangle (a near-dead head), and the offset-diagonal match-and-copy pattern of an induction head. Learn the honest caveat and be able to say it to a customer: attention weights are not feature attribution, because the OV circuit determines how much any attended token actually changes the output, so a bright cell is evidence of routing, not of reasoning. Save the figures into the README as the deliverable requires, with the probe string and layer/head indices captioned.",
+   "minutes": 30,
+   "resource": {
+    "label": "Brendan Bycroft - LLM Visualization (interactive walkthrough of GPT tensor flow)",
+    "url": "https://bbycroft.net/llm"
+   }
+  },
+  {
+   "name": "Decoding: greedy, temperature, top-k and nucleus sampling",
+   "learn": "Implement generate() as a loop: crop the context to the last block_size tokens (a hard constraint of learned positional embeddings), forward, take logits at the final position only, divide by temperature, optionally mask to the top-k or to the smallest set whose cumulative probability exceeds p, softmax, `torch.multinomial`, append, repeat - all under `@torch.no_grad()` and `model.eval()`. Know what each knob does to the distribution: temperature T scales logits so T -> 0 approaches argmax and T > 1 flattens; top-k truncates by rank; nucleus (top-p) truncates by probability mass, which adapts to how peaked the distribution is at that step. Understand the finding that maximum-likelihood decoding produces degenerate repetition loops even in strong models, so 'the model repeats itself' is often a decoding bug and not a training failure - a distinction you will need when a customer reports it. Note that a good val loss with garbled samples points at generation-time bugs: context cropping, forgetting positional offsets, or sampling from all T positions instead of the last.",
+   "minutes": 30,
+   "resource": {
+    "label": "Holtzman et al., The Curious Case of Neural Text Degeneration (arXiv:1904.09751)",
+    "url": "https://arxiv.org/abs/1904.09751"
+   }
+  },
+  {
+   "name": "Making it fast: SDPA/FlashAttention, the KV cache, bf16 autocast, torch.compile",
+   "learn": "Once your hand-written attention is correct, swap in `F.scaled_dot_product_attention(q, k, v, is_causal=True)` and assert `torch.allclose(mine, theirs, atol=1e-4)` before benchmarking - this is the single most valuable test in the repo. Understand why it is faster: FlashAttention tiles the computation and never materialises the T x T score matrix in HBM, turning attention from memory-bandwidth-bound to compute-bound and cutting activation memory from O(T^2) to O(T). Understand the KV cache for inference: without it, generating n tokens costs O(n^2) forwards because you recompute every prefix; with it, you keep past K and V per layer and each new token is a single query against a growing cache, which is why cache size (2 * n_layer * n_head * d_head * T * bytes) is the real memory constraint on long-context serving and the thing MQA/GQA were invented to shrink. Wrap the forward in `torch.autocast(device_type='cuda', dtype=torch.bfloat16)` (bf16 needs no GradScaler; fp16 does), set `torch.set_float32_matmul_precision('high')`, apply `torch.compile(model)`, and report tokens/sec and peak memory before and after each change.",
+   "minutes": 45,
+   "resource": {
+    "label": "PyTorch tutorial - Implementing High-Performance Transformers with Scaled Dot Product Attention",
+    "url": "https://docs.pytorch.org/tutorials/intermediate/scaled_dot_product_attention_tutorial.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can derive scaled dot-product attention on a whiteboard from the query/key/value story, state every tensor shape, and prove the 1/sqrt(d_k) factor from the variance of a d_k-term dot product plus the softmax Jacobian diag(a) - a a^T.",
+  "You can write a working multi-head causal self-attention module from memory in under 30 minutes without nn.MultiheadAttention, and show it agrees with F.scaled_dot_product_attention(is_causal=True) to within 1e-4.",
+  "You can prove your causal mask is airtight by perturbing token t and asserting that logits at every position before t are bitwise unchanged, and you can explain why a suspiciously low val loss is the expected symptom of failing that test.",
+  "You can derive the linear-shift property of sinusoidal positional encoding, implement sinusoidal and learned variants behind one flag, and state precisely what happens - and why - when a model built on learned positions is fed a sequence longer than block_size.",
+  "You can train a ~10M-parameter GPT on Tiny Shakespeare to a documented val loss with a reproducible seed, and report the loss at initialisation matching ln(vocab) as evidence the model was correctly initialised.",
+  "You can produce an ablation table over no-positional-encoding, no-causal-mask and post-LN variants with three seeds each, and explain each result from the maths rather than from the number - including why the no-mask run has the *best* val loss and the worst samples.",
+  "You can look at a broken training run (diverged loss, flat loss, NaN, or good loss with garbled samples) and name the most likely cause among positional encoding, mask leakage, LayerNorm placement and head-dim splitting, then confirm it with a targeted assertion rather than a hyperparameter sweep.",
+  "You can explain to a non-ML customer engineer, in five minutes and without notation, why context length is quadratic, what the KV cache costs in gigabytes for their config, and why quality degrades beyond the trained context window."
+ ],
+ "failureModes": [
+  "The causal mask is built once for block_size but sliced wrong (or omitted at inference), so training sees the future; val loss drops to 0.2, the ablation table looks spectacular, and the model generates incoherent text - the metric flatters a model that has learned nothing about prediction.",
+  "Head splitting reshapes to (B, T, d_head, n_head) instead of (B, T, n_head, d_head), so each 'head' reads an interleaved stride of the feature vector; the model still trains and the loss curve looks normal, just a few percent worse, and the bug survives to production because nothing ever crashes.",
+  "The train/val split is made by random sampling of overlapping context windows rather than by cutting the corpus at a byte offset, so validation contexts overlap training contexts and val loss tracks train loss perfectly - the reported number is memorisation, and the customer's held-out data behaves nothing like it.",
+  "Positional encodings are computed but never added to the token embeddings (or added after the first LayerNorm and then normalised away); the model becomes a bag-of-tokens predictor, reaches a plausible-looking loss on character data where unigram statistics carry a lot of signal, and only the ablation reveals that the no-PE variant scores the same.",
+  "Post-LN is used with no warmup at an LR copied from a pre-LN config; the run diverges at step ~400, and three days are spent on the data pipeline before anyone checks the LayerNorm placement - the residual-path gradient growth with depth is the actual cause.",
+  "The mask is stored as a plain tensor attribute rather than a registered buffer, so `.to('cuda')` leaves it on CPU; the code path that hits it raises a device error only for long sequences, or worse, a broadcast silently produces a mask of the wrong shape that masks nothing.",
+  "Sampling is done from the logits at all T positions, or the context is never cropped to block_size, so generation is fine for the first block_size tokens and then either crashes on the positional embedding lookup or wraps around and produces nonsense - the training run is blamed for a decoding bug.",
+  "Val loss is compared against a published number from a model with a different tokenizer; per-token cross-entropy is not comparable across vocabularies, so the write-up claims a result it has not earned - the fix is bits-per-byte, and nobody notices until a reviewer asks."
+ ],
+ "interviewQuestions": [
+  "Derive scaled dot-product attention at the whiteboard and justify the 1/sqrt(d_k) factor. What exactly happens to the forward pass and to the gradients if you drop it, and at what value of d_k does it start to matter?",
+  "Walk me through every tensor shape in a decoder block for B=4, T=1024, d_model=768, n_head=12. Where is the O(T^2) term, what is the peak activation memory, and how does FlashAttention change that number without changing the maths?",
+  "I have a decoder-only model whose validation loss is 0.08 and whose generated text is gibberish. Give me your ordered hypothesis list and the specific assertion you would write to test each one.",
+  "Explain pre-LN versus post-LN in terms of the gradient on the residual path. Why does post-LN need learning-rate warmup, and what would you expect to see in the loss curve and grad-norm log if someone removed warmup from a post-LN model?",
+  "A customer says the model 'gets dumber' past 8k tokens even though the API accepts 32k. Explain what is actually happening in terms of positional encoding, and describe two mitigations and the trade-off each one makes.",
+  "Design a controlled experiment that proves positional encoding matters, on a 10M-parameter character-level model with a 4-hour compute budget. What do you hold fixed, how many seeds, what do you measure, and what result would falsify the claim?",
+  "Explain the KV cache: what is stored, how big is it for a 32-layer, 32-head, d_head=128 model at 8k context in bf16, why generation without it is quadratic, and what MQA or GQA changes about that arithmetic."
+ ],
+ "proofOfWork": "A companion repo `attention-forensics` that turns the derivations into executable evidence rather than prose. It ships a pytest suite over your hand-written attention that a reviewer can run in under two minutes: an equivalence test against F.scaled_dot_product_attention(is_causal=True) to 1e-4; a causality test that perturbs token t and asserts bitwise-identical logits at all positions < t; a permutation-equivariance test proving the model without positional encoding is invariant to shuffling the input and that the same test fails once PE is added; a head-splitting test asserting an n_head=1 model is bitwise identical to a single-head implementation; a gradient-flow test asserting every registered parameter receives a non-None, finite gradient after one backward; and a numerical test that a fully-masked softmax row raises rather than silently returning NaN. Alongside it, a `broken/` directory containing six deliberately sabotaged variants of your GPT - missing 1/sqrt(d_k), transposed head reshape, mask excluding the diagonal, PE computed but not added, post-LN with the pre-LN learning rate, and generation without context cropping - each with its loss curve, its sample output and a one-paragraph forensic note naming the observable symptom, the assertion that catches it, and the fix. Finish with a two-page BUILD-VS-BUY memo written for a customer's engineering lead: what a decoder-only transformer costs to train per token at their scale, what the KV cache costs in GB at their target context length, and the three architectural questions (positional scheme, context window, tokenizer) they must answer before anyone writes code."
+}

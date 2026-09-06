@@ -1,0 +1,219 @@
+{
+ "i": 102,
+ "topic": "SVM, k-NN and Naive Bayes: margins, kernels, and when each still wins",
+ "track": "N. Machine Learning Systems",
+ "month": 8,
+ "hours": 5,
+ "why": "These three are the models a customer already has in production - a spam filter that is multinomial Naive Bayes, a duplicate-ticket matcher that is cosine k-NN, a fraud screen that is an RBF SVM someone tuned in 2019 - and you will be asked to explain, fix or replace them in the room, not to build a transformer. Each fails in a way you can only diagnose from the mathematics: an SVM with 92 percent of rows as support vectors is an overfit you read off the KKT conditions, a k-NN that died at 300 features is the curse of dimensionality you can derive in two lines, and a Naive Bayes returning 0.9999 posteriors is the independence assumption double-counting correlated words. Being able to write the soft-margin objective, its dual, the Cover-Hart bound and the Laplace-smoothed MLE on a whiteboard is what turns 'we should try a neural net' into a defensible recommendation with a latency number attached.",
+ "prerequisites": [
+  "Vectors, inner products, norms, hyperplanes and positive semi-definite matrices, plus the eigenvalue test for PSD (Topic 93, Linear algebra for ML)",
+  "Convexity, Lagrange multipliers and constrained optimisation, and what a KKT condition is (Topic 94, Calculus and optimisation)",
+  "Bayes theorem, conditional independence, and the multinomial and Gaussian likelihoods (Topic 95, Probability)",
+  "Maximum likelihood estimation and why you optimise a log-likelihood rather than a likelihood (Topic 98, Information theory and loss functions)",
+  "NumPy vectorisation, broadcasting, float64 underflow and log-space arithmetic (Topic 99, Numerical computing) - the from-scratch implementations live or die on this",
+  "Regularisation, the bias-variance trade-off and train/validation/test discipline from Topic 100 (Supervised learning I), plus scikit-learn's fit/predict/Pipeline API"
+ ],
+ "subtopics": [
+  {
+   "name": "Three inductive biases, and the shape of data that picks one",
+   "learn": "Say each model's assumption in one sentence before touching any code. SVM: a large-margin linear boundary in a possibly implicit feature space, found by convex optimisation, stored as a handful of support vectors. k-NN: no model at all - the training set is the model, the assumption is local constancy of the label, and every cost is deferred to predict time. Naive Bayes: a generative model p(x|y)p(y) with a factorised likelihood, fitted by one counting pass, O(nd) to train and O(nnz) to score. Build a five-column decision table keyed on n, dimensionality d, sparsity, class balance and p99 latency budget, and fill a cell only when you can name the mathematical reason. Run the classifier-comparison example and be able to identify which boundary belongs to which bias with the labels covered.",
+   "minutes": 12,
+   "resource": {
+    "label": "scikit-learn - Classifier comparison (decision boundaries of the same data under different biases)",
+    "url": "https://scikit-learn.org/stable/auto_examples/classification/plot_classifier_comparison.html"
+   }
+  },
+  {
+   "name": "Maximum-margin geometry: functional vs geometric margin and the hard-margin primal",
+   "learn": "For the hyperplane w.x + b = 0, derive that the signed distance of a point is y_i(w.x_i + b)/||w||. Notice the functional margin y_i(w.x_i + b) is scale-dependent - double w and b and it doubles while the geometry is unchanged - so you must fix the scale; the standard normalisation min_i y_i(w.x_i + b) = 1 makes the geometric margin exactly 2/||w||, which converts 'maximise the margin' into min (1/2)||w||^2 subject to y_i(w.x_i + b) >= 1 for all i. Be able to write the objective, the constraint and the margin width from memory in two minutes, and to say why this is a convex QP with linear constraints and therefore has a unique global optimum, unlike anything you will train with SGD. Know where hard margin dies: one mislabelled point inside the other class empties the feasible set, and the solver reports infeasibility rather than a bad fit.",
+   "minutes": 20,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - Chapter 06 Machine Learning, 01. Classical Machine Learning (SVM margins, kernels, Naive Bayes, k-NN)",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2006%20-%20machine%20learning/01.%20classical%20machine%20learning.md"
+   }
+  },
+  {
+   "name": "Soft margin: slack variables, the hinge loss, and what C actually is",
+   "learn": "Write min (1/2)||w||^2 + C sum_i xi_i subject to y_i(w.x_i + b) >= 1 - xi_i and xi_i >= 0, then eliminate the slacks with xi_i = max(0, 1 - y_i f(x_i)) to get the unconstrained equivalent min (1/2)||w||^2 + C sum_i max(0, 1 - y_i f(x_i)). Read that as hinge loss plus an L2 penalty, so C is inverse regularisation strength: C to infinity recovers the hard margin (narrow margin, few violations, memorisation), C to zero gives a very wide margin that ignores the data. Know the hinge is convex but not differentiable at the margin - its subgradient is -y_i x_i when y_i f(x_i) < 1 and 0 otherwise - and that it is a convex upper bound on the 0-1 loss, which is the justification for minimising it at all. Critically for deployment: scikit-learn's C multiplies a summed, not averaged, loss, so the optimal C shrinks roughly as 1/n and a C tuned on a 5k prototype is the wrong C on 500k rows.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - SVM margins with a penalty parameter (effect of C on margin width)",
+    "url": "https://scikit-learn.org/stable/auto_examples/svm/plot_svm_margin.html"
+   }
+  },
+  {
+   "name": "Lagrangian duality, KKT, and why the solution is sparse in examples",
+   "learn": "Form the Lagrangian with multipliers alpha_i on the margin constraints and mu_i on the slacks, set the stationarity conditions to zero and get the three facts everything else follows from: w = sum_i alpha_i y_i x_i, sum_i alpha_i y_i = 0, and C = alpha_i + mu_i. Substitute back to obtain the dual, max over alpha of sum_i alpha_i - (1/2) sum_i sum_j alpha_i alpha_j y_i y_j (x_i.x_j) subject to 0 <= alpha_i <= C and sum_i alpha_i y_i = 0 - note that the box constraint is exactly where C enters. Read complementary slackness as a taxonomy of every training row: alpha_i = 0 means the point is outside the margin and irrelevant; 0 < alpha_i < C means it sits exactly on the margin and is the only kind of point from which you can recover b; alpha_i = C means it is inside the margin or misclassified. This is why f(x) = sum over support vectors of alpha_i y_i (x_i.x) + b and why predict cost is O(n_SV d). Use n_SV/n as a rough leave-one-out error bound and therefore as a free overfitting diagnostic you can quote to a customer.",
+   "minutes": 24,
+   "resource": {
+    "label": "Chang and Lin - LIBSVM: A Library for Support Vector Machines (dual formulation, KKT conditions, SMO)",
+    "url": "https://www.csie.ntu.edu.tw/~cjlin/papers/libsvm.pdf"
+   }
+  },
+  {
+   "name": "The kernel trick, Mercer's condition, and the cost of the Gram matrix",
+   "learn": "Observe that the dual and the decision function touch the data only through inner products, so replace (x_i.x_j) with K(x_i, x_j) = phi(x_i).phi(x_j) and never construct phi. State Mercer's condition operationally: K is a valid kernel iff the Gram matrix K_ij is symmetric positive semi-definite for every finite sample, which you check on an invented kernel with numpy.linalg.eigvalsh(K).min() >= -1e-8. Memorise the four you will meet - linear x.x'; polynomial (gamma x.x' + r)^d, whose feature map is the finite set of monomials up to degree d; RBF exp(-gamma||x - x'||^2), whose feature map is infinite-dimensional (expand the exponential in a series); and sigmoid tanh(gamma x.x' + r), which is not PSD for most parameter choices. Know the closure properties (sums, positive scalings and products of kernels are kernels) and the hard operational limit: the Gram matrix is dense n by n, so 40k rows in float64 is 12.8 GB - that, not accuracy, is why kernel SVMs stop somewhere around 10^4 to 10^5 rows.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn User Guide - Pairwise metrics, Affinities and Kernels (linear, polynomial, RBF, sigmoid, chi-squared)",
+    "url": "https://scikit-learn.org/stable/modules/metrics.html"
+   }
+  },
+  {
+   "name": "The C-gamma surface, and why unscaled features silently break the kernel",
+   "learn": "Read gamma as an inverse squared length scale. Large gamma means each support vector influences only its immediate neighbourhood, so the boundary becomes islands around training points and the limit is a 1-NN classifier in which every row is a support vector; small gamma makes the kernel nearly constant across the data and the model degenerates into an expensive linear one. Study the validation-accuracy heatmap over the (C, gamma) grid and notice the good region is a diagonal ridge, which is why you search both jointly on a log grid (C in 2^-5 to 2^15, gamma in 2^-15 to 2^3) rather than one at a time. The default gamma='scale' is 1/(d * X.var()), so the RBF exponent is dominated by whichever column has the largest units: a salary column in dollars annihilates every binary flag, and no amount of gamma tuning repairs it. StandardScaler goes inside a Pipeline, fitted on the training fold only.",
+   "minutes": 18,
+   "resource": {
+    "label": "scikit-learn - RBF SVM parameters (the C and gamma validation heatmap)",
+    "url": "https://scikit-learn.org/stable/auto_examples/svm/plot_rbf_parameters.html"
+   }
+  },
+  {
+   "name": "Solver complexity: SVC vs LinearSVC vs SGDClassifier",
+   "learn": "SVC and SVR wrap libsvm's SMO, which repeatedly selects a working set of two alphas that maximally violate KKT and solves that two-variable subproblem analytically; empirical cost sits between O(n^2 d) and O(n^3 d) and kernel columns are cached, so raise cache_size from its 200 MB default to 1000 before you conclude the model is too slow. LinearSVC wraps liblinear and runs coordinate descent on the linear problem at roughly O(n * nnz), but it defaults to squared_hinge, penalises the intercept and uses one-vs-rest, so it does not reproduce SVC(kernel='linear') exactly and you should say so rather than debug the difference. SGDClassifier(loss='hinge', alpha=...) takes one subgradient step per sample with alpha equal to 1/(C n), supports partial_fit, and is the only one of the three that survives 10^7 rows. The rule you defend in a room: if n is above roughly 50k, or if d greatly exceeds n, use a linear solver; otherwise try RBF first.",
+   "minutes": 18,
+   "resource": {
+    "label": "scikit-learn User Guide - Stochastic Gradient Descent (hinge loss, alpha vs C, complexity, partial_fit)",
+    "url": "https://scikit-learn.org/stable/modules/sgd.html"
+   }
+  },
+  {
+   "name": "Kernel approximation: Nystroem and random Fourier features",
+   "learn": "When the boundary is genuinely non-linear but n is too large for an n by n Gram matrix, approximate the feature map explicitly instead of abandoning the kernel. RBFSampler implements Rahimi-Recht random Fourier features: draw w from N(0, 2 gamma I) and b uniform on [0, 2pi), map x to sqrt(2/D) cos(w.x + b), and the expected inner product of the maps equals the RBF kernel with error decaying like 1/sqrt(D). Nystroem instead samples m landmark rows and builds a rank-m approximation of K, which is usually the better choice when the data has structure. Then feed the D-dimensional dense features to LinearSVC or SGDClassifier and you get near-RBF accuracy at linear cost: make_pipeline(StandardScaler(), Nystroem(gamma=..., n_components=...), LinearSVC()). Be able to plot accuracy against D and point at the knee.",
+   "minutes": 12,
+   "resource": {
+    "label": "scikit-learn User Guide - Kernel Approximation (Nystroem, RBFSampler, AdditiveChi2Sampler)",
+    "url": "https://scikit-learn.org/stable/modules/kernel_approximation.html"
+   }
+  },
+  {
+   "name": "Multiclass reductions and what decision_function actually returns",
+   "learn": "An SVM is intrinsically binary. SVC trains K(K-1)/2 one-vs-one classifiers and votes, so ten classes means 45 models but each on a small subset, which is often cheaper overall than one-vs-rest on large classes; LinearSVC and SGDClassifier default to one-vs-rest with K coefficient vectors. Know the shape trap cold: SVC.decision_function returns an (n, K(K-1)/2) array under decision_function_shape='ovo' and an (n, K) array under 'ovr' (the default), so code written against one silently mis-indexes under the other and the bug looks like a labelling error in the data. OvO ties break on summed confidences. By contrast MultinomialNB, GaussianNB and KNeighborsClassifier are natively multiclass - no reduction, no shape surprise - which is a small but real reason they survive in legacy pipelines.",
+   "minutes": 14,
+   "resource": {
+    "label": "scikit-learn User Guide - Multiclass and multioutput algorithms (OvO, OvR, natively multiclass estimators)",
+    "url": "https://scikit-learn.org/stable/modules/multiclass.html"
+   }
+  },
+  {
+   "name": "k-NN: the estimator, the metric, the weighting, the Voronoi boundary",
+   "learn": "Write the estimator explicitly as a local empirical average: yhat(x) = argmax_c sum over i in N_k(x) of w_i * 1[y_i = c], where N_k(x) is the set of k training points nearest under a metric d. Understand k as the bias-variance dial running backwards: k = 1 gives zero training error and a Voronoi-tessellation boundary of maximum variance, k = n gives the majority class and pure bias, and boundary complexity falls monotonically in between. Choose the metric deliberately - euclidean is meaningless across mixed units without scaling, manhattan degrades more gracefully in high d, cosine is the right choice for TF-IDF text, hamming for categoricals - and know that weights='distance' (weight 1/d) beats 'uniform' when density varies across the space. Two properties to state out loud: k-NN cannot extrapolate beyond the convex hull of the training data, and it reproduces the training class prior exactly, so a shifted prior at serving time is not something the model can absorb.",
+   "minutes": 18,
+   "resource": {
+    "label": "scikit-learn User Guide - Nearest Neighbors (metrics, weights, KDTree/BallTree, classification)",
+    "url": "https://scikit-learn.org/stable/modules/neighbors.html"
+   }
+  },
+  {
+   "name": "Cover-Hart: 1-NN error is at most twice the Bayes rate",
+   "learn": "State the theorem precisely: as n goes to infinity the asymptotic 1-NN risk R satisfies R* <= R <= R*(2 - M R*/(M-1)) <= 2 R*, where R* is the Bayes error and M the number of classes. Carry the one-line intuition: with enough data the nearest neighbour sits at essentially the same x, so its label is a fresh draw from p(y|x) and you err when either you or it is wrong, giving roughly 2 R*(1 - R*). Name the assumption that has to hold - a metric and densities such that the nearest neighbour actually converges to x, meaning enough data locally - because that is precisely what fails in high dimensions. Use the result twice in customer conversations: to explain why the 'dumb' k-NN baseline is competitive (half the achievable information is already in the nearest row) and to be honest that 'asymptotically' at d = 300 means effectively never.",
+   "minutes": 15,
+   "resource": {
+    "label": "Cover and Hart (1967) - Nearest Neighbor Pattern Classification (the 2 R* bound)",
+    "url": "https://isl.stanford.edu/~cover/papers/transIT/0021cove.pdf"
+   }
+  },
+  {
+   "name": "The curse of dimensionality: deriving why k-NN collapses",
+   "learn": "Do the hypercube calculation on paper: to enclose a fraction k/n of uniformly distributed points in the unit cube of dimension d you need a sub-cube of side l = (k/n)^(1/d); for n = 1000, k = 10, d = 100 that is l = 0.955, so the 'neighbourhood' spans 95 percent of the range of every feature and nothing local survives. Pair it with distance concentration: for i.i.d. coordinates the ratio (d_max - d_min)/d_min tends to 0 as d grows, so all points become nearly equidistant and the argmin over neighbours is decided by noise. Reproduce both numerically - sample 1000 uniform points at d = 2, 10, 100, 1000, plot the histogram of pairwise euclidean distances and watch it collapse into a spike, then hold a two-dimensional signal fixed and pad with noise features while plotting 10-NN accuracy down to chance. Draw the conclusion that decides architecture: what matters is intrinsic dimension, not d, which is why an SVM or NB is untroubled by 30k TF-IDF columns while k-NN needs PCA, NCA or a learned metric first.",
+   "minutes": 18,
+   "resource": {
+    "label": "Cornell CS4780 Lecture 2 - k-nearest neighbors and the Curse of Dimensionality (the l = (k/n)^(1/d) derivation)",
+    "url": "https://www.cs.cornell.edu/courses/cs4780/2018fa/lectures/lecturenote02_kNN.html"
+   }
+  },
+  {
+   "name": "Indexing and the latency budget: brute force, KD-tree, ball tree, ANN",
+   "learn": "Brute force is O(nd) per query but is one BLAS GEMM, so it usually wins below roughly 10^4 rows; a KD-tree gives about O(d log n) per query but degrades to brute force above roughly d = 15 to 20 because of the same curse; a ball tree tolerates higher d and any valid metric. algorithm='auto' chooses for you - verify with a timed benchmark rather than trusting the heuristic. Then face the operational point an FDE is actually asked about: k-NN has zero training time but O(nd) memory that must stay resident and per-query work that grows with the dataset, so it is the model that misses a 20 ms p99 SLA and the model whose 'retraining' is an append. When n is large and approximation is acceptable, IVF, PQ and HNSW indexes trade a stated recall@k for orders of magnitude in latency - always say the recall number out loud, because it is the accuracy you agreed to give away.",
+   "minutes": 14,
+   "resource": {
+    "label": "Johnson, Douze and Jegou - Billion-scale similarity search with GPUs (FAISS: IVF, PQ, recall/latency trade-off)",
+    "url": "https://arxiv.org/abs/1702.08734"
+   }
+  },
+  {
+   "name": "The Bayes decision rule, generative vs discriminative, and what 'naive' costs",
+   "learn": "Start from p(y|x) proportional to p(x|y)p(y) and the MAP rule argmax over y of p(y) * product over j of p(x_j|y); the evidence p(x) is constant across classes so you never compute it, which is the mechanical reason NB's outputs are not probabilities. The naive assumption is conditional independence of features given the class: with d binary features it cuts the parameters per class from 2^d - 1 to d, and that collapse is the entire reason NB can be fitted on 200 documents. Be exact about the price: correlated features are counted repeatedly, so the log-posterior is driven towards 0 or 1 while the argmax - the only thing a classifier uses - is frequently still correct. That asymmetry, bad probabilities with good decisions, is the single most useful sentence to have ready about NB, and it connects directly to conditional independence in Topic 95 and log-likelihood in Topic 98.",
+   "minutes": 18,
+   "resource": {
+    "label": "Dive into Deep Learning - Naive Bayes (the MAP rule, the factorised likelihood, a from-scratch implementation)",
+    "url": "https://d2l.ai/chapter_appendix-mathematics-for-deep-learning/naive-bayes.html"
+   }
+  },
+  {
+   "name": "Multinomial NB: deriving the MLE, Lidstone smoothing and log-space scoring",
+   "learn": "Derive the estimator rather than memorising it: maximising the multinomial log-likelihood subject to sum over j of theta_cj = 1 gives theta_cj = N_cj / sum over j' of N_cj', the share of all token occurrences in class c belonging to word j, with prior N_c / N. Then add smoothing: theta_cj = (N_cj + alpha) / (sum over j' of N_cj' + alpha V), and be able to show this is the posterior mean under a symmetric Dirichlet(alpha) prior, so alpha is not a hack. Know why alpha > 0 is mandatory: a single unseen (word, class) pair zeroes the whole product and no other evidence can recover it. Score entirely in logs - log p(c) + sum_j x_j log theta_cj - and notice this is linear in the count vector, so the whole model is the matrix product X @ log_theta.T + log_prior. That is exactly why a from-scratch NumPy MultinomialNB matches scikit-learn to floating-point precision and scores 20 Newsgroups in milliseconds; reach for scipy.special.logsumexp only when you need normalised posteriors.",
+   "minutes": 22,
+   "resource": {
+    "label": "Manning, Raghavan and Schutze, IIR - Naive Bayes text classification (the multinomial MLE and add-one smoothing)",
+    "url": "https://nlp.stanford.edu/IR-book/html/htmledition/naive-bayes-text-classification-1.html"
+   }
+  },
+  {
+   "name": "Matching the NB variant to the data: Multinomial, Bernoulli, Gaussian, Complement",
+   "learn": "MultinomialNB models counts or TF-IDF weights as a multinomial draw per document. BernoulliNB models binary presence/absence and, unlike Multinomial, explicitly penalises the ABSENCE of every vocabulary word, which is why it beats Multinomial on very short texts and loses on long ones. GaussianNB estimates a per-class mean and variance per feature and adds var_smoothing to the variances so a constant column does not produce a division by zero - and it is only sensible after you have checked the per-class marginals are roughly unimodal. CategoricalNB handles unordered categoricals directly. ComplementNB (Rennie et al.) estimates each class's parameters from the complement of that class and is the documented fix when text classes are imbalanced. Be able to state the single assumption each makes about p(x_j|y) and to construct a small dataset on which each one is the wrong choice.",
+   "minutes": 14,
+   "resource": {
+    "label": "scikit-learn User Guide - Naive Bayes (Gaussian, Multinomial, Complement, Bernoulli, Categorical)",
+    "url": "https://scikit-learn.org/stable/modules/naive_bayes.html"
+   }
+  },
+  {
+   "name": "Why Naive Bayes still wins on sparse bag-of-words, and NBSVM",
+   "learn": "Give three reasons, not one. First, in text where d greatly exceeds n the class-conditional word distributions carry most of the signal and the independence violations largely cancel inside an argmax. Second, NB is a single count-and-divide pass, so it fits an entire corpus in the time an RBF SVM spends assembling one block of Gram-matrix rows. Third, the estimator has almost no variance, so it dominates in the small-n regime - the Ng and Jordan observation that a generative model converges to its own (higher) asymptotic error far faster than the discriminative one converges to its lower one, so the curves cross. Know the empirical boundary reported by Wang and Manning: NB tends to win on short snippets, SVM on full-length documents, and their NBSVM - a linear SVM on log-count-ratio features r = log((p + alpha)/(q + alpha)) with interpolated weights - beats both. Implement r in about ten lines and add it as a fourth row in your benchmark table.",
+   "minutes": 16,
+   "resource": {
+    "label": "Wang and Manning (ACL 2012) - Baselines and Bigrams: Simple, Good Sentiment and Topic Classification (NBSVM)",
+    "url": "https://aclanthology.org/P12-2018/"
+   }
+  },
+  {
+   "name": "Calibration: SVM margins are not probabilities and NB posteriors are worse",
+   "learn": "decision_function returns a signed distance to the hyperplane measured in units of 1/||w||; there is no probability in it. SVC(probability=True) runs Platt scaling, a one-dimensional logistic fit sigmoid(A f(x) + B) trained by internal 5-fold cross-validation, which makes fitting several times slower and can make the argmax of predict_proba DISAGREE with predict - know this and never expose both to the same consumer. Read reliability diagrams by shape: an SVM is typically sigmoid-shaped and under-confident in the middle, while NB is pushed hard to 0 and 1 by the double-counted correlated features. Fix with CalibratedClassifierCV(estimator, method='sigmoid' or 'isotonic', cv=5) - sigmoid when calibration data is scarce, isotonic when you have thousands of points and can afford its higher variance - and report Brier score alongside a calibration curve, not accuracy alone, whenever the customer intends to threshold the score.",
+   "minutes": 16,
+   "resource": {
+    "label": "scikit-learn - Comparison of calibration of classifiers (reliability diagrams for SVC and Naive Bayes)",
+    "url": "https://scikit-learn.org/stable/auto_examples/calibration/plot_compare_calibration.html"
+   }
+  },
+  {
+   "name": "The honest benchmark: pipelines, leakage, timing and the metric that flatters",
+   "learn": "Every preprocessing step belongs inside a Pipeline so StandardScaler and TfidfVectorizer are fitted on training folds only - a scaler or an IDF vector fitted on the full dataset before splitting is the leak that makes k-NN and SVM look excellent and production look broken, and it is the single most common defect in a customer's existing notebook. Fix random_state, use StratifiedKFold, and tune C, gamma, k and alpha inside a nested cross-validation or on a held-out validation split, otherwise the number you report is selection-inflated. Time the two costs separately because they decide deployment: fit wall time, and predict latency per 1000 rows plus resident memory. Report accuracy alongside balanced accuracy or macro-F1 with the majority-class baseline printed next to them, and record the split, seed and library versions in the README so the numbers reproduce on the customer's box.",
+   "minutes": 20,
+   "resource": {
+    "label": "scikit-learn - Common pitfalls and recommended practices (data leakage, preprocessing inside pipelines, controlling randomness)",
+    "url": "https://scikit-learn.org/stable/common_pitfalls.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can derive the soft-margin SVM closed-book in under ten minutes in all three forms - constrained primal with slacks, the equivalent unconstrained hinge-plus-L2 objective, and the dual with its 0 <= alpha_i <= C box and sum_i alpha_i y_i = 0 equality - and classify any training point into its KKT case from its alpha.",
+  "You can implement a soft-margin kernel SVM, k-NN and multinomial Naive Bayes in NumPy from the equations alone, match scikit-learn's accuracy to within 1 percent on the same split, and show the NB joint log-likelihoods agreeing to 1e-10.",
+  "You can predict, before running anything, which way the decision boundary and the support-vector count move when C or gamma is changed, and read a (C, gamma) validation heatmap to point at the overfitting corner, the underfitting corner and the usable ridge.",
+  "You can demonstrate the curse of dimensionality numerically - pairwise-distance histograms collapsing to a spike and k-NN accuracy decaying to chance as noise dimensions are appended - and derive l = (k/n)^(1/d) on a whiteboard on request.",
+  "You can derive the multinomial NB maximum-likelihood estimator, show that Laplace smoothing is the posterior mean under a Dirichlet prior, and explain in one sentence why alpha = 0 lets a single unseen word veto an otherwise unambiguous document.",
+  "You can choose between SVM, k-NN and Naive Bayes from nothing but n, d, sparsity, class balance and a p99 latency budget, name the specific property of the data that decides it, and state the measurement that would change your mind.",
+  "You can produce reliability diagrams and Brier scores for an SVM and a Naive Bayes on the same data, explain the shape of each curve from the model's mathematics, and say which output you would let a customer threshold at 0.9.",
+  "You can produce a benchmark table of accuracy, macro-F1, fit seconds, predict milliseconds per 1000 rows and resident megabytes on one dense low-dimensional and one sparse high-dimensional dataset, and prove no fold ever saw its own scaler or IDF vector."
+ ],
+ "failureModes": [
+  "Features were never scaled before an RBF SVM, so the exponent -gamma||x - x'||^2 is dominated by the one column measured in dollars; every binary flag is invisible to the kernel and two weeks are burned sweeping a gamma grid that cannot repair it.",
+  "StandardScaler or TfidfVectorizer was fitted on the full dataset before train_test_split; k-NN and SVM validation scores come in three to five points high, none of it reproduces on the customer's holdout, and the gap is misdiagnosed as distribution drift rather than leakage.",
+  "C was tuned on a 5,000-row prototype and carried over to the customer's 500,000-row table; because scikit-learn's C weights a summed rather than averaged hinge loss, the effective regularisation is roughly 100 times weaker and the model memorises while the code diff shows no change at all.",
+  "n_SV came back at 92 percent of the training set and nobody looked; gamma was large enough that each support vector covered only itself, so the deployed artefact was an expensive 1-NN with perfect training accuracy, a 40 MB model file and chance-level generalisation.",
+  "k-NN was benchmarked on a 5,000-row sample where it beat everything, then deployed against 8 million rows; the index no longer fits the pod's memory limit, p99 latency is 900 ms against a 50 ms SLA, and no hyperparameter fixes it because the cost is structural.",
+  "A hand-rolled MultinomialNB shipped without smoothing, or with alpha = 0; one word appearing only in the test set gives a log-probability of negative infinity for one class, and every document containing it is assigned to the other class regardless of the other four hundred words.",
+  "A 99-to-1 imbalanced dataset was reported at 98.7 percent accuracy with k = 25; every neighbourhood was majority-class so the model never predicted the positive class even once, and the metric flattered a classifier with exactly zero recall on the only class the customer cares about.",
+  "predict_proba from SVC(probability=True) was used for ranking while predict supplied the label; Platt scaling was fitted by internal CV on a small set, the two disagreed on about 1 percent of rows, and the customer's audit surfaced records labelled approved with an approval score of 0.42."
+ ],
+ "interviewQuestions": [
+  "Derive the soft-margin SVM dual from the primal. Where exactly do the box constraints 0 <= alpha_i <= C come from, and what does complementary slackness tell you about a point with alpha_i = C versus one with 0 < alpha_i < C?",
+  "Explain what C and gamma each do, geometrically and statistically. I hand you a model with 90 percent of rows as support vectors, 100 percent training accuracy and 55 percent test accuracy - which knob do you move, in which direction, and what do you expect n_SV to do?",
+  "Why does k-NN break down in high dimensions? Give me both the volume argument and the distance-concentration argument, then explain why a linear SVM on 30,000 TF-IDF features is perfectly fine.",
+  "Multinomial Naive Bayes assumes words are conditionally independent given the class, which is plainly false for text. Why does it still classify well, and where precisely does the false assumption show up in the model's output?",
+  "Design: a customer has 12 million support tickets, 60,000 TF-IDF features, 8 classes at a 200-to-1 imbalance, needs a label in under 30 ms at p99, and retrains monthly on one 32 GB box. Pick a model, defend it against the other two, and tell me what you would measure to discover you were wrong.",
+  "Debug: an RBF SVM cross-validates at 0.97 and scores 0.71 on the customer's holdout from the following month. Give me your ordered hypotheses and the specific check for each, cheapest first.",
+  "Someone shows you a ComplementNB text classifier at 94 percent accuracy on a 20-to-1 imbalanced dataset and wants to route tickets on its predict_proba. What do you ask for before you believe the number, and what would you have plotted?"
+ ],
+ "proofOfWork": "A public companion repo `classifier-triage` that turns the benchmark into a tool you can run on a customer's data during a workshop. A single command profiles an arbitrary feature matrix and prints the numbers that decide the model - n, d, density, class balance, the number of PCA components needed for 95 percent of variance as an intrinsic-dimension proxy, and the pairwise-distance concentration ratio (d_max - d_min)/d_min measured on a sample - then fits all three models plus an NBSVM log-count-ratio baseline inside Pipelines under a fixed wall-clock budget and emits a one-page HTML report containing the (C, gamma) validation heatmap, the support-vector fraction with the n_SV/n leave-one-out bound annotated, reliability diagrams and Brier scores for each model, a k-NN accuracy curve as noise dimensions are appended, and a fit-time / predict-latency / resident-memory table. Alongside it ships `leakage_drill.ipynb`, which reproduces two failures end to end with measured deltas: the pre-split scaler that inflates SVM and k-NN validation accuracy, and the alpha = 0 multinomial NB where one unseen token drives a class log-likelihood to negative infinity and flips the prediction. The repo closes with a one-page decision card written for a customer's engineers - which of the three, keyed on n, d, sparsity, imbalance and latency budget, with the mathematical reason and the disqualifying condition stated for each cell."
+}

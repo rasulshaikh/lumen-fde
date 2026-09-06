@@ -1,0 +1,228 @@
+{
+ "i": 93,
+ "topic": "Linear algebra for ML: vectors, matrices, eigendecomposition, SVD",
+ "track": "M. Mathematical Foundations",
+ "month": 1,
+ "hours": 8,
+ "why": "Every model an FDE deploys is a matrix problem in disguise: a regression whose coefficients flip sign, a PCA that keeps the wrong components, an embedding index that returns the same five documents for every query, and a fine-tune that refuses to learn are all diagnosable from a singular-value spectrum in under five minutes. Without that you are reduced to swapping hyperparameters in front of the customer and hoping; with it you can point at a condition number of 1e12 or a rank-3 embedding table, name the cause and name the fix. It is also the layer at which you defend a model in a technical review - why the coefficients are unstable, why you kept 40 components, why rank-8 LoRA is enough - to people who will check the arithmetic on the whiteboard behind you.",
+ "prerequisites": [
+  "Python 3.11 with NumPy, SciPy, scikit-learn, Matplotlib and pytest installed - every claim in this topic is checkable in ten lines and the deliverable is a tested NumPy-only library",
+  "School algebra fluency: solving 2x2 systems by hand, the quadratic formula (you will apply it to characteristic polynomials), summation notation, and sin/cos for rotation matrices",
+  "Enough calculus to differentiate a quadratic form, since the normal equations come from setting the gradient of ||Xb - y||^2 to zero - Topic 94 (Calculus and optimisation) picks this up immediately after",
+  "Jupyter plus Matplotlib for the diagnostic plots this topic is really about: log-scale singular-value spectrum, scree, reconstruction error versus k, coefficient paths versus lambda",
+  "git and a CI runner (Topic 0, Topic 35) so the from-scratch implementations ship with tests asserting agreement with numpy.linalg to 1e-8 rather than a notebook that ran once",
+  "No prior linear algebra course is assumed; if 'the columns of A span a subspace' currently means nothing, run MIT 18.06 lectures 1-10 alongside the first two subtopics"
+ ],
+ "subtopics": [
+  {
+   "name": "Vectors, norms, inner products and projections",
+   "learn": "Get fluent with the objects a model actually stores: a feature row, a gradient and an embedding are all vectors in R^n. Be able to compute and hand-derive the L1, L2 and L-infinity norms (np.linalg.norm(x, ord=1|2|np.inf)), the inner product identity <x,y> = ||x|| ||y|| cos(theta), the orthogonal projection of b onto span(a) as (a^T b / a^T a) a, and the residual b - proj which is orthogonal to a - that single fact is the whole of least squares. Know why cosine similarity is just the inner product of L2-normalised vectors, why it is scale-invariant while Euclidean distance is not, and why an unnormalised vector index ranks by magnitude rather than direction. Derive Cauchy-Schwarz and the triangle inequality once by hand so the bounds are yours rather than memorised.",
+   "minutes": 25,
+   "resource": {
+    "label": "Maths, CS & AI Compendium - Ch. 01 Vectors",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/tree/main/chapter%2001%20-%20vectors"
+   }
+  },
+  {
+   "name": "Matrices as linear maps: the four fundamental subspaces and rank-nullity",
+   "learn": "Read A as the function x -> Ax and be able to state, for a concrete 4x3 matrix, its column space (which outputs are reachable), null space (which inputs are annihilated), row space and left null space, plus rank(A) + dim(null(A)) = n. Find a basis for each by hand via row reduction and in code with scipy.linalg.null_space and scipy.linalg.orth, then connect them to modelling facts: a design matrix with a redundant one-hot column plus an intercept has a non-trivial null space, so beta is not unique and any solver's coefficients are arbitrary along that direction. Know rank(AB) <= min(rank A, rank B) - the reason a width-r bottleneck layer caps the rank of everything downstream. Be able to say in one sentence what 'A is singular' means to a customer: some direction in their feature space carries no information, so its effect cannot be separated.",
+   "minutes": 30,
+   "resource": {
+    "label": "MIT OCW 18.06 Linear Algebra (Strang) - lecture notes and problem sets",
+    "url": "https://ocw.mit.edu/courses/18-06-linear-algebra-spring-2010/"
+   }
+  },
+  {
+   "name": "Matrix multiplication: the four views, shapes, batching and einsum",
+   "learn": "Be able to compute AB four ways - entrywise dot products, A times each column of B, each row of A times B, and the sum of outer products sum_k a_k b_k^T - and say which view explains a given piece of code; the outer-product view is what makes low-rank updates and rank-1 gradient steps obvious. Enforce shape discipline: (n,d) @ (d,k) -> (n,k), X @ W + b for a dense layer, O(n*d*k) flops so you can predict cost before you run anything. Use np.einsum('bij,bjk->bik', A, B) and torch.matmul broadcasting for attention-shaped batched products (B, H, T, d), and know einsum is not automatically fast - pass optimize=True or inspect np.einsum_path for the contraction order. Practise reading a shape error as a modelling error, since transposed samples-versus-features is the single most common cause.",
+   "minutes": 25,
+   "resource": {
+    "label": "NumPy docs - numpy.einsum (and einsum_path)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.einsum.html"
+   }
+  },
+  {
+   "name": "Vectorisation, broadcasting, strides and what BLAS is doing underneath",
+   "learn": "Internalise the broadcasting rule - align trailing dimensions, each must be equal or 1 - and use it deliberately: X - X.mean(axis=0) centres columns, (X - mu) / sigma standardises, x[:, None] - y[None, :] builds a pairwise difference tensor, and that last one silently allocates n*m*d floats, which is how a 10k-row distance computation becomes an OOM. Know that a NumPy array is a pointer plus shape plus strides, that .T is a free view with swapped strides, that np.ascontiguousarray copies, and that A @ B dispatches to a BLAS gemm whose speed depends on that layout and on the thread count. Benchmark a Python triple loop against @ on 1000x1000 matrices and be able to quote the ratio - two to three orders of magnitude - to the customer engineer who wants to 'just loop over the rows'.",
+   "minutes": 25,
+   "resource": {
+    "label": "NumPy docs - Broadcasting",
+    "url": "https://numpy.org/doc/stable/user/basics.broadcasting.html"
+   }
+  },
+  {
+   "name": "Orthogonality, Gram-Schmidt and the QR factorisation",
+   "learn": "Prove that for orthonormal Q you get Q^T Q = I, ||Qx|| = ||x|| and Q^-1 = Q^T, then derive classical Gram-Schmidt and demonstrate numerically why it loses orthogonality (||Q^T Q - I|| grows with the condition number on a Hilbert matrix) while modified Gram-Schmidt and Householder reflections do not. Implement Householder QR: each reflector H = I - 2 v v^T / (v^T v) zeroes everything below the diagonal of one column, giving A = QR with R upper triangular in roughly 2mn^2 - 2n^3/3 flops. Check against np.linalg.qr(A, mode='reduced') to 1e-8 and plot orthogonality loss for both Gram-Schmidt variants versus Householder. Know rank-revealing QR with column pivoting, scipy.linalg.qr(A, pivoting=True), as the cheap way to name which columns are the redundant ones.",
+   "minutes": 30,
+   "resource": {
+    "label": "NumPy docs - numpy.linalg.qr (modes and LAPACK backing)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.linalg.qr.html"
+   }
+  },
+  {
+   "name": "Eigenvalues and eigenvectors: diagonalisation, similarity, and where it fails",
+   "learn": "State Av = lambda v, form the characteristic polynomial det(A - lambda I) = 0, and solve 2x2 cases by hand including one rotation matrix with complex eigenvalues. Understand A = P D P^-1 as a change of basis, why A^k = P D^k P^-1 makes power-iteration and Markov-chain behaviour obvious, and the two failure cases: defective matrices where algebraic multiplicity exceeds geometric multiplicity (the classic [[1,1],[0,1]]) have no eigenbasis at all, and non-symmetric matrices can have ill-conditioned eigenvectors so np.linalg.eig returns numbers that move a lot under a 1e-10 perturbation. Keep the invariants at hand - trace equals the sum of eigenvalues, determinant equals their product - and be clear that eigenvalues are not singular values unless the matrix is symmetric PSD.",
+   "minutes": 30,
+   "resource": {
+    "label": "Dive into Deep Learning - Eigendecompositions",
+    "url": "https://d2l.ai/chapter_appendix-mathematics-for-deep-learning/eigendecompositions.html"
+   }
+  },
+  {
+   "name": "Symmetric and positive semi-definite matrices: spectral theorem, Cholesky, quadratic forms",
+   "learn": "State and use the spectral theorem: every real symmetric A factors as Q Lambda Q^T with real eigenvalues and orthonormal eigenvectors, so np.linalg.eigh - not eig - is the correct call for covariance, Gram and Hessian matrices; it is faster, returns sorted real eigenvalues, and never hands you an imaginary part to discard. Define PSD as x^T A x >= 0 for all x, prove any Gram matrix X^T X is PSD, and connect it to practice: a covariance estimate with a -1e-17 eigenvalue from round-off makes np.linalg.cholesky raise LinAlgError, and the fix is diagonal jitter of about 1e-6 or eigenvalue clipping, not switching library. Read a quadratic form geometrically - the Hessian's eigenvalues are curvature along its eigenvectors and their ratio is the condition number that sets how badly gradient descent zig-zags, which is where Topic 94 begins.",
+   "minutes": 25,
+   "resource": {
+    "label": "NumPy docs - numpy.linalg.eigh (symmetric/Hermitian eigendecomposition)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.linalg.eigh.html"
+   }
+  },
+  {
+   "name": "Power iteration, the Rayleigh quotient and the QR algorithm",
+   "learn": "Implement power iteration - x <- Ax / ||Ax||, with the eigenvalue estimated by the Rayleigh quotient x^T A x / x^T x - and derive its convergence rate |lambda_2 / lambda_1|^k, so you can predict that a spectral ratio of 0.99 needs hundreds of iterations and explain why PageRank's damping factor of 0.85 is precisely a spectral-gap fix. Extend to deflation, A - lambda_1 v_1 v_1^T, for the next eigenpair, then to the unshifted QR algorithm: repeat A_k = Q_k R_k, A_k+1 = R_k Q_k and watch it converge to a quasi-triangular Schur form; note that production LAPACK adds Hessenberg reduction and Wilkinson shifts to get cubic convergence. Test on a column-stochastic matrix where the answer is known (the stationary distribution) and assert agreement with np.linalg.eig to 1e-8.",
+   "minutes": 30,
+   "resource": {
+    "label": "NetworkX docs - pagerank (power iteration, damping, tolerance, max_iter)",
+    "url": "https://networkx.org/documentation/stable/reference/algorithms/generated/networkx.algorithms.link_analysis.pagerank_alg.pagerank.html"
+   }
+  },
+  {
+   "name": "SVD: what it says, why it always exists, and deriving a 2x2 by hand",
+   "learn": "Write A = U Sigma V^T for any real m x n matrix, with U and V orthonormal and sigma_1 >= ... >= sigma_r > 0, and derive it: V and the sigma_i^2 are the eigenvectors and eigenvalues of A^T A, and u_i = A v_i / sigma_i. Do one 2x2 fully by hand - take [[3,0],[4,5]], form A^T A, get the eigenvalues, normalise V, produce Sigma and U, multiply back out and check. Read the geometry as rotate, scale along axes, rotate again, and use it to explain rank (count of non-zero sigma), the four subspaces (the first r columns of U span the column space, the last n-r columns of V span the null space), ||A||_2 = sigma_1 and ||A||_F^2 = sum sigma_i^2. Note the ambiguity: columns of U and V are determined only up to a shared sign flip (and up to rotation within a repeated-sigma block), which is why 'my PCA components flipped between runs' is not a bug.",
+   "minutes": 30,
+   "resource": {
+    "label": "MIT OCW 18.065 Matrix Methods in Data Analysis, Signal Processing, and Machine Learning",
+    "url": "https://ocw.mit.edu/courses/18-065-matrix-methods-in-data-analysis-signal-processing-and-machine-learning-spring-2018/"
+   }
+  },
+  {
+   "name": "Computing the SVD in practice: full_matrices, drivers, cost and verification",
+   "learn": "Call np.linalg.svd(A, full_matrices=False) by default so you get thin (m,k), (k,) and (k,n) factors rather than an m x m U that is a memory bomb on a 1e6 x 300 matrix, and remember the third return value is already transposed (Vt, not V). Know the cost is O(min(m,n)^2 * max(m,n)), so a dense SVD of 200k x 50k is not happening on a laptop, and that LAPACK's gesdd (divide and conquer) is NumPy's default while gesvd is the slower, more robust fallback for hard inputs. Compare torch.linalg.svd and torch.svd_lowrank for GPU and autograd contexts, and know gradients through an SVD are undefined when singular values are degenerate. Verify every factorisation by relative reconstruction error ||A - U S Vt||_F / ||A||_F against a stated tolerance rather than by eyeballing the factors.",
+   "minutes": 20,
+   "resource": {
+    "label": "NumPy docs - numpy.linalg.svd (full_matrices, shapes, notes)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.linalg.svd.html"
+   }
+  },
+  {
+   "name": "Eckart-Young-Mirsky: low-rank approximation and what truncation costs",
+   "learn": "State the theorem: the best rank-k approximation of A in both spectral and Frobenius norm is A_k = sum over i <= k of sigma_i u_i v_i^T, with ||A - A_k||_2 = sigma_k+1 and ||A - A_k||_F^2 = sum over i > k of sigma_i^2 - so the spectrum tells you the error you will incur before you truncate anything. Implement image compression with your own SVD, compute the storage ratio k(m + n + 1) / (mn), and plot reconstruction error against k; then do the same on a TF-IDF matrix with sklearn's TruncatedSVD (LSA) and note that TruncatedSVD deliberately does not centre, which is exactly why it works on sparse data where PCA would densify it. Be able to answer 'how many components?' with a number and a reason - cumulative explained variance, the sigma_k+1 error bound, or a downstream CV metric - never a squint at a scree plot.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn docs - TruncatedSVD (LSA on sparse data)",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.decomposition.TruncatedSVD.html"
+   }
+  },
+  {
+   "name": "Numerical rank, condition number and error amplification",
+   "learn": "Define kappa_2(A) = sigma_1 / sigma_n and read it as an error amplification factor: a relative perturbation eps in b produces up to kappa * eps relative error in the solution of Ax = b, so kappa = 1e10 in float64 (machine epsilon about 2.2e-16) leaves roughly six correct digits. Compute numerical rank as the count of sigma_i > tol with tol = max(m,n) * eps * sigma_1, which is what np.linalg.matrix_rank does, and show a matrix that is mathematically rank-deficient coming back numerically full rank with sigma values around 1e-16. Practise the whole diagnostic loop on a real design matrix: plot log sigma_i, find the cliff, name the offending columns with pivoted QR or the correlation matrix, then drop, combine or regularise - and be able to tell a customer in plain words why their 'stable' regression's coefficients swing 300 percent when one row changes.",
+   "minutes": 25,
+   "resource": {
+    "label": "NumPy docs - numpy.linalg.cond (condition number in several norms)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.linalg.cond.html"
+   }
+  },
+  {
+   "name": "Least squares three ways: normal equations, QR and SVD/pinv",
+   "learn": "Derive the normal equations by setting the gradient of ||Xb - y||^2 to zero, giving X^T X b = X^T y, and note that kappa(X^T X) = kappa(X)^2 - forming the Gram matrix squares your conditioning and can turn a solvable problem into a singular one. Solve the same system three ways on a deliberately ill-conditioned X and compare coefficients and residuals: scipy.linalg.solve on the normal equations, QR (solve R b = Q^T y by back substitution), and np.linalg.lstsq or pinv via the SVD, b = V Sigma^+ U^T y, which returns the minimum-norm solution when X is rank-deficient instead of raising. Know that lstsq's rcond decides which singular values are treated as zero, that sklearn's LinearRegression is a thin wrapper over lstsq (so it silently returns an arbitrary minimum-norm fit under exact collinearity), and derive the hat matrix H = X(X^T X)^-1 X^T as the orthogonal projection onto the column space.",
+   "minutes": 30,
+   "resource": {
+    "label": "NumPy docs - numpy.linalg.lstsq (rcond, rank, singular values)",
+    "url": "https://numpy.org/doc/stable/reference/generated/numpy.linalg.lstsq.html"
+   }
+  },
+  {
+   "name": "Ridge as spectral filtering, and diagnosing multicollinearity",
+   "learn": "Derive b_ridge = (X^T X + lambda I)^-1 X^T y and rewrite it in the SVD basis: each direction's contribution is shrunk by sigma_i^2 / (sigma_i^2 + lambda), so ridge leaves large-sigma directions almost untouched and crushes the small-sigma directions that were amplifying noise - that one expression is the entire explanation of why regularisation fixes instability. Show that adding lambda lifts every eigenvalue of X^T X, so kappa falls from sigma_1^2/sigma_n^2 to (sigma_1^2 + lambda)/(sigma_n^2 + lambda), and compute effective degrees of freedom as sum sigma_i^2/(sigma_i^2 + lambda). Diagnose collinearity with concrete numbers - VIF_j = 1/(1 - R_j^2), the correlation matrix, and condition indices sigma_1/sigma_i - and remember ridge is not scale-invariant, so standardisation is part of the model rather than optional hygiene (this feeds Topic 100).",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn User Guide - Linear Models (Ridge, coefficient paths, collinearity)",
+    "url": "https://scikit-learn.org/stable/modules/linear_model.html"
+   }
+  },
+  {
+   "name": "PCA done properly: centring, scaling, explained variance and choosing k",
+   "learn": "Derive PCA twice - as the eigendecomposition of the sample covariance (1/(n-1)) Xc^T Xc, and as the SVD of the centred matrix Xc = U Sigma V^T with components V and explained variance sigma_i^2/(n-1) - and know sklearn's PCA takes the SVD route, centres for you, and does not scale. Be able to say precisely what changes under standardisation: PCA on raw columns with mixed units is PCA of whichever column has the largest variance, so a dollar-denominated feature will swamp a probability. Use explained_variance_ratio_ and its cumulative sum, components_ (rows are components, columns are features) and the loadings V * sigma to interpret a component to a customer, and know whiten=True divides scores by sigma so downstream distances become isotropic. Fit PCA inside a Pipeline on training folds only; fitting on the full dataset before cross-validation is textbook leakage (Topic 103).",
+   "minutes": 30,
+   "resource": {
+    "label": "scikit-learn User Guide - Decomposing signals in components (PCA, whitening, variants)",
+    "url": "https://scikit-learn.org/stable/modules/decomposition.html"
+   }
+  },
+  {
+   "name": "Randomised and incremental factorisation when the matrix does not fit",
+   "learn": "Understand the randomised range finder: draw a Gaussian test matrix Omega with k + p columns (oversampling p around 10), form Y = A Omega, orthonormalise Q from a QR of Y, SVD the small matrix B = Q^T A, then lift back with U = Q U_B - cost around O(mnk) with expected error close to the Eckart-Young optimum, plus q power iterations using (A A^T)^q A when the spectrum decays slowly. Call it as sklearn.utils.extmath.randomized_svd or PCA(svd_solver='randomized'), and know the result is seed-dependent so random_state must be pinned before you show a customer two runs. Add the streaming option, IncrementalPCA with partial_fit over batches for data that will not fit in memory, and scipy.sparse.linalg.svds (ARPACK/LOBPCG) when you want a handful of components of a large sparse matrix.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv - Halko, Martinsson, Tropp, Finding Structure with Randomness (randomised SVD)",
+    "url": "https://arxiv.org/abs/0909.4061"
+   }
+  },
+  {
+   "name": "Sparse matrices: CSR, the memory arithmetic, and sparse linear algebra",
+   "learn": "Know the layouts and when each is right - COO to build, CSR for row slicing and matrix-vector products, CSC for column operations - and be able to do the memory arithmetic in front of a customer: a 1e6 x 5e4 TF-IDF matrix at 0.1 percent density holds about 5e7 non-zeros, roughly 600 MB in CSR against roughly 400 GB dense. Recognise the operations that densify and explode - X.toarray(), mean-centring a sparse matrix (exactly why sklearn's PCA rejects sparse input while TruncatedSVD accepts it), appending a dense intercept column - and prefer scipy.sparse.linalg.svds, a LinearOperator, or estimators that accept sparse input natively. Check density with X.nnz / (X.shape[0] * X.shape[1]) before choosing any algorithm, and know that a matvec on CSR costs O(nnz), not O(mn).",
+   "minutes": 20,
+   "resource": {
+    "label": "SciPy docs - Sparse arrays (formats, construction, sparse linear algebra)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/sparse.html"
+   }
+  },
+  {
+   "name": "Embedding matrices: cosine, normalisation, anisotropy and collapse",
+   "learn": "Treat an embedding table or a batch of encoder outputs as a matrix E of shape (n, d) and diagnose it with linear algebra rather than vibes: compute the singular-value spectrum of the centred E, an effective rank such as exp(entropy of the normalised sigma_i) or the participation ratio (sum sigma_i^2)^2 / sum sigma_i^4, and the mean cosine between random pairs. Healthy embeddings show a slowly decaying spectrum and near-zero mean pairwise cosine; a degenerate or collapsed table shows sigma_1 dominating by an order of magnitude and mean cosine of 0.7 or higher, all vectors sitting in a narrow cone. Know that this anisotropy is a documented property of trained language models, not something you invented, and that the standard remedies are subtracting the mean vector, whitening, or removing the top one or two principal directions before similarity search. Always L2-normalise before cosine or inner-product retrieval, and be able to demonstrate with numbers why an unnormalised index returns the same high-norm items for every query.",
+   "minutes": 30,
+   "resource": {
+    "label": "arXiv - Representation Degeneration Problem in Training Natural Language Generation Models",
+    "url": "https://arxiv.org/abs/1907.12009"
+   }
+  },
+  {
+   "name": "Low-rank structure in deep learning: LoRA, bottlenecks and attention shapes",
+   "learn": "Read LoRA as arithmetic you can do on a napkin: freeze W of shape (d, k) and learn W + BA with B of shape (d, r) and A of shape (r, k), so trainable parameters fall from d*k to r(d + k) - for d = k = 4096 and r = 8 that is 16.8M down to about 65k, a 256x reduction - and understand that the update is constrained to rank r, a modelling assumption you may have to defend when a customer's fine-tune underfits. Trace shapes through scaled dot-product attention: Q = XW_Q, K = XW_K, V = XW_V, then softmax(QK^T / sqrt(d_k))V, where QK^T is (T, T), which is the whole reason memory grows quadratically in sequence length. Be able to run np.linalg.svd on a trained weight matrix, plot its spectrum on a log axis, and say whether a rank-r approximation would preserve behaviour - the honest, checkable version of 'can we compress this model?'.",
+   "minutes": 25,
+   "resource": {
+    "label": "arXiv - LoRA: Low-Rank Adaptation of Large Language Models",
+    "url": "https://arxiv.org/abs/2106.09685"
+   }
+  },
+  {
+   "name": "Floating point and numerical stability in linear algebra",
+   "learn": "Know the numbers cold: float64 has a 53-bit mantissa (eps about 2.22e-16, roughly 16 decimal digits), float32 has 24 (eps about 1.19e-7, roughly 7 digits), and float16/bfloat16 have 11 and 8 - which is why a Gram matrix accumulated in fp32 on a GPU can come back with negative eigenvalues and fail a Cholesky. Understand catastrophic cancellation through the canonical case, the naive variance formula E[x^2] - E[x]^2, and use a two-pass or Welford update instead; the same cancellation is why X^T X is worse than QR for least squares. Never compare floats with ==: use np.allclose(a, b, rtol=1e-5, atol=1e-8), and write your from-scratch tests as reconstruction-error assertions with a stated tolerance. Use np.finfo(dtype).eps in rank tolerances, and know matrix multiplication is not associative in floating point, so A@(B@C) and (A@B)@C differ in the last digits - which is why a 'deterministic' pipeline gives different numbers under a different BLAS or thread count.",
+   "minutes": 20,
+   "resource": {
+    "label": "Goldberg - What Every Computer Scientist Should Know About Floating-Point Arithmetic",
+    "url": "https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can hand-derive the SVD of an arbitrary 2x2 matrix at a whiteboard in under ten minutes - A^T A, eigenvalues, V, Sigma, U - and multiply back to verify, with no notes.",
+  "You can implement power iteration, Householder QR plus the QR algorithm, and one-sided Jacobi SVD in NumPy only, each with a test asserting agreement with numpy.linalg to 1e-8 on well-conditioned, rank-deficient, defective and Hilbert fixtures.",
+  "You can take any real design matrix and produce a one-page diagnostic - log-scale singular-value spectrum, numerical rank at a stated tolerance, kappa_2, the offending columns from pivoted QR and VIF - and say whether an OLS fit is trustworthy and what to do if it is not.",
+  "You can explain in two sentences, using sigma_i^2 / (sigma_i^2 + lambda), why ridge stabilises a collinear regression, and back it with measured coefficient paths and the drop in condition number as lambda increases.",
+  "You can choose a number of PCA components with a defensible justification (cumulative explained variance, the sigma_k+1 error bound, or a downstream CV metric) and demonstrate that fitting PCA outside the CV fold inflates the reported score.",
+  "You can take an embedding table or encoder output, compute its effective rank and mean pairwise cosine, state whether it has collapsed, and show the measured recall@10 change from mean-centring plus L2 normalisation.",
+  "You can size a factorisation before running it: predict flops and peak memory for a dense SVD versus randomized_svd versus svds at a given (m, n, k), and pick the one that fits the customer's box.",
+  "You can state the numerical case for QR or SVD over the normal equations, quote kappa(X^T X) = kappa(X)^2, and show the measured digit loss on an ill-conditioned example in float64 and float32."
+ ],
+ "failureModes": [
+  "A one-hot encoder without drop='first' plus an intercept makes the design matrix exactly rank-deficient; LinearRegression calls lstsq and silently returns one arbitrary minimum-norm solution, so the coefficients shown to the customer as feature importance are one of infinitely many and shift with row order or library version.",
+  "PCA is fitted on the whole dataset before the train/test split, so the components encode test-set variance; cross-validation comes back several points high, the deck quotes that number, and the model degrades exactly when it reaches the customer's production data.",
+  "PCA is run on unstandardised columns where one feature is in dollars and another is a probability; component 1 is essentially that one column, the 'explains 92 percent of variance' line is meaningless, and truncating to two components discards every real signal.",
+  "np.linalg.eig is used on a covariance matrix instead of eigh; round-off yields complex eigenvalues with 1e-18 imaginary parts, someone takes .real, the eigenvectors come back unsorted, and the 'top two components' actually plotted are components five and one.",
+  "np.linalg.svd is called with the default full_matrices=True on a 2e6 x 300 matrix; the job requests a 2e6 x 2e6 U, the pod is OOM-killed, and the incident is investigated for a day as a Kubernetes memory-limit problem rather than a one-word API fix.",
+  "A vector index is built without L2 normalisation and scored by inner product; a handful of high-norm vectors win almost every query, offline recall looks acceptable because those items happen to be popular in the eval sample, and users see the same five results for unrelated searches.",
+  "Two runs of PCA produce sign-flipped components and the dashboard's axes invert; a day is spent hunting a data-pipeline bug that is only the SVD's sign ambiguity, which nobody pinned with a deterministic convention such as forcing the largest-magnitude loading positive.",
+  "A model is 'compressed' by truncating weight matrices to rank 16 from a spectrum that was never plotted on a log axis; sigma_17 onward still carry 30 percent of the Frobenius mass, accuracy drops eight points, and the regression is blamed on quantisation instead of the truncation."
+ ],
+ "interviewQuestions": [
+  "Derive the SVD of this 2x2 matrix at the whiteboard, then tell me what happens to U, Sigma and V if I multiply one column of A by 1000, and what that implies for PCA on unstandardised features.",
+  "A customer's linear regression reports R^2 = 0.94, but the coefficient on their most important feature flips sign when a week of new data arrives. Diagnose it in linear-algebra terms, name the first two numbers you would compute, and give two different fixes with their trade-offs.",
+  "Explain why solving least squares through the normal equations is numerically worse than QR or SVD. Quantify it: what happens to the condition number, and roughly how many correct digits remain in float64 when kappa(X) = 1e8?",
+  "Write the ridge solution in the SVD basis and use that expression to explain to a non-mathematical stakeholder what regularisation is actually doing to their model.",
+  "Design: a customer has a 3-million-document TF-IDF matrix over a 200k-term vocabulary and wants topic clusters on a 32 GB box. Walk me through the factorisation you would use, the memory arithmetic, how many components you would keep, and how you would defend that number.",
+  "Debug: after a fine-tune, a retrieval system's recall@10 collapses and every query returns near-identical results. What do you compute on the embedding matrix, in what order, and what does each result rule in or out?",
+  "What is the difference between an eigendecomposition and an SVD, when does the eigendecomposition fail to exist, and for which matrices do the two coincide? Then tell me what np.linalg.eigh assumes and why calling eig on a covariance matrix is a bug rather than a style choice."
+ ],
+ "proofOfWork": "A public `spectrum-doctor` CLI and report generator that ingests any matrix - a pandas design matrix, a scipy sparse TF-IDF matrix, or a .npy embedding table - and emits a one-page diagnostic: the singular-value spectrum on a log axis, numerical rank at three tolerances with the tolerance formula printed alongside, kappa_2, effective rank and participation ratio, cumulative explained variance with the k that first reaches 90/95/99 percent, the Eckart-Young error bound sigma_k+1 at each k, the most collinear column groups found by pivoted QR and VIF, and for embedding inputs the mean pairwise cosine before and after mean-centring plus top-direction removal. Ship it with a `pathologies/` directory that reproduces four failures end to end, each with a before/after number: a duplicated one-hot column that makes OLS coefficients arbitrary and a ridge fit that fixes them, an unstandardised PCA where a dollar-denominated column eats component one, a rank-collapsed embedding table where centring plus L2 normalisation restores recall@10, and a full_matrices=True SVD that OOMs on a tall matrix while the thin call finishes in seconds. Back the whole thing with a pytest suite asserting that your from-scratch power iteration, Householder QR and one-sided Jacobi SVD reproduce numpy.linalg to 1e-8 on Hilbert, rank-deficient, defective and complex-eigenvalue fixtures, and finish with a two-page memo written for a customer's data lead that uses their own numbers to explain why their regression was unstable and exactly what you changed."
+}

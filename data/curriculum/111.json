@@ -1,0 +1,210 @@
+{
+ "i": 111,
+ "topic": "Training deep networks: optimisers, batch norm, schedules, mixed precision, debugging a bad loss curve",
+ "track": "O. Deep Learning and Multimodal",
+ "month": 11,
+ "hours": 8,
+ "why": "When a customer's model does not train, the room turns to you with one plot and no hypothesis, and the difference between a senior AI/FDE and a framework user is whether you can look at a loss curve plus a grad-norm log and say 'that is a learning rate above the 2/lambda_max stability bound' or 'that is BatchNorm still in train mode at eval' rather than 'let me try some hyperparameters'. Every knob in this topic - momentum, Adam's second moment, warmup, BatchNorm's running statistics, fp16 loss scaling - is a small piece of arithmetic you can derive on a whiteboard, and deriving it is what lets you defend a fix on the spot instead of promising a week of sweeps. It is also the topic that decides whether the customer's model fits on their GPU and finishes inside their maintenance window, because optimiser state and precision are memory and wall-clock decisions dressed up as mathematics.",
+ "prerequisites": [
+  "Backpropagation derived by hand and an autograd engine written from scratch (Topic 110): you must already be able to say what dJ/dW^l is and which activations must be cached to compute it",
+  "Gradient descent, convexity, the Hessian and second-order conditions from Topic 94 (Calculus and optimisation), plus eigenvalues, spectral radius and condition number from Topic 93 (Linear algebra for ML)",
+  "Floating point at the bit level from Topic 99 (Numerical computing): mantissa vs exponent, subnormals, catastrophic cancellation, why summation order changes the answer",
+  "Cross-entropy as negative log-likelihood from Topic 98, so 'the loss should start at ln(C)' is an identity you can state rather than a rule you remember",
+  "Held-out discipline and leakage awareness from Topic 103 (Model evaluation) - every ablation number in the deliverable is a validation number produced under model.eval()",
+  "Working PyTorch: nn.Module, DataLoader, a hand-written training loop and .backward() (Topic 112 takes tensors, autograd internals and profiling much further; you only need to be able to run a loop here), plus a CUDA GPU or a Colab/T4-class runtime, since AMP is a no-op on CPU"
+ ],
+ "subtopics": [
+  {
+   "name": "The objective and the minibatch gradient estimator",
+   "learn": "Write the training objective as empirical risk J(theta) = (1/N) sum_i loss(f_theta(x_i), y_i) and the minibatch gradient g_B = (1/B) sum_{i in B} grad loss_i, then prove the two facts the rest of the topic rests on: g_B is an unbiased estimator of grad J under uniform sampling (E[g_B] = grad J) and its covariance is Sigma/B, so gradient noise falls as 1/sqrt(B). Know the Robbins-Monro conditions sum eta_t = infinity and sum eta_t^2 < infinity that make a decayed step size converge, and the practical consequence of violating the second one: with a constant eta, SGD does not converge to a point, it bounces inside a noise ball whose size grows with eta and with the gradient noise, which is exactly why the last few percent of accuracy only appears once the schedule anneals. Be able to say why a per-step loss printout that jumped at B=32 is usually noise (plot an EMA and the per-epoch mean before believing anything) and why the same jump at B=1024 is a signal.",
+   "minutes": 25,
+   "resource": {
+    "label": "d2l.ai 12.4 - Stochastic Gradient Descent (dynamics, noise, decaying learning rates)",
+    "url": "https://d2l.ai/chapter_optimization/sgd.html"
+   }
+  },
+  {
+   "name": "Step size versus curvature: deriving the eta < 2/lambda_max bound",
+   "learn": "Derive it on the quadratic f(w) = (1/2) w^T H w: gradient descent gives w_{t+1} = (I - eta H) w_t, so in the eigenbasis each component decays as (1 - eta lambda_i)^t, convergence requires |1 - eta lambda_i| < 1 for every i, hence 0 < eta < 2/lambda_max; the optimum is eta = 2/(lambda_min + lambda_max) with contraction rate (kappa - 1)/(kappa + 1) where kappa = lambda_max/lambda_min. Read the three regimes off that formula: eta slightly too large gives an oscillation that grows geometrically (the sawtooth that ends in inf within tens of steps), a large kappa gives the classic zig-zag across a narrow valley, and this is why momentum (which improves the rate to roughly (sqrt(kappa) - 1)/(sqrt(kappa) + 1)) and preconditioning exist at all. Know the modern caveat before you over-claim in a review: Cohen et al.'s 'edge of stability' result shows real networks drift until eta*lambda_max sits just above 2 and then train non-monotonically, so a mildly ragged curve is not automatically a bug.",
+   "minutes": 25,
+   "resource": {
+    "label": "d2l.ai 12.3 - Gradient Descent (learning rate, local minima, preconditioning, Newton)",
+    "url": "https://d2l.ai/chapter_optimization/gd.html"
+   }
+  },
+  {
+   "name": "SGD with momentum and Nesterov, implemented and matched to torch.optim.SGD",
+   "learn": "Implement the heavy-ball form PyTorch actually uses - b_t = mu*b_{t-1} + (1 - dampening)*g_t with b_1 = g_1 (not (1-mu)g_1), then w <- w - eta*b_t, and for nesterov=True the step uses g_t + mu*b_t - and understand that this differs from the textbook v <- mu*v - eta*g formulation by where eta sits, which matters the moment you change eta mid-run under a schedule. Derive the steady-state effective step eta/(1 - mu): raising mu from 0.9 to 0.99 multiplies your effective learning rate by ten, so momentum and learning rate must be retuned together and 'I only changed momentum' is never true. Then do the parity test that makes this topic real: same seed, float64, one linear layer, run your optimiser and torch.optim.SGD(momentum, dampening, weight_decay, nesterov) for 100 steps and assert max abs parameter difference < 1e-6, including the fact that torch's weight_decay is coupled (added into the gradient before momentum) rather than decoupled.",
+   "minutes": 30,
+   "resource": {
+    "label": "PyTorch docs - torch.optim.SGD (exact algorithm pseudocode)",
+    "url": "https://pytorch.org/docs/stable/generated/torch.optim.SGD.html"
+   }
+  },
+  {
+   "name": "Adagrad to RMSProp to Adam: derive the bias correction, then match to 1e-6",
+   "learn": "Walk the lineage and know what each step fixed: Adagrad accumulates G_t = G_{t-1} + g^2 and steps eta*g/(sqrt(G_t) + eps), whose denominator only grows so the effective rate decays to zero on long runs; RMSProp replaces the sum with an EMA v_t = beta2*v_{t-1} + (1-beta2)g^2; Adam adds the first moment m_t = beta1*m_{t-1} + (1-beta1)g and the corrections m_hat = m_t/(1 - beta1^t), v_hat = v_t/(1 - beta2^t). Derive the correction rather than memorising it: unrolling gives E[v_t] = (1 - beta2^t)E[g^2] for stationary g, so dividing by (1 - beta2^t) removes the zero-initialisation bias that would otherwise make the first ~1/(1-beta2) = 1000 steps take absurdly small steps. Implement it, note that the step size is roughly eta in parameter units when gradients are stationary (Adam is nearly sign-descent, which is why its eta is ~1e-3 while SGD's is ~1e-1), and match torch.optim.Adam to 1e-6 in float64 by following the docs pseudocode exactly - including that eps is added outside the sqrt and that the implementation folds the corrections into the step rather than into m and v.",
+   "minutes": 35,
+   "resource": {
+    "label": "PyTorch docs - torch.optim.Adam (algorithm block, eps placement, amsgrad)",
+    "url": "https://pytorch.org/docs/stable/generated/torch.optim.Adam.html"
+   }
+  },
+  {
+   "name": "AdamW: decoupled weight decay and the no-decay parameter group",
+   "learn": "Understand the defect precisely: adding lambda*w to the gradient inside Adam means the penalty is then divided by sqrt(v_hat) like every other gradient component, so parameters with large historical gradients are decayed least - the opposite of what a uniform Gaussian prior means - and the lambda sweep comes out flat and non-monotonic. AdamW applies w <- w - eta*lambda*w outside the adaptive scaling; know that PyTorch multiplies the decay by the current lr, so an LR schedule silently schedules your regularisation too, and that AdamW's default weight_decay is 0.01 while Adam's is 0. Build the parameter groups by hand rather than passing one lambda for everything: weight matrices and conv kernels decay, biases and every LayerNorm/BatchNorm gamma and beta do not (decaying a normalisation scale changes the function without regularising it), and assert in code that the two groups partition model.parameters() exactly - a silent overlap or omission is a favourite source of 'the reproduction does not match the paper'.",
+   "minutes": 20,
+   "resource": {
+    "label": "Loshchilov & Hutter, \"Decoupled Weight Decay Regularization\" (arXiv:1711.05101)",
+    "url": "https://arxiv.org/abs/1711.05101"
+   }
+  },
+  {
+   "name": "Choosing an optimiser in front of a customer: quality, memory, and the honest answer",
+   "learn": "Be able to give the working rule and its evidence: AdamW for transformers and anything with sparse or badly scaled gradients, tuned SGD+momentum for ResNet-style vision where it still matches or beats Adam on held-out accuracy, and never a bare Adam with default weight decay on a model you will hand over. Do the memory arithmetic out loud, because it decides whether the model fits: fp32 weights are 4 bytes/param, gradients another 4, SGD+momentum adds one state tensor (4), Adam/AdamW adds two (8), so a 1B-parameter AdamW run needs ~16 GB of optimiser-related state before a single activation. Know enough about the current alternatives to answer without bluffing - Lion keeps only a momentum buffer and steps on its sign, Muon orthogonalises the momentum matrix via Newton-Schulz for 2D weights while leaving embeddings and the head to AdamW, schedule-free methods remove the decay schedule as a hyperparameter - and then give the honest recommendation: inside a customer's eight-hour budget, tuning the learning rate and the schedule beats swapping optimisers almost every time.",
+   "minutes": 20,
+   "resource": {
+    "label": "Maths/CS/AI Compendium - Chapter 06, \"02. gradient machine learning\" (SGD, momentum, Adagrad, RMSProp, Adam, AdamW, Lion, Muon, schedule-free)",
+    "url": "https://github.com/HenryNdubuaku/maths-cs-ai-compendium/blob/main/chapter%2006%20-%20machine%20learning/02.%20gradient%20machine%20learning.md"
+   }
+  },
+  {
+   "name": "Warmup + cosine from scratch, and the schedule bugs nobody sees",
+   "learn": "Write the schedule as a pure function of the global step and implement it under LambdaLR so it is testable: eta_t = eta_max * t/T_warm for t < T_warm, then eta_t = eta_min + 0.5*(eta_max - eta_min)*(1 + cos(pi*(t - T_warm)/(T_total - T_warm))). Plot it for the exact step count of your run before training, then assert it against torch.optim.lr_scheduler.CosineAnnealingLR (or SequentialLR chaining LinearLR and CosineAnnealingLR) to within 1e-9. Know why warmup exists mechanically - Adam's v_hat is estimated from a handful of samples at t small, so the very first steps have an unreliable denominator, and post-LN transformers additionally have large early gradients - and know the four bugs that silently ruin the run: calling scheduler.step() once per epoch when T_max was specified in steps (the schedule finishes in 1/len(loader) of training), calling scheduler.step() before optimizer.step(), resuming without scheduler.state_dict() so the LR restarts at the warmup floor, and stepping the scheduler on an iteration where GradScaler skipped the optimiser step.",
+   "minutes": 30,
+   "resource": {
+    "label": "PyTorch docs - torch.optim.lr_scheduler.CosineAnnealingLR (closed form, chaining caveats)",
+    "url": "https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.CosineAnnealingLR.html"
+   }
+  },
+  {
+   "name": "The LR range test and one-cycle: getting a defensible learning rate in three minutes",
+   "learn": "Run the range test: save model.state_dict() and optimizer.state_dict(), increase the LR geometrically from ~1e-7 to ~1 over 100-500 minibatches, record the loss each step, restore the saved state, then plot loss against log(LR) and take eta_max about one order of magnitude below the point where the loss turns upward (or at the steepest downward slope). Implement it yourself with LambdaLR so you can run it on a customer's model in one cell and produce a plot rather than an opinion. Know one-cycle as the packaged version - a single warmup to eta_max then annealing well below the initial rate, with momentum cycled inversely - and know its claim (super-convergence on some vision workloads) is workload-specific, so present it as a candidate, not a law. The FDE value here is speed of evidence: 'here is the range test, 3e-4 is the top of the stable band for your model and batch size' ends an argument that a week of grid search would not.",
+   "minutes": 20,
+   "resource": {
+    "label": "Smith, \"Cyclical Learning Rates for Training Neural Networks\" (arXiv:1506.01186) - the LR range test",
+    "url": "https://arxiv.org/abs/1506.01186"
+   }
+  },
+  {
+   "name": "BatchNorm mechanics: the coupled backward pass and running statistics",
+   "learn": "Write the transform per feature - xhat = (x - mu_B)/sqrt(var_B + eps), y = gamma*xhat + beta, with mu and var taken over N for a linear layer and over N,H,W for a conv - and derive the backward at least once until you can write dx = (gamma/sqrt(var_B + eps)) * (dy - mean(dy) - xhat*mean(dy*xhat)); the two subtracted terms are what makes BatchNorm a batch-coupled operation rather than a pointwise one, so one poisoned example perturbs the gradient of every other example in the batch. Know the running statistics exactly: PyTorch's momentum=0.1 is the weight on the new batch value, not the old, so running_mean <- 0.9*running_mean + 0.1*batch_mean; train() uses batch statistics and updates the buffers, eval() uses the buffers and updates nothing, and track_running_stats=False makes eval use batch statistics too. Also know the plumbing details you will be asked about: bias=False on the conv before a BN (beta subsumes it), eps=1e-5 inside the sqrt, and SyncBatchNorm when a DDP job's per-rank batch is too small to estimate a variance.",
+   "minutes": 35,
+   "resource": {
+    "label": "d2l.ai 8.5 - Batch Normalization (from-scratch implementation, training vs prediction mode)",
+    "url": "https://d2l.ai/chapter_convolutional-modern/batch-norm.html"
+   }
+  },
+  {
+   "name": "Why BatchNorm helps, and the couplings it introduces",
+   "learn": "Be able to state the current explanation and not the folklore: Santurkar et al. showed empirically that BN does not reduce 'internal covariate shift' in the sense originally claimed (injecting noise after BN keeps the benefit) and that the real mechanism is a smoother, better-conditioned loss surface, which is what buys the 10-30x larger usable learning rate and the robustness to initialisation scale. Then know the two couplings that produce mysterious results: a BN'd layer is scale-invariant in its preceding weights, so weight decay on those weights does not regularise - it shrinks ||w||, which raises the effective learning rate, meaning 'we removed weight decay' is really 'we changed the LR schedule'; and the train/eval gap grows whenever batch statistics are unrepresentative (batch size 2, a loader that yields class-sorted batches, or an eval distribution that has shifted). Know that gradient accumulation does not give you large-batch BN statistics, and that a batch-size change silently changes the amount of BN regularisation.",
+   "minutes": 20,
+   "resource": {
+    "label": "Santurkar et al., \"How Does Batch Normalization Help Optimization?\" (arXiv:1805.11604)",
+    "url": "https://arxiv.org/abs/1805.11604"
+   }
+  },
+  {
+   "name": "LayerNorm, GroupNorm, RMSNorm, and pre-LN versus post-LN",
+   "learn": "Know the axis each one normalises over and what that buys: LayerNorm normalises across the feature dimension of a single example, so it has no batch coupling, behaves identically in train and eval, and works with batch size 1 and variable-length sequences; GroupNorm splits channels into G groups for small-batch vision; RMSNorm drops the mean subtraction entirely, computing x/sqrt(mean(x^2) + eps)*gamma, which is cheaper and empirically as good, which is why modern LLM stacks use it. Then learn the result that explains half the transformer training folklore: Xiong et al. show post-LN (residual then norm) has expected gradients at initialisation that grow with depth, so it requires warmup and is fragile, while pre-LN (norm inside the residual branch) has well-behaved gradients and trains without warmup - so 'do we need warmup?' is a question about architecture, not taste. Use this as a diagnostic: a NaN at exactly the same step every run in a post-LN model that disappears with warmup is a different failure from a NaN at a random step, which is data or fp16.",
+   "minutes": 20,
+   "resource": {
+    "label": "Xiong et al., \"On Layer Normalization in the Transformer Architecture\" (arXiv:2002.04745)",
+    "url": "https://arxiv.org/abs/2002.04745"
+   }
+  },
+  {
+   "name": "Gradient clipping: global norm, threshold choice, and ordering in the loop",
+   "learn": "Implement global-norm clipping the way torch.nn.utils.clip_grad_norm_ does - compute total = sqrt(sum_p ||g_p||^2) over all parameters, and if total > max_norm scale every gradient by max_norm/total so the direction is preserved - and note that the function returns the pre-clip total norm, which is the single most useful scalar to log every step. Choose the threshold from evidence: run 100 steps unclipped, take roughly the 90th percentile of the observed grad-norm distribution, and set max_norm there, rather than copying 1.0 from a blog into a model whose typical norm is 40. Get the ordering right under AMP: backward, then scaler.unscale_(optimizer), then clip, then scaler.step(optimizer) - clipping before unscale_ clips gradients that are still multiplied by a loss scale of order 65536, which makes clipping either a no-op or catastrophically aggressive depending on the scale. Treat a rising clip rate over training as a real instability signal, and remember clipping suppresses the symptom while the cause (LR above the stability bound, a corrupt batch, post-LN depth) is still there.",
+   "minutes": 25,
+   "resource": {
+    "label": "PyTorch docs - torch.nn.utils.clip_grad_norm_",
+    "url": "https://pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html"
+   }
+  },
+  {
+   "name": "Mixed-precision numerics: fp16 versus bf16 versus tf32",
+   "learn": "Know the formats by their bits, because every AMP decision follows from them: fp16 is 1-5-10 with a maximum of 65504 and normals down to ~6e-5 (subnormals to ~6e-8), so a gradient of 1e-8 flushes to zero and an activation of 1e5 becomes inf; bf16 is 1-8-7, carrying fp32's exponent range with roughly three decimal digits of precision, so it needs no loss scaling but resolves less; tf32 is a 19-bit-mantissa matmul mode on Ampere and later, enabled per-op through torch.backends.cuda.matmul.allow_tf32 and torch.backends.cudnn.allow_tf32. Understand the master-weight design: autocast does not convert your model, it runs selected ops (matmul, conv) in low precision while parameters, optimiser state and the update stay fp32, and it keeps reductions, softmax, layer norms and the loss in fp32 because those are where cancellation and overflow live. Be able to answer the customer question 'is this still the same model?' honestly: throughput typically improves 1.5-3x and memory drops substantially, accuracy is usually within noise, and you demonstrate that with a fixed-seed A/B rather than asserting it.",
+   "minutes": 30,
+   "resource": {
+    "label": "Micikevicius et al., \"Mixed Precision Training\" (arXiv:1710.03740) - loss scaling and fp32 master weights",
+    "url": "https://arxiv.org/abs/1710.03740"
+   }
+  },
+  {
+   "name": "autocast + GradScaler in practice, and NaN triage",
+   "learn": "Write the canonical loop and know why each line is where it is: with torch.autocast(device_type='cuda', dtype=torch.float16) wrapping only the forward and the loss, then scaler.scale(loss).backward(), scaler.unscale_(optimizer), clip_grad_norm_, scaler.step(optimizer), scaler.update(). Understand the dynamic loss scaler as a control loop: it starts around 65536, multiplies the loss so small gradients land inside fp16's normal range, inspects gradients for inf/nan, halves the scale and skips the whole optimiser step when it finds one, and doubles the scale after growth_interval clean steps - so skipped steps early in training are expected, and any per-step bookkeeping (schedulers, EMA, step counters) that assumes the step happened will drift. Know the rules you will otherwise break: do not call .half() on the model, do not wrap backward in autocast, include scaler.state_dict() in every checkpoint, and use a separate scaler per optimiser. Triage NaNs by bisection: rerun the same seed in bf16 - if the NaN survives, it is a modelling or data bug (a log(0), a division by a zero norm, a corrupt label), not a precision bug.",
+   "minutes": 30,
+   "resource": {
+    "label": "PyTorch docs - CUDA Automatic Mixed Precision examples (gradient clipping, accumulation, multiple losses, checkpointing)",
+    "url": "https://pytorch.org/docs/stable/notes/amp_examples.html"
+   }
+  },
+  {
+   "name": "Instrumenting the loop: the five scalars and the sanity ladder",
+   "learn": "Log per step, not per epoch: loss and an EMA of it, the current LR (read from optimizer.param_groups, never recomputed), the pre-clip global gradient norm, the update-to-weight ratio ||eta*update||/||w|| per parameter tensor (healthy is around 1e-3; 1e-2 means the LR is too high, 1e-5 means the model is barely moving), and throughput plus peak memory. Run the ladder in order before any real training: confirm the loss at initialisation equals ln(C) (2.303 for CIFAR-10 - anything else means the head bias, the label mapping or the reduction is wrong), overfit one batch of 32 to below 1e-3 with augmentation, dropout and weight decay disabled, verify every parameter you expect to train appears in optimizer.param_groups and has requires_grad=True, then scale up. Adopt the tuning-playbook vocabulary for the write-up - scientific, nuisance and fixed hyperparameters - and its non-negotiable rule that the learning rate is re-tuned whenever anything else changes, because otherwise your ablation is measuring how well each variant suits the old LR.",
+   "minutes": 30,
+   "resource": {
+    "label": "Google Research - Deep Learning Tuning Playbook",
+    "url": "https://github.com/google-research/tuning_playbook"
+   }
+  },
+  {
+   "name": "Loss-curve taxonomy: reading the five broken configs from the plot alone",
+   "learn": "Build the mapping from signature to cause so you can diagnose without touching the code. Flat at ln(C) forever: LR effectively zero, symmetric or zero initialisation, parameters missing from the optimiser, or requires_grad left False after a freeze. Smooth descent that turns into a growing oscillation and then inf inside tens of steps: LR above the 2/lambda_max bound - confirm with the grad norm rising geometrically and the update ratio near 1e-1. Loss decreasing only in visible steps at epoch boundaries: shuffle=False on a class-sorted dataset. Training loss healthy but the validation number collapses only at eval time: BatchNorm running statistics never warmed up, model.eval() missing, or eval running with a batch of 1. A NaN at a random step under fp16 with no GradScaler, which moves under a different seed: underflow to zero followed by a division, or an overflow in the loss. Also learn the non-bugs: validation below training is dropout plus BN accounting or an easier split, and a plateau that coincides exactly with the cosine schedule bottoming out is the schedule, not overfitting.",
+   "minutes": 35,
+   "resource": {
+    "label": "Google ML Crash Course - Interpreting loss curves (oscillating, exploding, step-shaped, and stuck curves)",
+    "url": "https://developers.google.com/machine-learning/crash-course/overfitting/interpreting-loss-curves"
+   }
+  },
+  {
+   "name": "Batch size, gradient accumulation and the linear scaling rule",
+   "learn": "Know the rule and its evidence: Goyal et al. scale the learning rate by k when the minibatch is multiplied by k, preceded by a gradual warmup over the first ~5 epochs, and show it holds to about 8k images before quality degrades - so quote it with its validity range rather than as a law. Implement gradient accumulation correctly: divide the loss by accum_steps (or keep mean reduction and scale), call optimizer.step() and zero_grad() every accum_steps microbatches, and be explicit that this is not identical to a real large batch - BatchNorm statistics are still computed per microbatch, dropout masks differ, and under AMP a skipped scaler step throws away the whole accumulated group. Notice the arithmetic everybody forgets: doubling the batch halves the number of optimiser steps per epoch, so holding the epoch budget and the LR fixed quietly halves the number of updates and makes the large-batch run look worse for a reason that has nothing to do with generalisation. Pair this with the memory picture - activations dominate and scale with batch - and know activation checkpointing as the trade you offer when a customer's GPU is too small.",
+   "minutes": 25,
+   "resource": {
+    "label": "Goyal et al., \"Accurate, Large Minibatch SGD\" (arXiv:1706.02677) - linear scaling rule and gradual warmup",
+    "url": "https://arxiv.org/abs/1706.02677"
+   }
+  },
+  {
+   "name": "Determinism, seeds and a checkpoint you can actually resume from",
+   "learn": "Control the randomness you can: torch.manual_seed plus numpy and python random, a DataLoader generator and worker_init_fn so workers do not share a seed, torch.use_deterministic_algorithms(True) with CUBLAS_WORKSPACE_CONFIG=:4096:8, and know that torch.backends.cudnn.benchmark=True picks kernels by timing so it is fast and non-reproducible, while atomics in some backward kernels are non-deterministic regardless. Then define the run-to-run spread empirically (train the same config with 3-5 seeds and report mean +/- std) so you can tell a real regression from noise rather than arguing about a single run. Make the checkpoint complete: model state, optimizer state (momentum and Adam moments), scheduler state, GradScaler state, epoch and global_step, RNG states and a hash of the config - a resume that silently drops the optimiser buffers produces a loss spike at exactly the resume step which gets misdiagnosed as data corruption for a day. Test it in CI: train 100 steps, checkpoint, train 100 more; separately resume from the checkpoint and train 100; assert the two final losses agree to 1e-6.",
+   "minutes": 25,
+   "resource": {
+    "label": "PyTorch docs - Reproducibility (seeding, deterministic algorithms, DataLoader workers, cuDNN benchmark)",
+    "url": "https://pytorch.org/docs/stable/notes/randomness.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can implement SGD-with-momentum (including dampening and Nesterov) and Adam (including bias correction and PyTorch's eps placement) from scratch and show a pytest assertion that parameters match torch.optim to within 1e-6 over 100 float64 steps across a grid of hyperparameters.",
+  "You can derive, on a whiteboard and without notes, that gradient descent on a quadratic requires eta < 2/lambda_max, state the optimal step size and the rate in terms of the condition number, and use it to explain a specific diverging run.",
+  "You can write a warmup+cosine schedule as a closed-form function of the global step, assert it against SequentialLR/CosineAnnealingLR to 1e-9, and name the four ways a schedule silently breaks (per-epoch stepping, step ordering, missing scheduler state on resume, AMP-skipped steps).",
+  "You can turn on torch.autocast plus GradScaler on an existing training loop, place unscale_ and clip_grad_norm_ correctly, checkpoint the scaler, and produce a measured fp32-vs-fp16-vs-bf16 table of wall-clock, peak memory and final validation accuracy across three seeds with zero NaNs.",
+  "You can be handed a loss curve plus per-step logs of LR, grad norm and update-to-weight ratio, and name the cause - LR above the stability bound, bad init, dead units, exploding or vanishing gradients, BatchNorm in the wrong mode at eval, or fp16 overflow - then show the one-line fix and the corrected curve.",
+  "You can state BatchNorm's train/eval asymmetry precisely (batch statistics and buffer updates versus frozen running estimates), write its backward pass, and quantify the exact accuracy delta caused by evaluating without model.eval() on your own model.",
+  "You can run an LR range test on an unfamiliar model in under five minutes, restore the pre-test state, and justify the chosen eta_max from the plot rather than from a default.",
+  "You can produce a resumable checkpoint (model, optimizer, scheduler, scaler, step, RNG state) and prove in CI that a resumed run matches an uninterrupted run to 1e-6, and separately report the seed-to-seed spread of your headline metric so a regression can be distinguished from noise."
+ ],
+ "failureModes": [
+  "Weight decay is passed to torch.optim.Adam instead of AdamW, so the penalty is divided by sqrt(v_hat) per parameter; the lambda sweep comes out flat and non-monotonic and the team records 'regularisation does not help on this dataset' as a finding.",
+  "scheduler.step() is called once per epoch while T_max was specified in optimiser steps, so a 30-epoch cosine schedule completes inside the first epoch and trains the remaining 29 at eta_min; the curve looks like a healthy early drop followed by a permanent plateau and gets blamed on model capacity.",
+  "clip_grad_norm_ is called before scaler.unscale_(), so the norm being clipped is the fp16 loss-scaled norm; clipping becomes a no-op at scale 65536 and catastrophically aggressive after the scaler halves a few times, producing an instability that appears and disappears with the loss scale.",
+  "Validation is run without model.eval(), so BatchNorm uses each validation minibatch's own statistics and dropout stays on; the reported accuracy is both noisy and optimistically biased, and the config that wins the ablation is the one that drew the luckiest eval batches.",
+  "A model is trained with .half() applied to the weights instead of autocast with fp32 master weights; updates smaller than the fp16 spacing of the parameter are lost entirely on every step, so the loss decreases for a while and then stalls with a perfectly flat curve and a grad norm that is still nonzero.",
+  "Batch size is raised from 128 to 1024 for throughput while the learning rate and the epoch budget stay fixed; the run takes one eighth of the optimiser steps, ends two points below baseline, and the large-batch result is written up as a generalisation gap rather than as an under-trained run.",
+  "A job is resumed from a checkpoint that saved only model.state_dict(); Adam's moment buffers restart at zero and the bias correction restarts at t=1, so the loss spikes at exactly the resume step and the incident is investigated as corrupted training data.",
+  "cudnn.benchmark is on and no seeds are fixed, so two runs of the identical config differ by 0.4 points; a genuinely neutral change is shipped as an improvement and a genuine 0.3-point regression is dismissed as noise, in the same week."
+ ],
+ "interviewQuestions": [
+  "Derive the condition on the learning rate for gradient descent to converge on a quadratic with Hessian H. What is the optimal step size, what is the convergence rate in terms of the condition number, and how does momentum change that rate? Then tell me what you would actually look at in a training log to decide whether a run is violating that bound.",
+  "Write Adam's update from memory, including the bias corrections, and derive why the corrections are needed. Where does eps sit in PyTorch's implementation, and what changes if you move it inside the square root? Why is Adam's typical learning rate two orders of magnitude smaller than SGD's?",
+  "Explain the difference between L2 regularisation added to the gradient and decoupled weight decay under an adaptive optimiser. Which parameters would you exclude from weight decay in a transformer, and why is excluding LayerNorm gains not just a micro-optimisation?",
+  "Describe exactly what BatchNorm computes in training mode and in eval mode, including how the running statistics are updated. A model scores 94 percent in training-mode evaluation and 61 percent after calling model.eval(). Give me three candidate causes in order and the experiment that distinguishes them.",
+  "Debug: a training run is healthy for 4,000 steps and then goes to NaN, and it does so at a different step each time you rerun it. It uses fp16 autocast with a GradScaler, gradient clipping and a warmup+cosine schedule. Walk me through your triage, in order, and say what each observation would rule out.",
+  "Design: a customer has a 20 GB GPU and an 8-hour nightly window, and their current fp32 run takes 14 hours. Walk me through what you change, in what order, and what you measure to prove the model is unchanged - include the optimiser-state and activation memory arithmetic and where mixed precision does and does not help.",
+  "You raise the batch size from 256 to 2048 on eight GPUs. What happens to the gradient noise, what do you do to the learning rate and why, what does gradual warmup fix, and what would make you say the linear scaling rule has stopped applying?"
+ ],
+ "proofOfWork": "A public repo `optimiser-parity` that turns the training-lab work into evidence a customer's ML team can audit. It contains (a) a small from-scratch optimiser library - SGD with momentum, dampening and Nesterov, Adagrad, RMSProp, Adam and AdamW - together with a pytest suite that, for a grid over learning rate, momentum/betas, weight decay and nesterov, runs 100 float64 steps on a fixed-seed two-layer network and asserts max |theta_mine - theta_torch| < 1e-6, plus a closed-form warmup+cosine schedule asserted against SequentialLR to 1e-9; (b) a measured mixed-precision report on one named GPU comparing fp32, fp16+GradScaler and bf16 across three seeds, reporting median step time, peak allocated memory, final validation accuracy with standard deviation, the count of scaler-skipped steps, and the observed loss-scale trajectory, so 'AMP is free' becomes a number rather than a claim; (c) a blind triage log in which someone else ran the five broken configs from the deliverable plus three new ones (weight decay applied to BatchNorm gammas, scheduler stepped per epoch instead of per step, resume without optimiser state) and you recorded your diagnosis from the curves and the four logged scalars alone, with your hit rate stated honestly including the misses; and (d) a one-page 'why is my model not training' decision card written for a customer engineer, mapping each observable signature to its check and its fix, with the update-to-weight ratio and pre-clip grad norm named as the two scalars to log before anything else. The README opens with the derivations - the 2/lambda_max bound, Adam's bias correction and the BatchNorm backward - typeset, because the parity tests are only interesting if you can show where the reference behaviour comes from."
+}
