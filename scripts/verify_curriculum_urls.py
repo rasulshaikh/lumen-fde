@@ -63,6 +63,10 @@ def classify(url: str) -> tuple[str, int]:
         return "live", code
     if code in (403, 429, 999):
         return "blocked", code
+    # YouTube oEmbed answers 401 for videos that exist but disallow embedding, and this
+    # checker is asking "is the link good", not "can it be iframed". Never call those dead.
+    if code == 401 and "youtube.com" in url:
+        return "blocked", code
     if code in (404, 410, 451):
         return "dead", code
     return ("error", code) if code == 0 else ("dead", code)
