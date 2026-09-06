@@ -3,7 +3,44 @@ import workbook from "@/data/workbook.json";
 import library from "@/data/library-context.json";
 import repositories from "@/data/repository-context.json";
 
-function cleanEmailText(value: string) { return value.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/\*/g, "").replace(/[—–]/g, " - ").trim(); }
+/**
+ * MiniMax-M3 does not reliably honour thinking:disabled, so reasoning has to be stripped.
+ * Two failure modes, both seen in a real delivered email:
+ *   - the reply is ENTIRELY a <think> block, so stripping leaves "" and the email arrives
+ *     blank. The old `|| "Lumen could not generate…"` fallback could not catch this because
+ *     it ran BEFORE cleaning, against a non-empty string.
+ *   - the tag is never closed, so the pair regex misses and raw reasoning ships to the inbox.
+ * Handle the unclosed case too, and let the caller decide what to do with an empty result.
+ */
+function cleanEmailText(value: string) {
+  return value
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/i, "")
+    .replace(/\*/g, "")
+    .replace(/[—–]/g, " - ")
+    .trim();
+}
+
+/**
+ * A brief built from the plan itself, with no model involved. Used when the model returns
+ * nothing usable — an email that states the next real action beats an apology, and beats
+ * the blank message that actually shipped.
+ */
+function fallbackBrief(rows: (string | number | null)[][]) {
+  const next = rows.find((r) => { const s = String(r[15]).trim().toLowerCase(); return s !== "done" && s !== "skipped"; });
+  const active = rows.filter((r) => String(r[15]).trim().toLowerCase() !== "skipped");
+  const remaining = active.filter((r) => String(r[15]).trim().toLowerCase() !== "done").reduce((n, r) => n + Number(r[13] || 0), 0);
+  if (!next) return `Every topic in the plan is done or skipped. ${active.length} topics complete.`;
+  return [
+    `Next up: ${String(next[2])} (Month ${next[1]}, ${next[13]}h).`,
+    ``,
+    `What it asks of you: ${String(next[3])}`,
+    ``,
+    `Ship this: ${String(next[14])}`,
+    ``,
+    `${remaining}h of active plan remain across ${active.length} topics.`,
+  ].join("\n");
+}
 
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -24,7 +61,11 @@ export async function GET(request: Request) {
     body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, messages: [{ role: "system", content: "You are Lumen, a candid and motivating Senior FDE coach. Use fifth-grade reading language with exact technical meaning. Do not use hidden reasoning, asterisks, or em dashes." }, { role: "user", content: prompt }], temperature: 0.5, max_completion_tokens: 500, stream: false }), signal: AbortSignal.timeout(45_000) });
     const aiData = await aiResponse.json();
     if (!aiResponse.ok) return NextResponse.json({ ok: false, error: "MiniMax request failed." }, { status: 502 });
-    const brief = cleanEmailText(aiData?.choices?.[0]?.message?.content || "Lumen could not generate today's brief.");
+    // Clean FIRST, then check — a reply that is entirely reasoning cleans to "" and used to
+    // ship as a blank email.
+    const cleaned = cleanEmailText(aiData?.choices?.[0]?.message?.content || "");
+    const brief = cleaned || fallbackBrief(rows);
+    if (!cleaned) console.error("[cron/daily-digest] model returned no usable text; sent the plan-derived fallback");
     const emailResponse = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ from, to: [to], subject: "Lumen Brief · your next Senior FDE move", text: brief, html: `<div style="font-family:system-ui,sans-serif;max-width:620px;line-height:1.6"><h1>Lumen Brief</h1><p>${brief.replace(/\n/g, "<br />")}</p><p style="color:#667085;font-size:12px">Generated from your Lumen plan and study library.</p></div>` }) });
     if (!emailResponse.ok) return NextResponse.json({ ok: false, error: "Email delivery failed." }, { status: 502 });
     return NextResponse.json({ ok: true, sentTo: to });
