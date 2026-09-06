@@ -5,6 +5,7 @@ import workbook from "@/data/workbook.json";
 import library from "@/data/library-context.json";
 import repositories from "@/data/repository-context.json";
 import { LogoMark, AskMark } from "./brand";
+import { RecallStrip } from "./recall";
 
 type Row = (string | number | null)[];
 const planRows = workbook.Plan.slice(1) as Row[];
@@ -22,21 +23,8 @@ const topicKey = (r: Row) => `${String(r[0])}::${String(r[2])}`;
 
 function Link({ href, children }: { href: string; children: React.ReactNode }) { if (!href.startsWith("http")) return <span className="resource-link no-link" title="No resource assigned">{children}</span>; return <a className="resource-link" href={href} target="_blank" rel="noreferrer">{children}<span>↗</span></a>; }
 function Metric({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: string }) { return <div className={`metric ${tone}`}><span className="metric-label">{label}</span><strong>{value}</strong><span className="metric-detail">{detail}</span></div>; }
-const quizQuestions = [
-  { question: "Which Bash option makes a failed command inside a pipeline fail the pipeline?", options: ["set -u", "set -o pipefail", "trap EXIT", "getopts"], answer: 1 },
-  { question: "What is the safest default place to clean up a temporary file?", options: ["A comment", "The README", "An EXIT trap", "A global variable"], answer: 2 },
-  { question: "What should a strong FDE learning artifact preserve?", options: ["Only the final screenshot", "Command, directory, exit code, and artifact", "A copied tutorial", "A list of tool names"], answer: 1 },
-  { question: "What is the best first move when a customer automation fails?", options: ["Guess and rerun it", "Change five things at once", "Capture the error, inputs, and last known good run", "Delete the logs"], answer: 2 },
-];
-function QuickQuiz() {
-  const [index, setIndex] = useState(0); const [selected, setSelected] = useState<number | null>(null); const [score, setScore] = useState(0);
-  const question = quizQuestions[index]; const finished = index === quizQuestions.length;
-  const choose = (option: number) => { if (selected !== null) return; setSelected(option); if (option === question.answer) setScore((value) => value + 1); };
-  const next = () => { setSelected(null); setIndex((value) => value + 1); };
-  return <section className="quiz-strip" aria-label="Quick plan quiz"><div className="quiz-copy"><span className="quiz-label">5-minute check</span><strong>{finished ? `Score ${score}/${quizQuestions.length}` : question.question}</strong><span>{finished ? "Good. Repeat it tomorrow or ask Lumen to go deeper." : `Question ${index + 1} of ${quizQuestions.length}`}</span></div>{finished ? <button className="quiz-action" onClick={() => { setIndex(0); setScore(0); setSelected(null); }}>Replay</button> : <div className="quiz-options">{question.options.map((option, optionIndex) => <button key={option} className={selected === null ? "quiz-option" : optionIndex === question.answer ? "quiz-option correct" : selected === optionIndex ? "quiz-option wrong" : "quiz-option muted-option"} onClick={() => choose(optionIndex)}>{option}</button>)}{selected !== null && <button className="quiz-action" onClick={next}>{index === quizQuestions.length - 1 ? "See score" : "Next"} →</button>}</div>}</section>;
-}
 const assessmentSets = [
-  { title: "Weekly checkpoint", cadence: "Every week · 30 minutes", instruction: "Close your notes. Explain one topic, solve two small problems, then write one production lesson. Pass when you can explain the why, not only the command.", topics: "Current plan topics · shell · networking · systems", key: quizQuestions.map((q, i) => `${i + 1}${String.fromCharCode(65 + q.answer)}`).join(" · ") },
+  { title: "Weekly checkpoint", cadence: "Every week · 30 minutes", instruction: "Close your notes. Explain one topic, solve two small problems, then write one production lesson. Pass when you can explain the why, not only the command.", topics: "Current plan topics · shell · networking · systems", key: "Grade yourself against the topic's own outcomes in the recall strip: Fluent means closed-book and complete, Halting means gaps, Gone means start it again." },
   { title: "Monthly deep dive", cadence: "Every month · 90 minutes", instruction: "Part 1: explain three ideas simply. Part 2: design a small system. Part 3: debug a failure case. Part 4: show evidence from your build. Review mistakes the next day.", topics: "One month of plan work · one build artifact · one mock", key: "Rubric: correctness 40% · tradeoffs 25% · debugging 20% · communication 15%" },
   { title: "Quarterly capstone", cadence: "Every quarter · 3 hours", instruction: "Treat this like an MIT-style open-book systems examination. Start with assumptions, draw the design, implement a thin slice, test failure paths, and defend your choices aloud. Submit notes, code, tests, and a short retrospective.", topics: "End-to-end FDE case · architecture · delivery · customer impact", key: "Rubric: problem framing 20% · system design 25% · implementation 25% · reliability 15% · FDE communication 15%" },
 ];
@@ -171,6 +159,14 @@ export default function Home() {
 
   const filtered = useMemo(() => planRows.filter((r) => (track === "All tracks" || r[0] === track) && (month === "All months" || String(r[1]) === month) && (progress === "All progress" || String(statuses[topicKey(r)] || r[15] || "Not started") === progress) && String(r[2]).toLowerCase().includes(query.toLowerCase())), [track, month, progress, query, statuses]);
   const statusOf = (r: Row) => String(statuses[topicKey(r)] || r[15] || "Not started");
+
+  // Only topics actually in play enter the review schedule — drilling something never
+  // opened is noise. Indices are curriculum keys, which are plan-row indices.
+  const startedTopics = useMemo(() => planRows
+    .map((r, i) => [i, statusOf(r)] as const)
+    .filter(([, s]) => s === "In progress" || s === "Done")
+    .map(([i]) => i), [statuses]);
+
   const done = planRows.filter((r) => statusOf(r) === "Done").length;
   const skipped = planRows.filter((r) => statusOf(r) === "Skipped").length;
   // Progress counted non-skipped topics (117 of 119) while every hours figure counted all
@@ -204,7 +200,7 @@ export default function Home() {
   return <main className={askOpen ? "shell ask-open" : "shell"}>
     <header className="topbar"><a className="brand brand-link" href="/" aria-label="Return to Lumen home"><LogoMark className="brand-mark" /><div><div className="brand-name">Lumen</div><div className="brand-sub">by Rasul</div></div></a><div className="top-actions"><button className="ask-trigger" onClick={() => { setAskTopic(null); setAskOpen(true); }}><AskMark size={14} /> Ask Lumen</button><button className="ghost-button" onClick={share} aria-live="polite">{shared ? "✓ Link copied" : "↗ Share"}</button><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`} title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>{theme === "dark" ? "☀" : "☾"}</button></div></header>
     <section className="hero"><div><p className="kicker">Preparation command center</p><h1>Build proof, not just knowledge.</h1><p className="hero-copy">Your {hours}-hour Senior FDE plan, reduced to the pace, practice, and proof that matter this week.</p></div><div className="hero-note"><span className="note-pin">●</span><div><strong>Current focus</strong><p>{focus ? `Month ${focus.month} · ${focus.track}` : "Plan complete"}</p></div></div></section>
-    <nav className="tabs" aria-label="Workbook views">{TABS.map((item) => <button key={item} className={tab === item ? "tab active" : "tab"} onClick={() => setView(item)}>{item}</button>)}</nav><QuickQuiz />
+    <nav className="tabs" aria-label="Workbook views">{TABS.map((item) => <button key={item} className={tab === item ? "tab active" : "tab"} onClick={() => setView(item)}>{item}</button>)}</nav><RecallStrip startedTopics={startedTopics} />
     {tab === "Assessments" && <Assessments />}
     {tab === "Overview" && <>
       <section className="metric-grid"><Metric label="Plan progress" value={`${pct(done, activeRows.length)}%`} detail={`${done} of ${activeRows.length} active${skipped ? ` · ${skipped} of ${planRows.length} skipped` : ""}`} tone="rose" /><Metric label="Hours remaining" value={`${Math.max(hours - doneHours, 0)}`} detail={`of ${hours} active hours${skippedHours ? ` · ${skippedHours}h skipped` : ""}`} tone="teal" /><div className="metric brass"><span className="metric-label">Weekly commitment</span><strong><input className="weekly-input" type="number" min={1} max={80} value={weeklyHours} aria-label="Hours you study each week" onChange={(e) => setWeekly(Number(e.target.value))} />h</strong><span className="metric-detail">{(hours / weeklyHours).toFixed(1)} weeks · {(hours / weeklyHours / 4.333).toFixed(1)} months</span></div><Metric label="Mocks" value={`${mockRows.reduce((n, r) => n + Number(r[6] || 0), 0)} / ${mockRows.reduce((n, r) => n + Number(r[1] || 0), 0)}`} detail="completed / target" tone="ink" /></section>

@@ -10,6 +10,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "data" / "curriculum"
 OUT = ROOT / "data" / "curriculum.json"
+BANK = ROOT / "data" / "recall-bank.json"
 PLAN = ROOT / "data" / "workbook.json"
 
 REQUIRED = ["i", "topic", "why", "prerequisites", "subtopics", "outcomes", "failureModes", "interviewQuestions", "proofOfWork"]
@@ -43,6 +44,33 @@ def main() -> None:
         topics[str(i)] = d
 
     OUT.write_text(json.dumps({"topics": topics}, ensure_ascii=False, indent=1))
+
+    # The recall strip needs prompts on first paint, and curriculum.json is 3.7MB — far too
+    # large to import into the client bundle. Emit a slim bank instead.
+    #
+    # Shape matters: the reveal text is stored ONCE PER TOPIC, not per prompt. Storing it
+    # per prompt made a 2.6MB file for 1710 prompts — bigger than the problem it solved.
+    #
+    # Two corpora, deliberately. interviewQuestions are scenario-shaped and answerable aloud
+    # in ~90s, which is what retrieval practice needs. outcomes[] are NOT usable as prompts:
+    # 132 of the 947 are build-shaped ("write, closed-book in 45 minutes, a 200-line bash
+    # CLI…"), i.e. multi-hour deliverables restated as capabilities. Asked as flashcards the
+    # honest answer is "I'd have to try", which grades as nothing and teaches the learner to
+    # lie to the scheduler. They serve as the self-grading REFERENCE on the reveal instead,
+    # which is what they were actually written for.
+    meta, prompts = {}, []
+    for i, d in sorted(topics.items(), key=lambda kv: int(kv[0])):
+        meta[i] = {"topic": d["topic"], "track": d.get("track", ""), "outcomes": d.get("outcomes", [])[:3]}
+        for n, q in enumerate(d.get("interviewQuestions", [])):
+            prompts.append({"i": int(i), "k": f"q{i}-{n}", "kind": "recall", "p": q})
+        for n, f in enumerate(d.get("failureModes", [])):
+            prompts.append({"i": int(i), "k": f"f{i}-{n}", "kind": "drill", "p": f})
+    BANK.write_text(json.dumps({"meta": meta, "prompts": prompts}, ensure_ascii=False))
+    kinds = {}
+    for b in prompts:
+        kinds[b["kind"]] = kinds.get(b["kind"], 0) + 1
+    print(f"recall bank: {len(prompts)} prompts ({kinds}) · {BANK.stat().st_size/1024:.0f}KB -> {BANK.relative_to(ROOT)}")
+
     subs = sum(len(t["subtopics"]) for t in topics.values())
     urls = sum(1 for t in topics.values() for s in t["subtopics"] if s.get("resource", {}).get("url", "").startswith("http"))
     print(f"merged {len(topics)}/{len(plan_rows)} topics · {subs} subtopics · {urls} urls -> {OUT.relative_to(ROOT)}")
