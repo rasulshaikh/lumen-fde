@@ -1,0 +1,218 @@
+{
+  "i": 39,
+  "topic": "Designing Data-Intensive Applications and Kleppmann's lectures",
+  "track": "F. Distributed Systems and System Design",
+  "month": 5,
+  "hours": 16.0,
+  "why": "Every FDE engagement eventually reaches the meeting where the customer's architect asks 'is this strongly consistent', 'what happens when the replica is behind', or 'can we just add a distributed lock', and the FDE either answers in terms of user-visible anomalies and concrete costs or loses the room. DDIA plus Kleppmann's Cambridge lectures are the shared vocabulary that Palantir, Databricks and Anthropic loops assume you already have: replication lag, quorums, isolation levels, linearizability, total order broadcast, Raft, CDC. The Gossip Glomers force you to feel the failures (lost messages, partitions, stale reads on a sequentially consistent store) in code, so that when a customer's Kafka consumer double-counts or a Postgres failover loses writes you recognise the mechanism inside a minute instead of a week.",
+  "prerequisites": [
+    "PostgreSQL at depth (Topic 29): MVCC (xmin/xmax), WAL, EXPLAIN, row locks, SELECT ... FOR UPDATE - replication and isolation levels here build directly on that mental model",
+    "Kafka and event-driven design (Topic 33): partitions, keys, consumer groups, offsets, log compaction - Kafka is the worked example of a partitioned replicated log throughout",
+    "Networking (Topic 2): TCP retransmission and timeouts, why a timeout is not a failure signal, what a network partition physically looks like (asymmetric loss, one-way links)",
+    "High availability and DR (Topic 24): failover, promotion, RPO/RTO vocabulary, and the idea that an async replica is a lossy backup, not a hot standby",
+    "Enough Go to write a 300-line program with goroutines, sync.Mutex, context.WithTimeout, time.Ticker and encoding/json - the supported Gossip Glomers path is the Go Maelstrom library (if you insist on Python you must write the stdin/stdout JSON loop and RPC correlation yourself)",
+    "Temporal sagas (Topic 34): compensation-based workflows, because the 2PC subtopic compares against them"
+  ],
+  "subtopics": [
+    {
+      "name": "Storage engines and encoding in 35 minutes (DDIA ch 3-4 skim)",
+      "learn": "Cover just enough of chapters 3-4 to answer the two questions customers actually ask: 'why is our write-heavy store slow to read' and 'will old consumers break when we add a field'. LSM-tree path: memtable, flush to immutable SSTables, leveled versus tiered compaction, bloom filters to skip files, and the write/read/space amplification triangle; versus B-tree: in-place page writes plus a WAL for crash recovery and more predictable read latency. Encoding: Avro/Protobuf/Thrift field tags, the compatibility rules (never reuse a field number, only add optional fields with defaults, never change a field's type), and why a jsonb column in Postgres breaks in exactly the same ways without any tooling to warn you.",
+      "minutes": 35,
+      "resource": {
+        "label": "RocksDB wiki - RocksDB Overview (LSM architecture, compaction, bloom filters)",
+        "url": "https://github.com/facebook/rocksdb/wiki/RocksDB-Overview"
+      }
+    },
+    {
+      "name": "System models, the two generals problem and failure detectors (Kleppmann lectures 1-2)",
+      "learn": "State the assumptions every later argument rests on: network model (reliable / fair-loss / arbitrary), node model (crash-stop / crash-recovery / Byzantine), timing model (synchronous / partially synchronous / asynchronous). Explain why the two generals problem means 'did the customer's payment go through' cannot be answered with certainty over a lossy link, and why every real system resolves it with idempotency keys, retries and a reconciliation job rather than a cleverer protocol. Know that a perfect failure detector is impossible in an asynchronous system, that timeouts give you an eventually-perfect one at best, and that FLP says deterministic consensus cannot be guaranteed to terminate under fully asynchronous assumptions - which is exactly why Raft uses randomised election timeouts and assumes partial synchrony.",
+      "minutes": 45,
+      "resource": {
+        "label": "Kleppmann - Distributed Systems lecture notes (Cambridge, PDF)",
+        "url": "https://www.cl.cam.ac.uk/teaching/2122/ConcDisSys/dist-sys-notes.pdf"
+      }
+    },
+    {
+      "name": "Clocks: wall time, monotonic time, Lamport and vector clocks, TrueTime",
+      "learn": "Distinguish CLOCK_REALTIME (NTP-slewed or stepped, can jump backwards, leap seconds) from CLOCK_MONOTONIC (only for measuring durations; time.monotonic() in Python, Go's time.Now() carries both readings). Know realistic NTP skew (tens of milliseconds on well-run hosts, seconds on neglected VMs) and conclude that timestamps from two machines never establish order. Lamport clocks: t = max(local, received) + 1 gives a total order consistent with causality but cannot detect concurrency; vector clocks / version vectors detect concurrent writes (neither dominates), which is how Dynamo-style stores decide to keep siblings rather than overwrite. Spanner TrueTime exposes an [earliest, latest] interval and commit-waits until latest has passed, so external consistency is bought with latency proportional to clock uncertainty. Be able to explain, with a two-node timeline, why last-writer-wins on wall clocks silently discards acknowledged writes.",
+      "minutes": 50,
+      "resource": {
+        "label": "Lamport - Time, Clocks, and the Ordering of Events in a Distributed System (PDF)",
+        "url": "https://lamport.azurewebsites.net/pubs/time-clocks.pdf"
+      }
+    },
+    {
+      "name": "Single-leader replication mechanics in PostgreSQL",
+      "learn": "Trace one write: WAL record, fsync on the primary, walsender streams to the standby's walreceiver, standby writes then replays. Know the settings and what each waits for: wal_level = replica | logical; max_wal_senders; synchronous_commit = off | local | remote_write | on | remote_apply; synchronous_standby_names with FIRST n (...) and ANY n (...) quorum syntax; physical replication slots (they stop WAL recycling and will fill the disk if the consumer dies - cap with max_slot_wal_keep_size); hot_standby_feedback trading primary-side bloat for fewer 'canceling statement due to conflict with recovery' errors. Failover: pg_ctl promote or SELECT pg_promote(), the timeline switch, and why the old primary must be fenced before the new one accepts writes (split brain); know what Patroni does with a DCS lease to automate exactly that. Distinguish statement-based, WAL-shipping and logical (row-level) replication and which one survives a major-version upgrade.",
+      "minutes": 70,
+      "resource": {
+        "label": "PostgreSQL docs - Log-Shipping Standby Servers (streaming replication, synchronous replication)",
+        "url": "https://www.postgresql.org/docs/current/warm-standby.html"
+      }
+    },
+    {
+      "name": "Replication lag anomalies and how to actually deliver read-your-writes",
+      "learn": "Name the three guarantees weaker than linearizability that customers actually want and the anomaly each prevents: read-your-writes (user saves profile, refreshes, sees the old one), monotonic reads (page goes back in time between two refreshes hitting different replicas), consistent prefix reads (the answer appears before the question). Implementations you can defend: route a user's reads to the primary for N seconds after their last write; or capture pg_current_wal_lsn() after commit, store it in the session, and on the replica wait until pg_last_wal_replay_lsn() >= that LSN before serving; or pay for synchronous_commit = remote_apply on the write path. Measure lag from pg_stat_replication (write_lag, flush_lag, replay_lag) and alert on byte lag (pg_wal_lsn_diff) as well as time, because time-based lag reads zero on an idle replica that is actually disconnected.",
+      "minutes": 40,
+      "resource": {
+        "label": "PostgreSQL docs - System Administration Functions (pg_current_wal_lsn, pg_last_wal_replay_lsn, pg_promote)",
+        "url": "https://www.postgresql.org/docs/current/functions-admin.html"
+      }
+    },
+    {
+      "name": "Multi-leader and leaderless replication: quorums, conflicts, anti-entropy",
+      "learn": "Do the quorum arithmetic (w + r > n) and then list why it is still not linearizable: sloppy quorums and hinted handoff, concurrent writes to different replicas, partial write failures with no rollback, and read repair racing with a second read. Know read repair versus anti-entropy (Merkle-tree comparison), last-writer-wins and why Cassandra's cell-level LWW with client-supplied timestamps loses writes under skew, and version vectors with sibling resolution as the alternative. Map Cassandra consistency levels (ONE, QUORUM, LOCAL_QUORUM, EACH_QUORUM, ALL) onto multi-datacenter latency and availability, and know that DynamoDB ConsistentRead=true costs double the read capacity units. Multi-leader use cases (multi-region active-active, offline clients, collaborative editing), conflict avoidance by giving each record a home region, and convergent merge functions or CRDTs when you cannot avoid conflicts.",
+      "minutes": 70,
+      "resource": {
+        "label": "Amazon - Dynamo: Amazon's Highly Available Key-value Store (SOSP 2007, PDF)",
+        "url": "https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf"
+      }
+    },
+    {
+      "name": "Partitioning: key choice, hot spots, secondary indexes, rebalancing, routing",
+      "learn": "Compare key-range partitioning (range scans work, sequential keys create a hot tail) with hash partitioning (even spread, range scans become scatter-gather). Know the fixed-slot schemes in tools your customers run: Redis Cluster's 16384 hash slots via CRC16, Kafka's murmur2(key) mod partition count - and why increasing a topic's partition count silently changes the key-to-partition mapping and breaks per-key ordering for in-flight consumers. Hot partitions: the celebrity-key problem, DynamoDB's per-partition ceiling (about 3000 RCU / 1000 WCU) and adaptive capacity, and the fix of salting a hot key with a small suffix and fanning reads back out. Secondary indexes: local/document-partitioned (scatter-gather reads, Cassandra, Elasticsearch) versus global/term-partitioned (asynchronous updates, DynamoDB GSIs). Rebalancing: many fixed partitions per node, dynamic splitting (HBase, DynamoDB), never hash mod N. Routing: coordination service (ZooKeeper in Kafka's older design), gossip (Cassandra), or smart clients following MOVED redirects (Redis).",
+      "minutes": 60,
+      "resource": {
+        "label": "AWS DynamoDB Developer Guide - Partitions and Data Distribution",
+        "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.Partitions.html"
+      }
+    },
+    {
+      "name": "Transactions: isolation levels, their anomalies, and Postgres specifics",
+      "learn": "Define each anomaly with a two-session example you can type into psql: dirty read/write, read skew (non-repeatable read), lost update, write skew, phantom. Map them to levels as PostgreSQL actually implements them: READ COMMITTED takes a snapshot per statement (the default); REPEATABLE READ is snapshot isolation with first-updater-wins (ERROR 40001 on a concurrent update); SERIALIZABLE is SSI, tracking rw-dependencies with SIReadLocks and aborting with 'could not serialize access due to read/write dependencies' (also SQLSTATE 40001), so the application needs a retry loop. Know the four fixes for lost updates (atomic UPDATE ... SET x = x + 1, SELECT ... FOR UPDATE, compare-and-set WHERE version = $1, or SSI) and the write-skew canon (on-call doctors, double-booked rooms) including the materialise-conflicts trick with a row per bookable slot when you cannot afford SERIALIZABLE. Run Hermitage's scripts against Postgres and one store your customer uses and record where the isolation names lie.",
+      "minutes": 75,
+      "resource": {
+        "label": "PostgreSQL docs - Transaction Isolation (Read Committed, Repeatable Read, Serializable/SSI)",
+        "url": "https://www.postgresql.org/docs/current/transaction-iso.html"
+      }
+    },
+    {
+      "name": "Linearizability, CAP, and what 'strong consistency' means in a design review",
+      "learn": "Define linearizability precisely: every operation appears to take effect atomically at some instant between its invocation and its response, and once any read returns the new value every later read returns it - a single-copy illusion in real time. Separate it from serializability (ordering of multi-object transactions, no real-time constraint) and strict serializability (both). Know the defaults of the systems you will meet: etcd reads are linearizable by default, ZooKeeper writes are but reads are not unless preceded by sync(), single-node Postgres is for single-object operations, Cassandra QUORUM is not, DynamoDB is only with ConsistentRead. Know where it is genuinely required (leader election, uniqueness constraints, locks, cross-channel timing such as 'file uploaded then message queued') and what it costs (a quorum or leader round trip, unavailability during partition). Retire CAP as a design tool - it is a theorem about one narrow model - and reason instead with 'linearizable or not' plus 'available under partition or not' plus the latency you pay even with no partition. Understand how Jepsen's checker (Knossos/Elle) tests a history for linearizability so you can read a Jepsen report and explain it to a customer.",
+      "minutes": 50,
+      "resource": {
+        "label": "Jepsen - Consistency Models: Linearizable",
+        "url": "https://jepsen.io/consistency/models/linearizable"
+      }
+    },
+    {
+      "name": "Ordering, total order broadcast, atomic commit and two-phase commit",
+      "learn": "Separate causal order from total order and show why Lamport timestamps alone cannot enforce a uniqueness constraint (you would have to hear from every node first). Define total order broadcast - reliable delivery plus identical order at every node - and know its equivalence to consensus and its real-world instances: ZooKeeper's ZAB and a single Kafka partition. Atomic commit across participants: 2PC prepare/commit, the coordinator's log write as the point of no return, in-doubt participants holding row locks forever after a coordinator crash (2PC is blocking), and why 2PC is not fault-tolerant consensus (one coordinator, no election). In PostgreSQL: PREPARE TRANSACTION 'gid', COMMIT PREPARED, ROLLBACK PREPARED, max_prepared_transactions defaults to 0, and pg_prepared_xacts to find orphaned in-doubt transactions that are blocking VACUUM. Know XA in the Java world and why most current systems replace 2PC with idempotent, log-based sagas (Topic 34).",
+      "minutes": 50,
+      "resource": {
+        "label": "PostgreSQL docs - PREPARE TRANSACTION",
+        "url": "https://www.postgresql.org/docs/current/sql-prepare-transaction.html"
+      }
+    },
+    {
+      "name": "Consensus: Raft mechanics, the Paxos family, safety versus liveness",
+      "learn": "Work through Raft at the level of the paper's Figure 2: terms as epochs; randomised election timeouts (150-300 ms in the paper); RequestVote's up-to-date check (compare last log term, then last log index); AppendEntries with prevLogIndex/prevLogTerm as the consistency check and how followers truncate conflicting suffixes; commitIndex advancing only when a majority stores an entry from the leader's current term (the Figure 8 subtlety); the Log Matching and Leader Completeness properties; why a leader never overwrites or deletes its own entries; membership change via joint consensus or single-server changes; snapshots and InstallSnapshot for log compaction. Know Paxos vocabulary (proposers, acceptors, ballots) and that Multi-Paxos with a stable leader is what Raft makes explicit. Quorum arithmetic for the customer: 2f+1 nodes tolerate f failures, so 3 tolerates 1, 5 tolerates 2, and 4 tolerates the same 1 as 3 while costing more; every cross-region write pays at least one WAN round trip to a majority.",
+      "minutes": 75,
+      "resource": {
+        "label": "Ongaro and Ousterhout - In Search of an Understandable Consensus Algorithm (Raft paper, PDF)",
+        "url": "https://raft.github.io/raft.pdf"
+      }
+    },
+    {
+      "name": "Coordination services in practice: leases, fencing tokens, ephemeral nodes",
+      "learn": "Know what ZooKeeper and etcd actually give you: linearizable writes, session or lease-scoped ephemeral keys (etcd Lease with TTL and KeepAlive; ZooKeeper session timeout and ephemeral znodes), watches, and a monotonic counter usable as a fencing token (ZooKeeper sequential znodes, etcd's revision / ModRevision). Understand the lease-expiry hole: a process paused by GC, VM live migration or SIGSTOP still believes it holds the lock after the lease expired; the correct fix is a fencing token that the protected resource checks and rejects if lower than the last one it saw - the lock alone is never sufficient. Know etcd's documented guarantees (linearizable reads by default, serializable reads when you opt in via --consistency=s, revision semantics) and why Redlock is contested. When a customer asks for a 'distributed lock', your first questions are 'what resource does it protect' and 'can that resource check a token'.",
+      "minutes": 40,
+      "resource": {
+        "label": "etcd docs - API guarantees (linearizability, serializability, revisions)",
+        "url": "https://etcd.io/docs/v3.5/learning/api_guarantees/"
+      }
+    },
+    {
+      "name": "Derived data: dual writes, outbox, log-based CDC (DDIA ch 11-12)",
+      "learn": "Diagnose the dual-write problem (write to Postgres, then publish to Kafka: either step can fail, and two writers can interleave differently in each system) and know the two fixes: a transactional outbox table drained by CDC, or log-based CDC straight from the database. For Postgres logical decoding know wal_level = logical, CREATE PUBLICATION, the logical replication slot, the pgoutput plugin, and that Debezium emits before/after images tagged with LSN and transaction id; know that an abandoned slot retains WAL until the disk fills. Distinguish CDC from event sourcing, use log compaction to hold keyed state, and describe rebuilding a search index, cache or warehouse table by replaying the log from offset zero. Make consumers idempotent on (source LSN or event id) and evolve schemas through the log, not around it.",
+      "minutes": 45,
+      "resource": {
+        "label": "Debezium docs - PostgreSQL connector (logical decoding, slots, publications, event envelope)",
+        "url": "https://debezium.io/documentation/reference/stable/connectors/postgresql.html"
+      }
+    },
+    {
+      "name": "Stream processing semantics: event time, watermarks, exactly-once (DDIA ch 11)",
+      "learn": "Separate event time from processing time and explain why a late-arriving mobile event changes an already-emitted hourly count. Know the window types (tumbling, hopping, sliding, session), watermarks as the operator's promise that no earlier events will arrive, and what to do with late data (drop, side output, retract). Cover the three join shapes (stream-stream, stream-table, table-table) and why stream-table joins are time-dependent. Fault tolerance via periodic checkpointing plus replay from the log, and the honest definition of exactly-once: at-least-once delivery plus idempotent or transactional sinks - Kafka's enable.idempotence, transactional.id and isolation.level = read_committed cover Kafka-to-Kafka, but an external sink still needs its own idempotency key.",
+      "minutes": 35,
+      "resource": {
+        "label": "Apache Flink docs - Concepts: Timely Stream Processing (event time, watermarks, lateness)",
+        "url": "https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/"
+      }
+    },
+    {
+      "name": "Maelstrom harness and Glomers 1-2: echo and unique IDs under partition",
+      "learn": "Install Maelstrom (a JDK, Graphviz and gnuplot) and run the echo workload. Learn the protocol cold: newline-delimited JSON on stdin/stdout, every message is {src, dest, body}, body carries type, msg_id and in_reply_to; the first message is init with node_id and node_ids; replies use type = request type + '_ok'; errors carry a numeric code (0 timeout, 11 temporarily-unavailable, 13 crash, 14 abort, 20 key-does-not-exist, 22 precondition-failed) and are either definite or indefinite; logs go to stderr because stdout is the wire. In the Go library: maelstrom.NewNode(), n.Handle(type, fn), n.Reply(msg, body), n.Send(dest, body), n.RPC(dest, body, callback), n.SyncRPC(ctx, dest, body), n.Run(), n.ID(), n.NodeIDs(). Challenge 1 is echo. Challenge 2 runs with --node-count 3 --rate 1000 --availability total --nemesis partition: generate IDs with no coordination (node id plus a local counter, or a timestamp-node-sequence layout) and be able to say why any scheme that talks to another node would fail the total-availability check. Read results.edn and store/latest until 'Everything looks good' means something to you.",
+      "minutes": 75,
+      "resource": {
+        "label": "Maelstrom docs - Protocol (message format, init, RPC, error codes)",
+        "url": "https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md"
+      }
+    },
+    {
+      "name": "Glomers 3a-3c: broadcast, gossip, and fault tolerance under partitions",
+      "learn": "3a (single node): handle broadcast, read and topology; store a set of ints behind a sync.Mutex; return read_ok with messages. 3b (multi-node): forward each newly-seen value to your neighbours from the topology message (or a topology you choose), deduplicate so you only forward on first sight, and avoid echoing back to the sender. 3c runs with --node-count 5 --time-limit 20 --rate 10 --nemesis partition: inter-node messages will be dropped, so keep a per-neighbour pending set and retry unacknowledged sends from a background goroutine (ticker plus n.RPC callback or n.SyncRPC with a context timeout) until acked; never block the request handler on the network, never spawn an unbounded goroutine per retry, and run go test -race or go build -race to catch the shared-map race you almost certainly have. Success criteria from the challenge text: values propagate to all nodes by the end of the test, and each node returns only its own local values.",
+      "minutes": 80,
+      "resource": {
+        "label": "Fly.io Gossip Glomers - Challenge 3c: Fault Tolerant Broadcast",
+        "url": "https://fly.io/dist-sys/3c/"
+      }
+    },
+    {
+      "name": "Glomers 3d-3e: efficient broadcast and reading Maelstrom's stats",
+      "learn": "Run with --node-count 25 --time-limit 20 --rate 100 --latency 100 and hit the stated limits: 3d requires messages-per-operation below 30, median latency below 400 ms and maximum below 600 ms; 3e requires below 20, below 1 s and below 2 s. Read results.edn properly: :net :servers :msgs-per-op counts only inter-server traffic, and :workload :stable-latencies gives quantiles {0, 0.5, 0.95, 0.99, 1} measured from broadcast acknowledgement to the value being present on every node. Do the arithmetic before coding: with 100 ms per hop a grid topology is several hops deep, so switch to a spanning tree or hub-and-spoke (one or two hops), and batch pending values per neighbour on a ticker (every 100-500 ms) so one message carries many values. Re-run with --nemesis partition after every optimisation, because the challenge text is explicit that you must not trade safety for the numbers.",
+      "minutes": 70,
+      "resource": {
+        "label": "Fly.io Gossip Glomers - Challenge 3d: Efficient Broadcast, Part I",
+        "url": "https://fly.io/dist-sys/3d/"
+      }
+    },
+    {
+      "name": "Glomers 4: grow-only counter on a sequentially consistent KV",
+      "learn": "Use maelstrom.NewSeqKV(n): seq-kv offers Read, Write and CompareAndSwap with sequential consistency, meaning operations are totally ordered and each client's order is respected, but a read may return a value that is old in real time. Two designs: (a) a single shared counter updated by a CAS loop - kv.ReadInt, then kv.CompareAndSwap(ctx, key, from, to, createIfNotExists) and retry on PreconditionFailed (code 22), handling KeyDoesNotExist (code 20) on first write; (b) a G-counter CRDT where each node only increments its own key (its node id) and read sums every node's key, which has no contention and survives partitions cleanly. Handle stale reads honestly: because reads are only sequentially consistent, perform a write (to a throwaway key with a unique value) before reading so your subsequent reads are ordered after it, or merge the store's value with your local knowledge. Run with --node-count 3 --rate 100 --time-limit 20 --nemesis partition; the final read must equal the sum of all acknowledged adds. Be able to explain why this design passes while an LWW register keyed on wall time would not.",
+      "minutes": 70,
+      "resource": {
+        "label": "Maelstrom docs - Services (lin-kv, seq-kv, lww-kv semantics and operations)",
+        "url": "https://github.com/jepsen-io/maelstrom/blob/main/doc/services.md"
+      }
+    },
+    {
+      "name": "The client-architect explanation: a 20-minute whiteboard script without notes",
+      "learn": "Assemble and rehearse the explanation the depth target demands. Replication: leader/follower, sync vs async, what lag means, and which of read-your-writes / monotonic reads / consistent prefix their product actually needs. Partitioning: key choice, hot spots, rebalancing, and the cost of secondary indexes. Consistency: linearizable versus eventual versus the in-between guarantees, each expressed as a user-visible anomaly rather than a term of art. Consensus: why 3 or 5 nodes, what a lease is, what happens during a partition, what a fencing token protects. Transactions across services: outbox or saga, never 2PC by default. Use the 'stop calling databases CP or AP' framing to head off the CAP conversation, carry a one-page decision table (use case, required guarantee, cost in latency and availability), record yourself, time each section, and cut every sentence you cannot back with an anomaly example.",
+      "minutes": 45,
+      "resource": {
+        "label": "Martin Kleppmann - Please stop calling databases CP or AP",
+        "url": "https://martin.kleppmann.com/2015/05/11/please-stop-calling-databases-cp-or-ap.html"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can draw PostgreSQL single-leader replication on a whiteboard and, for each synchronous_commit setting (off, local, remote_write, on, remote_apply), state exactly which failure loses acknowledged writes and how a client would observe it.",
+    "You can take a user story such as 'saved my profile, refreshed, saw the old one', name the missing guarantee (read-your-writes), and describe two implementations, one of them the LSN-tracking approach using pg_current_wal_lsn() and pg_last_wal_replay_lsn().",
+    "You can take five concurrent-transaction scenarios, predict which anomaly occurs under READ COMMITTED and under REPEATABLE READ in PostgreSQL, and prove it in two psql sessions, then show the SERIALIZABLE retry loop or explicit lock that removes it.",
+    "You can explain Raft leader election and log replication from memory, including why a candidate with a longer log but an older last-entry term loses the vote, and answer 'why five nodes and not four' with quorum arithmetic.",
+    "You can complete Gossip Glomers 1 through 4 with Maelstrom reporting 'Everything looks good', including 3d and 3e within the stated messages-per-operation and latency limits and still correct under --nemesis partition.",
+    "You can read a Jepsen analysis or a Maelstrom results.edn, identify the consistency model being checked, and state whether the anomaly found would affect a named customer use case.",
+    "You can deliver the 20-minute explanation of replication, partitioning, consistency and consensus to a non-specialist architect without notes, recorded, with every claim tied to a user-visible anomaly.",
+    "You can spot the dual-write problem in a customer's architecture diagram and redraw it with an outbox plus CDC path, naming wal_level = logical, the replication slot, and the slot-lag disk risk that comes with it."
+  ],
+  "failureModes": [
+    "An asynchronous Postgres replica was promoted after the primary died; the last thirty seconds of acknowledged writes were gone, and the old primary rebooted and kept accepting writes because nothing fenced it, leaving two divergent timelines that had to be merged by hand.",
+    "A Debezium connector was decommissioned but its logical replication slot was not dropped; the primary retained WAL for weeks until the disk filled at 03:00 and PostgreSQL stopped accepting writes.",
+    "A Cassandra cluster using last-writer-wins with client timestamps had one app server forty seconds behind on NTP; every update from that host was silently overwritten by older writes from the others and the team chased a 'random data loss' bug for three weeks.",
+    "A Kafka topic was bumped from 12 to 24 partitions to add throughput; the key-to-partition mapping changed under live consumers, per-key ordering broke, and the downstream aggregator emitted duplicate and out-of-order state that reached the customer's reports.",
+    "A 'distributed lock' built on Redis SET NX PX with a 30-second TTL and no fencing token; a JVM garbage-collection pause exceeded the TTL, two workers processed the same batch, and the storage layer happily accepted both.",
+    "A check-then-insert for booking a slot ran at Postgres's default READ COMMITTED; write skew let two customers book the same slot on a busy day, and the fix (a unique index plus a SERIALIZABLE retry loop) arrived only after the refund.",
+    "A three-node etcd cluster was split two-plus-one across two data centres; the two-node site lost power, the surviving node could not form a quorum, and the Kubernetes control plane was down even though every application node was healthy."
+  ],
+  "interviewQuestions": [
+    "A customer runs Postgres with one asynchronous streaming replica and asks for 'zero data loss on failover'. Walk me through exactly what you would change - synchronous_commit, synchronous_standby_names, quorum shape, fencing - what it costs in write latency and availability, and what you tell them when the replica is in another region.",
+    "Explain linearizability as if I were a solutions architect with no distributed-systems background, then name three places in a typical SaaS application that genuinely need it and three that do not, with the cost of getting it in each case.",
+    "Design a globally unique, roughly time-ordered ID generator across three regions that stay available during partitions. What do you give up relative to a database sequence, and what happens when one node's clock jumps backwards?",
+    "An orders service writes to Postgres and then publishes to Kafka; users report missing events roughly once a day. Diagnose the mechanism, redesign it with an outbox or CDC, and state the new operational risks you have introduced and how you would monitor them.",
+    "A five-node Raft cluster: the leader in term 7 has committed through index 100; node B was partitioned and holds uncommitted entries 101-105 from term 6. The partition heals. Walk through what happens to B's log, step by step, and why those entries can or cannot be discarded safely.",
+    "Given this history - A writes x = 1 and gets an ack; B's read of x starts after A's ack and returns 0; C's read returns 1 - is it linearizable? Sequentially consistent? Which real databases produce it, under which configuration, and how would you stop it?",
+    "Your Gossip Glomers broadcast passes cleanly without a nemesis but under --nemesis partition some values never reach every node. Give me the three most likely bugs in order of probability and how you would prove each one from Maelstrom's logs and results.edn."
+  ],
+  "proofOfWork": "A recorded 'consistency anomaly lab' checked into the portfolio repo next to the Glomers solutions: a docker-compose with a Postgres primary and one streaming replica plus a set of scripted demonstrations, each captured as a terminal recording with the exact commands and output. Demo one reproduces a stale read-after-write on the replica and then fixes it with the pg_current_wal_lsn / pg_last_wal_replay_lsn wait and separately with synchronous_commit = remote_apply, timing the latency cost of each. Demo two shows write skew on a slot-booking table at REPEATABLE READ in two psql sessions, then the SERIALIZABLE retry loop catching SQLSTATE 40001, and finally the unique-index alternative. Demo three kills the primary with synchronous_commit = off versus on, promotes the replica with pg_promote(), and counts the acknowledged rows that were lost in each case. Alongside it sits a Maelstrom results table for challenges 3d, 3e and 4 showing msgs-per-op and the stable-latency quantiles with and without --nemesis partition, and the recorded 20-minute architect explanation with its one-page decision table (use case, required guarantee, cost). A reviewer should be able to clone, run make lab, and reproduce every anomaly and every fix in under fifteen minutes."
+}

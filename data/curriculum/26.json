@@ -1,0 +1,227 @@
+{
+ "i": 26,
+ "topic": "FastAPI in production: DI, settings, lifespan, background tasks, workers, deployment",
+ "track": "E. Backend and Data",
+ "month": 4,
+ "hours": 8.0,
+ "why": "An FDE ships the service into the customer's cluster and is the person standing next to their platform team when it returns 502s on every deploy or freezes at 09:00 when one tenant sends a slow prompt; the HTTP layer's worker model, timeouts, shutdown sequence and health semantics are exactly where a working demo dies on contact with a real load balancer and real traffic. FastAPI is the default Python service layer for LLM-backed systems on Palantir, Anthropic and Databricks deployed teams, so the interview loop probes whether you know its DI, lifespan and threadpool mechanics at the level of flags and syscalls, not tutorials. Getting this right is what turns Kaupex from a prototype into something a customer SRE will accept a pager for.",
+ "prerequisites": [
+  "The service, repository and domain layers from 'Production Python architecture: domain models, repositories, DI, packaging' (topic 25); this topic wires them into routers and dependencies without letting FastAPI leak into them",
+  "asyncio fundamentals: the event loop, `await`, `asyncio.gather`, `asyncio.timeout()`, `CancelledError`, and the ability to name what does and does not block a loop (`time.sleep`, `requests`, sync `psycopg2` all do)",
+  "Docker exec-form `CMD`, PID 1 signal handling, non-root images and multi-stage builds from 'Docker internals' (topic 5) and 'Production images and supply chain' (topic 6)",
+  "Kubernetes probes, requests and limits, HPA and rolling updates from 'Kubernetes production ops' (topic 8), because this topic defines the endpoints and shutdown behaviour those mechanisms depend on",
+  "HTTP keep-alive, load-balancer idle timeouts and `X-Forwarded-*` headers from 'Networking' (topic 2), and enough k6 from 'Load testing and chaos' (topic 22) to run a ramping-arrival-rate script",
+  "Kaupex running locally under Docker Compose: a FastAPI service with Postgres via SQLAlchemy asyncio + asyncpg, an outbound LLM call through httpx, and a Temporal client, on a box where you can read `ps`, `ss` and `pg_stat_activity`"
+ ],
+ "subtopics": [
+  {
+   "name": "def vs async def: which thread your handler actually runs on",
+   "learn": "FastAPI runs `async def` path operations on the event-loop thread and plain `def` ones in a worker thread via `anyio.to_thread.run_sync`; the same rule applies to dependencies. Any blocking call inside `async def` (`requests.get`, `time.sleep`, a sync SQLAlchemy session, the sync OpenAI client) freezes every request in that process until it returns. Prove it: an `async def` endpoint calling `time.sleep(2)` hit by 10 concurrent curls takes 20 s; switch to `def` or `await asyncio.sleep(2)` and it takes 2 s. Rule for Kaupex: `async def` with async clients (httpx.AsyncClient, SQLAlchemy asyncio, temporalio) everywhere, `def` only for legacy sync libraries; when a worker stalls, `py-spy dump --pid <pid>` shows which frame is holding the loop.",
+   "minutes": 25,
+   "resource": {
+    "label": "FastAPI docs: Concurrency and async / await",
+    "url": "https://fastapi.tiangolo.com/async/"
+   }
+  },
+  {
+   "name": "The 40-token anyio threadpool and CPU-bound work",
+   "learn": "All sync endpoints and sync dependencies in a process share one anyio thread limiter with 40 tokens; the 41st concurrent sync call queues, which presents as rising latency with idle CPU. Raise it in lifespan with `anyio.to_thread.current_default_thread_limiter().total_tokens = N`, and know that it does not govern `loop.run_in_executor(None, ...)`, which uses asyncio's own default ThreadPoolExecutor. Threads do not help CPU-bound work under the GIL (PDF parsing, tokenising a 2 MB prompt, a pandas transform in the compile step): move it to `loop.run_in_executor(process_pool, fn, arg)` with a `ProcessPoolExecutor` created in lifespan, or off the request path into a Temporal activity. Compare `time.process_time()` against wall clock on a slow request to tell the two cases apart.",
+   "minutes": 25,
+   "resource": {
+    "label": "AnyIO docs: Working with threads (default thread limiter)",
+    "url": "https://anyio.readthedocs.io/en/stable/threads.html"
+   }
+  },
+  {
+   "name": "Depends() mechanics: sub-dependencies, per-request cache, router-level guards",
+   "learn": "A dependency is any callable; FastAPI resolves the graph once per request, and the same callable appearing twice in that graph runs once unless declared `Depends(fn, use_cache=False)`. Use `Annotated[AsyncSession, Depends(get_session)]` type aliases so signatures stay one line, classes as dependencies for parametrised ones (`class Pagination: def __init__(self, limit: int = 50, offset: int = 0)`), and `dependencies=[Depends(verify_tenant)]` on `APIRouter` or `include_router` for side-effect-only guards every route under a prefix must pass. Know what belongs in DI (request-scoped: session, current user, tenant id, idempotency key) versus lifespan and `app.state` (process-scoped clients), and that `app.dependency_overrides` is the seam tests use, so anything constructed inline in a handler is untestable.",
+   "minutes": 30,
+   "resource": {
+    "label": "FastAPI docs: Dependencies tutorial (sub-dependencies, classes, caching)",
+    "url": "https://fastapi.tiangolo.com/tutorial/dependencies/"
+   }
+  },
+  {
+   "name": "Dependencies with yield: sessions, commit/rollback and Depends(scope=...)",
+   "learn": "`async def get_session(): async with SessionLocal() as s: yield s` gives a request-scoped session whose exit code runs after the response has been sent by default (`scope=\"request\"`), so a `commit()` placed after the yield can fail after the client already saw 200. Where the client must see the failure, commit inside the handler or declare `Depends(get_session, scope=\"function\")` so the exit block runs before the response; a `\"request\"`-scoped dependency may only depend on other `\"request\"`-scoped ones, while `\"function\"` may depend on either. Wrap the yield in `try/except/finally` so `rollback()` runs on exceptions and re-raise, because swallowing the exception in the dependency turns a 500 into a silent 200. Verify with a test that asserts the row is absent after a handler raises.",
+   "minutes": 30,
+   "resource": {
+    "label": "FastAPI docs: Dependencies with yield (scope, exceptions after yield)",
+    "url": "https://fastapi.tiangolo.com/tutorial/dependencies/dependencies-with-yield/"
+   }
+  },
+  {
+   "name": "Typed settings with pydantic-settings and a cached get_settings() dependency",
+   "learn": "Define `class Settings(BaseSettings)` with `model_config = SettingsConfigDict(env_prefix=\"KAUPEX_\", env_file=\".env\", env_nested_delimiter=\"__\", extra=\"forbid\")`, typed fields (`database_url: PostgresDsn`, `llm_api_key: SecretStr`, `request_timeout_s: float = 30`), and expose it through `@lru_cache def get_settings() -> Settings` used as `Depends(get_settings)`; the cache means one parse per process and tests swap it with `app.dependency_overrides[get_settings]`. Instantiate settings once at import of `main.py` so a missing or malformed variable crashes the process at start with a `ValidationError` naming the field, instead of at the first request. Know the precedence: constructor args, then environment, then `.env`, then a secrets directory (`_secrets_dir=\"/run/secrets\"`, one file per field, which is how Docker and Kubernetes secret mounts arrive), then defaults. Never log a settings object without `SecretStr` on every credential, because `repr()` ends up in the customer's log aggregator.",
+   "minutes": 30,
+   "resource": {
+    "label": "FastAPI docs: Settings and Environment Variables",
+    "url": "https://fastapi.tiangolo.com/advanced/settings/"
+   }
+  },
+  {
+   "name": "Lifespan: build process-scoped clients once, tear down in reverse",
+   "learn": "`@asynccontextmanager async def lifespan(app: FastAPI)` replaces the deprecated `@app.on_event`; before `yield` build the SQLAlchemy async engine, the `httpx.AsyncClient`, the Temporal client and any `ProcessPoolExecutor`, put them on `app.state` (or yield a dict that lands on `request.state`), and after `yield` close them in reverse (`await client.aclose()`, `await engine.dispose()`, `pool.shutdown()`). Lifespan runs once per worker process, so `--workers 4` means four pools of everything; an exception before `yield` sends ASGI `lifespan.startup.failed` and uvicorn exits non-zero, which is what you want when the DB URL is wrong. Do not put slow warmups (model download, a 30 s migration) in lifespan on Kubernetes unless the startup probe's `failureThreshold * periodSeconds` covers the worst case.",
+   "minutes": 25,
+   "resource": {
+    "label": "FastAPI docs: Lifespan Events",
+    "url": "https://fastapi.tiangolo.com/advanced/events/"
+   }
+  },
+  {
+   "name": "Connection-pool arithmetic: engine pools x workers x replicas vs Postgres max_connections",
+   "learn": "`create_async_engine(url, pool_size=5, max_overflow=10, pool_timeout=30, pool_recycle=1800, pool_pre_ping=True)` allows up to 15 connections per process; the fleet total is (pool_size + max_overflow) x workers per pod x replicas, and it must stay under Postgres `max_connections` (default 100) minus `superuser_reserved_connections` and whatever Temporal workers, migrations and the dashboard also hold. Know the two symptoms apart: `QueuePool limit of size 5 overflow 10 reached, connection timed out` in the app means this process exhausted its pool (a leaked session or a slow query), while `FATAL: too many connections` from Postgres means the fleet is oversubscribed. When replicas x workers grows, put PgBouncer in transaction mode in front and drop per-process pools to 2 or 3; `pool_pre_ping` costs one round trip per checkout but survives an RDS failover without a restart.",
+   "minutes": 30,
+   "resource": {
+    "label": "SQLAlchemy 2.0 docs: Connection Pooling",
+    "url": "https://docs.sqlalchemy.org/en/20/core/pooling.html"
+   }
+  },
+  {
+   "name": "Outbound httpx: one shared AsyncClient, explicit Timeout and Limits",
+   "learn": "Never build `httpx.AsyncClient()` per request; it defeats keep-alive and leaks sockets under load. Create one in lifespan with `timeout=httpx.Timeout(10.0, connect=3.0, read=60.0, pool=5.0)` and `limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)`; the `pool` timeout fires when every connection is busy and is usually the first visible sign an upstream slowed down. For LLM calls the `read` timeout must exceed the provider's worst-case generation time, and the whole call still has to fit inside the load balancer's idle timeout, otherwise stream tokens instead of waiting. Wrap upstream calls in `asyncio.timeout()` at the handler level so a hung dependency cannot pin a request forever, and map `httpx.TimeoutException` to a 504 carrying the request id rather than a 500 with a traceback.",
+   "minutes": 20,
+   "resource": {
+    "label": "HTTPX docs: Timeouts",
+    "url": "https://www.python-httpx.org/advanced/timeouts/"
+   }
+  },
+  {
+   "name": "BackgroundTasks: the exact guarantee, and when to hand off to Temporal instead",
+   "learn": "`background_tasks.add_task(fn, *args)` runs after the response is sent, in the same process and on the same event loop (sync functions go to the threadpool); there is no retry, no persistence, no visibility from other workers, and a SIGTERM or OOM kill between response and completion loses it silently. Use it only for work whose loss is acceptable: audit-log fan-out, cache warm, a metrics push. Anything a customer would notice missing (billing event, callback webhook to their system, the compile job itself) goes to Temporal or a Redis stream with the enqueue inside the request's DB transaction (outbox pattern) so the 200 and the job are atomic. A background task that raises after the response is sent appears only in logs, so give it its own exception wrapper and a counter.",
+   "minutes": 20,
+   "resource": {
+    "label": "FastAPI docs: Background Tasks",
+    "url": "https://fastapi.tiangolo.com/tutorial/background-tasks/"
+   }
+  },
+  {
+   "name": "Bigger-applications layout with APIRouter and the service layer from topic 25",
+   "learn": "Split Kaupex into `app/main.py` (an app factory `create_app()` with lifespan, middleware and `include_router` calls), `app/api/v1/{tasks,compile,health}.py` (thin routers built as `APIRouter(prefix=\"/tasks\", tags=[\"tasks\"], dependencies=[...])`), `app/core/{settings,deps,logging}.py`, and `app/services/` plus `app/repositories/` from topic 25 that never import FastAPI. Routers obtain services through `Depends`, so the domain code stays importable in a plain pytest run with no ASGI app. Declare `responses={404: {\"model\": Problem}}` on routers so OpenAPI stays honest for the customer's client generator, and run the factory with `uvicorn 'app.main:create_app' --factory` so tests can build one app per settings object without import-time side effects.",
+   "minutes": 25,
+   "resource": {
+    "label": "FastAPI docs: Bigger Applications - Multiple Files",
+    "url": "https://fastapi.tiangolo.com/tutorial/bigger-applications/"
+   }
+  },
+  {
+   "name": "Error handlers and middleware: problem responses, request ids, pure ASGI",
+   "learn": "Register `@app.exception_handler(RequestValidationError)` to return your `Problem` shape (422 with `detail` and `X-Request-ID`), `@app.exception_handler(Exception)` to return a 500 carrying the id but never the traceback, and map domain exceptions to 4xx in one place. Write middleware as pure ASGI (`async def __call__(self, scope, receive, send)`) rather than `BaseHTTPMiddleware`, which buffers responses, breaks streaming and background tasks in some version combinations, and hides exceptions from your handlers; middleware order is last-added-outermost. Build a request-id middleware that reads `X-Request-ID` or mints a UUID, stores it in a `ContextVar` for log records, and echoes it on the response; know that uvicorn's `--reset-contextvars` exists because contextvars can otherwise leak between requests on a keep-alive connection.",
+   "minutes": 30,
+   "resource": {
+    "label": "Starlette docs: Middleware (BaseHTTPMiddleware limitations, pure ASGI middleware)",
+    "url": "https://github.com/encode/starlette/blob/master/docs/middleware.md"
+   }
+  },
+  {
+   "name": "Health endpoints that mean something: /healthz, /readyz, /startupz",
+   "learn": "`/healthz` (liveness) must only prove the process serves HTTP, with no DB or upstream checks, because a flaky Postgres would otherwise get every pod restarted in rotation. `/readyz` runs `SELECT 1` through the pool under a 1 s timeout, confirms the Temporal client is connected, and returns 503 with a JSON body naming the failing check; it also flips to 503 the moment SIGTERM arrives so the load balancer drains. `/startupz` covers migrations or model load, paired with a startup probe whose `failureThreshold * periodSeconds` exceeds the worst-case start. Exclude all three from access logs, metrics and SLIs (topic 20), mount them on a router with no auth, and know the probe knobs: `periodSeconds`, `timeoutSeconds` (default 1 s, easily tripped under load), `failureThreshold`.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs: Configure Liveness, Readiness and Startup Probes",
+    "url": "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+   }
+  },
+  {
+   "name": "Process model and worker sizing: uvicorn --workers, gunicorn, or one process per pod",
+   "learn": "`uvicorn app.main:app --workers 4` (or `fastapi run --workers 4`) forks a supervisor plus N processes, each with its own event loop, pools and memory; gunicorn with `-k uvicorn.workers.UvicornWorker` adds `--max-requests`, `--graceful-timeout` and hot restart, but the FastAPI docs now steer you to uvicorn's own manager. On Kubernetes run one worker per container and scale with replicas, because requests and limits, HPA and readiness all reason per pod; use `--workers` on a single VM such as Kaupex on Hetzner under Compose. For async apps start at workers = cores, not the `2n+1` gunicorn folklore that assumes blocking workers, then measure RSS per worker (`ps -o pid,rss,cmd`) so N x RSS plus pools fits the container limit with headroom for LLM response buffers. `--limit-max-requests` with `--limit-max-requests-jitter` is the honest answer to slow memory growth you have not found yet.",
+   "minutes": 35,
+   "resource": {
+    "label": "FastAPI docs: Server Workers",
+    "url": "https://fastapi.tiangolo.com/deployment/server-workers/"
+   }
+  },
+  {
+   "name": "Uvicorn flags that decide production behaviour",
+   "learn": "Set these deliberately and keep them in version control: `--timeout-keep-alive` (default 5 s; must exceed the load balancer's idle timeout or the LB reuses a connection uvicorn just closed and the customer sees intermittent 502s), `--timeout-graceful-shutdown` (unset means wait indefinitely for in-flight requests), `--limit-concurrency` (returns 503 instead of queueing once connections plus tasks exceed N, your first load-shedding knob), `--backlog` (default 2048, the kernel accept queue), `--limit-max-requests` with jitter, `--proxy-headers` plus `--forwarded-allow-ips` (default trusts only 127.0.0.1, so behind an ingress `request.client.host` is wrong until you widen it), `--root-path`, `--loop uvloop --http httptools` for a real throughput gain, `--no-access-log` when the ingress already logs, `--log-config` pointing at your dictConfig, and `--timeout-worker-healthcheck` for the supervisor. Put them in the Dockerfile `CMD` so they are code-reviewed, not remembered.",
+   "minutes": 30,
+   "resource": {
+    "label": "Uvicorn docs: Settings (official repo)",
+    "url": "https://github.com/Kludex/uvicorn/blob/main/docs/settings.md"
+   }
+  },
+  {
+   "name": "Graceful shutdown end to end: SIGTERM, drain, in-flight, lifespan, grace period",
+   "learn": "On SIGTERM uvicorn stops accepting, closes idle keep-alive connections, waits for in-flight requests up to `--timeout-graceful-shutdown`, then runs lifespan shutdown. On Kubernetes the pod is removed from Endpoints concurrently with SIGTERM, so add `lifecycle.preStop: exec sleep 5` (or flip `/readyz` to 503 and sleep) so traffic stops arriving before the server stops accepting, and make `terminationGracePeriodSeconds` (default 30) exceed preStop + graceful timeout + lifespan teardown, otherwise SIGKILL cuts the longest LLM request mid-stream. Test it: start a 20 s request, `kubectl delete pod`, confirm the request completes and the ingress logs no 502; repeat with a 40 s request and watch it die so you know the ceiling. Gunicorn semantics differ (SIGTERM graceful, SIGINT and SIGQUIT quick), which matters when a customer runbook mixes them.",
+   "minutes": 35,
+   "resource": {
+    "label": "Kubernetes docs: Pod Lifecycle (termination of Pods)",
+    "url": "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"
+   }
+  },
+  {
+   "name": "Production Dockerfile for FastAPI: multi-stage uv, non-root, exec-form CMD and PID 1",
+   "learn": "Build with `uv` in a builder stage (`uv sync --frozen --no-dev` into `/app/.venv`), copy only the venv and source into `python:3.12-slim`, run as a non-root `USER` with a fixed UID, set `PYTHONUNBUFFERED=1` so shutdown logs are not lost in a stdout buffer, and finish with exec-form `CMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\", ...]`. Shell-form `CMD uvicorn ...` runs under `/bin/sh -c`, which does not forward SIGTERM, so every stop waits the full grace period and SIGKILLs a healthy server; if an entrypoint script must run migrations first it must end in `exec \"$@\"`, and use `--init` or `tini` when a `ProcessPoolExecutor` could leave zombies. Verify with `time docker stop <id>`: a correct image exits in under a second when idle, ten seconds means SIGTERM never reached uvicorn. The FastAPI docs now deprecate the old `uvicorn-gunicorn-fastapi` base image; write the Dockerfile yourself and be able to explain every line to a customer's platform team. Ties to topic 6 for SBOM, scanning and signing.",
+   "minutes": 30,
+   "resource": {
+    "label": "FastAPI docs: FastAPI in Containers - Docker",
+    "url": "https://fastapi.tiangolo.com/deployment/docker/"
+   }
+  },
+  {
+   "name": "Behind a proxy or load balancer: root_path, forwarded headers, timeout alignment",
+   "learn": "When the customer mounts Kaupex under `/api/kaupex` at their ingress, `--root-path /api/kaupex` (or `FastAPI(root_path=...)`) makes the OpenAPI `servers` entry and `url_for` correct without touching routes; `X-Forwarded-Proto` and `X-Forwarded-For` are honoured only when `--proxy-headers` is on and the proxy's IP is in `--forwarded-allow-ips`, otherwise redirects go to `http://` and every log line shows the proxy's address. Align the timeouts along the path: LB idle (ALB 60 s, nginx `proxy_read_timeout` 60 s) must be shorter than uvicorn `--timeout-keep-alive` for connection reuse to be safe, and longer than your slowest handler or you stream. Reproduce the classic intermittent 502 locally with nginx `keepalive_timeout 10s` in front of uvicorn's 5 s keep-alive under k6 load, then fix it, so you recognise the pattern in a customer's environment on day one.",
+   "minutes": 20,
+   "resource": {
+    "label": "FastAPI docs: Behind a Proxy",
+    "url": "https://fastapi.tiangolo.com/advanced/behind-a-proxy/"
+   }
+  },
+  {
+   "name": "Testing the wiring: dependency_overrides, ASGITransport, lifespan in tests",
+   "learn": "Replace external edges with `app.dependency_overrides[get_settings] = lambda: Settings(database_url=test_url, llm_api_key=\"x\")` and an override of `get_session` that yields a session inside a transaction rolled back after each test. Use `httpx.AsyncClient(transport=ASGITransport(app=app), base_url=\"http://test\")` under pytest-anyio for async tests, and `with TestClient(app) as c:` when a test needs lifespan to have run, because a bare `TestClient(app)` outside the context manager skips startup and `app.state` is empty. Write one test asserting `/readyz` returns 503 when the DB override raises, one asserting the request-id header is echoed, and one asserting a handler exception leaves no row committed; these three catch most wiring regressions before a customer does.",
+   "minutes": 25,
+   "resource": {
+    "label": "FastAPI docs: Testing Dependencies with Overrides",
+    "url": "https://fastapi.tiangolo.com/advanced/testing-dependencies/"
+   }
+  },
+  {
+   "name": "Load-test the worker matrix with k6 and commit the decision",
+   "learn": "Write a k6 script using the `ramping-arrival-rate` executor against two endpoints (an IO-bound call to an LLM stub that sleeps 300 ms, and the CPU-bound compile step) with thresholds `http_req_duration: ['p(95)<500']` and `http_req_failed: ['rate<0.01']`. Run the matrix `--workers 1,2,4` x `--limit-concurrency 64,256,unset` on a 2 vCPU box, capturing p50, p95, p99, RPS, 503 count and per-worker RSS. Expect the IO-bound endpoint to scale with concurrency rather than workers, the CPU-bound one to scale with workers up to the core count, and an unset concurrency limit to turn saturation into timeouts instead of fast 503s. Record the winning configuration and the evidence table in `DEPLOY.md` beside the Dockerfile, and keep the script running in CI as a smoke threshold; topic 22 goes deeper on load and chaos.",
+   "minutes": 40,
+   "resource": {
+    "label": "Grafana k6 docs",
+    "url": "https://grafana.com/docs/k6/latest/"
+   }
+  },
+  {
+   "name": "Metrics across worker processes",
+   "learn": "With `--workers 4`, `prometheus_client`'s default registry is per process, so each scrape hits whichever worker accepted the connection and counters appear to move backwards. Either run one worker per pod (the Kubernetes default from the worker-sizing subtopic) or enable multiprocess mode: set `PROMETHEUS_MULTIPROC_DIR`, serve `/metrics` from a fresh `CollectorRegistry()` with `multiprocess.MultiProcessCollector(registry)`, and call `multiprocess.mark_process_dead(pid)` on worker exit. Gauges are the trap in this mode; pick `multiprocess_mode=\"livesum\"` or `\"max\"` deliberately per gauge. With OpenTelemetry instead, `FastAPIInstrumentor.instrument_app(app, excluded_urls=\"healthz,readyz,metrics\")` keeps probe noise out of traces and the `http.server.duration` histogram that topic 21 builds dashboards on.",
+   "minutes": 20,
+   "resource": {
+    "label": "prometheus_client docs: Multiprocess Mode",
+    "url": "https://prometheus.github.io/client_python/multiprocess/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can demonstrate, with 10 concurrent curls and a `py-spy dump`, why a blocking call inside an `async def` handler stalls every request in the process, and fix it three ways (async client, `def`, `run_in_executor` with a process pool), choosing correctly between IO-bound and CPU-bound work.",
+  "You can start Kaupex with `KAUPEX_DATABASE_URL` unset and have it exit non-zero within one second with a `ValidationError` naming the field, and show that every credential in the settings `repr()` prints as `**********`.",
+  "You can write the connection budget for a deployment as (pool_size + max_overflow) x workers x replicas against Postgres `max_connections` and prove it by running the fleet at full pool while reading `SELECT count(*) FROM pg_stat_activity`.",
+  "You can `kubectl delete pod` (or `docker stop`) during a 20 s in-flight request and show that the request completes with 200, the pod leaves Endpoints before uvicorn stops accepting, and shutdown finishes inside the grace period, with the ordering visible in timestamped logs.",
+  "You can produce a k6 results table for workers {1,2,4} x `--limit-concurrency` {64,256,unset} on a 2 vCPU host with p95, RPS, 503 rate and RSS per worker for an IO-bound and a CPU-bound endpoint, and defend the chosen configuration in writing.",
+  "You can implement `/healthz`, `/readyz` and `/startupz` such that a Postgres outage flips readiness to 503 within 2 s without a single liveness restart, with all three excluded from access logs, metrics and SLIs.",
+  "You can write a pure-ASGI request-id middleware and problem-shaped exception handlers so every 4xx and 5xx from Kaupex carries `X-Request-ID` and no response ever contains a traceback, verified by tests using `dependency_overrides` and `ASGITransport`.",
+  "You can explain to a customer's platform team in under five minutes why the same image runs one uvicorn process per pod on their cluster but `--workers 4` on the Hetzner VM, and what changes in memory, metrics scraping and probe behaviour if they choose the other."
+ ],
+ "failureModes": [
+  "An `async def` handler calls the sync OpenAI client for a 20 s completion; one slow prompt from one tenant freezes the worker's event loop, readiness probes time out at their 1 s default, kubelet restarts pods in rotation, and the customer reports that 'the API dies every morning at nine'.",
+  "`terminationGracePeriodSeconds` is left at 30 while `--timeout-graceful-shutdown` is unset and compile requests take 45 s; every rolling deploy SIGKILLs in-flight compilations, clients see connection resets, and their retries double the load on the freshly started pods.",
+  "uvicorn's default `--timeout-keep-alive 5` sits behind an ALB with a 60 s idle timeout; the ALB reuses a connection uvicorn closed a millisecond earlier and roughly 0.1% of requests return 502 with nothing in the application logs, which takes a week to attribute.",
+  "`pool_size=5, max_overflow=10` with `--workers 4` across six replicas plus Temporal workers exceeds RDS `max_connections` on a db.t3.medium; Postgres refuses with `FATAL: too many connections`, and because readiness checks the DB, every pod leaves service at the same moment.",
+  "A yield dependency commits after the response is sent under the default `scope=\"request\"`; the commit fails on a unique-constraint violation, the client already received 201, and the 'created' task never exists, surfacing weeks later as a phantom-ID support ticket.",
+  "Shell-form `CMD uvicorn ...` in the Dockerfile means SIGTERM reaches `/bin/sh`, not uvicorn; every stop waits the full grace period then SIGKILLs, lifespan teardown never runs, and httpx connections and PgBouncer server slots leak until `server_idle_timeout` reaps them.",
+  "`BackgroundTasks` is used to send the customer's job-complete webhook; an OOM kill between the 200 and the task loses the callback, their system waits forever, and there is no queue to inspect because the work only ever existed in one process's memory."
+ ],
+ "interviewQuestions": [
+  "Kaupex p99 latency triples every weekday at 09:00 while CPU sits at 15% and the database is idle. Walk me through diagnosis on a running pod with only `kubectl exec`, `py-spy` and the uvicorn logs: what are your top three hypotheses, and how does each one show up?",
+  "Design settings and secrets handling for a FastAPI service a customer will run in three places: a developer laptop, a staging namespace, and an air-gapped production cluster where secrets arrive as mounted files. What is the precedence order, how does a wrong value fail, and how do tests override it?",
+  "We are moving from 3 replicas with `--workers 4` to 12 replicas with one worker each on the customer's EKS cluster. What changes for connection pools, metrics scraping, probes, memory and graceful shutdown, and what would you set differently in each place?",
+  "A rolling deploy produces about eight seconds of 502s at the ingress each time a pod terminates, yet the application logs show every request completed with 200. Explain the race, the two fixes, and how you would prove which one closed it.",
+  "When would you reach for `BackgroundTasks`, a Temporal workflow, or a Redis stream for work that happens after the request returns? Give a concrete example of each and the failure the wrong choice produces in production.",
+  "Compare `--limit-concurrency`, the anyio thread limiter, the SQLAlchemy pool size and the load balancer's connection limit as load-shedding points. Under sustained overload, which one do you want to trip first, and why?",
+  "A customer's security team insists on `BaseHTTPMiddleware` to audit every request and response body. Explain what that does to streaming LLM responses and background tasks, and propose a pure-ASGI design that still satisfies the audit requirement."
+ ],
+ "proofOfWork": "A public repository, `kaupex-api-prod`, that a reviewer can run cold with `make up && make load && make chaos`. `make up` starts the FastAPI service, Postgres and an LLM stub under Compose and includes a recorded three-second clip of the service exiting non-zero with a `ValidationError` when `KAUPEX_DATABASE_URL` is removed. `make load` runs the k6 matrix (workers 1/2/4 x `--limit-concurrency` 64/256/unset) against the IO-bound and CPU-bound endpoints on a 2 vCPU host and writes `LOAD_REPORT.md` with p50/p95/p99, RPS, 503 rate and RSS per worker, ending in a one-paragraph decision that is reflected verbatim in the Dockerfile `CMD`. `make chaos` starts a 20 s in-flight request, sends SIGTERM, and a pytest asserts that the request returned 200, `/readyz` flipped to 503 before accepting stopped, lifespan teardown logged `engine disposed`, and total shutdown fit inside a 30 s budget; it then rebuilds with a shell-form `CMD` to demonstrate the ten-second hang and SIGKILL. Alongside sits a `k8s/` folder with a Deployment carrying all three probes, `preStop`, `terminationGracePeriodSeconds`, requests and limits, plus a one-page `RUNBOOK.md` a customer SRE could follow to size workers and pools for their node type and Postgres `max_connections`."
+}

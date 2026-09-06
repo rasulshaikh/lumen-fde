@@ -1,0 +1,200 @@
+{
+ "i": 77,
+ "topic": "Coding drills: data manipulation and AI-assisted production builds",
+ "track": "K. Interview Loop and Mocks",
+ "month": 9,
+ "hours": 8,
+ "why": "The FDE coding round is not a LeetCode round - it is a simulation of the thing you do on day three of an engagement: a customer hands you a CSV export or read access to a schema nobody documented, and you have to produce a defensible number while someone watches. Databricks, Palantir and Anthropic-style loops score two axes at once - can you actually manipulate data under time pressure, and can you keep a human in the loop while you do it - which means silence is scored as failure even when the code is right. The AI-assisted half is now standard because the job is now standard: you will build customer code with an assistant in the room, and the interviewer is watching whether you review what it wrote or paste it and hope.",
+ "prerequisites": [
+  "Python you can type without a tutorial open: comprehensions, dict/set idioms, collections.Counter and defaultdict, itertools.groupby, dataclasses, and the csv/json/datetime standard-library modules - the working level assumed by topic 25 (Production Python architecture).",
+  "PostgreSQL at the depth of topic 29: window functions, CTEs, EXPLAIN ANALYZE, join algorithms, and NULL semantics. You should already know why NOT IN with a nullable subquery returns nothing.",
+  "pytest fluency from topic 35 - fixtures, parametrize, tmp_path - because in the AI-assisted drills the test is the thing you write first and the thing the interviewer will ask you to run.",
+  "The AI engineering working set: structured outputs and tool schemas (topic 47), evals as infrastructure (topic 53), and provider fluency across the Anthropic and OpenAI SDKs (topic 60) - the 45-minute builds assume you can call a model with a strict schema without reading docs.",
+  "The take-home scaffolding and recording rig from topic 74: a clone-and-go repo template, OBS or QuickTime configured, and a habit of one-take recordings.",
+  "Demo and narration craft from topic 68 - talking over a screen share for ten minutes without filler, and stating a trade-off in one sentence."
+ ],
+ "subtopics": [
+  {
+   "name": "Reverse-engineer the actual coding bar and write the self-grade rubric",
+   "learn": "Before drilling, decide what you are drilling for. Read the published FDE loop structures and note the pattern: a 45-60 minute data-manipulation round (pandas or SQL on a provided dataset, easy-to-medium difficulty, hard time limit) plus an increasingly common AI-assisted build round where an assistant is allowed and reviewing its output is part of the test. Write a five-axis rubric you will score every recording against: correctness of the final number, correctness of the method (did you validate the join, or just merge and move on), time discipline (first correct partial answer before minute 15), narration continuity (longest silence in seconds), and recovery (what you did when you were wrong). Grade two of your own past sessions against it first; if you cannot make the rubric discriminate, it is too vague to improve against.",
+   "minutes": 20,
+   "resource": {
+    "label": "Exponent - Databricks Forward Deployed Engineer interview guide",
+    "url": "https://www.tryexponent.com/guides/databricks-forward-deployed-engineer-interview"
+   }
+  },
+  {
+   "name": "Continuous narration protocol: never go silent for more than fifteen seconds",
+   "learn": "Narration is a mechanical skill and it degrades exactly when you need it - the moment you hit a bug. Drill four fixed phrases until they are automatic: (1) restate the ask and the output shape - 'you want one row per customer per month with revenue and refund rate, I will produce a DataFrame with those four columns'; (2) announce before you type - 'I'm going to check dtypes and null counts before I aggregate, because if amount came in as object the sum will silently concatenate'; (3) name the assumption out loud with its falsifier - 'I'm assuming order_id is unique; if the merge inflates row count I'm wrong and I'll dedupe on the max updated_at'; (4) narrate the failure without apologising - 'that returned 1.2 million rows, more than either input, so this is a fan-out on a non-unique key; I'll check value_counts on the join key'. Practise the hardest case explicitly: keep talking while reading a traceback. Set a rule that any silence over fifteen seconds must be filled with 'let me say what I'm looking at' and then read the error aloud.",
+   "minutes": 30,
+   "resource": {
+    "label": "Exercism - Python track (timed practice exercises)",
+    "url": "https://exercism.org/tracks/python"
+   }
+  },
+  {
+   "name": "Build the drill rig: fixture datasets, timer, one-take recording, grade sheet",
+   "learn": "Assemble the harness once so no drill costs setup time. Curate three real, messy CSV corpora from your own exports (bank or payments transactions, a CRM or email-tool export, and a log or event stream) at 50k-2M rows, each with genuine defects: mixed date formats, thousands separators in numeric columns, trailing whitespace in keys, duplicated rows with different updated_at, and a column that is 40% null. Load the same data into a local Postgres via docker compose so every question can be asked in both pandas and SQL. Set up a visible countdown timer in the recorded frame, a scratch notebook template with the first cell already doing df.info(), df.isna().sum() and df.head(), and a GRADES.md table with one row per drill and columns for the five rubric axes plus longest-silence seconds. Record at 1080p with a large terminal font - unreadable text makes the tape useless for review.",
+   "minutes": 20,
+   "resource": {
+    "label": "OBS Studio (open-source screen recording)",
+    "url": "https://obsproject.com/"
+   }
+  },
+  {
+   "name": "pandas operation vocabulary you must type cold, no lookup",
+   "learn": "Rehearse the ~15 operations that cover the overwhelming majority of interview data manipulation until muscle memory: groupby().agg() with named aggregations (df.groupby(['a','b']).agg(rev=('amount','sum'), n=('id','nunique')).reset_index()), transform for group-broadcast columns, merge with explicit how and validate='one_to_many', concat with ignore_index, pivot_table with aggfunc and fill_value versus melt for long form, sort_values with ascending as a list, drop_duplicates(subset=..., keep='last') after a sort, assign for chained derivation, query and boolean masks with parentheses around each condition, loc-based assignment to avoid SettingWithCopyWarning, nlargest/rank(method='dense'), cut and qcut for bucketing, and value_counts(dropna=False). Know the two idioms for 'top N per group' - sort_values then groupby().head(n), and rank over a transform - and which one is faster. Drill by writing each from a blank cell against your fixture data and checking the shape of the result before looking at the values.",
+   "minutes": 35,
+   "resource": {
+    "label": "pandas User Guide - Group by: split-apply-combine",
+    "url": "https://pandas.pydata.org/docs/user_guide/groupby.html"
+   }
+  },
+  {
+   "name": "Dirty-data reflexes: dtypes, missing-value semantics, and parsing",
+   "learn": "The interview dataset is dirty on purpose, and the score is decided in the first three minutes. Build a fixed opening move: df.info(), df.isna().sum(), df.nunique(), df.describe(include='all'), and df.duplicated().sum(). Then know the specific traps and their fixes - an object-dtype numeric column from thousands separators or currency symbols (pd.to_numeric(s.str.replace(r'[^0-9.\\-]','',regex=True), errors='coerce') and count the coerced NaNs, do not hide them); mixed date formats (pd.to_datetime(..., format='mixed', errors='coerce') or explicit format plus a fallback pass, and never trust dayfirst inference); float NaN versus pd.NA versus None and why NaN != NaN breaks equality filters; integer columns that become float64 the moment a null appears, and Int64 nullable dtype as the fix; whitespace and case in join keys (str.strip().str.lower()) which is the single most common silent zero-match cause; and category dtype for memory when a key column has 20 distinct values over 2M rows. Say the null count out loud every time you coerce - interviewers are listening for whether you noticed you destroyed data.",
+   "minutes": 30,
+   "resource": {
+    "label": "pandas User Guide - Working with missing data",
+    "url": "https://pandas.pydata.org/docs/user_guide/missing_data.html"
+   }
+  },
+  {
+   "name": "SQL window functions under time pressure",
+   "learn": "Window functions are the single highest-yield SQL topic in FDE loops because they are how every 'compare each row to its group' question is answered. Get fluent enough to write without hesitation: ROW_NUMBER/RANK/DENSE_RANK with PARTITION BY ... ORDER BY and know exactly how they differ on ties; LAG/LEAD with the offset and default arguments for period-over-period deltas; SUM(...) OVER (PARTITION BY x ORDER BY d ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) for rolling windows, and the critical distinction between ROWS and RANGE frames when the order key has duplicates; FIRST_VALUE/LAST_VALUE and why LAST_VALUE needs an explicit frame to do what you meant; NTILE for bucketing; and named windows via the WINDOW clause when three expressions share a frame. Know the ordering rule that WHERE cannot reference a window result, so top-N-per-group needs a CTE or subquery in Postgres - and that Snowflake and Databricks give you QUALIFY instead. Drill by writing the same 'second-highest order per customer' query three ways.",
+   "minutes": 30,
+   "resource": {
+    "label": "PostgreSQL - Window Functions (function reference)",
+    "url": "https://www.postgresql.org/docs/current/functions-window.html"
+   }
+  },
+  {
+   "name": "Join semantics, NULL traps, and aggregation correctness in SQL",
+   "learn": "Most wrong answers in a SQL round are join or NULL bugs, not syntax. Internalise: LEFT JOIN plus a filter on the right table's column in WHERE silently becomes an INNER JOIN (the predicate must move into the ON clause); a join on a non-unique key fans out rows and inflates every downstream SUM, so the reflex is to check counts before and after and use COUNT(DISTINCT id) or pre-aggregate the many-side in a CTE; NOT IN with a subquery containing a single NULL returns zero rows while NOT EXISTS does the right thing; COUNT(col) skips NULLs but COUNT(*) does not; AVG ignores NULLs so a mean over a partially-null column is over a different denominator than you think; and integer division truncates unless you cast. Know COALESCE versus NULLIF, FILTER (WHERE ...) on aggregates as the clean alternative to CASE-inside-SUM, and DISTINCT ON as the Postgres shortcut for per-group latest. Practise stating the invariant before running: 'this should return exactly one row per customer per month; I will assert that with a GROUP BY HAVING COUNT(*) > 1 check.'",
+   "minutes": 25,
+   "resource": {
+    "label": "PostgreSQL - Table Expressions (joins, ON vs WHERE, lateral)",
+    "url": "https://www.postgresql.org/docs/current/queries-table-expressions.html"
+   }
+  },
+  {
+   "name": "AI-assisted build: rules of engagement and review discipline",
+   "learn": "In the assistant-allowed round the assistant is not the subject - your control loop is. Fix a protocol before the drills: state the plan and the file layout out loud before prompting; prompt in units small enough to review in under a minute (one function, one endpoint, one test file) rather than 'build the whole thing'; read every generated diff line by line out loud, naming what you accept and what you reject and why; write or at least specify the tests yourself so the assistant cannot grade its own homework; and never paste code you cannot explain. Know the specific things assistants get wrong that you must catch on sight: invented library functions and kwargs, silent except: pass, off-by-one in slicing and date ranges, timezone-naive datetimes mixed with aware ones, no pagination on a list endpoint, secrets or absolute paths hardcoded, and tests that assert the implementation rather than the behaviour. Practise saying 'I'm rejecting this because...' - the sentence the interviewer is waiting for.",
+   "minutes": 30,
+   "resource": {
+    "label": "Claude Developer Platform documentation",
+    "url": "https://platform.claude.com/docs/en/home"
+   }
+  },
+  {
+   "name": "Drill 1 (25 min, recorded): messy transaction CSV to a reconciled monthly metric",
+   "learn": "Timed pandas drill on the payments corpus. Task: produce monthly net revenue per customer segment from a raw export where amount has currency symbols, dates come in two formats, refunds appear as separate negative rows with a matching original_transaction_id, and roughly 3% of rows are exact duplicates from a re-export. Requirements you must hit inside 25 minutes: profile first and say the row count and null counts aloud; dedupe explicitly with a stated key; coerce numerics and report how many values failed to parse; produce one row per (segment, month) with revenue, refund_amount, refund_rate and transaction count; and finish with a reconciliation - the sum of your output must equal the sum of the cleaned input, asserted in code, not eyeballed. Score yourself on whether you had a defensible partial answer by minute 15.",
+   "minutes": 30,
+   "resource": {
+    "label": "pandas User Guide - IO tools (read_csv parsing options, dtypes, parse_dates)",
+    "url": "https://pandas.pydata.org/docs/user_guide/io.html"
+   }
+  },
+  {
+   "name": "Drill 2 (25 min, recorded): multi-table join with fan-out you must catch",
+   "learn": "Timed pandas drill designed so the naive answer is wrong. Given orders, order_items, customers and a customers_history table with one row per attribute change, compute revenue per customer tier as of the order date. The traps: joining customers_history without an as-of condition multiplies every order by the number of history rows; order_items has a many relationship to orders so a naive merge inflates order-level totals; and a few customer_ids exist in orders but not customers. Do it correctly with merge(..., validate='m:1') to make the fan-out raise instead of silently corrupting, an explicit pre-aggregation of order_items before joining up, and pd.merge_asof for the point-in-time tier lookup with by= and direction='backward'. Narrate the row-count check after every merge - 'orders was 84,102 rows, after the merge it is 84,102, good' - because that sentence is what a senior reviewer is listening for.",
+   "minutes": 30,
+   "resource": {
+    "label": "pandas User Guide - Merge, join, concatenate and compare",
+    "url": "https://pandas.pydata.org/docs/user_guide/merging.html"
+   }
+  },
+  {
+   "name": "Drill 3 (25 min, recorded): event stream sessionisation and rolling windows",
+   "learn": "Timed pandas drill on the event corpus. Task: from raw timestamped events, define sessions with a 30-minute inactivity gap per user, then report median session length, events per session, and a 7-day rolling count of active users. The mechanics you must execute cleanly: sort by user and timestamp, compute the gap with groupby('user_id')['ts'].diff(), build session ids with (gap > pd.Timedelta('30min')).groupby(level).cumsum(), aggregate per session, then resample('D') and rolling('7D') on a DatetimeIndex. Handle the real complications out loud: timestamps arriving as UTC strings that must be tz-localised before comparison (mixing naive and aware raises), days with zero events that must appear as zeros rather than be dropped by groupby, and a user whose clock is skewed producing a negative diff. Report medians and p95, not means.",
+   "minutes": 30,
+   "resource": {
+    "label": "pandas User Guide - Time series and date functionality",
+    "url": "https://pandas.pydata.org/docs/user_guide/timeseries.html"
+   }
+  },
+  {
+   "name": "Drill 4 (30 min, recorded): SQL window analytics on an undocumented schema",
+   "learn": "Timed SQL drill against your local Postgres with the schema shown but not explained - the realistic customer situation. Answer four escalating questions in one session: monthly revenue with month-over-month percent change using LAG; each customer's second-largest order using ROW_NUMBER in a CTE; a 28-day trailing average of daily orders with an explicit ROWS frame; and each customer's rank within their segment by lifetime value with ties handled by DENSE_RANK. Constraints that make it real: you must first orient yourself out loud by querying the catalog (information_schema.columns, plus a quick COUNT(*) and a five-row sample per table) rather than assuming, and every query must be preceded by a one-sentence statement of the expected grain of the result. Verify each result with an independent check - a spot-check on one customer computed a different way.",
+   "minutes": 35,
+   "resource": {
+    "label": "PostgreSQL Tutorial - Window Functions",
+    "url": "https://www.postgresql.org/docs/current/tutorial-window.html"
+   }
+  },
+  {
+   "name": "Drill 5 (30 min, recorded): dedupe, point-in-time correctness, gaps and islands",
+   "learn": "Timed SQL drill on the three patterns that separate people who have shipped customer pipelines from people who have not. One: deduplicate a change-data-capture table to the latest row per business key using ROW_NUMBER() OVER (PARTITION BY key ORDER BY updated_at DESC, id DESC) = 1, and explain why the tiebreak column matters when updated_at is not unique. Two: an as-of join - attach the price that was in effect when each order was placed, using a LATERAL subquery or a range-bounded join, and demonstrate the wrong answer you get without it. Three: gaps and islands - find each customer's longest run of consecutive active months using the difference-of-row-numbers trick, and separately find the missing months with generate_series and a LEFT JOIN. Say the grain and the expected row count before executing every one.",
+   "minutes": 35,
+   "resource": {
+    "label": "PostgreSQL - WITH Queries (Common Table Expressions)",
+    "url": "https://www.postgresql.org/docs/current/queries-with.html"
+   }
+  },
+  {
+   "name": "Drill 6 (45 min, recorded, AI-assisted): CSV to a tested, runnable service",
+   "learn": "Timed build with an assistant in the loop. Deliverable: a small FastAPI service that ingests one of your messy CSVs, normalises it, and exposes GET /metrics with query params for date range and segment, plus a health endpoint, with pytest tests that pass and a one-command run. Sequence it deliberately - contract first (write the response Pydantic model and one failing test before any implementation), then the loader, then the endpoint, then pagination and input validation. Non-negotiables that the interviewer will look for: typed request/response models with explicit field constraints, 422 on bad input rather than a 500, a test that exercises the empty-result case and a test on the parsing of one deliberately dirty row, and no unbounded response. Narrate every accept/reject decision on generated code, and at minute 40 stop building and spend five minutes running the tests and stating what is not done.",
+   "minutes": 45,
+   "resource": {
+    "label": "FastAPI - Tutorial: User Guide",
+    "url": "https://fastapi.tiangolo.com/tutorial/"
+   }
+  },
+  {
+   "name": "Drill 7 (45 min, recorded, AI-assisted): LLM extraction with strict schema and a mini eval",
+   "learn": "Timed build: turn 200 unstructured records (support tickets, invoices or emails from your own corpus) into validated structured rows. Required shape: a Pydantic model with enums and constrained types as the extraction schema, a provider call using structured output or a tool schema so the model cannot return free text, validation on the way out with a rejected-rows path rather than a silent drop, bounded concurrency with a semaphore, retries with jittered backoff on transient errors only, and a per-record cache keyed on content hash so re-runs are free. Then the part most candidates skip and the one that wins the round: hand-label 20 records, score the extractor field-by-field, and report precision on the two fields that matter plus a count of records that failed validation. Say the cost and the p95 latency out loud at the end.",
+   "minutes": 45,
+   "resource": {
+    "label": "Pydantic documentation (models, validation, constrained types)",
+    "url": "https://pydantic.dev/docs/validation/latest/get-started/"
+   }
+  },
+  {
+   "name": "Drill 8 (45 min, recorded, AI-assisted): mid-build requirement change",
+   "learn": "The realistic FDE variant: build for 25 minutes, then have a pre-written envelope change the requirement, exactly as a customer does on a Thursday. Sample changes to draw from - the metric must now be computed per timezone-local day instead of UTC; the input arrives as a stream of JSON lines instead of one CSV; the customer needs the last 12 months backfilled and the job must be idempotent on re-run; a second file format must be supported with the same output contract. What is scored is the first ninety seconds after the change: do you restate the new requirement, name what breaks, propose the smallest change that satisfies it, and say explicitly what you are dropping to fit the time - or do you silently start refactoring. Keep the existing tests green through the change, add one test that would have failed before it, and finish with a spoken summary of what shipped, what regressed, and what you would do next.",
+   "minutes": 45,
+   "resource": {
+    "label": "pytest documentation (fixtures, parametrize, tmp_path)",
+    "url": "https://docs.pytest.org/en/stable/"
+   }
+  },
+  {
+   "name": "Watch the tapes: error taxonomy and the second pass",
+   "learn": "The recordings are worthless unless you mine them. For each of the eight, log in GRADES.md: minutes to first correct partial answer, longest silence in seconds, the number of times you ran code before saying what you expected it to return, every correctness bug and its class (dtype, join fan-out, NULL, timezone, off-by-one, assistant-generated), and the one sentence you wish you had said. Build a running error taxonomy and note that the same two classes will account for most of your failures - drill those specifically rather than doing more random exercises. Then do a second pass on the two worst drills under the same clock and confirm the delta with numbers, not feeling. Add assert-based self-checks to your fixture repo (pandas.testing.assert_frame_equal against a saved expected output) so future re-runs are graded automatically instead of by memory.",
+   "minutes": 25,
+   "resource": {
+    "label": "pandas - Testing utilities (assert_frame_equal)",
+    "url": "https://pandas.pydata.org/docs/reference/testing.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can profile an unfamiliar dirty dataset and state its row count, null profile, duplicate count and the two dtype problems that will bite you, out loud, within the first three minutes of a timed drill.",
+  "You can produce a correct grouped, joined and time-bucketed answer in pandas within 25 minutes on a dataset you have never seen, and reconcile the output total against the cleaned input in code.",
+  "You can write ROW_NUMBER, LAG, a ROWS-framed rolling aggregate, an as-of join and a gaps-and-islands query in SQL without a reference open, and explain the ROWS-versus-RANGE difference on demand.",
+  "You can catch a join fan-out at the moment it happens because you state the expected row count before every merge and check it after - visible on every one of your eight tapes.",
+  "You can complete a 45-minute AI-assisted build that ends with passing tests, a typed contract, and a spoken list of what is not done, having narrated an accept/reject decision on every block of generated code.",
+  "You can absorb a mid-build requirement change and, within ninety seconds, restate it, name what breaks, propose the minimal change, and say what you are cutting to fit the clock.",
+  "You keep your longest silence under fifteen seconds across all eight recordings, including while reading a traceback, measured from the tape rather than estimated.",
+  "You can show an error taxonomy across eight drills with your two dominant bug classes named, and a second-pass recording that demonstrates a measured improvement on both."
+ ],
+ "failureModes": [
+  "You merge two customer tables without checking cardinality, the many-side fans out, and every revenue number you present to the customer is inflated by a factor nobody notices until finance reconciles the quarter.",
+  "A numeric column arrives as object because of thousands separators, the sum silently concatenates strings or coerces to NaN, and the dashboard ships with a metric that is off by orders of magnitude.",
+  "A LEFT JOIN with the right table's column filtered in WHERE quietly becomes an INNER JOIN, so customers with no matching rows vanish from the report and the customer's own count never matches yours.",
+  "Timestamps are compared across a mix of tz-aware and naive datetimes, so daily aggregates are shifted by hours and month boundaries land in the wrong bucket for every customer outside UTC.",
+  "You accept assistant-generated code with a bare except that swallows parse errors, and the pipeline reports success while silently discarding every malformed record for weeks.",
+  "You go quiet for four minutes debugging, the interviewer loses the thread, and the write-up says 'strong coder, unclear how they would work with a customer in the room' - which is a no for an FDE role.",
+  "You spend twenty of your twenty-five minutes perfecting ingestion and never produce a number, so there is nothing to grade on the axis that actually matters."
+ ],
+ "interviewQuestions": [
+  "Here is a 900k-row export and a question about monthly revenue. Talk me through your first three minutes before you write any aggregation - what do you check and what would make you stop and ask me something?",
+  "You join orders to a customer attributes table and the row count goes from 84,000 to 310,000. Walk me through how you diagnose it and what the correct query looks like if attributes change over time.",
+  "Write, out loud, the query for each customer's second-largest order. Now do it in a dialect without QUALIFY, and tell me what changes if two orders tie exactly.",
+  "You used an assistant to generate this loader. Show me a line you rejected and tell me why - and tell me what class of bug you have learned to look for first in generated code.",
+  "Your extraction pipeline reports 98% success but the customer says records are missing. The code has no errors in the logs. How do you find out what happened?",
+  "Halfway through a build the customer says the metric must be per local business day, not UTC, and they need twelve months backfilled idempotently. What do you change, what do you drop, and what do you tell them by end of day?",
+  "You are on a screen share with a customer's data engineer and your first answer turns out to be wrong. What do you actually say, and what do you do next?"
+ ],
+ "proofOfWork": "Beyond the eight recorded drills, publish a repository called fde-drill-kit that turns your practice into a reusable, evidence-backed system another engineer could run tomorrow. It ships three synthetic-but-realistic corpora (payments, CRM and event-stream) generated by a seeded script so the defects are reproducible and documented - a defects.md naming each planted trap (mixed date formats, currency-symbol numerics, CDC duplicates with non-unique updated_at, whitespace in join keys, a tz-skewed clock, orphan foreign keys) and the query or cell that exposes it. It ships a docker compose that loads the same data into Postgres so every prompt exists in both pandas and SQL form, a prompts/ directory with all eight drill prompts written the way an interviewer would write them (underspecified, with the ambiguity deliberate), and a solutions/ directory with a reference answer plus an assert-based grader using pandas.testing.assert_frame_equal and SQL count assertions, so anyone can self-score without your judgement. The credibility comes from the evidence section: a GRADES.md with one row per drill recording minutes-to-first-partial-answer, longest silence in seconds, bug classes hit, and rubric score across all five axes, plus the second-pass rows for the two worst drills showing the measured delta; an ERRORS.md distilling the taxonomy down to your two dominant failure classes with the specific drill timestamps where each occurred; and an index page linking the eight unedited recordings. Send that one link when a recruiter asks how you prepare, and it answers the coding question and the self-improvement question at once."
+}

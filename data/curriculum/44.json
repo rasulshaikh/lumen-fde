@@ -1,0 +1,227 @@
+{
+  "i": 44,
+  "topic": "System design mocks (six, timed, recorded)",
+  "track": "F. Distributed Systems and System Design",
+  "month": 5,
+  "hours": 10,
+  "why": "An FDE does system design live and unprepared: in a customer's conference room, in front of their principal architect, with requirements that arrive as complaints rather than specs, and with a hard stop when the VP has to leave. The system design round in a Palantir, Anthropic or Databricks FDE loop is a compressed version of that meeting, and both reward the same muscle: turn a vague ask into numbers, draw something a stranger can follow, name the two things that will actually break, choose between options out loud, and stay coherent when someone pushes back. Topics 39 to 43 gave you the material; this topic trains delivery under a clock, and the recording is what lets you see the gap between what you know and what you can show in 45 minutes.",
+  "prerequisites": [
+    "The component playbook from 'System design playbook' (topic 42): you should already be able to explain consistent hashing, cache-aside versus write-through, fan-out on write versus read, Kafka partitioning, token buckets and Snowflake IDs without notes; the mocks test whether you can reach for them under time pressure, not learn them.",
+    "The consistency vocabulary from 'DDIA' (topic 39) and 'MIT 6.824 selected lectures' (topic 40): linearizable versus eventual, leader-based replication and its failover, quorums, and why 'exactly once' means at-least-once plus idempotency.",
+    "The LLM serving constraints from 'LLM-era system design' (topic 43): token-based rate limits, p99 latency in seconds not milliseconds, and queue-plus-worker rather than synchronous model calls, so the one LLM-flavoured mock does not derail.",
+    "SLIs and SLOs from topic 20 and the four golden signals from topic 21, because the non-functional requirements you write in the first five minutes are SLOs and the operability close in the last five minutes is a monitoring design.",
+    "A working recording rig: OBS or QuickTime capturing screen plus microphone, Excalidraw open with a saved template, a visible countdown timer, and a private folder or repo to store six 45-minute recordings.",
+    "One peer (Exponent match or a friend who has run design interviews) who agrees to two sessions as interviewer and to score with your rubric, plus a written set of interviewer cards so solo mocks still get interrupted."
+  ],
+  "subtopics": [
+    {
+      "name": "The 45-minute time budget and phase transitions",
+      "learn": "Fix a budget and rehearse the transitions until they are reflexive: 0-5 requirements (three core functional requirements, explicit 'below the line' list, non-functional requirements with numbers), 5-8 estimation (only the numbers that change a decision), 8-12 API and data model, 12-22 high-level design that satisfies every functional requirement end to end, 22-40 two or three deep dives on the parts you named as hardest, 40-45 failure modes, operability and what you would build first. Know the two universal failure patterns: spending 15 minutes on requirements and never reaching a deep dive, and drawing a 'perfect' architecture before checking it against the functional requirements. Practise saying the transition sentence out loud ('I have the core flow working, let me name the two things that will break at this scale and go deep on them') because the interviewer is scoring whether you drive or wait to be driven.",
+      "minutes": 15,
+      "resource": {
+        "label": "Hello Interview - System Design in a Hurry: Delivery Framework",
+        "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery"
+      }
+    },
+    {
+      "name": "Writing the rubric: what 4/5 means on each dimension",
+      "learn": "Adapt the Hello Interview evaluation dimensions (problem navigation, high-level design, technical excellence, communication and collaboration) into a 1-5 rubric where every level is an observable behaviour you can timestamp in a recording. Define 4 concretely: problem navigation 4 = you named the hardest two components unprompted and spent at least 15 minutes on them; high-level design 4 = every box traces to a stated requirement and the diagram satisfies all core functional requirements before any deep dive; technical excellence 4 = each deep dive presents two options, a quantified reason for the choice, and its failure mode; communication 4 = you talked while drawing, checked in at each phase, and changed course on pushback without defending a bad choice. Write 5 as 'taught the interviewer something' and 2 as 'needed a hint to proceed'. This is the document a peer scores against, so it must be legible to someone who did not watch you prepare.",
+      "minutes": 20,
+      "resource": {
+        "label": "Hello Interview - System Design in a Hurry: Introduction (how you are evaluated)",
+        "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/introduction"
+      }
+    },
+    {
+      "name": "Choosing six problems that cover six archetypes",
+      "learn": "Pick one problem per archetype so the six mocks exercise different bottlenecks rather than the same one six times: read-heavy fan-out (news feed or timeline), write-heavy ingestion (metrics or log pipeline at millions of events per second), real-time bidirectional (chat with presence and ordering), geospatial matching (ride dispatch or nearby search), contended inventory with money (ticket booking or payments with idempotency and holds), and the FDE-flavoured one: a multi-tenant document ingestion and LLM classification platform where one tenant must run inside their own VPC. Use the primer's solved questions to sanity-check that each archetype has a known 'hard part' and write that hard part on the interviewer card before you start, so afterwards you can check whether you found it unprompted. Do not pick a problem you have already watched a full walkthrough of; the mock measures reasoning, not recall.",
+      "minutes": 15,
+      "resource": {
+        "label": "GitHub - donnemartin/system-design-primer (interview questions with solutions)",
+        "url": "https://github.com/donnemartin/system-design-primer"
+      }
+    },
+    {
+      "name": "Recording rig and whiteboard template",
+      "learn": "Set up OBS with a display-capture source and your microphone, confirm audio levels and that the cursor is visible, and record a two-minute test before mock one so a broken recording never wastes a session. Build an Excalidraw template you reuse every time: a legend (solid arrow = synchronous call, dashed = asynchronous, cylinder = store, numbered circles for the core flow steps), a requirements box top-left, an estimation box below it, and a timer window pinned on top. Name recordings `mock-NN-problem-YYYY-MM-DD.mp4` and export the `.excalidraw` file alongside; the diagram file is what a reviewer will actually open. Never pause the timer or the recording; running out of time on camera is the data you are collecting.",
+      "minutes": 10,
+      "resource": {
+        "label": "OBS Studio Knowledge Base - Quick Start Guide (display capture source, audio setup, first recording)",
+        "url": "https://obsproject.com/kb/quick-start-guide"
+      }
+    },
+    {
+      "name": "Requirements in five minutes: functional scope and NFRs as SLOs",
+      "learn": "Drive the first five minutes with questions that change the design, not a checklist: who are the users and how many, what are the three operations that must work, what is explicitly out of scope, and for each core operation what consistency it needs (booking a seat is linearizable, viewing a seat map is eventual). Write non-functional requirements as numbers you can be held to: availability target and the consistency cost of the higher one (99.9 versus 99.99), p99 latency per operation, peak QPS with a stated peak-to-average ratio, retention, durability, and any compliance constraint (PII residency, audit). Phrase them as SLOs from topic 20 ('99.9 percent of reads under 200 ms over 30 days') because that is exactly how a customer architect will later ask you to commit. State 'I am designing for 10x today's numbers' and move on; a candidate still gathering requirements at minute ten has already lost the design phase.",
+      "minutes": 20,
+      "resource": {
+        "label": "Google SRE Book - Service Level Objectives",
+        "url": "https://sre.google/sre-book/service-level-objectives/"
+      }
+    },
+    {
+      "name": "Estimation that changes decisions, not estimation for show",
+      "learn": "Memorise the handful of numbers you will use every time: 1 day is about 1e5 seconds, so 1M DAU doing 10 actions each is about 100 QPS average and roughly 1,000 at peak; a single well-tuned Postgres handles on the order of 10k simple reads per second and low thousands of writes; one Redis node does about 100k ops per second; a Kafka partition sustains tens of MB per second; memory access is about 100 ns, SSD random read about 100 us, same-region RPC about 1 ms, cross-region round trip about 100 ms. Compute only what decides something: does the hot dataset fit in memory on one node, do writes exceed one primary, does storage over the retention period force tiering, does fan-out multiply writes past what one partition can take. Round to powers of ten, write the number on the board next to the component it justifies, and say the decision it drives ('200 GB fits on one Postgres primary with replicas, so I will not shard yet').",
+      "minutes": 20,
+      "resource": {
+        "label": "Latency Numbers Every Programmer Should Know (jboner gist)",
+        "url": "https://gist.github.com/jboner/2841832"
+      }
+    },
+    {
+      "name": "API design in four minutes: resources, idempotency, pagination, async",
+      "learn": "Sketch the three or four endpoints that map to your core functional requirements as resources and verbs (`POST /v1/bookings`, `GET /v1/events/{id}/seats`), and state the non-obvious decisions rather than reading fields aloud: an `Idempotency-Key` header on every mutating call with server-side deduplication keyed by (tenant, key), cursor pagination with an opaque token instead of `offset` because deep offsets scan the table, `202 Accepted` plus a status resource for anything that takes longer than a request timeout, tenant and user identity taken from the token and never from the body, and a consistent error shape with a retryable flag. Mention versioning and rate-limit headers only if the problem is a public API. Be ready to defend REST versus gRPC versus WebSocket per endpoint in one sentence each, then move to the data model.",
+      "minutes": 15,
+      "resource": {
+        "label": "GitHub - microsoft/api-guidelines (REST API guidelines)",
+        "url": "https://github.com/microsoft/api-guidelines"
+      }
+    },
+    {
+      "name": "Data model and store selection from access patterns",
+      "learn": "List the entities and the top three access patterns first, then pick the store, and say the sentence that shows judgement: 'relational, a few hundred GB, needs transactions across seats and payments, so Postgres with an index on (event_id, status) and a partial index on held seats; I shard by tenant_id only when a primary can no longer absorb writes'. Know when a key-value or wide-column store is the right answer (single-row access by key at very high write rates, time-series with TTL) and what it costs you (no joins, secondary indexes that double writes, hot partitions). For any partitioned store, state the partition key and check it against cardinality, distribution and access locality; a tenant_id key with one tenant at 60 percent of traffic is a hot partition you must call out before the interviewer does. Name the write-amplification of every secondary index you add and whether the store gives you conditional writes for the contended path.",
+      "minutes": 20,
+      "resource": {
+        "label": "AWS DynamoDB Developer Guide - Best practices for designing and using partition keys effectively",
+        "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html"
+      }
+    },
+    {
+      "name": "High-level design: C4 container level, numbered flows, narrated",
+      "learn": "Draw at the C4 'container' level (deployable units and stores, not classes and not cloud icons) left to right: clients, edge (CDN, load balancer, API gateway with auth and rate limiting), stateless services, stores, and the asynchronous spine (queue, workers, schedulers) below. Number the arrows for the primary flow and walk each core functional requirement through the diagram out loud before any deep dive, ticking them off; a box you cannot trace to a requirement gets deleted on camera. Start boring (one service, Postgres, Redis, one queue) and add components only where a number from estimation forces it; the interviewer is scoring whether each box is justified, not how many there are. Talk while drawing; more than 30 seconds of silent drawing is a communication deduction in your own rubric.",
+      "minutes": 15,
+      "resource": {
+        "label": "C4 model - software architecture diagrams (container level)",
+        "url": "https://c4model.com/"
+      }
+    },
+    {
+      "name": "Deep dive pattern: the read path (caching, replicas, stampedes, hot keys)",
+      "learn": "For a read-heavy bottleneck present the options and choose with a number: cache-aside with TTL versus write-through with event-driven invalidation, and the staleness each allows against the NFR you wrote. Name the failure modes and their fixes as a unit: stampede on expiry (lock or lease, request coalescing, jittered or probabilistic early expiration), hot keys (local in-process cache, key replication across cache nodes), replica lag breaking read-your-writes (route the writer's next read to the primary, or carry a version token), and consistent hashing so a cache node loss does not flush everything. Say where the CDN ends and the application cache begins. Close the deep dive with the metric you would watch (hit ratio, origin QPS, replica lag seconds) so it connects to the operability close.",
+      "minutes": 15,
+      "resource": {
+        "label": "AWS ElastiCache Developer Guide - Caching strategies",
+        "url": "https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Strategies.html"
+      }
+    },
+    {
+      "name": "Deep dive pattern: the write path (queues, ordering, idempotent consumers, outbox)",
+      "learn": "For a write-heavy or asynchronous bottleneck, decouple with a log or queue and immediately state the three questions that follow: partition key for ordering (per entity, never global), delivery semantics (at-least-once plus a consumer dedupe table keyed by event id, because exactly-once at the application level is idempotency, not a broker feature), and backpressure (bounded consumer lag alerts, producer-side shedding, dead-letter topic with replay). Use the transactional outbox for the 'write to DB and publish an event' atomicity problem and say why dual writes fail. Quantify the partition count from throughput per partition and the retention from replay needs, and name the hot-partition risk of your chosen key. Know when a queue is the wrong answer: a synchronous confirmation the user is waiting for cannot hide behind eventual processing.",
+      "minutes": 15,
+      "resource": {
+        "label": "Microservices.io - Pattern: Transactional outbox (atomic database write plus event publish, why dual writes fail)",
+        "url": "https://microservices.io/patterns/data/transactional-outbox.html"
+      }
+    },
+    {
+      "name": "Deep dive pattern: consistency, replication and failover",
+      "learn": "Decide consistency per operation, not per system, and say it in Jepsen's vocabulary: the seat decrement is linearizable (single leader per shard with a conditional update or row lock), the seat map is eventual (replicas), the payment-to-booking relationship is a saga with compensations, not a distributed transaction. Explain what synchronous versus asynchronous replication buys and costs in RPO and write latency, how leader failover works and why unfenced failover produces split brain, and why a distributed lock without a fencing token is a bug rather than a design. When the interviewer asks for active-active across regions, know the honest answer: either partition the data so each key has one home region, or accept conflicts and define the merge; there is no third option that keeps linearizability. Quantify the availability you give up for the consistency you need and tie it back to the NFR line.",
+      "minutes": 20,
+      "resource": {
+        "label": "Jepsen - Consistency Models",
+        "url": "https://jepsen.io/consistency"
+      }
+    },
+    {
+      "name": "Handling curveballs: 10x traffic, region loss, hot tenant, slow dependency",
+      "learn": "Rehearse a fixed response shape for any mid-design change: restate the change, point at the diagram component it stresses, quantify the new load against the number you already wrote, offer two options, choose one and name its cost, all inside three minutes. Prepare the standard set on interviewer cards: traffic grows 10x, one region is lost, one tenant becomes half the traffic, a downstream API caps you at 100 requests per second, the product adds a feature that changes the access pattern, the interviewer asks 'why not just use X'. For the dependency-failure card, reach for the cascading-failure toolkit by name: timeouts with deadline propagation, retries with exponential backoff and jitter capped by a budget, circuit breakers, load shedding by priority, graceful degradation, and a queue as a buffer during the outage. The score is for locating and quantifying the bottleneck, not for having anticipated the specific card.",
+      "minutes": 15,
+      "resource": {
+        "label": "Google SRE Book - Addressing Cascading Failures",
+        "url": "https://sre.google/sre-book/addressing-cascading-failures/"
+      }
+    },
+    {
+      "name": "The operability close: golden signals, rollout, phasing",
+      "learn": "Spend the last five minutes proving you have run systems, not just drawn them: name the four golden signals for each service tier (latency, traffic, errors, saturation), map the NFRs from minute two onto SLO alerts, and say how the system rolls out (canary by tenant or percentage, feature flags, expand-and-contract migrations, backfills that can be paused). Give an order-of-magnitude cost and a phased plan ('phase one is the monolith plus Postgres plus one queue and ships in six weeks; sharding and the second region are phase three when the numbers demand them'). Finish with the two failure modes you are least comfortable with and how you would detect each; interviewers rate candour about weaknesses above a design that claims to have none.",
+      "minutes": 10,
+      "resource": {
+        "label": "Google SRE Book - Monitoring Distributed Systems (four golden signals)",
+        "url": "https://sre.google/sre-book/monitoring-distributed-systems/"
+      }
+    },
+    {
+      "name": "The FDE twist: designing inside the customer's constraints",
+      "learn": "In at least two of the six mocks, add the constraints an FDE actually faces and practise adapting the design out loud: deploy inside the customer's VPC or on-premises (so every managed service becomes a swap table: DynamoDB to Postgres, SQS to Redis Streams or Kafka, Lambda to a worker deployment), data residency that forces per-region shards and per-region key management, integration with systems you do not control (a CRM with a 100 requests-per-second limit, a nightly SFTP drop, an IdP you must federate with), change windows and a security review that will ask about every arrow on the diagram. Practise the migration story as part of the design: dual-write, backfill, verify, cut over, roll back. Use the Well-Architected pillars as the checklist a customer architect will use on you, and be able to say which pillar you consciously traded down in phase one and why.",
+      "minutes": 15,
+      "resource": {
+        "label": "AWS Well-Architected Framework - Overview and pillars",
+        "url": "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html"
+      }
+    },
+    {
+      "name": "When the problem contains an LLM step",
+      "learn": "Treat a model call as an external dependency with unusual numbers and say them: p50 in seconds, p99 in tens of seconds, rate limits expressed in requests and tokens per minute (RPM, TPM, ITPM) per organisation rather than per user, 429 responses that carry a `retry-after` header, and cost per call that makes 'call it for every request' a budget conversation. Put it behind a queue and workers instead of in the request path, add a semantic or exact-match cache keyed by prompt hash, define a fallback (smaller model, rules, or 'pending' state) for rate-limit and outage cases, and make the output idempotent so a retried classification does not double-write to the customer's CRM. Say explicitly that evals and observability for the model step exist and that you will treat them as a separate design (topics 53 and 54), so the interviewer sees scope control rather than avoidance.",
+      "minutes": 10,
+      "resource": {
+        "label": "Claude Developer Platform docs - Rate limits",
+        "url": "https://platform.claude.com/docs/en/api/rate-limits"
+      }
+    },
+    {
+      "name": "Mocks 1 and 2: solo, timed, recorded, interviewer cards",
+      "learn": "Run the news-feed and metrics-ingestion problems alone under the full 45-minute clock with the recording running, using a shuffled deck of interviewer cards you draw at minutes 12, 25 and 35 to force interruptions you did not pick. Play both roles honestly: read the card aloud, respond, do not skip it because it is inconvenient. Expect these two to score around 3 and to overrun the requirements phase; the purpose is a baseline and a working rig, not a good score. Within 24 hours run the self-review protocol and write the three fixes for mock three before you forget what it felt like.",
+      "minutes": 90,
+      "resource": {
+        "label": "Hello Interview - System Design in a Hurry: Core Concepts",
+        "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/core-concepts"
+      }
+    },
+    {
+      "name": "Mocks 3 and 4: peer sessions on Exponent, both chairs",
+      "learn": "Book two peer practice sessions and take the chat and ride-dispatch problems as candidate, sending your rubric to the peer beforehand so their score is on your scale. Sit in the interviewer chair for an equal number of sessions; running someone else's design interview teaches you what silence, unjustified boxes and unquantified claims look like from the other side faster than any amount of candidate practice. Give feedback with timestamps and rubric dimensions, ask for the same, and record your own sessions (with consent) so the peer score can be compared against your self-score. A gap of more than one point on any dimension between your score and theirs is the most important finding of the week.",
+      "minutes": 90,
+      "resource": {
+        "label": "US Office of Personnel Management - Structured Interviews (developing, conducting and rating with a fixed scale)",
+        "url": "https://www.opm.gov/policy-data-oversight/assessment-and-selection/structured-interviews/"
+      }
+    },
+    {
+      "name": "Mocks 5 and 6: contended inventory and the FDE tenant platform, under pushback",
+      "learn": "Run the ticket-booking problem and the multi-tenant ingestion and classification platform with the peer instructed to push back at least once every five minutes ('why not Kafka for everything', 'the customer will not allow a managed database', 'a tenant with 40 percent of traffic just signed'). These are the two archetypes whose hard parts (linearizable decrement under contention; a design that must survive being redeployed into a customer VPC) most resemble what an FDE loop asks. Your target is the third consecutive 4/5 across all rubric dimensions; if either falls short, the seventh mock is the same problem again with the same peer, not a new problem. Keep the `.excalidraw` from mock six, it becomes the design doc in the proof of work.",
+      "minutes": 90,
+      "resource": {
+        "label": "Hello Interview - System Design in a Hurry: Common Patterns",
+        "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/patterns"
+      }
+    },
+    {
+      "name": "Self-review protocol and the pattern ledger",
+      "learn": "Within 24 hours of each mock, watch the recording at 1.5x with the rubric open and log: the timestamp of each phase transition against the budget, the number of design-changing questions asked in the first five minutes, boxes drawn without a stated requirement, statements that included a number versus statements that did not, seconds of silent drawing, and every moment you defended a choice after the interviewer gave you a reason to change it. Score each dimension with at least one timestamp as evidence and record it in a running table alongside the peer's score. Maintain a pattern ledger with two columns, 'reached for' and 'should have reached for', per mock; the second column across six mocks is your revision list for topic 42, and a pattern appearing there twice means a targeted 30-minute drill before the next mock. Write exactly three fixes for the next session and re-read them five minutes before it starts.",
+      "minutes": 120,
+      "resource": {
+        "label": "Hello Interview - System Design in a Hurry: Key Technologies (checklist for the 'should have reached for' column)",
+        "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/key-technologies"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can run a 45-minute design mock in which the recording shows each phase transition (requirements, estimation, API and data model, high-level design, deep dives, close) within two minutes of the planned budget, with no phase skipped.",
+    "You can, for any of the six archetypes, state three core functional requirements, an explicit out-of-scope list, and non-functional requirements with numbers (availability, p99 latency, peak QPS, retention, consistency per operation) inside five minutes without prompting.",
+    "You can derive QPS, storage and bandwidth in powers of ten in under three minutes and, for each number, say which design decision it changes (shard or not, in-memory or not, one primary or many).",
+    "You can draw a container-level diagram with numbered flows and a sync/async legend, walk every core requirement through it before deep diving, and delete or justify on camera any box that does not trace to a requirement.",
+    "You can name the two hardest components unprompted and deep dive each with two options, a quantified reason for the choice, its failure mode and the metric you would watch, spending at least 15 of the 45 minutes there.",
+    "You can respond to any of eight rehearsed curveballs (10x traffic, region loss, hot tenant, capped dependency, on-prem only, new access pattern, 'why not X', active-active demand) by locating it on the diagram, quantifying it and choosing, in three minutes or less.",
+    "You can score your own recording against the rubric with timestamped evidence and land within half a point of a peer's independent score on at least three of four dimensions.",
+    "You can show three consecutive peer-scored mocks at 4/5 or better on every rubric dimension, with the score table, recordings and diagrams as evidence."
+  ],
+  "failureModes": [
+    "A design that scored well in the mock assumed DynamoDB, SQS and Lambda; the customer's security team requires everything inside their VPC with no managed services, and the FDE has to redesign the write path on site in a week because the swap table (Postgres, Kafka or Redis Streams, worker deployments) was never practised.",
+    "The read path uses cache-aside with a ten-minute TTL and no invalidation events, so after a customer changes a tenant's entitlements their users keep seeing the old plan for ten minutes and the customer files it as a security incident rather than a staleness bug.",
+    "The feed was designed fan-out-on-write because it demoed cleanly; a tenant with five million followers onboards, one post produces five million timeline writes, the queue backs up for hours and every other tenant's feed goes stale until someone adds the hybrid pull path for high-follower accounts.",
+    "Estimation used average traffic; the customer's users all log in at 09:00 Monday with a peak-to-average ratio above ten, the connection pool saturates, retries without jitter triple the load and the primary falls over exactly when the customer's leadership is watching.",
+    "The queue consumer was described as exactly-once in the interview but shipped as at-least-once with no dedupe table; a broker rebalance replays a batch and the classifier writes duplicate contacts into the customer's HubSpot, which the customer's sales team notices before your monitoring does.",
+    "Sharding by tenant_id was chosen because it sounded natural; one tenant is 60 percent of all writes, that shard's primary runs hot while the others idle, and rebalancing a live shard becomes a multi-week project that was avoidable by discussing key skew in the design review.",
+    "Offset pagination shipped because the API sketch used `?page=`; a customer's export job pages through 80 million rows, each deeper page scans further, p99 climbs past the gateway timeout on page 4,000 and the export never completes."
+  ],
+  "interviewQuestions": [
+    "Design a document ingestion and LLM classification platform for 30 enterprise tenants where one tenant requires the whole thing to run inside their own VPC with no managed services. Walk me through the shared design first, then tell me exactly which components change for that tenant, what you lose, and how you keep one codebase.",
+    "You designed a news feed with fan-out on write. A customer account with five million followers is about to onboard. What breaks first, how would you have detected it before the customer did, and how do you evolve the design to a hybrid without downtime or a re-backfill of every timeline?",
+    "For a ticket-booking system, how do you guarantee no seat is sold twice? Tell me which operation needs linearizability, how you get it on a single shard, what happens at leader failover, and what you say when the customer insists on active-active across two regions.",
+    "A customer reports that users see stale data for several minutes after an update. Walk me through diagnosing it on your diagram: cache TTL versus missing invalidation versus replica lag versus CDN, what evidence distinguishes each, and what you tell the customer at each step before you know the cause.",
+    "Your pipeline needs to write into a CRM API that allows 100 requests per second for the whole customer account while your system produces bursts of 5,000 events per second. Design the shaping layer: where the buffer lives, how you prioritise, what you drop or delay, how the customer sees progress, and what your on-call alert is.",
+    "I am going to push back on your choice of Postgres plus an outbox instead of Kafka as the source of truth. Defend it with numbers, tell me the point at which you would switch, and tell me what the migration from one to the other looks like for a live customer.",
+    "You had 45 minutes and chose to deep dive on two components. Which did you skip, why was that the right call given the requirements, and what would you have said if I had told you at minute 30 that the skipped component was the one the customer cares about?"
+  ],
+  "proofOfWork": "A public `system-design-mocks` repository (or a section of the FDE dashboard) that a hiring manager can read in ten minutes and a peer can reuse in one. It contains: (1) `rubric.md` with the 1-5 definitions per dimension written as observable behaviours, plus the score table for all six mocks showing self-score, peer score and the gap per dimension, with the three consecutive 4/5 sessions highlighted; (2) six `.excalidraw` files and PNG exports, each with the requirements and estimation boxes filled in on the canvas, and a `scorecard-NN.md` per mock listing phase-transition timestamps against budget, the curveball cards drawn and the three fixes carried into the next session; (3) `interviewer-cards.md`, the deck of twelve curveballs with the 'hard part' for each of the six archetypes, usable by anyone running a mock for you or for themselves; (4) `pattern-ledger.md` with the 'reached for' and 'should have reached for' columns across all six mocks and the drills that resulted; and (5) a two-page `design-doc-tenant-platform.md` written from the mock-six diagram in the form a customer architect would review: requirements as SLOs, container diagram, the two deep dives, the managed-to-self-hosted swap table for the VPC tenant, a phased delivery plan with what ships in six weeks, and the failure modes you are least comfortable with and how each is detected."
+}

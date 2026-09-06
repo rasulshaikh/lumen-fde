@@ -1,0 +1,200 @@
+{
+ "i": 23,
+ "topic": "Incident response and postmortems",
+ "track": "D. Reliability and Observability",
+ "month": 3,
+ "hours": 6,
+ "why": "When the system you deployed at a customer breaks at 02:00, the FDE is the person the customer's VP calls, the person who has to run the bridge with the customer's own platform team on it, and the person who has to send the written account the customer's CTO forwards to their board. Nobody on the vendor side has more context than you, so you are the de facto incident commander whether or not anyone gave you the title, and a sloppy incident (three people typing into production, no timeline, a status update that speculated about root cause and was wrong) costs more trust than the outage itself. The postmortem is the artifact that turns an outage into a renewal: a blameless, numbers-first document with dated action items is how a customer decides you are safe to keep in production.",
+ "prerequisites": [
+  "SLIs, SLOs and error-budget burn alerts from 'SRE fundamentals' (topic 20): severity levels and paging rules only make sense against a defined SLO for DefenderMate.",
+  "The ability to read a trace, a log stream and a Prometheus dashboard under pressure from 'Observability' (topic 21); during an incident you are consuming what you built there, not building it.",
+  "The chaos notes on Kaupex and Temporal from 'Load testing and chaos' (topic 22): those experiments are the scenario bank for your Wheel of Misfortune sessions.",
+  "Kubernetes production ops from topic 8: `kubectl rollout undo`, `kubectl get events`, probes, HPA, and how ArgoCD self-heal (topic 9) will fight a manual `kubectl` change.",
+  "Postgres operations basics: `pg_stat_activity`, `statement_timeout`, `lock_timeout`, what an idle-in-transaction session does to `VACUUM` and to lock queues (previewed here, deepened in topic 29).",
+  "A Slack or Discord workspace you control, a Grafana Cloud stack with at least one alert rule firing into a contact point, and one friend willing to spend 45 minutes playing game master."
+ ],
+ "subtopics": [
+  {
+   "name": "Severity ladder and the declaration threshold",
+   "learn": "Write a SEV1 to SEV5 ladder for DefenderMate where each level is defined by customer-observable impact and a required response, not by which component broke: SEV1 = customer-facing outage or data loss, IC assigned, status page within 15 minutes, exec update every 30; SEV2 = degraded for a subset, IC assigned, no status page unless it lasts 60 minutes; SEV3 and below are business-hours tickets. Internalise PagerDuty's rule that if you are unsure whether it is a SEV1 or SEV2 you treat it as the higher one, and that declaring an incident is cheap while a late declaration is not. Know the difference between severity (impact) and priority (order of work) and why a SEV1 for one tenant may be a P2 for the platform.",
+   "minutes": 20,
+   "resource": {
+    "label": "PagerDuty Incident Response - Severity Levels",
+    "url": "https://response.pagerduty.com/before/severity_levels/"
+   }
+  },
+  {
+   "name": "Roles: Incident Commander, deputy, scribe, comms lead, subject-matter experts",
+   "learn": "Know each role's single job and its anti-pattern: the IC owns decisions and the timeline but never touches a keyboard to debug; the deputy watches the IC (time, fatigue, missed hand-raises) and takes over on a clean hand-off ('you have command', 'I have command'); the scribe records observations, decisions and actions with timestamps; the comms lead owns every message that leaves the room; SMEs run diagnosis and execute tasks the IC assigns. Practise the hand-off protocol and the 'IC role is not seniority' rule: on a customer bridge the customer's principal engineer may be the best SME precisely because they should not be IC. Decide up front how the FDE splits the IC and comms roles when only two people are awake.",
+   "minutes": 25,
+   "resource": {
+    "label": "PagerDuty Incident Response - Different Roles",
+    "url": "https://response.pagerduty.com/before/different_roles/"
+   }
+  },
+  {
+   "name": "Running the bridge: the IC decision loop",
+   "learn": "Run the loop out loud: state current impact and what is known, propose one action, poll for strong objections ('any strong objections?' then a five-second silence, not a discussion), assign it to a named person with a timebox ('Priya, roll back the classifier to the previous revision, report in 5 minutes'), then re-assess when the timebox expires. Enforce one channel and one voice bridge, ban side-threads and 'let me just try something', and never let a task go unassigned or un-timeboxed. Know PagerDuty's explicit rules: the IC may remove anyone who is disruptive, the IC decides rather than seeks consensus, and 'I need someone to' is banned in favour of names. Pin a state summary (impact, current hypothesis, actions in flight, next update time) every 30 minutes.",
+   "minutes": 30,
+   "resource": {
+    "label": "PagerDuty Incident Response - During an Incident",
+    "url": "https://response.pagerduty.com/during/during_an_incident/"
+   }
+  },
+  {
+   "name": "Scribing the timeline and annotating dashboards",
+   "learn": "Keep a single incident channel where every entry is `HH:MM UTC` plus one of OBSERVED / DECIDED / ACTION / RESULT, and paste raw evidence (the exact error line, the `kubectl rollout history` output, the alert payload) rather than paraphrase. Push the same timestamps into Grafana as annotations (`POST /api/annotations` with `time`, `tags: [\"incident\",\"INC-2026-014\"]`, `text`) on the DefenderMate SLO dashboard so the postmortem graphs show detection, mitigation and recovery as vertical lines against the burn rate. Configure the dashboard's annotation query to pull by tag so the lines survive dashboard edits. Export the channel history at the end; the timeline is the raw material for the postmortem and it degrades every hour it is not written down.",
+   "minutes": 20,
+   "resource": {
+    "label": "Grafana docs - Annotate visualizations (incl. annotations HTTP API)",
+    "url": "https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/annotate-visualizations/"
+   }
+  },
+  {
+   "name": "Mitigate first: the five-minute triage decision",
+   "learn": "Adopt the SRE rule that during an incident you stop the bleeding before you find the cause. Within five minutes of declaring, answer three questions: what changed (deploy, config, feature flag, dependency, traffic, certificate expiry, quota), can it be reverted, and can traffic be shed. Know the generic mitigation menu and its order of preference: roll back the last change, disable via flag, scale up, fail over, degrade gracefully (serve cached, drop non-critical path), rate limit, drain. Understand why 'roll forward with a fix' is usually the wrong first move under pressure and when it is the only move (a migration that already ran, a data corruption). Rehearse saying 'we are mitigating; root cause comes after' to a customer exec who wants to know why.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google SRE Book - Emergency Response",
+    "url": "https://sre.google/sre-book/emergency-response/"
+   }
+  },
+  {
+   "name": "Troubleshooting under pressure without fooling yourself",
+   "learn": "Apply the SRE troubleshooting loop deliberately: triage, examine (what the telemetry says, not what you expect), hypothesise, test the cheapest discriminating experiment, repeat. Name the pitfalls you must actively defend against: confirmation bias toward the last thing you touched, correlation with an unrelated deploy, fixing symptoms of a healthy component, and 'it is always DNS' style pattern-matching that skips the evidence. Build the 'is it us or the cloud' reflex: check the provider health dashboard and your dependency status pages before spending 20 minutes on your own code. Keep a written list of hypotheses with the evidence for and against each so a fresh responder can pick up without re-deriving.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google SRE Book - Effective Troubleshooting",
+    "url": "https://sre.google/sre-book/effective-troubleshooting/"
+   }
+  },
+  {
+   "name": "Kubernetes mitigation moves for Dokeo and DefenderMate",
+   "learn": "Be able to execute each of these blind and know what it does and does not fix: `kubectl rollout history deploy/dokeo` then `kubectl rollout undo deploy/dokeo --to-revision=N`; `kubectl rollout pause` to freeze a bad progressive rollout; `kubectl scale --replicas=` and temporarily raising HPA `minReplicas`; `kubectl cordon` and `drain --ignore-daemonsets --delete-emptydir-data` for a bad node; `kubectl delete pod` on a single CrashLoopBackOff pod (useless if the image is broken, useful if it is a stuck init); `kubectl get events -A --sort-by=.lastTimestamp` as the first command every time. Know that ArgoCD with `selfHeal: true` will revert your manual `undo` within minutes, so the durable mitigation is `git revert` on the app-of-apps repo or `argocd app set --sync-policy none` first, and that `kubectl rollout undo` changes the pod-template-hash so your dashboards' version labels change too.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs - Deployments: Rolling Back a Deployment",
+    "url": "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-back-a-deployment"
+   }
+  },
+  {
+   "name": "Data-layer mitigation on Kaupex Postgres",
+   "learn": "Read `pg_stat_activity` for the incident view: `state`, `wait_event_type`, `wait_event`, `xact_start`, `query_start`, and `pg_blocking_pids(pid)` to find the head of a lock queue. Know the difference between `pg_cancel_backend(pid)` (cancels the statement, keeps the session) and `pg_terminate_backend(pid)` (kills the session and rolls back), and that killing an `idle in transaction` session that holds an `ACCESS EXCLUSIVE` lock unblocks everything behind it. Know the emergency settings you can `ALTER SYSTEM SET` and `pg_reload_conf()` without a restart: `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`. Know what not to do: terminating the walsender to a replica, or a long-running `VACUUM` on a table near wraparound, converts a slow incident into an outage.",
+   "minutes": 20,
+   "resource": {
+    "label": "PostgreSQL docs - The Cumulative Statistics System (pg_stat_activity)",
+    "url": "https://www.postgresql.org/docs/current/monitoring-stats.html"
+   }
+  },
+  {
+   "name": "Workflow-engine incidents: stuck and poisoned Temporal workflows",
+   "learn": "Diagnose a Kaupex incident where hundreds of workflows are stuck: `temporal workflow list --query 'ExecutionStatus=\"Running\" AND WorkflowType=\"Onboarding\"'`, `temporal workflow describe -w <id>` to see pending activities and their retry state, `temporal task-queue describe` to confirm workers are polling. Know the mitigation ladder: restart workers (safe, execution is durable), `temporal workflow signal` to nudge a waiting workflow, `temporal workflow reset -w <id> --event-id N --reason` to replay from before a bad activity, `temporal workflow cancel` (cooperative) versus `terminate` (immediate, no cleanup), and batch versions of each. Understand the poison-pill pattern where one activity fails forever with an unbounded retry policy and starves the task queue, and why the postmortem action item is a `maximumAttempts` and a non-retryable error type, not a bigger worker pool.",
+   "minutes": 20,
+   "resource": {
+    "label": "Temporal CLI docs - temporal workflow commands (describe, signal, reset, cancel, terminate)",
+    "url": "https://docs.temporal.io/cli/command-reference/workflow"
+   }
+  },
+  {
+   "name": "Alert hygiene: symptoms not causes, grouping, inhibition, silences",
+   "learn": "Audit every DefenderMate alert against the rule that a page must be urgent, actionable, and about a user-visible symptom (SLO burn rate, error ratio, latency), with cause-based alerts (pod restarts, CPU) demoted to tickets or dashboards. In Alertmanager, configure `route.group_by` so one incident is one notification rather than 40, `group_wait` and `group_interval` to batch, `repeat_interval` long enough not to re-page during the incident, and `inhibit_rules` so a cluster-down alert suppresses every downstream service alert. Know `amtool silence add alertname=... --duration=2h --comment='INC-014'` and that silences during an incident are logged in the timeline, and put a `runbook_url` annotation on every paging rule so the responder lands on the mitigation steps, not a search box.",
+   "minutes": 20,
+   "resource": {
+    "label": "Prometheus docs - Alertmanager (grouping, inhibition, silences)",
+    "url": "https://prometheus.io/docs/alerting/latest/alertmanager/"
+   }
+  },
+  {
+   "name": "On-call design and escalation policies",
+   "learn": "Set up a real schedule and escalation chain in Grafana IRM (or PagerDuty free tier): primary, secondary after a 5-minute unacknowledged timeout, then the engineering lead, with an override mechanism for hand-offs and a weekly rotation. Know the SRE numbers: no more than two incidents per 12-hour shift so responders can actually do postmortems, and page volume is a reliability metric, not a badge. Decide what the FDE embedded in a customer's rotation looks like: who pages you, through which system, with what SLA in the SOW, and what you do when the customer's own on-call does not acknowledge. Write the hand-off note format: open incidents, known-flaky alerts, changes scheduled in the next 24 hours.",
+   "minutes": 15,
+   "resource": {
+    "label": "Grafana Cloud docs - Alerting and IRM (schedules, escalation chains)",
+    "url": "https://grafana.com/docs/grafana-cloud/observe-and-act/alert-and-measure-reliability/"
+   }
+  },
+  {
+   "name": "Customer and executive communication during the incident",
+   "learn": "Write and rehearse the three message types: the initial status post within 15 minutes of a SEV1 ('We are investigating elevated errors affecting X; next update by HH:MM'), the periodic update every 30 minutes even when the content is 'no change, still investigating', and the resolution post with impact window and a promise of a postmortem date. Use the impact / what we know / what we are doing / next update structure and never state a cause you have not confirmed; 'a database issue' becomes the headline the customer repeats to their board and you will spend the postmortem walking it back. Separate the war-room channel from the stakeholder channel and let only the comms lead post in the latter. As the FDE, decide in advance which incidents the customer hears about from you proactively versus from their own monitoring, and write that into the engagement runbook.",
+   "minutes": 30,
+   "resource": {
+    "label": "Atlassian Incident Management Handbook - Incident communication",
+    "url": "https://www.atlassian.com/incident-management/incident-communication"
+   }
+  },
+  {
+   "name": "Writing the blameless postmortem",
+   "learn": "Use the Google template sections and know why each exists: summary with impact in numbers (requests failed, tenants affected, minutes of SLO budget burned, revenue if known), trigger versus root cause versus contributing factors, detection (how long from first bad request to first human knowing, and whether a human or an alert found it), the timeline with UTC timestamps, lessons learned split into what went well / what went wrong / where we got lucky, and action items each with owner, type (prevent, detect, mitigate, process), priority and ticket link. Enforce blamelessness mechanically: no names in the causal chain (roles instead), no counterfactuals ('should have'), and every human action described in terms of what made it reasonable at the time. Write it within 48 hours, circulate for comment before the review meeting, and publish it where the customer can read it.",
+   "minutes": 35,
+   "resource": {
+    "label": "Google SRE Book - Postmortem Culture: Learning from Failure",
+    "url": "https://sre.google/sre-book/postmortem-culture/"
+   }
+  },
+  {
+   "name": "Facilitating the debrief when the customer's team pulled the trigger",
+   "learn": "Run the postmortem meeting as a facilitated debrief rather than a status review: open with the purpose (learning, not accountability), walk the timeline asking 'what did you see at that moment' and 'what made that the obvious next step' instead of 'why did you do that', and pull out the tacit knowledge (who knew the runbook was stale, who had seen this error before) that never appears in tickets. Know how to handle the hardest case for an FDE: the customer's engineer ran the migration that caused the outage, their manager is in the room, and your postmortem has to be honest about the trigger without making the vendor look like it is assigning blame. Practise redirecting 'who' questions to 'what conditions' and recording disagreements about causation rather than forcing consensus.",
+   "minutes": 20,
+   "resource": {
+    "label": "Etsy Debriefing Facilitation Guide (GitHub)",
+    "url": "https://github.com/etsy/DebriefingFacilitationGuide"
+   }
+  },
+  {
+   "name": "Action items that actually close",
+   "learn": "Turn each lesson into an action item that passes the test in the SRE Workbook chapter: specific, has one owner, has a due date, is tracked as a ticket with a priority that competes honestly with feature work, and is classified so the mix is visible (if every item is 'add an alert' and none is 'prevent', say so). Distinguish the immediate fix from the systemic fix and record both. Set up the review loop: a monthly check of open postmortem action items with the customer, and a rule that a repeat incident with an unclosed action item is escalated as a process failure, not another SEV. Include near-misses in the process; the cheapest postmortem is the one for an incident that did not quite happen.",
+   "minutes": 15,
+   "resource": {
+    "label": "Google SRE Workbook - Postmortem Culture: Learning from Failure",
+    "url": "https://sre.google/workbook/postmortem-culture/"
+   }
+  },
+  {
+   "name": "Incident metrics and the monthly reliability report",
+   "learn": "Compute and report time-to-detect, time-to-acknowledge, time-to-mitigate and time-to-resolve per incident from the timeline, incident count by severity per month, and SLO budget consumed per incident, and know why an averaged MTTR across heterogeneous incidents is a vanity number that hides one four-hour outage behind fifty two-minute blips. Map your SEV definitions onto the customer's contractual SLA (monthly availability percentage, exclusions for scheduled maintenance and customer-caused issues, the service-credit process) so the reliability report answers the question their finance team will ask. Build the one-page monthly format: budget remaining, incidents with links to postmortems, open action items with ages, and one recommendation.",
+   "minutes": 20,
+   "resource": {
+    "label": "Atlassian Incident Management Handbook - Common incident management metrics",
+    "url": "https://www.atlassian.com/incident-management/kpis/common-metrics"
+   }
+  },
+  {
+   "name": "Wheel of Misfortune and disaster role-playing",
+   "learn": "Design and run a tabletop from the SRE book's format: a game master holds a real past incident (or one of your topic 22 chaos scenarios) as a script, reveals information only when the responder asks the right question or runs the right command, injects a twist at the ten-minute mark (a second alert, a customer exec joining the bridge), and stops at 30 minutes for a debrief. Score the responder on declaration time, mitigation-first behaviour, communication cadence and timeline quality, not on finding the root cause. Rotate roles so you play IC, scribe and game master at least once each. Keep the scenario bank versioned in the Dokeo repo and add one scenario after every real incident.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google SRE Book - Accelerating SREs to On-Call and Beyond (Disaster Role Playing, Wheel of Misfortune)",
+    "url": "https://sre.google/sre-book/accelerating-sre-on-call/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take a paging alert on DefenderMate and, within five minutes, have declared a severity, named yourself IC, opened the incident channel with a pinned state summary, and issued one timeboxed mitigation task to a named person, all recorded with UTC timestamps.",
+  "You can run a 30-minute Wheel of Misfortune as IC with a friend as game master and be scored by them on the rubric (declaration time, mitigation before diagnosis, update cadence, no unassigned tasks) at or above the threshold you set in the playbook.",
+  "You can execute the Kubernetes and Postgres mitigation menu from memory on your k3s cluster: `kubectl rollout undo` to a named revision with ArgoCD self-heal disabled first, HPA minReplicas raised, a blocking Postgres session found via `pg_blocking_pids` and terminated, each with the observed effect written to the timeline.",
+  "You can diagnose a Kaupex incident where workflows are stuck on a poisoned activity using `temporal workflow describe` and `task-queue describe`, mitigate with a reset or terminate, and state the retry-policy change that prevents recurrence.",
+  "You can write a customer-facing status update in under three minutes that states impact, what is known, what is being done and the next update time, with no unconfirmed cause, and a resolution message that commits to a postmortem date.",
+  "You can produce a blameless postmortem within 48 hours of an incident that a reviewer confirms has no names in the causal chain, no counterfactual language, impact quantified in requests and SLO budget, a UTC timeline matching the Grafana annotations, and action items each with owner, type, priority and ticket link.",
+  "You can audit your Grafana or Alertmanager rules and show that every paging alert is symptom-based with a `runbook_url`, that related alerts group into one notification, and that a cluster-level alert inhibits its downstream children.",
+  "You can present a one-page monthly reliability report to a non-engineer that includes SLO budget remaining, incidents by severity with postmortem links, time-to-detect and time-to-mitigate per incident, and the age of every open action item."
+ ],
+ "failureModes": [
+  "Three engineers on the bridge each 'just try something' in production at the same time; one rolls back the deployment while another applies a hotfix, ArgoCD self-heal reverts both, and the postmortem timeline cannot say which change fixed it or when the customer was actually impacted.",
+  "The first status-page update says 'a database issue' because someone saw connection errors; the real cause is a certificate that expired on the ingress, the customer's CTO has already forwarded 'database issue' to their board, and the postmortem review spends twenty minutes on the retraction instead of the fix.",
+  "The IC is also the strongest debugger, disappears into a terminal for fifteen minutes, nobody posts the 30-minute update, and the customer's engineering manager escalates to the vendor's CEO because the channel went silent.",
+  "A responder terminates every 'idle in transaction' backend in `pg_stat_activity` to clear a lock queue, including the logical-replication slot consumer, and the analytics replica falls two hours behind, producing a second incident during the first one.",
+  "The postmortem names the customer's junior engineer as having 'run the migration without approval', their manager refuses to sign off, the document is never published, and the same migration pattern causes a repeat outage three months later because no action item was ever created.",
+  "Twelve action items are written, none has a due date or ticket, all are 'add alert for X', and at the monthly review nine are still open; the customer concludes the vendor treats postmortems as paperwork.",
+  "A Kaupex activity with an unbounded retry policy fails forever against a decommissioned downstream API, the retries consume the entire task queue's worker capacity, and the team scales the worker pool from 4 to 40 pods before anyone runs `temporal workflow describe` and sees the single failing activity."
+ ],
+ "interviewQuestions": [
+  "You are on-site with a customer and their production deployment of your platform starts returning 500s to a third of tenants. Their platform team is on the bridge, their VP joins ten minutes later, and your own engineering team is asleep in another timezone. Walk me through the first fifteen minutes: who is IC, what you say, what commands you run, what you post and where, and what you refuse to do.",
+  "Design the severity ladder and paging policy for a multi-tenant LLM classification service with an SLO of 99.9 percent successful webhook deliveries. Which alerts page, which create tickets, how do you avoid 40 notifications for one incident, and what does a single tenant's outage map to?",
+  "An incident was caused by a customer engineer running a schema migration in production without a review. Write the root-cause section of the postmortem out loud so that it is honest, blameless, and something their manager will sign. Then tell me the action items and who owns each.",
+  "During an incident someone proposes rolling forward with a hotfix rather than rolling back. Under what conditions do you accept that, under what conditions do you overrule it as IC, and how do you handle the fact that the person proposing it is the customer's principal engineer?",
+  "Your postmortem shows detection took 45 minutes because the customer noticed before any alert fired. Debug the alerting: what did the existing alerts measure, what should they have measured, how would you structure the new rules in Alertmanager or Grafana, and how would you prove the new alert would have fired for this incident?",
+  "The customer's finance team asks for your MTTR for the quarter. Explain why you would push back on a single averaged number, what you would report instead, how it ties to their contractual SLA and exclusions, and how you would present it in one page.",
+  "Describe a Temporal or queue-based system in which one bad message or workflow starves everything else. How do you detect it during the incident with the CLI, what is the immediate mitigation, and what retry-policy or error-classification change goes into the postmortem so it does not recur?"
+ ],
+ "proofOfWork": "A public `incident-kit` directory in the Dokeo repository that a hiring manager can read in ten minutes and a friend can use to run a drill in thirty. It contains: (1) a one-page incident playbook with the SEV ladder, role cards, the IC decision-loop script, the status-update templates and the Kubernetes / Postgres / Temporal mitigation menu with exact commands; (2) three Wheel of Misfortune scenario scripts derived from the topic 22 chaos experiments, each with the game master's hidden timeline, the information-release triggers and the scoring rubric; (3) a recorded 30-minute drill (screen and audio) in which you are IC and a friend is game master, with the exported incident channel timeline and the Grafana dashboard screenshot showing detection, mitigation and recovery annotations; (4) the resulting postmortem written to the Google template, redlined by a second reader for blame language and counterfactuals, with every action item linked to an issue in the repo and a `postmortem-review.md` recording what the reviewer challenged; and (5) the Alertmanager or Grafana alerting config diff that came out of the postmortem, showing the symptom-based rule, the `runbook_url` annotation, and the inhibition rule, plus a `promtool test rules` or equivalent unit test proving the new alert would have fired on the recorded incident data."
+}

@@ -1,0 +1,218 @@
+{
+ "i": 22,
+ "topic": "Load testing and chaos",
+ "track": "D. Reliability and Observability",
+ "month": 3,
+ "hours": 6.0,
+ "why": "When a customer asks 'will this hold on Monday when the whole ops floor logs in' or 'what happens when your worker pod gets patched', the FDE is the only person in the room who can answer with evidence rather than opinion, and that answer decides whether the go-live happens. Load tests find the first bottleneck before the customer does and turn a vague 'it feels slow' into a number, a saturated resource and a proven fix; chaos experiments turn 'Temporal is durable' from a vendor claim into a recovery time you measured on their cluster. Both are also how you write the capacity and resilience sections of the runbook the customer will hold you to after you leave.",
+ "prerequisites": [
+  "The USE method and single-box tooling from 'Performance and troubleshooting on a single box' (topic 3): top, vmstat, iostat, py-spy, reading a flame graph. Load testing is USE applied while something else drives the traffic.",
+  "Kubernetes ops from topic 8: readiness and liveness probes, requests and limits, `kubectl describe` / `logs` / `get events`, EndpointSlices, and the k3s cluster on the Hetzner box with Kaupex (FastAPI API, Temporal worker, Postgres) deployed and reachable through Traefik.",
+  "Prometheus and Grafana from 'Observability' (topic 21): RED metrics for Kaupex, `histogram_quantile()` over `rate()` of buckets, and a dashboard you can place k6 series next to.",
+  "SLOs from 'SRE fundamentals' (topic 20): the latency and availability targets that become k6 thresholds and chaos steady-state definitions.",
+  "Enough JavaScript to write ES modules with imports, arrow functions and JSON handling (k6 scripts are JS, not Python), and enough Temporal to start a Kaupex workflow and run a worker; 'Temporal at depth' (topic 34) comes later and builds on the failure semantics you observe here.",
+  "Postgres basics: `psql`, `EXPLAIN`, `pg_stat_activity`, and the SQLAlchemy async engine configuration in Kaupex, so pool and lock diagnostics are readable."
+ ],
+ "subtopics": [
+  {
+   "name": "Test taxonomy: which question each test type answers",
+   "learn": "Know the six shapes and the question each answers: smoke (1-5 VUs for a minute: does the script and the system work at all), average-load (ramp to expected daily peak and hold 30-60 min: does p95 meet the SLO at normal traffic), stress (150-200% of peak: where is the knee), soak (normal load for 2-8 h: leaks, connection churn, disk and log growth), spike (0 to 5-10x in seconds: does it shed or fall over, and does it recover), breakpoint (ramping-arrival-rate with no ceiling until a threshold aborts: the number for the capacity plan). Pick by the question you owe the customer, never 'a load test'. For Kaupex the order is smoke, average, stress, breakpoint, with a soak only once you have a fix to verify.",
+   "minutes": 10,
+   "resource": {
+    "label": "Grafana k6 docs: Load test types",
+    "url": "https://grafana.com/docs/k6/latest/testing-guides/test-types/"
+   }
+  },
+  {
+   "name": "Open vs closed workload models and coordinated omission",
+   "learn": "A closed model (constant-vus, ramping-vus) has each VU wait for its response before iterating, so when the server slows the offered load drops with it and the measured latency flatters the system; this is coordinated omission and it is why a 10-VU test 'passes' while real users queue. An open model (constant-arrival-rate, ramping-arrival-rate) starts iterations on a clock regardless of response time, which is how webhook and API traffic actually arrives. In the open model the executor still needs VUs to run iterations: size `preAllocatedVUs` at roughly rate x p99 seconds with a `maxVUs` ceiling, and read `dropped_iterations` as 'the generator could not keep up', which is either a test bug or the first symptom of saturation. Be able to say why arrival rate is the right shape for Kaupex's API and webhook ingress while a closed model is right only for a fixed pool of worker threads.",
+   "minutes": 20,
+   "resource": {
+    "label": "Grafana k6 docs: Open and closed models",
+    "url": "https://grafana.com/docs/k6/latest/using-k6/scenarios/concepts/open-vs-closed/"
+   }
+  },
+  {
+   "name": "k6 script anatomy: lifecycle, VUs, checks, tags, test data",
+   "learn": "Structure: the init context runs once per VU (imports, `export const options`, `new SharedArray('tasks', () => JSON.parse(open('./tasks.json')))` so test data loads once instead of per VU), `export function setup()` runs once and returns data (log in, fetch a JWT), `export default function (data)` is the VU loop, `export function teardown(data)` cleans up. Use `check(res, { 'status 201': r => r.status === 201 })` to record pass rates without failing the run, `group()` to bucket a user flow, and always tag dynamic URLs with `{ tags: { name: 'GET /tasks/:id' } }` so http_req_duration is not split across ten thousand unique URLs. Correlate requests: extract the id via `res.json('id')` and use it in the next call, parametrise with `__ENV.BASE_URL` and `k6 run -e BASE_URL=https://kaupex.local script.js`, use `http.batch()` for parallel fetches, and add `sleep()` only when modelling closed-model users. Define a custom `Trend('task_completed_ms')` from `k6/metrics` to time an end-to-end business operation (submit, then poll until status is done) rather than a single HTTP call, because that is the number the customer cares about.",
+   "minutes": 30,
+   "resource": {
+    "label": "Grafana k6 docs: Test lifecycle",
+    "url": "https://grafana.com/docs/k6/latest/using-k6/test-lifecycle/"
+   }
+  },
+  {
+   "name": "Scenarios and executors: arrival rate, stages, dropped iterations",
+   "learn": "Write `options.scenarios` as named scenarios, each with `executor`, `exec` (the function to run), `startTime`, `gracefulStop` (default 30s: how long in-flight iterations get to finish before VUs are interrupted) and per-scenario `tags`. Know all executors: shared-iterations, per-vu-iterations, constant-vus, ramping-vus (with `stages` and `gracefulRampDown`), constant-arrival-rate, ramping-arrival-rate, externally-controlled. For the breakpoint test use ramping-arrival-rate with stages climbing from 10 to 500 per `timeUnit: '1s'` over 20 minutes, `preAllocatedVUs: 100, maxVUs: 2000`, and a threshold with `abortOnFail` so the run stops at the knee instead of hammering a dead system. Run two scenarios concurrently to model mixed traffic (read-heavy at `startTime: '0s'`, writes at `startTime: '2m'`) and understand why per-scenario tags plus tagged thresholds are the only way to read them apart in the summary.",
+   "minutes": 20,
+   "resource": {
+    "label": "Grafana k6 docs: Executors",
+    "url": "https://grafana.com/docs/k6/latest/using-k6/scenarios/executors/"
+   }
+  },
+  {
+   "name": "Thresholds as pass/fail gates and CI exit codes",
+   "learn": "Thresholds turn a run into a verdict: `thresholds: { http_req_failed: ['rate<0.01'], http_req_duration: ['p(95)<400', 'p(99)<1200'], 'http_req_duration{name:POST /tasks}': ['p(95)<800'], checks: ['rate>0.99'], dropped_iterations: ['count<10'] }`. Use the object form `{ threshold: 'p(99)<2000', abortOnFail: true, delayAbortEval: '60s' }` to stop the breakpoint test once the system is clearly past the knee without a false abort during warm-up. k6 exits non-zero (code 99) when any threshold fails, which is what makes `k6 run` usable as a CI gate; set `summaryTrendStats: ['avg','med','p(95)','p(99)','max']` so the console shows the tails, and implement `handleSummary(data)` to emit JSON plus a markdown table for the load report. Derive every threshold number from the SLOs in topic 20, not from whatever the system happens to do today.",
+   "minutes": 15,
+   "resource": {
+    "label": "Grafana k6 docs: Thresholds",
+    "url": "https://grafana.com/docs/k6/latest/using-k6/thresholds/"
+   }
+  },
+  {
+   "name": "Reading k6 output and streaming it into Prometheus and Grafana",
+   "learn": "Decompose http_req_duration = http_req_sending + http_req_waiting (time to first byte, the server's share) + http_req_receiving; connection cost lives in http_req_blocked, http_req_connecting and http_req_tls_handshaking and should be near zero after warm-up because k6 reuses connections per VU (set `noConnectionReuse: true` only when modelling clients that do not). Read the `http_reqs` rate as achieved throughput, `iteration_duration` as the full flow, `http_req_failed` as the error rate (2xx and 3xx count as success by default; change it with `http.setResponseCallback`), and never report averages, which hide the bimodal tail customers feel. Stream results with `k6 run -o experimental-prometheus-rw script.js` and `K6_PROMETHEUS_RW_SERVER_URL=http://prometheus:9090/api/v1/write` (add `K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM=true` when Prometheus has native histograms enabled) so k6 series sit beside the Kaupex RED metrics from topic 21 on one Grafana dashboard and the before/after screenshots share a time axis; keep `--out json=run.json` for offline analysis.",
+   "minutes": 25,
+   "resource": {
+    "label": "Grafana k6 docs: Built-in metrics reference",
+    "url": "https://grafana.com/docs/k6/latest/using-k6/metrics/reference/"
+   }
+  },
+  {
+   "name": "The load generator is a system too: OS limits and placement",
+   "learn": "One k6 process can drive tens of thousands of VUs at roughly 1-5 MB of RAM each, but the OS gives out first: raise `ulimit -n` to 250000, widen `net.ipv4.ip_local_port_range` to '1024 65535', set `net.ipv4.tcp_tw_reuse=1` to survive TIME_WAIT churn, and expect ephemeral-port exhaustion the moment you enable `noConnectionReuse`. Set `discardResponseBodies: true` globally and opt in per request when you need the body. Never run the generator on the same box as the target (the Hetzner node hosting k3s): CPU contention makes both numbers lies. Run k6 from a second VPS or a dedicated pod on other hardware, or the k6-operator TestRun CRD when you need parallelism; watch the generator's own CPU with top and stop trusting results past about 80 percent, and treat `dropped_iterations` or high `http_req_blocked` as generator problems to rule out before blaming the target.",
+   "minutes": 15,
+   "resource": {
+    "label": "Grafana k6 docs: Fine-tuning OS",
+    "url": "https://grafana.com/docs/k6/latest/set-up/fine-tune-os/"
+   }
+  },
+  {
+   "name": "Finding the app-tier bottleneck: event loop, GIL, worker count",
+   "learn": "Under a constant-arrival-rate run, apply USE (topic 3) to each Kaupex API pod: `kubectl top pod` and `container_cpu_cfs_throttled_seconds_total` for saturation and throttling, `py-spy dump --pid 1` inside the container for what the event loop is doing right now, `py-spy record -o flame.svg` for the picture. Know the three classic Python API knees: a single uvicorn process pinning one core (fix: `--workers N`, or gunicorn with `-k uvicorn.workers.UvicornWorker`, roughly one per core because the GIL serialises CPU work); a blocking call inside `async def` (sync `requests`, sync psycopg, `time.sleep`, CPU-heavy JSON or pydantic on large bodies) that freezes every request on that loop so p99 explodes while CPU looks idle; and sync `def` endpoints saturating Starlette's anyio threadpool (40 tokens by default) so requests queue invisibly. The dump must name the frame; the fix is `await` on an async client, `run_in_threadpool` for the truly blocking, or moving the work into a Temporal activity. Also check uvicorn `--limit-concurrency` and `--backlog`, and confirm readiness probes are not failing under load and yanking pods from the Service, which shows up in k6 as intermittent connection refused.",
+   "minutes": 30,
+   "resource": {
+    "label": "FastAPI docs: Concurrency and async / await",
+    "url": "https://fastapi.tiangolo.com/async/"
+   }
+  },
+  {
+   "name": "Finding the data-tier bottleneck: pools, max_connections, waits",
+   "learn": "The second knee is almost always the pool. SQLAlchemy defaults to `pool_size=5, max_overflow=10, pool_timeout=30`, so four uvicorn workers can hold 60 Postgres backends and the sixteenth concurrent request per worker waits 30 s then raises 'QueuePool limit of size 5 overflow 10 reached'; Postgres `max_connections` (default 100) then caps the whole system and new connections fail with 'FATAL: sorry, too many clients already'. While k6 runs, query `SELECT state, wait_event_type, wait_event, count(*) FROM pg_stat_activity GROUP BY 1,2,3`: many `idle in transaction` means a leaked transaction, `Lock` waits mean row or advisory contention (find the blocker with `pg_blocking_pids(pid)` and `pg_locks`), `IO` / `DataFileRead` means the working set fell out of shared_buffers, `Client` / `ClientRead` on active sessions means the app is slow to consume results. Enable `pg_stat_statements` and sort by `total_exec_time` to find the query that only becomes visible at concurrency (a sequential scan that was fine at 1 rps). Fixes you must be able to prove: an index (verify with `EXPLAIN (ANALYZE, BUFFERS)` before and after), pgbouncer in `pool_mode = transaction`, `statement_timeout` and `idle_in_transaction_session_timeout` so a bad client cannot hold the pool, and pool sizing where workers x (pool_size + max_overflow) stays under max_connections minus superuser_reserved_connections.",
+   "minutes": 25,
+   "resource": {
+    "label": "PostgreSQL docs: The Cumulative Statistics System (pg_stat_activity)",
+    "url": "https://www.postgresql.org/docs/current/monitoring-stats.html"
+   }
+  },
+  {
+   "name": "Before/after methodology: proving the fix",
+   "learn": "A load report is an experiment, so control the variables: same script, same executor and rate, same duration, same dataset, same cluster state (warm or cold identically, with a 2-minute warm-up scenario excluded from thresholds), and change exactly one thing between runs. Record the environment in the report header (image digest, replica count, requests and limits, Postgres settings, node CPU model), because a 'fix' that shipped alongside a replica bump proves nothing. Report throughput at the fixed arrival rate, p50/p95/p99 and max, error rate, dropped_iterations, and the resource that saturated, with Grafana panels over identical time ranges. Run each configuration at least twice and quote the worse run; if run-to-run variance exceeds the improvement you have not proven anything and must say so. Codify the winning thresholds into the script and wire `k6 run` into CI on a nightly schedule against staging so the next regression is a red job, not a customer call.",
+   "minutes": 20,
+   "resource": {
+    "label": "Grafana k6 docs: Automated performance testing",
+    "url": "https://grafana.com/docs/k6/latest/testing-guides/automated-performance-testing/"
+   }
+  },
+  {
+   "name": "Overload, Little's law and load shedding",
+   "learn": "Little's law (concurrency = throughput x latency) explains the cliff: once a server's concurrency limit is full, every extra request queues, latency rises linearly with queue depth, and throughput flattens or falls as context switching and GC eat CPU. The SRE response is to fail fast and cheaply: bound the queue, return 503 or 429 with `Retry-After` immediately instead of letting requests time out slowly, reject low-criticality traffic (batch ingestion) before interactive traffic, and never let health checks fail under load, which turns overload into an outage. Implement one concrete limiter in Kaupex (uvicorn `--limit-concurrency`, or an ASGI middleware holding an `asyncio.Semaphore` per route class) and show with k6 that at 2x the breakpoint the p99 of accepted requests stays flat while rejections rise, rather than every request degrading. Understand the chapter's client-side adaptive throttling (reject locally when requests far exceed accepts) as what you recommend when the server is not yours to change.",
+   "minutes": 20,
+   "resource": {
+    "label": "Google SRE Book: Handling Overload",
+    "url": "https://sre.google/sre-book/handling-overload/"
+   }
+  },
+  {
+   "name": "Retry storms and cascading failures",
+   "learn": "Retries are load multipliers: a client retrying three times turns a 10 percent slowdown into a 4x surge exactly when the server can least take it, and a worker pool retrying a slow dependency exhausts its own threads and takes out a healthy service upstream. Learn the chapter's triggers (process death, deploys, organic growth, planned changes) and mitigations: exponential backoff with full jitter, a retry budget (retries capped near 10 percent of requests per client), retry only idempotent calls and only on specific errors (never on 4xx, never on a timeout without a deadline), deadline propagation so a downstream call cannot outlive its caller's timeout, and circuit breakers that stop calling a dependency that keeps failing. Reproduce a storm on your cluster: run k6 against Kaupex while NetworkChaos delays Postgres, watch the LLM and HubSpot retry code in Kaupex amplify the queue, then add a budget and jitter and re-run to show the difference.",
+   "minutes": 15,
+   "resource": {
+    "label": "Google SRE Book: Addressing Cascading Failures",
+    "url": "https://sre.google/sre-book/addressing-cascading-failures/"
+   }
+  },
+  {
+   "name": "Principles of chaos: hypothesis, blast radius, abort criteria",
+   "learn": "Chaos is an experiment, not a stunt: define steady state as measurable outputs (the SLIs from topic 20: Kaupex task completion rate, API p95, Temporal workflow success rate), write a hypothesis ('killing one worker pod causes zero failed workflows and under 60 s of added completion latency'), inject a real-world event (process death, network delay, dependency outage, disk full, clock skew), and compare steady state during and after. Minimise blast radius (one namespace, one pod, staging first, 30 s duration, a named owner watching, an abort condition tied to a dashboard panel), automate the experiment once understood, and only then run it in production with the customer's written sign-off. Write every experiment as a one-page card before running it: hypothesis, scope, method, abort criteria, expected and actual observations, timeline, recovery time, follow-up tickets. Those cards are the 'chaos notes' deliverable and exactly what a customer's risk or change board will ask to see.",
+   "minutes": 20,
+   "resource": {
+    "label": "Principles of Chaos Engineering",
+    "url": "https://principlesofchaos.org/"
+   }
+  },
+  {
+   "name": "Chaos Mesh on k3s: install, scope, safety",
+   "learn": "Install with `helm repo add chaos-mesh https://charts.chaos-mesh.org`, `kubectl create ns chaos-mesh`, then `helm install chaos-mesh chaos-mesh/chaos-mesh -n chaos-mesh --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/k3s/containerd/containerd.sock`; the socket path is the k3s-specific gotcha (k3s bundles its own containerd) and getting it wrong leaves experiments that never reach the Injected phase. Understand what you installed: chaos-controller-manager reconciles the CRDs, chaos-daemon is a privileged hostPID DaemonSet that uses nsenter, tc and iptables inside target pods (exactly the component a customer security team will flag, see topic 10), and the dashboard on port 2333 (`kubectl -n chaos-mesh port-forward svc/chaos-dashboard 2333:2333`) requires a ServiceAccount token unless you disable security mode for a lab. Every experiment scopes via `spec.selector` (namespaces, labelSelectors, pods by name) and `spec.mode` (one, all, fixed, fixed-percent, random-max-percent) plus `spec.duration`; inspect with `kubectl describe podchaos <name>` (Records with Injected and Recovered phases), pause with the annotation `experiment.chaos-mesh.org/pause: \"true\"`, and `kubectl delete` to recover. Never install it in a customer cluster without restricting the controller to target namespaces and agreeing a change window.",
+   "minutes": 20,
+   "resource": {
+    "label": "Chaos Mesh docs: Install Chaos Mesh using Helm",
+    "url": "https://chaos-mesh.org/docs/production-installation-using-helm/"
+   }
+  },
+  {
+   "name": "PodChaos under load: pod-kill, pod-failure, container-kill",
+   "learn": "With a constant-arrival-rate k6 run against Kaupex, apply `kind: PodChaos` with `action: pod-kill` (deletes the pod; `gracePeriod: 0` means SIGKILL with no drain, which is what a node crash looks like), `action: pod-failure` with `duration: '60s'` (swaps the container image for a pause image so the pod exists but serves nothing, which is what a wedged process looks like), and `action: container-kill` with `containerNames` to kill only the app container and exercise restartPolicy without rescheduling. Observe three clocks: time until readiness removes the pod from the Service (`kubectl get endpointslices -w`), time until the replacement is Ready (`kubectl get events --sort-by=.lastTimestamp -w`), and what k6 recorded in `http_req_failed` and the error strings in that window. Expect to find that a single-replica Deployment gives a hard outage of image-pull plus startup time, that two replicas without a PodDisruptionBudget still both die during a node drain, and that a readiness probe with `periodSeconds: 10` leaves up to 10 s of traffic going to a dead pod. Fix each and re-run until the hypothesis holds; that loop is the chaos notes.",
+   "minutes": 25,
+   "resource": {
+    "label": "Chaos Mesh docs: Simulate Pod Faults",
+    "url": "https://chaos-mesh.org/docs/simulate-pod-chaos-on-kubernetes/"
+   }
+  },
+  {
+   "name": "NetworkChaos: latency, loss and partition to Postgres and Temporal",
+   "learn": "Apply `kind: NetworkChaos` to the Kaupex API pods with `direction: to` and a `target` selector on the Postgres pods (or `externalTargets: ['<managed-db-ip>']` for a database outside the cluster) to inject `action: delay` (`latency: '200ms', jitter: '50ms', correlation: '25'`), `action: loss` (`loss: '10'`), `action: partition`, and `action: bandwidth`. Underneath it is tc netem and iptables inside the target pod's network namespace, so only that pod is affected. Watch which timeouts fire and in what order: libpq `connect_timeout`, Postgres `statement_timeout`, SQLAlchemy `pool_timeout`, uvicorn keep-alive, Traefik's ingress timeouts, and k6's request timeout (default 60 s); if nothing fires inside your SLO the customer sees a hang, not an error, and that is the finding. Repeat against the Temporal frontend service: delay makes worker polls slow but workflows keep progressing; a partition stops workers completing tasks, heartbeats lapse, and activities time out and retry when the partition heals. Write down the observed timeout chain and set the missing timeouts so the system fails inside the latency budget instead of hanging.",
+   "minutes": 25,
+   "resource": {
+    "label": "Chaos Mesh docs: Simulate Network Faults",
+    "url": "https://chaos-mesh.org/docs/simulate-network-chaos-on-kubernetes/"
+   }
+  },
+  {
+   "name": "Kubernetes termination semantics and resource pressure (StressChaos)",
+   "learn": "Know the termination sequence precisely: an API delete marks the pod Terminating and, in parallel, the endpoint controller removes it from EndpointSlices; the kubelet runs the preStop hook, sends SIGTERM to PID 1 of each container, waits `terminationGracePeriodSeconds` (default 30), then SIGKILLs. Because endpoint removal and SIGTERM race, a server that exits instantly on SIGTERM still drops in-flight requests; add `preStop: exec: command: ['sleep', '5']` and make uvicorn and the Temporal worker drain rather than exit. If the container starts with `sh -c 'python ...'` without `exec`, sh is PID 1, ignores SIGTERM, and every shutdown takes the full 30 s then a SIGKILL. Chaos Mesh pod-kill with gracePeriod 0 and `kubectl delete pod --grace-period=0 --force` skip all of this. PodDisruptionBudgets (`minAvailable`) are honoured only by the Eviction API (`kubectl drain`, autoscalers), not by deletes or chaos. Use `kind: StressChaos` with `stressors: { cpu: { workers: 2, load: 100 }, memory: { workers: 1, size: '256MB' } }` inside the Kaupex worker's cgroup to produce CPU throttling (`container_cpu_cfs_throttled_periods_total` climbing) and an OOMKilled restart (exit code 137; `kubectl describe pod` shows Last State Terminated, Reason OOMKilled), then size requests and limits from that evidence instead of guesses.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kubernetes docs: Pod Lifecycle (termination of Pods)",
+    "url": "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"
+   }
+  },
+  {
+   "name": "Temporal worker killed mid-workflow: timeouts, retries, replay",
+   "learn": "Kill the Kaupex Temporal worker pod (pod-kill, gracePeriod 0) while a workflow is inside an activity and trace exactly what the server does. Nothing happens immediately: the server has no liveness signal from a dead worker, so the activity stays started until its Start-To-Close timeout or its Heartbeat timeout expires; then the server records ActivityTaskTimedOut and, if the retry policy allows (default: initial interval 1 s, backoff coefficient 2.0, maximum interval 100x initial, unlimited attempts), schedules the next attempt, which any live worker polling the task queue picks up. Consequences you must be able to state cold: with a 1-hour Start-To-Close and no Heartbeat timeout the workflow stalls for an hour; a 30 s Heartbeat timeout plus `activity.heartbeat(progress)` bounds detection to 30 s and lets the retry resume from `activity.info().heartbeat_details`; Schedule-To-Start timeouts are non-retryable by design (they mean no worker is polling) so leave them unset. Workflow tasks on the dead worker time out after the Workflow Task timeout (default 10 s), the sticky cache is gone, and a fresh worker replays the full event history to rebuild state, which is why workflow code must be deterministic. Verify with `temporal workflow describe -w <id>` (Pending Activities: attempt, lastFailure, lastWorkerIdentity), `temporal workflow show -w <id>` for the event list, and `temporal task-queue describe -t kaupex` to see which worker identities are polling. Time the gap from kill to workflow completion and record it in the chaos notes.",
+   "minutes": 35,
+   "resource": {
+    "label": "Temporal docs: Detecting Activity failures (timeouts, heartbeats, retries)",
+    "url": "https://docs.temporal.io/encyclopedia/detecting-activity-failures"
+   }
+  },
+  {
+   "name": "Temporal graceful shutdown, idempotency and worker tuning under load",
+   "learn": "Because an activity may have performed its side effect (HubSpot write, LLM call, Postgres insert) before the worker died, retries mean at-least-once execution: every activity that touches the outside world needs an idempotency key derived from `activity.info().workflow_id` plus `activity_id`, `INSERT ... ON CONFLICT DO NOTHING`, or a lookup-before-write, and LLM calls should be cached by prompt hash so a retry does not double the bill. Make shutdown graceful in the Python SDK: `Worker(..., graceful_shutdown_timeout=timedelta(seconds=25))` (below terminationGracePeriodSeconds) stops polling, lets running activities finish or observe `activity.wait_for_worker_shutdown()` and heartbeat their progress, and cancels whatever remains; wire SIGTERM to `await worker.shutdown()` so a routine rollout is not an unplanned chaos experiment. Then load-test the worker path: run k6 at a rate that starts workflows, watch `temporal_worker_task_slots_available` (label `worker_type`) hit zero and `temporal_activity_schedule_to_start_latency` climb, and tune `max_concurrent_activities`, `max_concurrent_workflow_tasks`, `max_concurrent_activity_task_polls` (default 5), `max_cached_workflows`, or add replicas; if the pod's CPU is pinned, more slots will not help. Expose SDK metrics with `Runtime(telemetry=TelemetryConfig(metrics=PrometheusConfig(bind_address='0.0.0.0:9000')))` so they sit on the same Grafana dashboard as the k6 series.",
+   "minutes": 30,
+   "resource": {
+    "label": "Temporal docs: Worker performance tuning",
+    "url": "https://docs.temporal.io/develop/worker-performance"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can write a k6 script with a ramping-arrival-rate breakpoint scenario, tagged requests, a custom Trend for end-to-end task completion and thresholds derived from the Kaupex SLOs, run it from a separate host, and have results streaming into Prometheus so k6 and application RED metrics share one Grafana time axis.",
+  "You can name the first saturated resource in Kaupex under load within 15 minutes using `kubectl top`, `py-spy dump`, `pg_stat_activity` and the k6 timing breakdown, and state whether it is CPU, event-loop blocking, threadpool, connection pool or Postgres, with the evidence line for each.",
+  "You can produce a before/after load report in which exactly one variable changed, both configurations were run twice, the environment is recorded down to the image digest, and the p95/p99 improvement at fixed arrival rate exceeds run-to-run variance.",
+  "You can explain, with numbers from your own runs, how much a closed-model test under-reported latency versus the open model at the same nominal load, and what a non-zero `dropped_iterations` meant.",
+  "You can install Chaos Mesh on k3s with the correct containerd socket, scope an experiment to one namespace and one pod, run PodChaos, NetworkChaos and StressChaos against Kaupex while k6 is live, and read the outcome from EndpointSlice changes, events and `http_req_failed`.",
+  "You can kill a Temporal worker mid-activity and predict, before looking, how long until the activity retries and on which worker, confirm it with `temporal workflow describe` and `temporal task-queue describe`, and name the change (heartbeat timeout, idempotency key, graceful shutdown) that cuts recovery time.",
+  "You can implement a load-shedding limiter and demonstrate with k6 that at 2x the breakpoint the accepted requests' p99 stays flat while 503s rise, and explain to a customer's ops lead why that beats uniform degradation.",
+  "You can write a one-page chaos experiment card (hypothesis, blast radius, abort criteria, observations, recovery time, follow-ups) that a customer's change advisory board would accept."
+ ],
+ "failureModes": [
+  "The load generator ran on the same VPS as the k3s node; CPU contention manufactured a bottleneck at 300 rps that did not exist, and a sprint went into tuning uvicorn for a phantom.",
+  "A closed-model test with 20 VUs reported a 180 ms p95 and 'passed'; on go-live morning real users arrived at an open rate, requests piled into the uvicorn backlog, and p95 hit 9 s while the test dashboards were being shown to the customer.",
+  "Every request was tagged by its full URL including UUIDs, so k6 and then Prometheus remote-write produced tens of thousands of series, the summary was unreadable, the write endpoint hit cardinality limits, and the one slow endpoint stayed invisible.",
+  "The Temporal activity writing to HubSpot had a 2-hour Start-To-Close and no Heartbeat timeout; a node reboot during patching killed the worker and 340 workflows sat 'Running' for two hours, the customer's ops team re-submitted them by hand, and because the activity had no idempotency key HubSpot ended up with duplicate records.",
+  "Chaos Mesh went onto a customer cluster without a target-namespace restriction, a fixed-percent PodChaos with a typo in its labelSelector matched every pod including ingress, and the experiment card had no abort condition and no one watching the dashboard.",
+  "Client retries with no jitter and no budget turned a 30 s Postgres failover into a 15-minute outage: API pods exhausted their pools retrying, readiness probes that hit the database failed, Kubernetes pulled every pod out of the Service, and the LLM gateway retried on top of it all.",
+  "A before/after report showed a 40 percent p95 improvement that was actually a warm cache and a replica count that changed between runs; the fix was reverted in production two weeks later when the regression reappeared, and the report's credibility with the customer went with it."
+ ],
+ "interviewQuestions": [
+  "A customer says 'we need to know if the system can handle 5,000 concurrent users on Monday.' Turn that into a k6 test plan: which executor, what rate and duration, which thresholds, where the generator runs, and what you will and will not be able to claim from the result.",
+  "Your load test shows p99 climbing steeply at 400 rps while CPU on the API pods sits at 35 percent. Walk me through the next ten minutes: what you look at, in what order, and what each of the three most likely causes looks like in the evidence.",
+  "Explain coordinated omission to a customer engineer who insists their 50-thread JMeter run proved the system is fine. What would you change in the test, and what do you expect the new numbers to show?",
+  "Design the timeout and retry policy for a Temporal activity that writes to a third-party CRM with a p99 of 4 s and occasional 60 s stalls. Cover Start-To-Close, Heartbeat, the retry policy, idempotency, and exactly what happens when the worker pod is killed halfway through.",
+  "Kubernetes deletes a pod during a rolling deploy and users see connection resets for about three seconds even though the app handles SIGTERM. Explain the race that causes it and the two changes that eliminate it.",
+  "You have one afternoon in a customer's staging cluster to run chaos experiments before a go-live. Which three experiments do you run, what is the steady-state hypothesis for each, how do you control blast radius, and how do you write up the results so their change advisory board accepts them?",
+  "Under a spike, would you rather the API degrade uniformly (every request slower) or shed load (some 503s, the rest fast)? Defend your answer for an interactive LLM workflow product and describe how you would implement and prove it."
+ ],
+ "proofOfWork": "A public repository `kaupex-loadchaos` containing: the k6 scripts (smoke, average-load, ramping-arrival-rate breakpoint, and a mixed two-scenario run) with thresholds derived from the Kaupex SLOs and a `handleSummary` that emits a markdown table; Chaos Mesh manifests for PodChaos, NetworkChaos to Postgres, NetworkChaos to the Temporal frontend, and StressChaos, plus a Makefile that installs Chaos Mesh on k3s with the correct containerd socket, runs each experiment while k6 is live, and tears everything down; and a `REPORT.md` with the breakpoint number before and after the single fix, Grafana panels over identical time ranges, the observed timeout chain to Postgres, and a Temporal recovery timeline measured with `temporal workflow describe` for a worker killed mid-activity, showing detection time falling from the original Start-To-Close timeout to under 30 s after adding a heartbeat timeout and an idempotency key. A reviewer should be able to clone it, point it at any FastAPI plus Temporal deployment through `BASE_URL` and a namespace, and reproduce all three findings in under an hour."
+}

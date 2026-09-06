@@ -1,0 +1,218 @@
+{
+  "i": 18,
+  "topic": "CI/CD and supply chain: build, test, scan, sign, deploy",
+  "track": "C. Cloud and IaC",
+  "month": 3,
+  "hours": 5.0,
+  "why": "An FDE's first week on a new account is usually spent getting a pilot from a laptop into the customer's cluster, and every demo, hotfix and 'can you just change the prompt' request for the next six months rides on that same path, so the pipeline is the one piece of infrastructure you build before anything else. The customer's security team will not ask whether you have CI; they will ask how you know the image running in their EKS cluster is the exact bytes you tested and scanned, and who could have pushed something else. This topic is the chain of custody from commit SHA to running pod that lets you answer that in one sentence with evidence, and it is the mechanism behind the depth target: a failing test or a HIGH CVE blocks the deploy, and Argo CD syncs only on green.",
+  "prerequisites": [
+    "Git from 'Git at depth' (topic 4): what a SHA identifies, tags versus branches, protected branches, and why `refs/pull/N/merge` is a different commit from the PR head",
+    "Image supply chain from 'Production images and supply chain' (topic 6): Trivy severities and `.trivyignore`, cosign keyless signing, SBOM and provenance attestations, tag versus digest; this topic wires those into a pipeline rather than re-teaching them",
+    "GitOps from 'Helm charts and ArgoCD' (topic 9): the Application CRD, automated sync with prune and selfHeal, health assessment, and the CI-to-CD handoff pattern of committing a new image reference to a deploy repo",
+    "OIDC federation and ECR provisioning from 'Terraform' (topic 12) and 'IAM' (topic 15): the GitHub OIDC provider, a role trust policy with a `sub` condition, and an ECR repository created by Terraform rather than by the pipeline",
+    "A working EKS or kind cluster running Argo CD from topic 16, and the Dokeo repository with a passing `pytest` suite and the multi-stage Dockerfile built in topic 6",
+    "Comfort reading YAML with anchors and `${{ }}` expressions, and a `gh` CLI authenticated to your GitHub account"
+  ],
+  "subtopics": [
+    {
+      "name": "Pipeline DAG: jobs, needs, if-conditions and what 'green' means",
+      "learn": "Lay the pipeline out as a DAG of jobs (test, build, scan, sign-and-push, promote, verify) joined by `jobs.<id>.needs`, and understand that a job whose `needs` dependency failed or was skipped is itself skipped unless its `if` uses `always()` or `!cancelled()`. Learn the status functions `success()`, `failure()`, `cancelled()`, `always()` and the trap that a skipped job reports a neutral conclusion that GitHub treats as passing for required checks. Set `timeout-minutes` on every job (the default is 360) and `defaults.run.shell: bash` so `set -eo pipefail` is on and a failing command in a multi-line `run` actually fails the step. Draw the DAG on paper before writing YAML and mark each edge with the artifact it carries: test report, image digest, signature, GitOps commit SHA.",
+      "minutes": 20,
+      "resource": {
+        "label": "GitHub Actions reference: Workflow syntax (jobs.<job_id>.needs, if, timeout-minutes)",
+        "url": "https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax"
+      }
+    },
+    {
+      "name": "Triggers: pull_request versus push versus workflow_dispatch, and pull_request_target",
+      "learn": "Run test, build and scan on `pull_request` (which checks out the synthetic merge commit `refs/pull/N/merge`, so `github.sha` is not the PR head; use `github.event.pull_request.head.sha` when you need the real one) and run the full push-sign-deploy path only on `push` to `main` and on `push.tags: ['v*']`. Use `paths` and `paths-ignore` (mutually exclusive on the same event) to skip docs-only changes, knowing the skipped-check trap from the previous subtopic. Add `workflow_dispatch` with typed `inputs` (`type: choice`, `options: [dev, staging, prod]`) for manual redeploys and hotfixes. Understand why `pull_request_target` runs with the base branch's secrets and must never be combined with checking out and executing the PR's head: that combination is the standard way ECR push credentials are exfiltrated from a public repo.",
+      "minutes": 15,
+      "resource": {
+        "label": "GitHub Actions reference: Events that trigger workflows",
+        "url": "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows"
+      }
+    },
+    {
+      "name": "Concurrency groups: cancel PR builds, never cancel a deploy",
+      "learn": "Set a workflow-level `concurrency: { group: ${{ github.workflow }}-${{ github.ref }}, cancel-in-progress: ${{ github.event_name == 'pull_request' }} }` so a rapid series of pushes to a PR only runs the last one, and give the deploy job its own group per environment (`group: deploy-${{ inputs.env }}`, `cancel-in-progress: false`) so two merges to main queue instead of racing to write the GitOps repo. Know that GitHub keeps at most one pending run per group and cancels the earlier pending one, and that cancelling a job mid-way leaves no rollback: a cancelled deploy job can leave the GitOps repo committed but `argocd app wait` never run. Verify behaviour by pushing three commits to a PR within a minute and reading which runs were cancelled.",
+      "minutes": 10,
+      "resource": {
+        "label": "GitHub Actions how-to: Control workflow concurrency",
+        "url": "https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency"
+      }
+    },
+    {
+      "name": "GITHUB_TOKEN permissions: deny by default, grant per job",
+      "learn": "Put `permissions: {}` at the workflow top and grant per job exactly what it needs: `contents: read` for checkout, `id-token: write` for OIDC to AWS and Sigstore, `security-events: write` to upload SARIF, `attestations: write` for build provenance, `pull-requests: write` only on the job that comments on PRs. Understand that the token is scoped to the current repository and expires when the job ends, so it cannot push to a separate deploy repository, and that pushes made with `GITHUB_TOKEN` do not trigger other workflows (a loop guard you lose the moment you switch to an App token). Check the repository setting for default token permissions and set it to read-only, because older repositories default to read-write. Confirm the grants by reading the 'GITHUB_TOKEN Permissions' block at the top of any job log.",
+      "minutes": 12,
+      "resource": {
+        "label": "GitHub Actions: Automatic token authentication (GITHUB_TOKEN permissions)",
+        "url": "https://docs.github.com/en/actions/tutorials/authenticate-with-github_token"
+      }
+    },
+    {
+      "name": "The test gate: pytest exit codes, coverage threshold, JUnit and step summary",
+      "learn": "Install with `uv sync --locked` (fails if `uv.lock` is stale rather than silently resolving) and run `uv run pytest -q -x --junitxml=reports/junit.xml --cov=dokeo --cov-report=xml --cov-report=term-missing --cov-fail-under=80 -W error --durations=10 -p no:cacheprovider`. Know every pytest exit code: 0 passed, 1 failures, 2 interrupted, 3 internal error, 4 usage error, 5 no tests collected; treat 5 as a real failure because a broken import path that collects nothing would otherwise pass the gate. Stand up integration dependencies with `services: postgres: image: postgres:16` plus `options: --health-cmd pg_isready --health-interval 5s --health-retries 10` so the job waits for the database rather than flaking. Write the pass/fail counts and slowest tests to `$GITHUB_STEP_SUMMARY` so a reviewer sees them without opening logs, and upload the JUnit file as an artifact for the failure-trend view.",
+      "minutes": 25,
+      "resource": {
+        "label": "pytest reference: Exit codes",
+        "url": "https://docs.pytest.org/en/stable/reference/exit-codes.html"
+      }
+    },
+    {
+      "name": "Dependency caching keyed on the lockfile",
+      "learn": "Cache with `astral-sh/setup-uv` (`enable-cache: true`, `cache-dependency-glob: uv.lock`) or `actions/cache@v4` using `key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}` and a `restore-keys` prefix fallback; never key on a branch name or a file that does not pin versions, because then CI tests yesterday's dependency set. Know the limits: 10 GB per repository with least-recently-used eviction and a seven-day unused-entry expiry, and the scoping rule that a run can restore caches created on its own branch or the default branch but not on sibling branches, which is why the first PR run after a lockfile change on main is slow. Measure the effect: record install time cold versus warm in the step summary and expect a fall from minutes to seconds.",
+      "minutes": 12,
+      "resource": {
+        "label": "GitHub Actions reference: Dependency caching",
+        "url": "https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching"
+      }
+    },
+    {
+      "name": "Build once with Buildx: build-push-action, GHA cache backend, digest output",
+      "learn": "Use `docker/setup-buildx-action@v3` and `docker/build-push-action@v6` with `context: .`, `cache-from: type=gha` and `cache-to: type=gha,mode=max` (which stores every layer, not just the final stage, in the Actions cache and shares the 10 GB budget), `provenance: mode=max`, `sbom: true`, and `push: ${{ github.event_name != 'pull_request' }}`. Read `steps.build.outputs.digest` and `outputs.imageid`, and understand that the manifest digest of what was pushed is the only identity the rest of the pipeline should ever use. Know that `load: true` (to smoke-test the image in the same job with `docker run --rm IMAGE python -c 'import dokeo'`) is single-platform only and produces a local image whose ID is not the registry digest, so either test-then-push in one job or push to a candidate tag first and scan the pushed digest. Pass `build-args` for `GIT_SHA` and `secrets` for private index credentials instead of baking them into layers.",
+      "minutes": 25,
+      "resource": {
+        "label": "Docker Build docs: GitHub Actions cache (type=gha)",
+        "url": "https://docs.docker.com/build/ci/github-actions/cache/"
+      }
+    },
+    {
+      "name": "Tagging strategy with metadata-action: sha, semver, pr, no floating latest in prod",
+      "learn": "Generate tags and OCI labels with `docker/metadata-action@v5`: `type=sha,format=long` for the immutable per-commit tag, `type=semver,pattern={{version}}` on tag pushes, `type=ref,event=pr` for `pr-123` images that lifecycle rules can delete quickly, and `type=raw,value=latest,enable={{is_default_branch}}` only if a dev environment genuinely wants a floating tag. Feed `steps.meta.outputs.tags` and `outputs.labels` into build-push-action so every image carries `org.opencontainers.image.revision`, `.source`, `.created` and `.version`, which is what lets you map a running container back to a commit with `docker inspect`. Deployments never reference a tag: they reference `REGISTRY/REPO@sha256:...`, and tags are for humans browsing the registry.",
+      "minutes": 12,
+      "resource": {
+        "label": "docker/metadata-action (tags and labels inputs)",
+        "url": "https://github.com/docker/metadata-action"
+      }
+    },
+    {
+      "name": "Passing the digest downstream: job outputs versus artifacts",
+      "learn": "Expose the digest with `jobs.build.outputs.digest: ${{ steps.build.outputs.digest }}` and consume it as `needs.build.outputs.digest` in scan, sign and deploy jobs; outputs are capped at 1 MB per job and any output that contains a masked secret is silently dropped, which is the usual reason an output arrives empty. Use `actions/upload-artifact@v4` for files (JUnit XML, Trivy SARIF, SBOM) with a unique `name` per job and matrix leg because v4 artifacts are immutable, `if-no-files-found: error`, and `retention-days` tuned to your audit needs; download in later jobs with `actions/download-artifact@v4`. Write a one-line rule for the team: identity (digest, commit SHA, run ID) travels as outputs; evidence (reports, SBOMs) travels as artifacts.",
+      "minutes": 12,
+      "resource": {
+        "label": "GitHub Actions how-to: Pass job outputs between jobs",
+        "url": "https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/pass-job-outputs"
+      }
+    },
+    {
+      "name": "The Trivy gate: exit codes, severity, unfixed, SARIF, and DB rate limits",
+      "learn": "Run `aquasecurity/trivy-action` pinned to a release, scanning the pushed digest (`image-ref: REGISTRY/REPO@${{ needs.build.outputs.digest }}`) with `severity: CRITICAL,HIGH`, `ignore-unfixed: true`, `exit-code: '1'`, `trivyignores: .trivyignore` and `format: table` as the blocking step, plus a second non-blocking run with `format: sarif` uploaded through `github/codeql-action/upload-sarif` so findings appear in the Security tab. Know that Trivy's exit code 1 means findings at or above the threshold, other non-zero codes mean scanner errors, and `--exit-on-eol 1` additionally fails on an end-of-life base OS. Pre-empt the Monday-morning outage: the vulnerability DB is pulled from ghcr.io and gets rate-limited (TOOMANYREQUESTS) across busy orgs, so set `TRIVY_DB_REPOSITORY` and `TRIVY_JAVA_DB_REPOSITORY` to a mirror (`public.ecr.aws/aquasecurity/trivy-db`, or your own ECR pull-through cache), cache the DB directory between runs, and use `skip-db-update` on the second invocation.",
+      "minutes": 25,
+      "resource": {
+        "label": "aquasecurity/trivy-action README (inputs, exit-code, SARIF, DB env vars)",
+        "url": "https://github.com/aquasecurity/trivy-action"
+      }
+    },
+    {
+      "name": "OIDC to AWS and ECR login without stored keys",
+      "learn": "Assume a purpose-built push role with `aws-actions/configure-aws-credentials@v4` (`role-to-assume`, `aws-region`, `role-session-name: gha-${{ github.run_id }}`) under `permissions: id-token: write`; the role's trust policy must pin `token.actions.githubusercontent.com:aud` to `sts.amazonaws.com` and `:sub` to `repo:ORG/dokeo:ref:refs/heads/main` (or `repo:ORG/dokeo:environment:prod` when the job declares an environment), so a fork PR cannot assume it. Give that role only `ecr:GetAuthorizationToken` on `*` plus `BatchCheckLayerAvailability`, `InitiateLayerUpload`, `UploadLayerPart`, `CompleteLayerUpload`, `PutImage`, `BatchGetImage` and `GetDownloadUrlForLayer` on the one repository ARN, and no `CreateRepository`: the repo is Terraform's job. Log in with `aws-actions/amazon-ecr-login@v2` (`mask-password: 'true'` so the 12-hour token never lands in logs) and use its `registry` output (`ACCOUNT.dkr.ecr.REGION.amazonaws.com`) rather than hardcoding the account.",
+      "minutes": 20,
+      "resource": {
+        "label": "aws-actions/amazon-ecr-login README (OIDC example, mask-password, outputs)",
+        "url": "https://github.com/aws-actions/amazon-ecr-login"
+      }
+    },
+    {
+      "name": "ECR hygiene: immutable tags, lifecycle policies, scanning, cross-account pull, pull-through cache",
+      "learn": "Set `image_tag_mutability = \"IMMUTABLE\"` so a second push of an existing tag fails with `ImageTagAlreadyExistsException` instead of silently moving `latest`. Write a lifecycle policy that expires `tagStatus: untagged` images after 7 days and `pr-` prefixed images after 14, and understand the two ways it bites: expiring an image a Deployment still references causes ImagePullBackOff on the next node replacement, and a rule with `tagStatus: any` deletes cosign's `sha256-<digest>.sig` signature tags so admission verification starts rejecting pods. Turn on scan-on-push (basic) or enhanced scanning (Inspector, continuous) as a second opinion after Trivy. Grant the customer's EKS node role pull access with a repository policy or an `aws:PrincipalOrgID` condition, and configure pull-through cache rules for `public.ecr.aws`, `ghcr.io` and Docker Hub (credentials in Secrets Manager under the `ecr-pullthroughcache/` prefix) so builds stop dying on Docker Hub's anonymous pull limit.",
+      "minutes": 20,
+      "resource": {
+        "label": "Amazon ECR User Guide: Image tag mutability",
+        "url": "https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-tag-mutability.html"
+      }
+    },
+    {
+      "name": "Sign and attest by digest in the pipeline",
+      "learn": "After the scan passes, install cosign with `sigstore/cosign-installer@v3` and run `cosign sign --yes REGISTRY/REPO@DIGEST` in a job with `id-token: write`; the certificate identity will be `https://github.com/ORG/dokeo/.github/workflows/ci.yml@refs/heads/main`, which is exactly what your Kyverno `verifyImages` rule or a manual `cosign verify --certificate-identity-regexp '^https://github.com/ORG/dokeo/' --certificate-oidc-issuer https://token.actions.githubusercontent.com` should pin. Add `actions/attest-build-provenance@v2` with `subject-name`, `subject-digest` and `push-to-registry: true` (needs `attestations: write`) and verify with `gh attestation verify oci://REGISTRY/REPO@DIGEST --owner ORG`. Never sign a tag: the signature must be over the digest you scanned, and the order test, build, scan, sign, promote is what makes 'signed' mean 'passed the gates'.",
+      "minutes": 20,
+      "resource": {
+        "label": "actions/attest-build-provenance (subject-digest, push-to-registry, verification)",
+        "url": "https://github.com/actions/attest-build-provenance"
+      }
+    },
+    {
+      "name": "CI to GitOps handoff: committing the digest to the deploy repo",
+      "learn": "The deploy job mints a short-lived token with `actions/create-github-app-token@v1` (or uses a write deploy key stored as a secret) because `GITHUB_TOKEN` cannot push to another repository and a personal PAT dies with its owner; clones the deploy repo; runs `kustomize edit set image dokeo=REGISTRY/REPO@sha256:...` in `envs/dev` or `yq -i '.image.digest = strenv(DIGEST)' envs/dev/values.yaml`; commits with a message carrying the source SHA and run URL; and pushes directly for dev but opens a PR with `gh pr create` for prod. Guard against loops: App-token pushes do trigger workflows in the deploy repo, so its workflows must `paths-ignore` bot-touched files or the commit must carry `[skip ci]`. Know the alternative, Argo CD Image Updater watching ECR and writing back, and why it is a harder sell to a customer: the cluster now needs registry-read credentials and a Git write credential, and CI stops being the single writer of deployed state.",
+      "minutes": 25,
+      "resource": {
+        "label": "Argo CD user guide: Automation from CI pipelines",
+        "url": "https://argo-cd.readthedocs.io/en/stable/user-guide/ci_automation/"
+      }
+    },
+    {
+      "name": "Argo CD syncs on green: webhook, sync, and app wait as the deploy verdict",
+      "learn": "With `syncPolicy.automated: { prune: true, selfHeal: true }` Argo CD deploys the new digest on its next poll (default `timeout.reconciliation` is 180s); register a GitHub webhook to `https://ARGOCD_HOST/api/webhook` with the secret in `argocd-secret` under `webhook.github.secret` to make that near-instant. In the pipeline, `argocd login ARGOCD_HOST --grpc-web --auth-token $ARGOCD_TOKEN` using a project-role token (`argocd proj role create-token`, RBAC `p, proj:dokeo:ci, applications, sync, dokeo/*, allow`), then `argocd app get dokeo-dev --refresh` and `argocd app wait dokeo-dev --sync --health --timeout 300`, which exits non-zero on Degraded or timeout and turns 'deployed' into a real pass/fail. Understand why a sync can succeed while the rollout fails: Deployment health stays Progressing until `readyReplicas` matches or `progressDeadlineSeconds` (default 600) expires, so set that deadline below the wait timeout or the pipeline reports green while pods crash-loop.",
+      "minutes": 25,
+      "resource": {
+        "label": "Argo CD CLI reference: argocd app wait",
+        "url": "https://argo-cd.readthedocs.io/en/stable/user-guide/commands/argocd_app_wait/"
+      }
+    },
+    {
+      "name": "Environments, required reviewers and branch protection that actually gate",
+      "learn": "Declare `environment: { name: prod, url: https://dokeo.customer.example }` on the prod deploy job and configure required reviewers, a wait timer and a deployment-branches policy of `main` only; environment-scoped secrets (the prod ARGOCD_TOKEN) are then unavailable to any other job, and the OIDC `sub` claim gains `environment:prod`, which your prod IAM role trust should require. In branch protection or rulesets, require the status checks `test`, `scan` and `sign-and-push` by their exact job names and enable 'require branches to be up to date'; renaming a job silently orphans the required check and every PR sits pending forever, and a `paths`-skipped job counts as passing, so keep gating jobs unconditional and make them cheap instead. Test the gate by trying to merge a PR with a failing test and confirming the merge button is disabled, not just red.",
+      "minutes": 15,
+      "resource": {
+        "label": "GitHub Actions how-to: Manage environments for deployment",
+        "url": "https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments"
+      }
+    },
+    {
+      "name": "Reusable workflows: one golden pipeline for every customer repo",
+      "learn": "Extract build-scan-sign-push into a `workflow_call` workflow with typed `inputs` (`image_name`, `python_version`, `ecr_role_arn`) and declared `secrets`, and call it from Dokeo with `uses: ORG/platform-workflows/.github/workflows/build-scan-push.yml@<sha>` plus `with:` and `secrets: inherit`, so the application repo's workflow is under 25 lines. Know the rules: up to four levels of nesting, the caller's `permissions` can only be narrowed by the callee, `on.workflow_call.outputs` is how the digest comes back, and a private workflow repo must grant access to callers in its Actions settings. Use composite actions (`runs.using: composite`) for step bundles inside a job and reusable workflows for whole jobs; pin both to a commit SHA, not a moving tag.",
+      "minutes": 12,
+      "resource": {
+        "label": "GitHub Actions how-to: Reuse workflows",
+        "url": "https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows"
+      }
+    },
+    {
+      "name": "Debugging runs: debug logging, gh run, workflow commands, local iteration with act",
+      "learn": "Triage from the terminal: `gh run list --workflow ci.yml`, `gh run watch`, `gh run view RUN_ID --log-failed`, and `gh run rerun RUN_ID --failed --debug`, which re-runs only failed jobs with `ACTIONS_STEP_DEBUG` and `ACTIONS_RUNNER_DEBUG` enabled (you can also set those as repository variables). Emit structured output with workflow commands: `::group::`/`::endgroup::` to fold noisy sections, `::error file=app.py,line=42::message` to annotate the PR, `::add-mask::` for anything you print that must never appear, and `echo \"digest=$D\" >> \"$GITHUB_OUTPUT\"` rather than the deprecated `::set-output`. Iterate locally with `act -j test` before pushing, accepting that OIDC, environments and the GHA cache backend do not work under act, and drop a `tmate` step behind `if: failure()` when you need a shell on the runner.",
+      "minutes": 15,
+      "resource": {
+        "label": "GitHub Actions how-to: Enable debug logging",
+        "url": "https://docs.github.com/en/actions/how-tos/monitor-workflows/enable-debug-logging"
+      }
+    },
+    {
+      "name": "Self-hosted runners inside the customer's VPC",
+      "learn": "When ECR, Argo CD or the artifact store is reachable only from the customer's network, run jobs on `runs-on: [self-hosted, linux, x64, customer-vpc]` using Actions Runner Controller on EKS with ephemeral runners so each job gets a clean pod and no leftover credentials, and let the runner's IRSA role replace the OIDC-to-AWS step. Know the egress the runner needs (`github.com`, `api.github.com`, `*.actions.githubusercontent.com`, plus your registry and Argo CD), and the hard rule that self-hosted runners never serve `pull_request` from a public repository because a fork PR is arbitrary code on your network. Decide explicitly per job which runner it uses; test and scan can stay on GitHub-hosted, and only the push and deploy legs need to be inside.",
+      "minutes": 12,
+      "resource": {
+        "label": "GitHub Actions concepts: Self-hosted runners",
+        "url": "https://docs.github.com/en/actions/concepts/runners/self-hosted-runners"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can, from an empty `.github/workflows` directory, ship a Dokeo pipeline in which pull requests run test, build and scan without pushing, and merges to main run test, build, scan, sign, push to ECR, bump the GitOps repo and wait for Argo CD to report Healthy, with commit-to-healthy lead time under 10 minutes on a warm cache.",
+    "You can demonstrate on demand that a failing test and an injected HIGH CVE (an old base image or a pinned vulnerable urllib3) each stop the run at the right job, and that the merge button on the PR is disabled rather than merely red.",
+    "You can trace any running pod back to its source: `kubectl get pod -o jsonpath='{.status.containerStatuses[0].imageID}'` to a digest, `cosign verify` to a workflow identity, the OCI revision label to a commit SHA, and the GitOps commit to the run URL, in under five minutes with only CLI tools.",
+    "You can write an IAM trust policy and role for the push job such that a fork PR, a feature branch and a job without `environment: prod` all fail `AssumeRoleWithWebIdentity`, and prove it with a deliberate attempt.",
+    "You can write an ECR lifecycle policy that reclaims PR and untagged images while never deleting a digest referenced by a live Deployment or a cosign signature tag, and explain each rule to a customer's platform team.",
+    "You can read a failed run from `gh run view --log-failed`, distinguish scanner infrastructure failures (DB rate limit, registry auth) from real findings, and fix the pipeline or the code accordingly without re-running blindly.",
+    "You can extract the pipeline into a reusable workflow and onboard a second repository (DefenderMate) with a caller workflow of fewer than 25 lines, pinned to a commit SHA.",
+    "You can explain to a customer's security reviewer, in one paragraph and with evidence, why the image in their cluster is the exact artifact that passed tests and scanning, and what would have to be compromised for that not to hold."
+  ],
+  "failureModes": [
+    "Every pipeline in the org turns red on Monday morning with TOOMANYREQUESTS pulling the Trivy vulnerability DB from ghcr.io, and the team responds by setting `exit-code: 0`, which quietly disables the CVE gate for months.",
+    "A `paths` filter or a renamed job means the required 'test' check either reports skipped (treated as passing, so an untested change merges) or never reports at all (so every PR sits pending and someone adds a bypass rule).",
+    "A Deployment references a mutable `latest` tag; Argo CD shows Synced and Healthy while two of three pods run last week's image because `imagePullPolicy: IfNotPresent` kept the cached layer, and the customer sees inconsistent behaviour per request.",
+    "An ECR lifecycle rule with `tagStatus: any` or an aggressive count expires the digest the live Deployment points at, or deletes cosign's `sha256-*.sig` tags; nothing happens until a node is replaced at 3am, then pods fail ImagePullBackOff or are rejected by Kyverno.",
+    "A workflow uses `pull_request_target` and checks out the PR head to 'run the PR's tests with secrets'; a fork PR modifies `conftest.py` to print `$AWS_SECRET_ACCESS_KEY` or the ECR token, and the customer's registry is writeable by a stranger.",
+    "`argocd app sync` returns success and the pipeline goes green, but the new pods crash-loop; Deployment health stays Progressing for the full 600s `progressDeadlineSeconds`, longer than anyone watched, and prod is on the old version while the release notes say otherwise.",
+    "The GitOps bump is committed with a departed engineer's PAT; the day their account is deactivated, deploys stop with a 403 in the least-read job of the pipeline, and the on-call spends two hours before finding it."
+  ],
+  "interviewQuestions": [
+    "Design the path from `git push` to a pod running in a customer's EKS cluster such that their security team can verify the image was built from a reviewed commit, tested and scanned. Where does each gate live, what identity is carried between stages, and what is enforced at admission rather than in CI?",
+    "The pipeline is green but the customer says the fix is not live. Walk me through your debugging in order: which digest was pushed, what the GitOps repo contains, what Argo CD reports, and what `imageID` the pods actually run. Where are the places 'green' can lie?",
+    "Why deploy by digest rather than tag? Describe two concrete production failures that mutable tags cause, and how you make the registry itself refuse the mistake.",
+    "Your Trivy gate blocks on a HIGH CVE in glibc with no fix available in the base image. The customer wants the release today. What do you do, what do you write down, and how do you prevent the exception becoming permanent?",
+    "The customer's policy is no long-lived credentials anywhere. Explain exactly how a GitHub Actions job obtains permission to push to their ECR, what the OIDC `sub` claim looks like, and how you ensure only merges to main in the prod environment can assume the prod role.",
+    "All CI runs started failing this morning with a rate-limit error pulling the vulnerability database. What is happening, what is the fix in the next 30 minutes, and what is the durable fix?",
+    "A bad release went out through GitOps ten minutes ago. Give me the rollback sequence, the expected time to recovery, what makes it safe to do under pressure, and how you would turn it into a one-click job."
+  ],
+  "proofOfWork": "A recorded red-to-green walkthrough plus a written chain-of-custody sheet. Open three pull requests against Dokeo: one that breaks a test, one that pins a dependency or base image with a known HIGH CVE, and one clean change. Show the first two stopped at the test and scan jobs respectively with the merge button disabled, and the third flowing through push, signing, GitOps commit and `argocd app wait` to Healthy. Then produce a one-page document for that third change listing commit SHA, run URL, image digest, `cosign verify` output with the certificate identity, `gh attestation verify` output, the GitOps commit SHA, the Argo CD revision, and the `imageID` from the running pod, with a short paragraph on what would need to be compromised to break the chain. Finish by extracting the pipeline into a reusable workflow and onboarding DefenderMate with a caller of under 25 lines, showing both repositories' runs side by side."
+}

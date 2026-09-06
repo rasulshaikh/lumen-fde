@@ -1,0 +1,191 @@
+{
+ "i": 58,
+ "topic": "Experiment tracking and prompt versioning as CI",
+ "track": "H. AI in Production",
+ "month": 7,
+ "hours": 6,
+ "why": "The prompt is the highest-frequency change on a customer's production path and usually the only one that a non-engineer can make - a solutions consultant tweaking wording in a UI during a workshop is a production deploy with no PR, no review and no rollback plan. As the FDE you are the person the customer's change-management process points at, so you need to answer 'what changed on Tuesday, what did it do to the numbers, and how fast can you undo it' without a redeploy and without a hedge. Everything in topic 53 measures a system at one moment; this topic is what turns those measurements into a run history with lineage, a gate that blocks a regression before it reaches the customer's tenant, and a rollback you have actually rehearsed with a stopwatch.",
+ "prerequisites": [
+  "Prompt-as-code from topic 46: prompt files with pinned dated model snapshots, structured output schemas, and a committed baseline you can diff against. This topic moves that artefact into a registry and adds rollout mechanics; it does not re-teach prompt authoring.",
+  "The eval machinery from topic 53: a labelled dataset with a content hash, per-class metrics with Wilson intervals, at least one validated judge, and the notion of a noise budget derived from repeated runs of an unchanged system. Without a dataset that can actually go down, everything here is ceremony.",
+  "GitHub Actions at working depth from topic 18: pull_request vs push vs schedule vs workflow_dispatch vs repository_dispatch, job permissions, required status checks, path filters, artifacts, concurrency groups, and how secrets behave on forked PRs.",
+  "Tracing from topic 54: you need trace and observation ids in your production path already, because prompt-version lineage is attached to generations, not to log lines.",
+  "Git at depth from topic 4: tags, reflog, revert vs reset, and why an immutable content-addressed history is the right mental model for a prompt registry.",
+  "Audit-trail and multi-tenant modelling from topic 30: who-changed-what-when tables, and per-tenant scoping, since prompt labels are frequently tenant-scoped in real deployments."
+ ],
+ "subtopics": [
+  {
+   "name": "Source of truth: Git only, registry only, or both (the two-writer problem)",
+   "learn": "Decide explicitly, in writing, which system is authoritative for prompt text, because the common failure is that both are and neither is. Git-only gives you review, blame and atomic rollback with the code, but couples every wording fix to a deploy and locks out the domain expert who actually knows the wording. Registry-only gives non-engineers a UI and decouples rollout from deploy, but ships with no review, no diff in the PR, and a SaaS dependency on the request path. Learn the pragmatic split most teams land on: the registry is the deployment source of truth, and a webhook mirrors every version into Git for review tooling and disaster recovery - the mirror is a read model, never a writer. Write the decision into the engagement's ADR with the escape hatch named.",
+   "minutes": 20,
+   "resource": {
+    "label": "Langfuse docs - Prompt management, get started",
+    "url": "https://langfuse.com/docs/prompt-management/get-started"
+   }
+  },
+  {
+   "name": "Immutable versions, mutable labels: the pointer indirection",
+   "learn": "Internalise the one structural idea the whole topic rests on: versions are immutable and monotonically numbered, and what production reads is a mutable named pointer at a version. In Langfuse those pointers are labels - `production` is the default label served when you pass none, `latest` auto-tracks the newest version, and custom labels carry environments (`staging`), tenants (`tenant-acme`) or experiment arms (`prod-a`, `prod-b`). Fetch deliberately with `langfuse.get_prompt(\"finding-summary\", label=\"production\")` for the serving path and `version=7` for a reproduction, and never let application code compute a version number. The consequence to state out loud: promotion and rollback become label moves, which are O(1), auditable, and require no artefact rebuild.",
+   "minutes": 25,
+   "resource": {
+    "label": "Langfuse docs - Prompt version control (labels, protected labels, rollback)",
+    "url": "https://langfuse.com/docs/prompt-management/features/prompt-version-control"
+   }
+  },
+  {
+   "name": "MLflow prompt registry mechanics end to end",
+   "learn": "Do the same shape in the other ecosystem so you can walk into either customer. `mlflow.genai.register_prompt(name=..., template=..., commit_message=..., tags={...}, response_format=PydanticModel)` creates version N+1 - it never mutates version N; the template uses `{{double_brace}}` variables and both plain strings and chat-style message lists are accepted. Aliases are the pointer layer: `mlflow.genai.set_prompt_alias(\"finding-summary\", alias=\"production\", version=2)`, loaded as `mlflow.genai.load_prompt(\"prompts:/finding-summary@production\")`, with `prompts:/finding-summary/2` for a pinned version and the reserved `@latest` alias for newest. Know `prompt.format(**vars)` and `prompt.to_single_brace_format()` for LangChain/LlamaIndex interop, and that a prompt version can carry a JSON response schema and a model configuration block so decoding params version together with the text.",
+   "minutes": 25,
+   "resource": {
+    "label": "MLflow docs - Create and edit prompts (prompt registry)",
+    "url": "https://mlflow.org/docs/latest/genai/prompt-registry/create-and-edit-prompts/"
+   }
+  },
+  {
+   "name": "The fetch path in production: caching, staleness, fallback, cold start",
+   "learn": "A registry on the request path is a new dependency in your p99 and your availability budget, so learn its cache semantics exactly. Langfuse caches per process with `cache_ttl_seconds` (default 60; `0` disables) and serves stale-while-revalidate - an expired entry is returned immediately while a background refresh runs, which is why a label move is not instantaneous across a fleet. Always pass `fallback=` with the last-known-good template compiled into the image so a registry outage degrades to a slightly old prompt instead of a 500. Prefetch at startup rather than lazily on first request, and never call `get_prompt` at module import time in a long-lived worker - that pins the version for the process lifetime and quietly defeats every rollout mechanism you are about to build.",
+   "minutes": 25,
+   "resource": {
+    "label": "Langfuse docs - Prompt caching (cache_ttl_seconds, fallbacks)",
+    "url": "https://langfuse.com/docs/prompt-management/features/caching"
+   }
+  },
+  {
+   "name": "What exactly is 'a run': the fingerprint you must record",
+   "learn": "Define a run as a tuple and record every element as a param or tag, because any unrecorded element makes the number unattributable: prompt name and version, dated model snapshot, decoding params (temperature, top_p, max_tokens, seed if supported), dataset name and content hash, judge prompt version and judge model snapshot, eval-harness version, git SHA, and the run's total USD and token counts. In MLflow that is `mlflow.start_run()` plus `log_param` for the fingerprint, `log_metric(key, value, step=)` for scores over time, `set_tag` for the git SHA and environment, and `log_artifact` for the per-case results file; use nested runs so a sweep over five prompt versions is one parent with five children. The test of whether you got this right: given only a run id, can you rebuild the exact call that produced it six months later without asking anyone a question.",
+   "minutes": 25,
+   "resource": {
+    "label": "MLflow docs - Tracking API (runs, params, metrics, tags, artifacts)",
+    "url": "https://mlflow.org/docs/latest/ml/tracking/tracking-api/"
+   }
+  },
+  {
+   "name": "Lineage both directions: attaching prompt versions to production generations",
+   "learn": "An offline run history is half the value; the other half is being able to slice live traffic by prompt version. Pass the fetched prompt object through to the observation - Python `update_current_generation(prompt=prompt)`, `start_as_current_observation(..., prompt=prompt)`, or `propagate_attributes(prompt=prompt)` when several generations share it; JS `generation.update({ prompt })`. Once linked you get median latency, input/output tokens, cost, generation count and median score per prompt version for free, which is the chart you put in front of the customer when they ask whether last week's change helped. Also emit the version as a span attribute in your own OpenTelemetry pipeline so the same slice exists in Grafana and does not depend on one vendor.",
+   "minutes": 25,
+   "resource": {
+    "label": "Langfuse docs - Link prompts to traces (per-version metrics)",
+    "url": "https://langfuse.com/docs/prompt-management/features/link-to-traces"
+   }
+  },
+  {
+   "name": "Versioning the model and the decoding config with the prompt",
+   "learn": "A prompt version that does not carry its model and parameters is only two thirds of a configuration, and the missing third is where silent regressions live. Put the model id, temperature, max_tokens and any tool set into the prompt version's `config` object (Langfuse) or model-configuration block (MLflow) so a label move swaps text and settings atomically. Pin dated snapshots, never floating aliases, in anything a customer touches - a vendor rotating an alias underneath you produces a score change with no commit, and you will spend two days looking for a code cause that does not exist. Record the resolved model id returned in the API response next to the requested one, so you can prove after the fact which weights answered.",
+   "minutes": 20,
+   "resource": {
+    "label": "Langfuse docs - Prompt config (model and params on the version)",
+    "url": "https://langfuse.com/docs/prompt-management/features/config"
+   }
+  },
+  {
+   "name": "The longitudinal ledger: append-only history you can chart for a year",
+   "learn": "Treat run results as an append-only ledger, not a dashboard's cache: one immutable row per (run_id, case_id) with the full fingerprint denormalised onto it, written to object storage or a warehouse table you own, mirrored into whatever tool renders it. Content-hash datasets and archive rather than delete old versions, because a chart of score-over-time is meaningless the moment the measuring instrument changes without a marker - so plot vertical annotations for dataset version bumps, judge changes and model snapshot changes on the same axis. Guard against the classic silent break: a metric renamed from `recall` to `recall_macro` splits the series in two and the old half quietly stops updating, so assert metric-key stability in CI. Six months of this ledger is the single most persuasive artefact in a renewal conversation.",
+   "minutes": 20,
+   "resource": {
+    "label": "MLflow docs - GenAI version tracking",
+    "url": "https://mlflow.org/docs/latest/genai/version-tracking/"
+   }
+  },
+  {
+   "name": "The experiment script as a first-class CI artefact",
+   "learn": "Learn the `langfuse/experiment-action` script contract precisely because it is a good general shape: export a function `experiment(context: RunnerContext)`, call `context.run_experiment(name=..., task=..., evaluators=[...], run_evaluators=[...])`, pull the aggregate you gate on out of `result.run_evaluations` by name, and `raise RegressionError(result=result)` when it breaches the threshold. The distinction the action encodes is the one that matters operationally: a `RegressionError` (the system got worse) and a script crash (your harness is broken) are different failures with different owners, controlled by `should_fail_on_regression` and `should_fail_on_script_error`. Keep the script thin - dataset selection, task, evaluators, threshold, raise - and put everything reusable in a package that also runs from the CLI, so a red build is reproducible on a laptop with one command.",
+   "minutes": 25,
+   "resource": {
+    "label": "GitHub - langfuse/experiment-action (script contract, inputs, outputs)",
+    "url": "https://github.com/langfuse/experiment-action"
+   }
+  },
+  {
+   "name": "Wiring the gate into the workflow: triggers, permissions, outputs",
+   "learn": "Build the workflow deliberately: `on: pull_request` with path filters so unrelated PRs do not burn tokens, `permissions:` narrowed to `contents: read`, `pull-requests: write` (needed to post the result comment) and `actions: read` (so the comment links the specific job and matrix legs are distinguishable), and third-party actions pinned to a release commit SHA rather than a tag so a moved tag cannot execute new code against your customer's keys. Pass `experiment_path`, `dataset_name` and `dataset_version` explicitly - pinning the dataset version is what stops a dataset edit from masquerading as a prompt improvement - and forward `experiment_metadata` with your prompt version and model snapshot so the run is findable later. Capture `steps.<id>.outputs.result_json` and `outputs.failed`, write the JSON to an artifact with `actions/upload-artifact`, and make the smoke tier finish in under two minutes so nobody has a reason to bypass it.",
+   "minutes": 25,
+   "resource": {
+    "label": "GitHub Docs - Events that trigger workflows",
+    "url": "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows"
+   }
+  },
+  {
+   "name": "Choosing the baseline: production label, not main HEAD",
+   "learn": "The gate must compare the candidate against the version currently serving the customer - the run recorded for whatever `production` points at - not against the previous commit, or you get boiling-frog drift where three PRs each lose two points, each passes, and the system is six points worse with no red build in the history. Record `baseline_run_id` in the candidate run's tags so the comparison is auditable rather than recomputed and forgotten. Apply the paired-comparison discipline from topic 53 (same cases, McNemar or paired bootstrap, interval on the delta) rather than comparing two aggregate numbers, and set the failure threshold from a measured noise budget - run the unchanged system five times, take the spread, gate at roughly two sigma below the per-class floor. Gate the non-accuracy budgets in the same job: p95 latency, tokens per case and USD per thousand cases are regressions too.",
+   "minutes": 25,
+   "resource": {
+    "label": "Langfuse docs - Experiments via SDK (including testing in CI)",
+    "url": "https://langfuse.com/docs/evaluation/experiments/experiments-via-sdk"
+   }
+  },
+  {
+   "name": "Secrets, forks, cost and flakiness: keeping the gate cheap and safe",
+   "learn": "Know why the experiment step fails with an empty key on an external contributor's PR - `pull_request` runs from forks get no repository secrets - and know why the obvious fix is dangerous: `pull_request_target` runs in the base repo's context with secrets available, so checking out and executing PR code under it hands the customer's registry keys to an arbitrary contributor. Prefer a labelled or manually dispatched job for fork PRs. Control spend with `concurrency: { group: ..., cancel-in-progress: true }` so force-pushes do not stack full eval runs, a hard USD ceiling inside the harness that aborts rather than warns, response caching keyed on model plus rendered prompt plus params, and a small stratified smoke tier on PRs with the full set on `schedule`. Treat a re-run that passes as a signal, not a resolution: track flake rate per gate, because a gate that flakes twice gets demoted from required and then it is just a document.",
+   "minutes": 20,
+   "resource": {
+    "label": "GitHub Docs - Using secrets in GitHub Actions",
+    "url": "https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets"
+   }
+  },
+  {
+   "name": "Closing the loop from the UI: prompt-version webhook to repository_dispatch",
+   "learn": "A registry UI edit bypasses your PR gate entirely, so close that hole with an event path: Langfuse emits prompt-version events to an HTTPS endpoint with an HMAC signature; a small receiver verifies the signature (constant-time compare, reject on clock skew, dedupe on event id because delivery is at-least-once) and calls the GitHub REST `POST /repos/{owner}/{repo}/dispatches` with an `event_type` and a `client_payload` carrying the prompt name and version. The workflow triggers on `repository_dispatch`, runs the same experiment script against the new version, and writes the result back as a comment or a status - so an edit made in a customer workshop is measured within minutes without anyone opening an editor. Make the receiver idempotent and rate-limited: someone iterating in the playground will fire twenty version events in ten minutes.",
+   "minutes": 20,
+   "resource": {
+    "label": "Langfuse docs - Webhooks and Slack integrations for prompt events",
+    "url": "https://langfuse.com/docs/prompt-management/features/webhooks-slack-integrations"
+   }
+  },
+  {
+   "name": "Promotion and approval: who may move the pointer",
+   "learn": "Separate the right to create a version from the right to promote one - the whole safety property collapses if anyone who can edit text can also point `production` at it. Use protected labels where the platform offers them (Langfuse restricts modifying a protected label to admins and owners) and mirror the same control on the Git side with a GitHub environment carrying required reviewers and a wait timer on the promotion job, so promotion is a reviewed deployment with a record rather than a click. Emit a structured audit event for every pointer move - actor, prompt, from_version, to_version, run_id of the passing eval, timestamp, ticket - into the audit table from topic 30, because 'who approved this change' is a question that arrives in writing during the customer's first security review, not during the pilot.",
+   "minutes": 25,
+   "resource": {
+    "label": "GitHub Docs - Using environments for deployment (required reviewers)",
+    "url": "https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments"
+   }
+  },
+  {
+   "name": "Rollback as a rehearsed drill, and why it is never instant",
+   "learn": "Rollback is one operation - repoint `production` at the previous version (`update_prompt(name=..., version=N-1, new_labels=[\"production\"])` or `set_prompt_alias(..., alias=\"production\", version=N-1)`) - but treat the claim 'rolled back' as unproven until you can measure convergence. The tail is real: cache TTL on every process, stale-while-revalidate serving one more request per worker, in-flight requests, warm autoscaled pods that fetched at startup, and any CDN or gateway layer in front. Write the runbook with the actual numbers: trigger condition, the exact command, the verification query (count generations by prompt version over the last five minutes until the old version is zero), the expected convergence time from your TTL, and who to tell. Then rehearse it against staging with a stopwatch and put the measured number in the runbook - a rollback path first executed during an incident is a hypothesis, and drift-driven auto-rollback policy is topic 57's problem, not this one's.",
+   "minutes": 30,
+   "resource": {
+    "label": "Google SRE Book - Release Engineering",
+    "url": "https://sre.google/sre-book/release-engineering/"
+   }
+  },
+  {
+   "name": "Reproducibility six months on, and the changelog the customer reads",
+   "learn": "Test the property directly: pick a run from three months ago and replay it from its fingerprint alone. Enumerate what breaks it - a vendor deprecating a dated snapshot, a dataset edited in place instead of versioned, a judge prompt changed without a version bump, a `@latest` alias in a recorded config, a deleted branch taking the git SHA with it - and mitigate each (retention policy, content hashes, judge versioning, alias bans in serving code, tags not branches). Then render a human-readable prompt changelog straight from the ledger: date, version, one-line intent, who promoted it, the eval delta with its interval, and any rollback. That document is what you hand the customer at the QBR, and generating it from the run history rather than writing it by hand is what guarantees it is true.",
+   "minutes": 20,
+   "resource": {
+    "label": "Langfuse docs - Releases and versioning",
+    "url": "https://langfuse.com/docs/observability/features/releases-and-versioning"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can stand up a prompt registry with immutable versions and environment labels, and show the same prompt served to staging and production from two different versions with zero code differences between the two deployments.",
+  "You can make a pull request fail on an eval regression using langfuse/experiment-action, with the PR comment showing the score, the baseline it was compared against, and the result JSON attached as an artifact.",
+  "You can produce, from a run id alone, the prompt version, model snapshot, decoding params, dataset hash, judge version and git SHA that produced any number you have ever reported.",
+  "You can slice production traffic by prompt version and show median latency, token counts, cost and score per version, then point at the exact hour a version was promoted.",
+  "You can execute a rollback by moving one label, and state a measured convergence time backed by a query showing generations on the old version falling to zero.",
+  "You can explain and demonstrate why a fork PR cannot run the eval gate, and show a workflow that handles it without ever exposing the registry keys via pull_request_target.",
+  "You can wire a registry UI edit to a CI eval run through a signature-verified webhook and repository_dispatch, so a prompt changed by a non-engineer is scored within minutes.",
+  "You can generate a customer-facing prompt changelog directly from the run ledger, with per-change eval deltas and intervals, and defend every line of it."
+ ],
+ "failureModes": [
+  "A solutions consultant edits the prompt in the registry UI during a customer workshop and saves it onto the production label; no eval runs, the added examples double the token count, and the change is discovered a week later in the cost report rather than in CI.",
+  "The application calls get_prompt once at module import in a long-lived worker, so the fetched version is pinned for the process lifetime and every rollout and rollback silently does nothing until the next restart.",
+  "Rollback moves the label and everyone declares the incident over, but stale-while-revalidate plus a 60-second TTL plus warm pods that prefetched at startup means part of the fleet serves the bad version for another cache cycle, and the graph keeps showing failures nobody can explain.",
+  "The gate compares each PR against main HEAD instead of the version currently labelled production, so three individually-passing changes drift the score down eight points with no red build anywhere in the history.",
+  "A prompt change and a dataset edit land in the same afternoon, the delta is uninterpretable because two things moved, and the team burns a day arguing about a number that no longer means anything.",
+  "The eval step silently no-ops on external contributor PRs because forks get no secrets, someone switches the trigger to pull_request_target to fix it, and now arbitrary PR code executes with the customer's registry and model API keys in scope.",
+  "Serving code resolves prompts:/finding-summary@latest and the registry sits on the request path with no compiled-in fallback, so an engineer's laptop can ship an unreviewed draft into the customer's tenant and a two-minute SaaS blip becomes a full outage of the customer-facing feature."
+ ],
+ "interviewQuestions": [
+  "Your customer wants their compliance analyst to be able to change the wording of a generated summary without waiting for an engineering deploy. Design the whole path: where the text lives, who can promote it, what runs before it reaches production, and what happens when it turns out to be wrong at 4pm on a Friday.",
+  "You move the production label back to the previous prompt version and tell the customer the rollback is done. Their dashboard still shows failures for another eight minutes. Explain every mechanism that could cause that, and how you would have known the number in advance.",
+  "Walk me through the fingerprint you record for a single eval run, field by field, and for each field tell me the specific bug that field exists to catch.",
+  "A team hands you a repo where prompts live in Git and are also editable in a registry UI, and both are 'the source of truth'. Describe the failure this guarantees, and what you would change in what order - given you cannot take the UI away from the customer.",
+  "Design the CI gate for prompt changes on a customer-facing extraction pipeline: what triggers it, what it compares against, where the thresholds come from, how much it costs per week, and what specifically stops the team from marking it non-required after the third false failure.",
+  "Six months into a deployment the customer asks you to reproduce the accuracy number from your Q2 report. Tell me exactly what you need to have stored to do that, what commonly makes it impossible, and what you would say if you could not reproduce it.",
+  "You inherit a system where prompt changes are deployed via a UI, evals exist but run manually and nobody remembers the last result, and the model id in config is a floating alias. Rank the fixes and justify the ordering to a customer who is asking why you are not shipping features this sprint."
+ ],
+ "proofOfWork": "A public repository, `prompt-registry-ci`, that demonstrates the full loop against a self-hosted registry brought up by `docker compose up` so a reviewer needs no vendor account and no API key - the model calls run against a recorded-fixture provider by default. It contains a `prompts/` package whose only public surface is `get(name, env)` returning a compiled prompt plus its resolved version, model snapshot and decoding config, with a compiled-in fallback template and a unit test that asserts the process still serves a prompt when the registry is unreachable and that no call site anywhere resolves `@latest`. The CI workflow runs the eval gate on `pull_request` with path filters, third-party actions pinned to release SHAs, `concurrency: cancel-in-progress`, a hard USD ceiling in the harness, and a `repository_dispatch` twin triggered by a signature-verifying webhook receiver (`receiver/`, with tests for HMAC verification, replay dedupe and rate limiting) so a version created in the registry UI is scored without a PR. The repository history is the evidence: one merged PR where the gate passed with the paired delta and interval in the comment, one PR where it failed on a per-class floor with the flipped case ids named and the baseline run id shown, and one commit reverting a promoted version. `RUNBOOK.md` documents the rollback with the real measured convergence time from a rehearsal (stopwatch value, the verification query counting generations by prompt version, and the graph before and after), and `scripts/changelog.py` renders `CHANGELOG.md` - date, version, intent, promoter, eval delta with interval, rollbacks - purely from the append-only run ledger in `runs/`, with a CI check that fails if the committed changelog differs from the regenerated one, so the customer-facing document cannot drift from the runs that produced it."
+}

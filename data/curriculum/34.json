@@ -1,0 +1,218 @@
+{
+ "i": 34,
+ "topic": "Temporal at depth: signals, queries, versioning, sagas, worker tuning",
+ "track": "E. Backend and Data",
+ "month": 4,
+ "hours": 8,
+ "why": "Kaupex-style engagements live or die on long-running, side-effecting orchestration: an LLM compile step, a CRM write, a Postgres commit, a webhook back to the customer, each of which fails independently and none of which can be blindly re-run. Temporal is what lets you promise a customer 'nothing is lost and nothing is duplicated' after a node reboot, but only if you can change workflow code while thousands of their executions are mid-flight, unwind a half-finished business transaction without a human reconciling spreadsheets, and size workers so the backlog drains inside the SLO you signed. FDE loops at Temporal-heavy shops probe exactly these three things, because the FDE is the person who will be standing in the customer's cluster when a deploy strands 2,000 workflows.",
+ "prerequisites": [
+  "Temporal basics from 'Load testing and chaos' (topic 22): start a workflow, run a Python worker on the `kaupex` task queue, read `temporal workflow show`, and the timeout/retry/heartbeat behaviour you measured when killing a worker mid-activity",
+  "asyncio fluency: tasks, `await`, `asyncio.gather`, `asyncio.shield`, `CancelledError`, `asyncio.Lock`; Temporal's Python workflows run on a custom deterministic event loop and everything below assumes you can reason about interleaving at await points",
+  "The layered Kaupex Task Compiler from 'Production Python architecture' (topic 25): activities become ten-line adapters over service functions and idempotency lives in the repository, not in the workflow",
+  "Postgres transactions and unique constraints from topic 29, because idempotency keys land as `INSERT ... ON CONFLICT DO NOTHING` on a `(workflow_id, activity_id)` unique index",
+  "Kubernetes pod lifecycle (SIGTERM, `terminationGracePeriodSeconds`, `preStop`) from topic 8 and Prometheus/Grafana from topic 21, so worker SDK metrics land on the existing Kaupex dashboard",
+  "A local `temporal server start-dev --db-filename ./dev.db`, the Kaupex k3s deployment reachable, Python SDK `temporalio` >= 1.11 and server >= 1.29.1 (Worker Versioning needs both)"
+ ],
+ "subtopics": [
+  {
+   "name": "Event history, commands and deterministic replay",
+   "learn": "Read a history end to end with `temporal workflow show -w <id> --detailed` and name what each event means: `WorkflowTaskScheduled/Started/Completed` brackets one run of your Python code, `ActivityTaskScheduled` is the `ScheduleActivityTask` command your code emitted, `MarkerRecorded` is a patch or local-activity marker, `TimerStarted` is an `asyncio.sleep`. The worker rebuilds state by re-running `@workflow.run` from the top against the recorded events and checking each command it produces against the next event; any divergence (a new activity call, a different activity type name, a missing timer, reordered `asyncio.gather` branches) is a non-determinism error that fails the workflow *task*, not the workflow, so the execution sits in Running with `WorkflowTaskFailed` events retrying on backoff until the code is fixed. Know the Python sources of non-determinism and their replacements: `datetime.now()` -> `workflow.now()`, `random`/`uuid.uuid4` -> `workflow.random()`/`workflow.uuid4()`, threads and I/O -> activities, iterating an unordered `set` -> sort first. Know the ceilings: warning at 10,240 events, termination at 51,200 events, 10,000 signals or 2,000 updates per execution.",
+   "minutes": 35,
+   "resource": {
+    "label": "Temporal docs: Workflow Execution - Events and Event History",
+    "url": "https://docs.temporal.io/workflow-execution/event"
+   }
+  },
+  {
+   "name": "Failure taxonomy: workflow task failure vs execution failure vs activity failure",
+   "learn": "An arbitrary exception escaping `@workflow.run` fails the workflow task (retried, execution stays Running, fix-and-redeploy heals it), while `temporalio.exceptions.ApplicationError` fails the execution (terminal `WorkflowExecutionFailed`); promote specific types with `Worker(workflow_failure_exception_types=[...])` or `@workflow.defn(failure_exception_types=[...])`. Activities are the inverse: every exception is retried per `RetryPolicy(initial_interval, backoff_coefficient, maximum_interval, maximum_attempts, non_retryable_error_types)` until `schedule_to_close_timeout` expires, unless raised as `ApplicationError(..., non_retryable=True)` or its type is listed in `non_retryable_error_types`; the workflow sees an `ActivityError` whose `.cause` is that `ApplicationError` or a `TimeoutError` whose `.type` says START_TO_CLOSE or HEARTBEAT. Map Kaupex's domain exceptions from topic 25 onto this: `InvalidTaskSpec` non-retryable, `HubSpotRateLimited` retryable with a long `maximum_interval`, a `psycopg` `OperationalError` retryable but bounded. Be able to compute from a policy exactly how many attempts fit inside a given `schedule_to_close_timeout`.",
+   "minutes": 30,
+   "resource": {
+    "label": "Temporal Python SDK docs: Failure detection (timeouts, retry policies, heartbeats)",
+    "url": "https://docs.temporal.io/develop/python/best-practices/error-handling"
+   }
+  },
+  {
+   "name": "Signals and queries: async writes, sync reads, signal-with-start",
+   "learn": "Define `@workflow.signal async def approve(self, who: str)` handlers that only mutate state and set flags, and have the main coroutine block on `await workflow.wait_condition(lambda: self.approved, timeout=timedelta(days=3))`; signals are `WorkflowExecutionSignaled` events, delivered even if they arrive before the first workflow task or while every worker is down, and fire-and-forget from the client (`await handle.signal(MyWorkflow.approve, 'ops')`). Use `client.start_workflow(..., id=f'task-{uuid}', start_signal='approve', start_signal_args=[...])` so a retried webhook either starts or signals but never duplicates. `@workflow.query` methods must be synchronous, read-only and command-free (no `execute_activity`, no `asyncio.sleep`); a query against an execution evicted from the sticky cache forces a full replay on some worker, which is why polling queries against large histories hurt, and the built-in `__stack_trace` query is what the Web UI's Stack Trace tab uses to show where a stuck workflow is blocked. Drive Kaupex with `temporal workflow query -w <id> --type status` and `temporal workflow signal -w <id> --name approve --input '\"ops\"'`.",
+   "minutes": 35,
+   "resource": {
+    "label": "Temporal Python SDK docs: Message passing (signals, queries, updates)",
+    "url": "https://docs.temporal.io/develop/python/workflows/message-passing"
+   }
+  },
+  {
+   "name": "Updates: validated, synchronous, tracked writes",
+   "learn": "Use `@workflow.update` when the caller needs a result or a rejection: the paired `@my_update.validator` runs before anything is recorded and raising in it rejects the update with no history written, while the handler body runs as a workflow coroutine that can await activities and return a value. From the client `await handle.execute_update(MyWorkflow.add_step, step)` waits for completion; `await handle.start_update(..., wait_for_stage=WorkflowUpdateStage.ACCEPTED)` returns once the validator passes and lets you fetch the result later by update id. Update-with-Start (server 1.28+) lets one round trip create-or-address a workflow and get a synchronous answer, which is the right primitive for a FastAPI endpoint that must return 201 with the compiled plan id. Know the ceiling of 2,000 updates per execution and that entity workflows must Continue-As-New long before it.",
+   "minutes": 25,
+   "resource": {
+    "label": "Temporal Encyclopedia: Workflow message passing (signals, queries, updates)",
+    "url": "https://docs.temporal.io/encyclopedia/workflow-message-passing"
+   }
+  },
+  {
+   "name": "Handler concurrency, all_handlers_finished and safe message handlers",
+   "learn": "Handlers interleave with the main coroutine at every `await`, so two `add_step` updates can both read `len(self.steps) < limit`, both pass and both append; guard multi-step handlers with an `asyncio.Lock` created in `__init__` and held across the awaited activity. Before returning or calling `continue_as_new`, `await workflow.wait_condition(workflow.all_handlers_finished)` so an in-flight handler is not killed with the run; the SDK logs a warning per unfinished handler unless the handler sets `unfinished_policy=HandlerUnfinishedPolicy.ABANDON` because it is genuinely fire-and-forget. Make signal handlers idempotent on a caller-supplied id (`if req.id in self.seen: return`) because a client that timed out will send the same signal twice and both land in history. Port the lock-and-wait shape from the `safe_message_handlers` sample into the Kaupex compile workflow.",
+   "minutes": 20,
+   "resource": {
+    "label": "temporalio/samples-python: message_passing/safe_message_handlers",
+    "url": "https://github.com/temporalio/samples-python/tree/main/message_passing/safe_message_handlers"
+   }
+  },
+  {
+   "name": "Durable timers, wait_condition timeouts and Continue-As-New",
+   "learn": "`await asyncio.sleep(timedelta(hours=6).total_seconds())` inside a workflow is a server-side timer (`TimerStarted`/`TimerFired`) that survives worker restarts; `workflow.wait_condition(pred, timeout=...)` raises `asyncio.TimeoutError` and is how you implement 'wait for approval or escalate after 48 h'. For entity-style workflows (one long-lived execution per Kaupex project receiving signals for months) check `workflow.info().is_continue_as_new_suggested()` and `workflow.info().get_current_history_length()` at the top of each loop iteration, drain handlers with `all_handlers_finished`, then `workflow.continue_as_new(State(...))` to carry state into a fresh run with the same workflow id and a new run id; signals the old run has not processed are carried over by the server. Design the state dataclass so every field is serialisable by the default converter and versionable (optional fields with defaults) because the new run may be picked up by a newer worker build. Test it with a `max_history_length` hook rather than waiting for 10k events.",
+   "minutes": 25,
+   "resource": {
+    "label": "Temporal Python SDK docs: Continue-As-New",
+    "url": "https://docs.temporal.io/develop/python/workflows/continue-as-new"
+   }
+  },
+  {
+   "name": "Patch-based versioning: patched(), deprecate_patch(), and when the old branch can go",
+   "learn": "Wrap any change that alters the command sequence (new or removed activity, changed timer, reordered calls, renamed activity type) in `if workflow.patched('compile-v2'):`; new executions record a `MarkerRecorded` for the patch and take the new branch, old executions replay without the marker and take the old branch, so one worker build serves both. Changing only an activity's implementation, retry policy or timeouts needs no patch; changing the arguments passed to an activity does not fail replay but changes behaviour, so patch it if old runs must keep old semantics. Lifecycle: ship `patched()` with both branches; once `temporal workflow list --query 'WorkflowType=\"CompileTask\" AND ExecutionStatus=\"Running\" AND StartTime < \"<deploy time>\"'` returns nothing, replace the conditional with a bare `workflow.deprecate_patch('compile-v2')` plus only the new code; once every execution that contains the deprecated marker is past retention (they can still be queried or reset until then), delete the call. Patch ids are per workflow type and must be evaluated at the same logical point on every code path; a `patched()` inside a branch only some runs reach is a classic replay failure. Do it live on Kaupex: deploy the patched worker while ten compile workflows are mid-activity and prove none fail.",
+   "minutes": 40,
+   "resource": {
+    "label": "Temporal Python SDK docs: Versioning (patching and Worker Versioning)",
+    "url": "https://docs.temporal.io/develop/python/workflows/versioning"
+   }
+  },
+  {
+   "name": "Replay testing against production histories in CI",
+   "learn": "Before any worker image ships, replay real histories through the new code: `temporal workflow show -w <id> -o json > histories/<id>.json`, then `await Replayer(workflows=[CompileTask]).replay_workflow(WorkflowHistory.from_json('<id>', json_text))`; for breadth, iterate `client.list_workflows('WorkflowType=\"CompileTask\" AND CloseTime > \"<7 days ago>\"')`, feed each `client.get_workflow_handle(wf.id, run_id=wf.run_id).fetch_history()` into `replay_workflows`, and fail CI on the first `NondeterminismError`. Keep a curated corpus in the repo (one history per patch state, one with a cancellation, one with a signal burst) so the check runs offline in seconds, and refresh it from production weekly. This gate is what makes step three of the patch lifecycle safe: deleting a deprecated branch is only allowed when the replay job over all Running histories passes.",
+   "minutes": 30,
+   "resource": {
+    "label": "temporalio/samples-python: replay (fetch and replay histories)",
+    "url": "https://github.com/temporalio/samples-python/tree/main/replay"
+   }
+  },
+  {
+   "name": "Worker Versioning: deployment versions, pinned vs auto-upgrade, ramp and rollback",
+   "learn": "Worker Versioning (server >= 1.29.1, Python SDK >= 1.11) replaces most patching for services shipped as immutable builds, and Temporal now recommends it over patching where you can run versioned deployments: start the worker with `Worker(..., deployment_config=WorkerDeploymentConfig(version=WorkerDeploymentVersion(deployment_name='kaupex-worker', build_id=GIT_SHA), use_worker_versioning=True))` and give each workflow type a `versioning_behavior`: `VersioningBehavior.PINNED` (an execution finishes on the build it started on, so no patches) or `AUTO_UPGRADE` (moves to the current version, so patch discipline still applies). Roll out with `temporal worker deployment set-ramping-version --percentage 10`, verify, then `set-current-version`, or roll back instantly; old pinned builds must keep running until `temporal worker deployment describe` shows no executions on them, then sunset and `delete-version`. Know the trade: pinning means N versions of the worker alive in k3s, each costing pods and Postgres connections; patching means one build and more code. Decide per Kaupex workflow type and write the decision down.",
+   "minutes": 25,
+   "resource": {
+    "label": "Temporal docs: Worker Versioning (worker deployments)",
+    "url": "https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning"
+   }
+  },
+  {
+   "name": "Saga: compensation stack, reverse-order rollback, cancellation shielding",
+   "learn": "Implement the Kaupex compile-and-publish path as a saga: after each side-effecting activity succeeds, push its compensation (`self.compensations.append((undo_hubspot_record, record_id))`); on an `ActivityError` whose cause is non-retryable, or on a business rejection, walk the list in reverse and `await workflow.execute_activity(undo, arg, start_to_close_timeout=..., retry_policy=RetryPolicy(maximum_attempts=0))` for each, catching per-step failures so one stuck compensation does not skip the others, and finish with `ApplicationError('compensated', non_retryable=True)` or a `wait_condition` for a human `resolve` signal when a compensation is exhausted. Separate what to compensate (HubSpot record created, customer notified, credits deducted) from what simply did not happen (the Postgres write inside the activity that failed). Cancellation arrives as `asyncio.CancelledError` at the current await; catch it, run the compensation loop under `asyncio.shield(...)` so the cleanup activities are not themselves cancelled, then re-raise so the execution ends Cancelled rather than Completed. Compensations must be idempotent and must tolerate the forward action never having happened (a HubSpot 404 on delete is success).",
+   "minutes": 40,
+   "resource": {
+    "label": "Temporal Design Patterns: Saga Pattern",
+    "url": "https://docs.temporal.io/design-patterns/saga-pattern"
+   }
+  },
+  {
+   "name": "Activity contracts for sagas: idempotency keys, heartbeat details, timeout budgets",
+   "learn": "Every side-effecting Kaupex activity derives its idempotency key from `activity.info().workflow_id` plus `activity.info().activity_id` (stable across retries, unique per scheduled activity) and sends it as the partner API's idempotency header or as the `ON CONFLICT DO NOTHING` key in Postgres, so a retry after a worker crash post-commit is a no-op. Long activities call `activity.heartbeat(progress)` at least every `heartbeat_timeout / 3`; on retry, read `activity.info().heartbeat_details` to resume from `progress` instead of restarting (a 500-record batch resumes at record 312). Set timeouts as a budget: `start_to_close_timeout` = worst honest single attempt, `heartbeat_timeout` = how fast a dead worker must be detected (topic 22 measured the gap), `schedule_to_close_timeout` = the total the business tolerates, and leave `schedule_to_start_timeout` unset on normal activities because a slow worker pool would then fail healthy work. Log `activity.info().attempt` on every attempt so the customer's log search shows retries explicitly.",
+   "minutes": 30,
+   "resource": {
+    "label": "Temporal Encyclopedia: Detecting Activity failures (timeouts, heartbeats, retries)",
+    "url": "https://docs.temporal.io/encyclopedia/detecting-activity-failures"
+   }
+  },
+  {
+   "name": "Child workflows, parent close policy and cancellation propagation",
+   "learn": "Reach for `workflow.execute_child_workflow(PublishTask.run, arg, id=f'publish-{task_id}', parent_close_policy=ParentClosePolicy.REQUEST_CANCEL)` when a sub-process needs its own history (size), its own id for signals and visibility, or a different task queue; otherwise an activity or a plain function is simpler and cheaper. Know the three `ParentClosePolicy` values and their production consequences: TERMINATE (default) kills children when the parent closes, ABANDON detaches them (fan-out where the parent is only a launcher), REQUEST_CANCEL sends a cooperative cancel so the child's saga can compensate. Cancelling a parent cancels the awaited child future; cancelling an activity only takes effect when the activity heartbeats (`activity.is_cancelled()` or `CancelledError` at the next heartbeat), and the `cancellation_type` (`ActivityCancellationType`) on the activity call decides whether the workflow waits for the activity to acknowledge or proceeds immediately. `id_reuse_policy` on child start decides whether a retried parent collides with a previous child of the same id; `WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY` is the usual choice for publish steps.",
+   "minutes": 25,
+   "resource": {
+    "label": "Temporal Python SDK docs: Child Workflows",
+    "url": "https://docs.temporal.io/develop/python/workflows/child-workflows"
+   }
+  },
+  {
+   "name": "Sync vs async activities, the activity executor and the workflow sandbox",
+   "learn": "An `async def` activity runs on the worker's event loop, so one blocking call inside it (synchronous `requests`, `psycopg2`, a 30 s pandas transform) stalls every other activity, every heartbeat and every workflow task on that worker; either make it truly async (`httpx.AsyncClient`, asyncpg) or declare it `def` and pass `Worker(activity_executor=ThreadPoolExecutor(max_workers=N))` with N >= `max_concurrent_activities`, or for CPU-bound work a `ProcessPoolExecutor` plus `shared_state_manager=SharedStateManager.create_from_multiprocessing(multiprocessing.Manager())` so heartbeats and cancellation cross the process boundary. Workflow code runs in a sandbox that re-imports your module per run and blocks non-deterministic calls (`datetime.date.today`, `random`, file I/O); wrap heavy or stateful imports (pydantic models, SQLAlchemy models, the Kaupex domain package) in `with workflow.unsafe.imports_passed_through():` to avoid re-import cost and false positives, and reserve `workflow.unsafe.sandbox_unrestricted()` or `SandboxRestrictions.default.with_passthrough_modules(...)` for cases you can justify in a comment. Measure `temporal_workflow_task_replay_latency` before and after passing imports through.",
+   "minutes": 25,
+   "resource": {
+    "label": "Temporal Python SDK docs: Python SDK sandbox",
+    "url": "https://docs.temporal.io/develop/python/best-practices/python-sdk-sandbox"
+   }
+  },
+  {
+   "name": "Local activities: when the shortcut pays and when it bites",
+   "learn": "`workflow.execute_local_activity(fn, arg, start_to_close_timeout=timedelta(seconds=2))` runs the function inside the workflow worker and records only a `MarkerRecorded`, saving the schedule/start/complete round trips and three history events per call; use it for sub-second, idempotent lookups (feature flag, tenant config) executed thousands of times per workflow. Understand the costs: no heartbeats, in-worker retries until the workflow task timeout (10 s default) forces a workflow-task heartbeat that adds events and blocks signal processing, durability only when the enclosing workflow task completes, and a crash between the side effect and task completion re-runs it. Never put a non-idempotent write or a call that can stall behind a rate limit in a local activity; watch `local_activity_total` and marker counts in histories.",
+   "minutes": 20,
+   "resource": {
+    "label": "Temporal docs: Local Activity",
+    "url": "https://docs.temporal.io/local-activity"
+   }
+  },
+  {
+   "name": "Worker tuning: slots, pollers, sticky cache and the metric that drives each knob",
+   "learn": "Tune from SDK metrics scraped by Prometheus from `Runtime(telemetry=TelemetryConfig(metrics=PrometheusConfig(bind_address='0.0.0.0:9000')))`: `temporal_activity_schedule_to_start_latency` and `temporal_workflow_task_schedule_to_start_latency` (tasks waiting for a worker), `temporal_worker_task_slots_available{worker_type=...}` (zero means saturated), `temporal_sticky_cache_size` and `temporal_sticky_cache_total_forced_eviction` with `temporal_workflow_task_replay_latency` (evictions force full replays), plus `temporal_num_pollers`. Rules: high schedule-to-start with slots at zero -> raise `max_concurrent_activities` or add pods; high schedule-to-start with slots free -> too few pollers, raise `max_concurrent_activity_task_polls` or switch to `PollerBehaviorAutoscaling`; rising replay latency with forced evictions -> raise `max_cached_workflows` (memory per cached workflow is the price) and keep `sticky_queue_schedule_to_start_timeout` short so a dead worker's stickiness expires fast. Prefer `WorkerTuner.create_resource_based(target_memory_usage=0.8, target_cpu_usage=0.9)` in containers where the mix varies, and never combine a tuner with the `max_concurrent_*` kwargs (startup error). Load Kaupex with the k6 script from topic 22 and record the before/after of one knob change per run.",
+   "minutes": 40,
+   "resource": {
+    "label": "Temporal docs: Worker performance (metrics, slots, pollers, cache tuning)",
+    "url": "https://docs.temporal.io/develop/worker-performance"
+   }
+  },
+  {
+   "name": "Task queue topology, downstream rate limits and graceful shutdown on k3s",
+   "learn": "Split Kaupex into a workflow worker and activity workers on distinct task queues (`kaupex-wf`, `kaupex-llm`, `kaupex-crm`) so an LLM stall cannot starve compile-plan decisions, routing with `execute_activity(..., task_queue='kaupex-crm')`. Enforce a partner API's limit at the queue, not in code: `Worker(max_task_queue_activities_per_second=8.0)` is a server-side rate shared across every worker polling that queue, while `max_activities_per_second` caps one process; use the former for HubSpot's per-account limit. Use a worker-specific task queue (`samples-python/worker_specific_task_queues`) when consecutive activities need the same host (a downloaded file, a warmed model). On SIGTERM the pod must `await worker.shutdown()`, which stops polling, waits `graceful_shutdown_timeout` for running activities (which can observe `activity.is_worker_shutdown()` or `await activity.wait_for_worker_shutdown()` to checkpoint via heartbeat), then cancels the rest; set `terminationGracePeriodSeconds` above that timeout plus the `preStop` sleep from topic 8, and confirm with `temporal task-queue describe -t kaupex-crm` that the old worker identity stops appearing as a poller.",
+   "minutes": 30,
+   "resource": {
+    "label": "Temporal Python SDK API reference: temporalio.worker.Worker (all worker options)",
+    "url": "https://python.temporal.io/temporalio.worker.Worker.html"
+   }
+  },
+  {
+   "name": "Visibility, search attributes, batch operations and reset as the recovery tool",
+   "learn": "Register custom search attributes once per namespace (`temporal operator search-attribute create --name TenantId --type Keyword`, again for `Stage`), set them at start (`search_attributes=TypedSearchAttributes([...])`) and update them from the workflow with `workflow.upsert_search_attributes([TENANT.value_set(tid)])` so operators can answer 'which of Acme's compiles are stuck in publish' with `temporal workflow list --query 'TenantId=\"acme\" AND Stage=\"publish\" AND ExecutionStatus=\"Running\"'`. Batch operations take the same query: `temporal workflow signal --query ... --name pause`, `temporal workflow cancel --query ...`, and `temporal batch describe --job-id` / `temporal batch terminate` to watch or stop a job. Reset is how you recover from a bad deploy without losing progress: `temporal workflow reset -w <id> --event-id <WorkflowTaskCompleted id>` or `--type LastWorkflowTask` creates a new run that replays history to that point and then executes the corrected code; batch resets over a query are limited to `FirstWorkflowTask`, `LastWorkflowTask` or `BuildId`. Rehearse on Kaupex: bad worker image -> `WorkflowTaskFailed` with a non-determinism cause -> roll back the image (workflows heal by themselves) or, if the old code is gone, reset to the last workflow task.",
+   "minutes": 30,
+   "resource": {
+    "label": "Temporal CLI reference: temporal workflow (list, query, signal, reset, show)",
+    "url": "https://docs.temporal.io/cli/command-reference/workflow"
+   }
+  },
+  {
+   "name": "Testing workflows: time skipping, mocked activities and saga assertions",
+   "learn": "Use `async with await WorkflowEnvironment.start_time_skipping() as env:` so a workflow with a 48-hour escalation timer completes in milliseconds; time advances only when every coroutine is blocked, which also exposes accidental busy-waits. Register fakes with the real activity's name (`@activity.defn(name='publish_to_hubspot') async def fake_publish(...)`) on a `Worker(env.client, task_queue=..., workflows=[CompileTask], activities=[fake_publish, ...])` created inside the test, and have a fake raise `ApplicationError('boom', non_retryable=True)` on the third call to assert the compensations ran in reverse order and the result is the `compensated` failure. Test signals and updates by starting the workflow, calling `handle.signal` or `handle.execute_update`, then awaiting `handle.result()`. Unit-test activities alone with `ActivityEnvironment().run(fn, arg)` to check heartbeat details and idempotency-key derivation. Use `WorkflowEnvironment.start_local()` (a real dev server) for tests that need search attributes or replay of downloaded histories.",
+   "minutes": 25,
+   "resource": {
+    "label": "Temporal Python SDK docs: Testing suite (time skipping, mocking activities, replay)",
+    "url": "https://docs.temporal.io/develop/python/best-practices/testing-suite"
+   }
+  },
+  {
+   "name": "Observability: replay-safe logging, OpenTelemetry interceptors and context propagation",
+   "learn": "Use `workflow.logger` and `activity.logger` rather than `logging.getLogger` inside Temporal code: they attach workflow id, run id, type and attempt, and the workflow logger suppresses output during replay so a redeploy does not triple every log line. Add `TracingInterceptor()` from `temporalio.contrib.opentelemetry` to `Client.connect(interceptors=[...])` (the Worker built on that client inherits it) so a Kaupex API request, its workflow tasks and each activity attempt share one trace on the backend from topic 21, and use a header-propagating interceptor (`samples-python/context_propagation`) to carry `tenant_id` and `X-Request-ID` from the FastAPI request into every activity's `contextvars` for the logging filter from topic 25. Be able to correlate the three views a customer SRE will ask for: the trace, the workflow history in the Web UI, and the SDK metrics dashboard.",
+   "minutes": 20,
+   "resource": {
+    "label": "Temporal Python SDK docs: Observability (metrics, tracing, logging, visibility)",
+    "url": "https://docs.temporal.io/develop/python/platform/observability"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can deploy a patched Kaupex worker (`workflow.patched('compile-v2')`) while at least ten compile workflows are mid-activity, show with `temporal workflow show` that old runs finish on the old branch and new runs record the patch marker, and later remove the old branch only after a query for pre-deploy Running executions returns zero.",
+  "You can run a replay job in CI that pulls the last seven days of `CompileTask` histories, replays them through the candidate image, and fails the pipeline on the first `NondeterminismError`; you can demonstrate it catching a deliberately reordered activity.",
+  "You can force a non-retryable failure in the third step of the Kaupex publish saga and show the compensations execute in reverse order with idempotent retries, the execution ends Failed with `compensated`, and repeating the failure with a worker kill mid-compensation produces no duplicate HubSpot records.",
+  "You can cancel a running saga from the CLI and prove the shielded cleanup activities still ran, the execution ended Cancelled, and the history shows `WorkflowExecutionCancelRequested` followed by the compensation `ActivityTaskCompleted` events.",
+  "Given a Grafana panel of `temporal_activity_schedule_to_start_latency` climbing with `temporal_worker_task_slots_available` at zero, you name the knob (`max_concurrent_activities` or replica count) before touching anything, change it, and show p95 fall under the topic 22 k6 load; given the same latency with slots free, you name pollers instead.",
+  "You can drive a Kaupex workflow entirely through messages: signal-with-start from a retried webhook with no duplicate, a validated update that rejects a bad step with nothing written to history, a query for progress, and a Continue-As-New that carries state after `is_continue_as_new_suggested()` flips.",
+  "You can demonstrate on a live execution the difference between a workflow task failure and a workflow execution failure, and recover a stuck execution either by rolling back the worker image or with `temporal workflow reset --type LastWorkflowTask`.",
+  "You can enforce a downstream API's 8 req/s limit with `max_task_queue_activities_per_second` across three worker pods and show in the metrics that the aggregate rate holds while the backlog drains."
+ ],
+ "failureModes": [
+  "An engineer inserted a new `send_notification` activity ahead of an existing one without a patch; every in-flight execution hit a non-determinism error on its next workflow task, sat Running with `WorkflowTaskFailed` retrying all weekend, and the on-call terminated 2,000 workflows by hand because nobody knew that rolling back the worker image would have healed them.",
+  "A saga compensation deleted the CRM record by the id stored in Postgres, but the forward activity had crashed after HubSpot committed and before the id was stored; the compensation found nothing to delete, returned success, and the orphan records surfaced when the customer's sales team started calling leads twice.",
+  "The compile activity was `async def` and called a synchronous vendor SDK; one slow LLM response blocked the worker's event loop, heartbeats stopped, the server timed out twelve unrelated activities, and their retries on other workers doubled the load on the API that was already slow.",
+  "Query handlers were used as a polling API by a dashboard hitting 5,000 executions every two seconds; each evicted execution forced a full replay, `temporal_workflow_task_replay_latency` went to seconds, the sticky cache thrashed, and real workflow progress slowed to a crawl while the customer stared at a dashboard that said everything was fine.",
+  "`terminationGracePeriodSeconds` stayed at the default 30 s while `graceful_shutdown_timeout` was five minutes; every rolling deploy SIGKILLed workers mid-activity, the activities were only retried after their ten-minute start-to-close timeout, and the customer logged each deploy as a ten-minute outage.",
+  "An entity workflow per tenant received one signal per event with no Continue-As-New; the busiest tenant crossed the 51,200-event ceiling after five months, the server terminated the execution, and the tenant's accumulated state existed only inside that history.",
+  "A patch was deprecated and deleted after checking for Running executions but not for closed executions still inside retention; during an incident a week later, `temporal workflow reset` replayed a history containing the marker against code with no `deprecate_patch` and the reset the customer needed failed."
+ ],
+ "interviewQuestions": [
+  "You need to insert a new approval step into a workflow with 30,000 executions in flight, some of which will run for another six weeks. Walk through the options (patching, Worker Versioning with pinning, a new workflow type on a new task queue), what each costs operationally, how you verify safety before deploying, and how you know when the old code path can be deleted.",
+  "Design the compensation strategy for a workflow that charges a card, reserves inventory in a partner system with a 60 s p99, and emails the customer. Which steps are compensated, which are idempotent by construction, what happens when a compensation itself fails permanently, and what does the history look like when the workflow is cancelled halfway through?",
+  "A customer reports 400 workflows have been Running for two days with no progress. Using only the CLI and Prometheus, how do you determine whether this is a non-determinism error, a starved task queue, no worker polling, or an activity retrying against a dead dependency, and what is the remediation for each?",
+  "Explain what a worker does when it receives a workflow task for an execution that is not in its sticky cache, why that makes queries against large histories expensive, and how slots, pollers, cache size and sticky timeout interact under a burst of 10,000 new workflows.",
+  "A signal handler and the main workflow coroutine both mutate the same list, and in production the list occasionally has duplicates. Explain the interleaving that causes it, how you fix it while staying deterministic, and how you write a test that reproduces the race reliably.",
+  "Why does Temporal retry a workflow task forever on an unexpected exception but fail the execution on `ApplicationError`? Give a case where the default is wrong for a customer, show how you change it, and describe the blast radius if you get it backwards.",
+  "A partner API allows 10 requests per second per account across your entire fleet and you run six worker pods. Where do you enforce the limit, what breaks if you do it inside the activity, and how do you prove the aggregate rate to the partner from your own metrics?"
+ ],
+ "proofOfWork": "A public repository plus a fifteen-minute recorded walkthrough titled 'Change Kaupex while it runs'. The repo holds the Kaupex compile-and-publish saga (forward activities with idempotency keys derived from `workflow_id` and `activity_id`, a heartbeat-resumable batch step, reverse-order compensation with shielded cleanup under cancellation), a `histories/` corpus of real histories covering every patch state, a cancellation and a signal burst, and a CI pipeline with three gates: pytest under `start_time_skipping()` asserting compensation order and idempotency, a replay job that replays the corpus plus the last seven days of live `CompileTask` executions through the candidate image, and a load stage that runs the topic 22 k6 script against a kind cluster and asserts `temporal_activity_schedule_to_start_latency` p95 under a threshold. The recording shows, on the live k3s deployment: ten compile workflows started; a patched worker image rolled out mid-flight with old and new runs finishing on their respective branches; a deliberately non-deterministic image rolled out, the resulting `WorkflowTaskFailed` events, and the heal on rollback; one execution recovered with `temporal workflow reset --type LastWorkflowTask`; a saga forced to fail at step three with its compensations visible in history; and one worker-tuning change chosen from the Grafana panels with the before/after p95. A one-page `VERSIONING_POLICY.md` records, per workflow type, whether Kaupex uses patching or pinned Worker Versioning and the exact conditions under which a patch may be deprecated and then deleted."
+}

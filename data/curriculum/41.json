@@ -1,0 +1,227 @@
+{
+  "i": 41,
+  "topic": "MIT 6.824 Raft lab (optional deep dive)",
+  "track": "F. Distributed Systems and System Design",
+  "month": 5,
+  "hours": 20,
+  "why": "Reading the Raft paper makes you conversational; writing Raft and getting it past an adversarial tester makes you the person in the room who can say what a customer's etcd, Consul, CockroachDB or Kafka-KRaft cluster will actually do when a node's disk goes slow or a rack loses the network. FDEs get handed exactly these questions on-site — 'why did the API server freeze for 40 seconds', 'why did both workers hold the lock', 'is 4 nodes across 2 datacentres fine' — and the answers live in details you only internalise by hitting them: persist-before-reply, current-term-only commits, never truncating on a stale AppendEntries. It is also the strongest possible signal in a Palantir/Databricks/Anthropic loop that your distributed-systems knowledge is load-bearing rather than recited.",
+  "prerequisites": [
+    "Topic 40 (6.824 selected lectures): the Raft paper's Figure 2 read at least twice, plus the lecture notes on elections, log matching and the Figure 8 commit rule — this lab is the implementation of exactly that material, not an introduction to it",
+    "Topic 39 (DDIA): chapters 5, 8 and 9 — leader-based replication, the unreliability of clocks and networks, and linearizability, so you know what property the tester's checker is actually enforcing",
+    "Go at Tour-of-Go level: goroutines, channels, sync.Mutex, sync.Cond, structs and interfaces, slices and their aliasing behaviour. There is no Go topic in this plan, so budget 2-3 hours on the Tour plus Effective Go before hour one of the lab; the lab itself will not teach you Go",
+    "Topic 2 (Networking): what a partition looks like on the wire — dropped, delayed, reordered and duplicated packets, asymmetric reachability — because labrpc simulates precisely these and your code must be correct under all of them",
+    "Topic 1 (Linux internals): fsync/fdatasync semantics and rough costs on local NVMe versus EBS/NFS, since 'persist before you reply' is the single most expensive rule in Raft and the reason customers' consensus clusters flap",
+    "Topic 4 (Git): the lab is distributed as a git repo you `git pull` repeatedly, and you will want branches per part and `git bisect` when a passing test starts failing"
+  ],
+  "subtopics": [
+    {
+      "name": "Lab setup and a tour of the skeleton",
+      "learn": "Clone the 6.5840 repo, install a current Go toolchain, and run `make raft1` in `src` to watch every 3A test fail with 'expected one leader, got none' — that is your baseline. Read `src/raft1/raft.go` end to end before writing anything: `Make(peers, me, persister, applyCh)`, `Start(command) (index, term, isLeader)`, `GetState()`, the stub `ticker()` goroutine, and the example `sendRequestVote`/`RequestVote` pair. Then read `raftapi/raftapi.go` for the `ApplyMsg` fields and `tester1/persister.go` for `Save(raftstate, snapshot)`, `ReadRaftState()` and `ReadSnapshot()`. Know that peers may only communicate through labrpc — no shared variables, no files — and that the tester can delay, reorder, duplicate and drop every RPC.",
+      "minutes": 40,
+      "resource": {
+        "label": "6.5840 Lab 3: Raft — handout, Getting Started and 'The code'",
+        "url": "https://pdos.csail.mit.edu/6.824/labs/lab-raft1.html"
+      }
+    },
+    {
+      "name": "Figure 2 as an executable checklist",
+      "learn": "Transcribe Figure 2 of the extended paper into comments in raft.go and treat it as a spec you must satisfy line by line: persistent state (currentTerm, votedFor, log[]), volatile state (commitIndex, lastApplied), leader volatile state (nextIndex[] initialised to lastLogIndex+1, matchIndex[] to 0), the two RPC argument/reply structs, and the Rules for Servers. The rules that get skipped and cost days are: 'If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower' (applies to replies too, and must clear votedFor), and 'If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied]'. Write each rule as a named helper or an explicit branch so you can point at the line that implements it.",
+      "minutes": 55,
+      "resource": {
+        "label": "In Search of an Understandable Consensus Algorithm (extended) — Figure 2",
+        "url": "https://pdos.csail.mit.edu/6.824/papers/raft-extended.pdf"
+      }
+    },
+    {
+      "name": "Go concurrency primitives and the race detector",
+      "learn": "Be fluent in `sync.Mutex` with `defer rf.mu.Unlock()`, `sync.Cond` for the applier, and why `time.Sleep` in a loop is what the handout wants instead of `time.Timer`/`time.Ticker`. Understand the Go memory model well enough to know that an unsynchronised read of `rf.currentTerm` is a data race even if it 'looks atomic', and run everything with `go test -race` (the Makefile already builds with -race; graders run without it, so both must pass). Know that Go 1.22+ scopes loop variables per iteration, which kills the classic `for i := range rf.peers { go func(){ use i }() }` bug — but that capturing `rf.currentTerm` inside a goroutine still snapshots a value that may be stale by the time the RPC returns.",
+      "minutes": 55,
+      "resource": {
+        "label": "Go — Data Race Detector",
+        "url": "https://go.dev/doc/articles/race_detector"
+      }
+    },
+    {
+      "name": "The locking protocol, applied to raft.go",
+      "learn": "Internalise the course's five locking rules and decide, before you write code, exactly where the mutex is held. The rules: hold the lock for every access to shared state; hold it across a whole multi-step invariant update (e.g. incrementing currentTerm, setting votedFor = me, and resetting the election timer must be atomic); never hold it while sending an RPC, sleeping, or sending on a channel; after re-acquiring, re-check every assumption — currentTerm may have advanced and you may no longer be leader; and prefer one coarse lock over clever fine-grained locking for this codebase. The concrete pattern: lock, copy the args you need into local variables, unlock, call `peer.Call(...)`, re-lock, then guard the reply with `if rf.currentTerm != argsTerm || rf.state != Leader { return }`.",
+      "minutes": 45,
+      "resource": {
+        "label": "6.5840 — Advice on locking in the labs",
+        "url": "https://pdos.csail.mit.edu/6.824/labs/raft-locking.txt"
+      }
+    },
+    {
+      "name": "Goroutine structure: ticker, heartbeater, applier",
+      "learn": "Settle on the canonical structure before coding: one long-lived `ticker()` goroutine that sleeps ~10ms and starts an election when now-lastHeard exceeds a randomised timeout; one goroutine per election that fans out RequestVote to every peer in its own goroutine and counts votes; a leader loop that fires AppendEntries to each peer every heartbeat interval; and a dedicated applier goroutine that is the only thing that ever writes to applyCh. Know why the applier must be separate: sending on applyCh can block on the service, and if you do it while holding rf.mu the whole peer deadlocks. Every goroutine must exit when `rf.killed()` is true, or the test binary accumulates leaked goroutines across the suite.",
+      "minutes": 45,
+      "resource": {
+        "label": "6.5840 — Advice on structuring your Raft lab",
+        "url": "https://pdos.csail.mit.edu/6.824/labs/raft-structure.txt"
+      }
+    },
+    {
+      "name": "Part 3A: leader election and heartbeats",
+      "learn": "Implement RequestVote and empty-entry AppendEntries until TestInitialElection3A, TestReElection3A and TestManyElections3A pass. The vote handler: reject if args.Term < currentTerm; step down if args.Term > currentTerm; grant only if (votedFor == nil || votedFor == candidateId) AND the candidate's log is at least as up to date (compare lastLogTerm first, then lastLogIndex). The discipline that decides whether 3A is one hour or six: reset your election timer on exactly three events — granting a vote, receiving a valid AppendEntries from the current leader, and starting your own election — and on nothing else. Resetting on a rejected vote or a stale-term heartbeat is the most common 3A bug and it hides until TestManyElections3A.",
+      "minutes": 110,
+      "resource": {
+        "label": "6.5840 lecture notes — Raft part 1 (elections)",
+        "url": "https://pdos.csail.mit.edu/6.824/notes/l-raft.txt"
+      }
+    },
+    {
+      "name": "Timeout arithmetic, and the same arithmetic in etcd",
+      "learn": "Derive your constants rather than copying someone's: the tester caps heartbeats at 10 per second and demands a new leader within 5 seconds, so the paper's 150-300ms range is unusable — a heartbeat of ~100ms with an election timeout randomised over ~400-800ms (fresh random draw every time you reset) fits both constraints. Understand the invariant behind it, broadcastTime << electionTimeout << MTBF, and then map it to a real cluster: etcd defaults to --heartbeat-interval 100ms and --election-timeout 1000ms, recommends the 10x ratio, and recommends election-timeout be at least 5-10x the round-trip time between members — which is why a cross-region etcd with default flags flaps leaders under load.",
+      "minutes": 35,
+      "resource": {
+        "label": "etcd — Tuning (heartbeat interval and election timeout)",
+        "url": "https://etcd.io/docs/v3.5/tuning/"
+      }
+    },
+    {
+      "name": "Part 3B: Start(), AppendEntries and the log-matching check",
+      "learn": "Implement `Start()` (append locally, return index/term immediately, never block) and full AppendEntries until all ten 3B tests pass, including TestBackup3B. Follow the handout's advice to make the log 0-indexed with a dummy entry at index 0, term 0, so the first RPC can legally carry PrevLogIndex 0. The follower's five steps in order: reject on stale term; reject if there is no entry at prevLogIndex with prevLogTerm; on a conflict at an existing index delete that entry and everything after it; append only entries not already present; and set commitIndex = min(leaderCommit, index of last new entry). Step 3 and step 4 must be a single careful loop — truncating unconditionally is the bug that eats committed entries.",
+      "minutes": 140,
+      "resource": {
+        "label": "Ongaro, Consensus: Bridging Theory and Practice — §3.5 Log replication and the Log Matching Property",
+        "url": "https://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf"
+      }
+    },
+    {
+      "name": "Commit rules: majority matchIndex plus the current-term restriction",
+      "learn": "Implement the leader's advance rule exactly: find N > commitIndex such that a majority of matchIndex[i] >= N AND log[N].Term == rf.currentTerm, then set commitIndex = N. Be able to explain, from Figure 8, why dropping the term check lets a replicated-on-a-majority entry from an old term be overwritten later, breaking State Machine Safety. Pair it with the election restriction (5.4.1) and show why the two together give Leader Completeness: the restriction guarantees a new leader holds every entry committed under the old rule, and the term check guarantees nothing is called committed before that guarantee applies. Know the consequence for entries from prior terms: they commit indirectly, once any current-term entry above them commits.",
+      "minutes": 55,
+      "resource": {
+        "label": "6.5840 lecture notes — Raft part 2 (commit, persistence, snapshots)",
+        "url": "https://pdos.csail.mit.edu/6.824/notes/l-raft2.txt"
+      }
+    },
+    {
+      "name": "The applier goroutine and applyCh ordering",
+      "learn": "Write one applier that waits on a `sync.Cond` signalled whenever commitIndex advances, then, in a loop, copies the entries between lastApplied and commitIndex out under the lock, releases the lock, and sends them on applyCh. Guarantee the two invariants the tester checks: every peer applies the same command at the same index (a mismatch prints 'apply error' and fails the run), and indices arrive strictly in order with no gaps or repeats. Understand why `for i := lastApplied+1; i <= commitIndex; i++ { applyCh <- ApplyMsg{...rf.log[i]...} }` while holding the lock deadlocks, and why re-reading rf.log after re-acquiring the lock can read a trimmed log once 3D lands.",
+      "minutes": 45,
+      "resource": {
+        "label": "6.5840 lecture notes — lab 3 A+B Q&A: applier thread, condvar signalling and locking",
+        "url": "https://pdos.csail.mit.edu/6.824/notes/l-raft-QA.txt"
+      }
+    },
+    {
+      "name": "The catalogue of Figure 2 misreadings",
+      "learn": "Read the Students' Guide once you have 3B passing and audit your code against every item: don't reset the election timer on a stale-term AppendEntries; don't truncate the log just because entries were sent; don't return early from RequestVote without persisting; do step down on a higher term seen in a *reply*, and then ignore the rest of that reply; don't set matchIndex = nextIndex-1 from stale state — derive it from the args you sent (prevLogIndex + len(entries)); don't let a stale AppendEntries reply lower nextIndex twice. Each one you find here is a day you don't spend on TestFigure8Unreliable3C.",
+      "minutes": 45,
+      "resource": {
+        "label": "Students' Guide to Raft (Jon Gjengset)",
+        "url": "https://thesquareplanet.com/blog/students-guide-to-raft/"
+      }
+    },
+    {
+      "name": "Part 3C: persistence and 'persist before you reply'",
+      "learn": "Implement `persist()` and `readPersist()` with labgob, encoding exactly currentTerm, votedFor and log[] (plus the snapshot bookkeeping in 3D) into `persister.Save(state, nil)`. Know that gob only serialises exported fields — lowercase fields in your log-entry struct silently vanish and labgob will warn you — and that decoding into a value that was never encoded leaves it zeroed. The rule that makes 3C pass and makes real systems safe: call persist() before you send any RPC reply that depends on the changed state, so a crash immediately after replying can never let the restarted node vote twice in one term or forget an entry it acknowledged. Insert persist() calls at every mutation of the three persistent fields, then grep to prove no mutation is missed.",
+      "minutes": 85,
+      "resource": {
+        "label": "Go standard library — encoding/gob (exported fields, zero values)",
+        "url": "https://pkg.go.dev/encoding/gob"
+      }
+    },
+    {
+      "name": "Fast log backup and the Figure 8 tests",
+      "learn": "Decrementing nextIndex one entry per RPC round trip is too slow for TestBackup3B and the 3C churn tests, so implement the handout's rejection payload: XTerm (term of the conflicting entry), XIndex (index of the first entry with that term) and XLen (log length). Leader logic: if the leader has no entry with XTerm, nextIndex = XIndex; if it has XTerm, nextIndex = (index of its last entry with XTerm) + 1; if the follower's log is simply too short, nextIndex = XLen. Then grind TestFigure83C and TestFigure8Unreliable3C — these take ~50s each and are where a wrong commit rule, a missing persist, or election timeouts that are too tight surface as intermittent failures. Run them with `-count 10` before believing they pass.",
+      "minutes": 70,
+      "resource": {
+        "label": "etcd-io/raft — log.go, findConflictByTerm (production fast log backup)",
+        "url": "https://github.com/etcd-io/raft/blob/main/log.go"
+      }
+    },
+    {
+      "name": "Part 3D: log compaction, Snapshot() and InstallSnapshot",
+      "learn": "Rewrite the log to store only the tail after lastIncludedIndex, with every array access going through explicit index-conversion helpers — this refactor, not the RPC, is where 3D is won or lost. Implement `Snapshot(index, snapshot []byte)` (called on every peer, not just the leader; discard entries before index; persist state and snapshot together via `persister.Save(state, snapshot)`) and the InstallSnapshot RPC sent whenever nextIndex[i] <= lastIncludedIndex, in one shot with no Figure 13 offset splitting. Deliver the snapshot to the service through applyCh, never move the service backwards, and after restart make sure the first applyCh message is either a higher snapshot or the command immediately after the restored index. Discard trimmed entries so the GC can free them: reslicing keeps the old backing array alive, so copy into a fresh slice.",
+      "minutes": 140,
+      "resource": {
+        "label": "6.5840 — diagram of Raft interactions: Start, applyCh, Snapshot and InstallSnapshot",
+        "url": "https://pdos.csail.mit.edu/6.824/notes/raft_diagram.pdf"
+      }
+    },
+    {
+      "name": "Debugging distributed Go: annotations, timelines, repetition",
+      "learn": "Build a debugging rig on day one rather than day five: a `DPrintf` gated by an env var, every line stamped with peer id, term, state, commitIndex and lastApplied, plus `tester.Annotate(\"Server 0\", \"short\", \"details\")` calls so the tester's generated HTML timeline shows your events alongside its partitions, crashes and checks. Learn to read that timeline for the moment the invariant first breaks rather than the moment the test reports failure. Run failing tests in a loop — `go test -race -run 3C -count 20` piped to a file — because most Raft bugs appear in one run in twenty, and 'it passed once' is not evidence.",
+      "minutes": 65,
+      "resource": {
+        "label": "6.5840 — tester visualization of a failing run",
+        "url": "https://pdos.csail.mit.edu/6.824/labs/vis.html"
+      }
+    },
+    {
+      "name": "Performance budget: RPC counts, bytes, goroutines",
+      "learn": "Treat the tester's numbers as a performance spec, not decoration: each passing line reports elapsed time, peers, RPC count, RPC bytes and committed ops, and TestCount3B and TestRPCBytes3B fail outright on excess. The grader fails any submission where all of lab 3 exceeds 600 seconds or a single test exceeds 120; the reference solution is about 6 minutes without -race and 10 with. Hunt the usual causes of blowing the budget: loops that spin without sleeping or waiting on a cond, sending the entire log in every AppendEntries instead of the suffix from nextIndex, retrying an in-flight RPC before the previous one returns, and goroutines leaked per election. Use `go test -cpuprofile`/`-blockprofile` or a SIGQUIT goroutine dump when a run hangs.",
+      "minutes": 45,
+      "resource": {
+        "label": "Go — Diagnostics (profiling, tracing, goroutine dumps)",
+        "url": "https://go.dev/doc/diagnostics"
+      }
+    },
+    {
+      "name": "Linearizability and what Porcupine actually checks",
+      "learn": "Understand the layer above your Raft: the tester records a history of client operations with invocation and response intervals and asks whether some sequential ordering consistent with real time explains it — that is linearizability, and Porcupine is the checker that decides it (it writes an HTML visualisation on failure). Be able to say precisely what Raft gives you (a single totally ordered replicated log) and what it does not (linearizable *reads*, which need a log entry, a ReadIndex round trip, or a lease), and to read a Porcupine diagram to find the operation whose return value is impossible under every valid ordering.",
+      "minutes": 40,
+      "resource": {
+        "label": "Porcupine — linearizability checker for Go",
+        "url": "https://github.com/anishathalye/porcupine"
+      }
+    },
+    {
+      "name": "Section 8 client interaction: exactly-once and read paths",
+      "learn": "Read section 8 of the paper and design what lab 4 will need: clients tag every command with a clientId and a monotonically increasing seqNo, the state machine keeps a last-applied-seq table per client so a retried command after a leader change is deduplicated rather than applied twice, and that table is part of the snapshot. Know why a new leader commits a no-op entry from its own term at election time (to learn its true commitIndex before serving reads) and the three read strategies with their costs: put the read in the log (safe, one round trip of consensus), ReadIndex (confirm leadership with a heartbeat quorum, then read locally), or a leader lease (fastest, but correctness depends on bounded clock drift).",
+      "minutes": 45,
+      "resource": {
+        "label": "Raft extended paper — Section 8, Client interaction",
+        "url": "https://raft.github.io/raft.pdf"
+      }
+    },
+    {
+      "name": "From lab Raft to the consensus in a customer's stack",
+      "learn": "Close the loop by reading etcd's raft library README and mapping every lab concept onto a production knob: the `Node` interface and `Ready` struct that make persistence and message sending the application's job; PreVote and CheckQuorum, which stop a partitioned node from bumping the term and disrupting a healthy leader (your lab Raft has this bug by design); learners (non-voting members) for safe node replacement; ReadIndex for linearizable reads; and the WAL plus snapshot-count settings that decide restart time. Then look at the operational failure surface you will actually be paged for: losing quorum in a 3-node cluster, `etcdctl snapshot save` / restore, `--force-new-cluster`, and why fsync latency on the etcd disk shows up as apiserver timeouts.",
+      "minutes": 80,
+      "resource": {
+        "label": "etcd-io/raft — production Raft library README",
+        "url": "https://github.com/etcd-io/raft"
+      }
+    },
+    {
+      "name": "Quorum loss, recovery and cluster sizing for customers",
+      "learn": "Work the operational drill: for 2f+1 members you survive f failures, so 3 tolerates 1 and 5 tolerates 2, while 4 tolerates the same as 3 and is strictly slower — be able to shut down that 'let's add a fourth node for HA' request in one sentence. Walk etcd's documented failure modes: minority failure (self-heals when the member returns), majority failure (cluster is unavailable for writes and must be restored from a snapshot), and a partitioned member that returns with a higher term. Know the recovery sequence — stop members, `etcdutl snapshot restore` on each with a new cluster token, restart, verify with `etcdctl endpoint status --cluster` — and that a restore loses everything written after the snapshot, which is the number your customer actually needs to hear.",
+      "minutes": 45,
+      "resource": {
+        "label": "etcd — Failure modes and disaster recovery",
+        "url": "https://etcd.io/docs/v3.5/op-guide/failures/"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can run `make RUN=\"-run 3A\" raft1` through `-run 3D` and pass all of 3A, 3B, 3C and 3D with `-race`, repeated with `-count 10`, with the whole suite under the 600-second grading limit and no individual test over 120 seconds",
+    "You can point at the specific line in your raft.go that implements each numbered rule in Figure 2, including the two easily-skipped ones (step down on a higher term seen in a reply; apply while commitIndex > lastApplied)",
+    "You can reproduce the Figure 8 scenario on a whiteboard in under five minutes and state exactly which line of your commit-advance code prevents it",
+    "You can explain, without notes, the three and only three events that reset your election timer, and demonstrate a test that fails when you add a fourth",
+    "You can take a failing run's tester timeline plus your own annotated logs and name the first violated invariant and the peer that violated it, rather than the test that reported it",
+    "You can translate any lab constant into its production equivalent — heartbeat interval, election timeout, snapshot trigger, quorum size — and defend those values for a customer's cluster given their RTT and disk fsync latency",
+    "You can describe three implementations of a linearizable read (log entry, ReadIndex, leader lease), rank them by latency, and name the assumption each one can violate",
+    "You can diagnose an etcd cluster that has lost quorum and give the exact recovery sequence plus the data-loss window it implies"
+  ],
+  "failureModes": [
+    "Replying to a RequestVote or AppendEntries before persisting currentTerm/votedFor/log, so a crash-restart in the same term votes twice or forgets an acknowledged entry — in the lab it is an intermittent 3C failure, in production it is two leaders writing divergent history",
+    "Truncating the follower's log on every AppendEntries instead of only at a genuine conflict, so a delayed or duplicated RPC deletes entries that were already committed and the peers diverge — the tester calls this 'apply error', a customer calls it lost writes",
+    "Advancing commitIndex by counting replicas without checking log[N].Term == currentTerm, which commits a previous-term entry that a later leader can legally overwrite (Figure 8) — silent, rare, and only reproducible under partitions",
+    "Holding rf.mu across a peer.Call or an applyCh send, which deadlocks the peer; the cluster keeps electing leaders that never make progress, and the production analogue is an etcd member that answers heartbeats but stalls every write",
+    "Election timeouts tuned too aggressively for the environment — a node whose fsync latency spikes (EBS burst credits exhausted, noisy-neighbour NVMe) misses heartbeats, terms climb, and the cluster flaps leaders every few seconds while the apiserver above it times out",
+    "Log compaction that reslices instead of copying, so trimmed entries stay reachable and never get freed; memory grows for days until the process is OOM-killed, mirroring an etcd cluster that hits its DB quota, raises a NOSPACE alarm and goes read-only",
+    "Retrying a client command against a new leader without a clientId/seqNo dedup table, so an operation that timed out is applied twice — harmless for an idempotent Put, corrupting for an increment, a debit, or an append"
+  ],
+  "interviewQuestions": [
+    "Walk me through why a Raft leader may not mark an entry from a previous term committed just because it is stored on a majority. Draw the Figure 8 sequence and tell me what your code does instead.",
+    "Exactly where in the protocol must state hit stable storage before you reply, and what concretely breaks if you reply first? Now estimate the write throughput ceiling that rule imposes given a 6ms fsync.",
+    "A customer's five-node etcd behind their Kubernetes control plane is electing a new leader every couple of minutes and apiserver p99 latency has gone from 20ms to 2s. What do you look at, in what order, and which of heartbeat-interval, election-timeout, snapshot-count, disk or network do you expect to be the cause?",
+    "Give me three ways to serve a linearizable read from a Raft cluster, in order of increasing latency, and tell me the specific failure each one can exhibit.",
+    "A client issues a write, gets no response, and retries against a different node that is now leader. How do you guarantee the command applies exactly once, and where does that dedup state have to live so it survives a snapshot and a restart?",
+    "The customer's platform team wants to go from three to four members 'for more redundancy' across two datacentres. What do you tell them, and what would you propose instead?",
+    "How do snapshots interact with AppendEntries and the applyCh contract? What invariants must hold about the order and indices of messages the service sees after a follower installs a snapshot?"
+  ],
+  "proofOfWork": "Beyond the passing test suite, build a fault-injection harness and a written failure atlas on top of your own implementation. Add a debug build flag that lets you deliberately break one invariant at a time — persist after reply instead of before, drop the current-term check in the commit rule, truncate the log unconditionally on AppendEntries, reset the election timer on stale-term RPCs, remove the election restriction from RequestVote — then, for each mutation, run the suite with `-count 20` and record which tests fail, at what rate, and what the first divergence looks like in the tester timeline. Write it up as a short document (kept private since it contains lab code, or published with the solution stripped to diagrams and log excerpts) where each entry has the broken invariant, the safety property it violates from the paper, the observed symptom, the failure rate across twenty runs, and the equivalent production symptom in etcd or Consul — leader flapping, apiserver timeouts, a stale read, a double-applied command. That document is both the artifact that proves you understand Raft as a set of enforced invariants rather than a pile of RPCs, and the thing you can hand an interviewer or a customer's platform team when they ask why a consensus tuning change is risky."
+}

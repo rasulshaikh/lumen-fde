@@ -1,0 +1,199 @@
+{
+  "i": 24,
+  "topic": "High availability and disaster recovery",
+  "track": "D. Reliability and Observability",
+  "month": 3,
+  "hours": 6.0,
+  "why": "Every enterprise deal an FDE touches has a security questionnaire line that reads 'state your RTO and RPO' and a CTO who asks 'what happens if the region goes down' in the second architecture review, and the answer determines whether the pilot is allowed near production data. The FDE also inherits the customer's existing Postgres, their single-AZ Kubernetes cluster and their untested nightly dump, and is the person on the bridge when a migration drops a table or an AZ degrades. An FDE who has personally restored a database to a timestamp and measured the clock can make commitments and price them; one who has only read about it will either overpromise or stall the deal.",
+  "prerequisites": [
+    "Topic 13 (AWS networking and compute): what an Availability Zone and a Region are, subnets per AZ, cross-zone load balancing, and why an ALB in one AZ is not redundant.",
+    "Topic 14 (AWS data): you have already run an RDS point-in-time restore and a forced Multi-AZ failover; this topic does the self-managed Postgres equivalent and then zooms out to the whole system.",
+    "Topic 8 (Kubernetes production ops): Deployments, StatefulSets, PersistentVolumes, node drains and readiness probes, so PodDisruptionBudgets and topology spread constraints have something to attach to.",
+    "Topic 20 (SRE fundamentals): SLIs, SLOs and error budgets; RTO and RPO are the same discipline applied to the recovery half of an outage.",
+    "Working Postgres: psql, what WAL and checkpoints are, that replicas replay WAL, and how to run pg_dump; Topic 29 goes deeper but the vocabulary is assumed now.",
+    "A target to drill on: the Kaupex Postgres on the Hetzner VPS (or a clone of it in Docker) plus an S3-compatible bucket you control (Hetzner Object Storage, Backblaze B2 or AWS S3) for the WAL archive; budget a few USD and about 20 GB."
+  ],
+  "subtopics": [
+    {
+      "name": "Availability arithmetic: nines, serial and parallel composition",
+      "learn": "Convert nines into budget you can feel: 99.9% is roughly 43 minutes of downtime per month, 99.95% about 22, 99.99% about 4.4. Hard dependencies in series multiply, so an app at 99.95% on a database at 99.95% behind DNS at 99.99% caps at about 99.89% before you write a line of code; redundant components in parallel give 1-(1-a)^n only when their failures are independent, and a shared deploy pipeline, shared AZ or shared control plane makes them correlated. Availability equals MTBF/(MTBF+MTTR), which is why a measured RTO is a direct lever on the SLO. Practice: take the Kaupex stack (VPS, Postgres, object storage, LLM provider, DNS) and compute its honest ceiling, marking each dependency hard or soft.",
+      "minutes": 20,
+      "resource": {
+        "label": "AWS Well-Architected Reliability Pillar - Availability",
+        "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/availability.html"
+      }
+    },
+    {
+      "name": "RTO and RPO as negotiated business numbers, per tier",
+      "learn": "RTO is the elapsed time from declaring a disaster to the service serving users again, and it includes detection and decision time, not just the restore; RPO is the maximum window of committed data you may lose, expressed in time. Both are set from business impact (revenue per hour, regulatory retention, contractual penalties), never from what the current infrastructure happens to offer, and cost rises steeply as either approaches zero. Build a tier table for a customer workload: Tier 0 for auth and payments (RTO 15 min, RPO near zero), Tier 1 for core product (RTO 1 h, RPO 5 min), Tier 2 for analytics and logs (RTO 24 h, RPO 24 h). Always record objective next to measured; the gap column is the DR plan.",
+      "minutes": 20,
+      "resource": {
+        "label": "Reliability Pillar - REL13-BP01 Define recovery objectives for downtime and data loss",
+        "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_planning_for_recovery_objective_defined_recovery.html"
+      }
+    },
+    {
+      "name": "Failure domains, correlated failure and blast radius",
+      "learn": "Enumerate the failure domains of a stack explicitly: host, AZ, Region, cloud account, control plane, deploy pipeline, DNS zone, identity provider, TLS certificate, a single KMS key, a single Terraform state file. Redundancy only protects against domains you have actually separated; two replicas in one AZ behind one single-AZ load balancer is one failure domain wearing three costumes. Learn the correlated failures that defeat N+1: the same bad deploy rolled to all AZs, one certificate expiring everywhere, one account-level quota, one shared secret rotated. Understand cell-based architecture and shuffle sharding as ways to cap the fraction of customers any single failure can reach, and draw the dependency graph for Kaupex with each edge labelled hard or soft.",
+      "minutes": 20,
+      "resource": {
+        "label": "Reliability Pillar - Use fault isolation to protect your workload",
+        "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/use-fault-isolation-to-protect-your-workload.html"
+      }
+    },
+    {
+      "name": "Static stability: surviving an AZ loss without the control plane",
+      "learn": "During an AZ impairment the control plane (RunInstances, Auto Scaling launches, volume creation, IAM changes, Kubernetes node provisioning) is the first thing to degrade or throttle, so a design that needs new capacity to recover is not resilient. Statically stable design pre-provisions N+1 across AZs so that losing one AZ requires no launches: three AZs each running at 50% utilisation tolerate one AZ loss with headroom. Prefer data-plane dependencies (Route 53 answers, already-issued credentials, pre-pulled images, warm caches) over control-plane calls in the recovery path, and avoid fallback code paths that only execute during a disaster because they are by definition untested. Map this onto Kubernetes: cluster-autoscaler launching nodes is a control-plane dependency; the fix is spare capacity, not a faster autoscaler.",
+      "minutes": 20,
+      "resource": {
+        "label": "Amazon Builders' Library - Static stability using Availability Zones",
+        "url": "https://aws.amazon.com/builders-library/static-stability-using-availability-zones/"
+      }
+    },
+    {
+      "name": "The four DR strategies and why the data tier decides",
+      "learn": "Know the ladder cold: backup and restore (RTO hours, RPO hours, cheapest), pilot light (data replicated live, compute off, RTO tens of minutes), warm standby (scaled-down full stack, RTO minutes), multi-site active/active (RTO and RPO near zero but requires write partitioning or conflict resolution). Compute is trivially recreatable from IaC and images; data is the constraint, and whatever your replication or archive lag is becomes your real RPO regardless of the slide. Choose per tier rather than per company: most customers should run pilot light for the primary database and backup and restore for everything else. List what the DR region must already contain before the disaster: images, secrets, KMS key grants, IAM roles, service quotas, DNS records, IdP configuration.",
+      "minutes": 20,
+      "resource": {
+        "label": "AWS whitepaper - Disaster recovery options in the cloud",
+        "url": "https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html"
+      }
+    },
+    {
+      "name": "Postgres backup methods: pg_dump, pg_basebackup, WAL archiving",
+      "learn": "pg_dump is logical: it takes a consistent snapshot inside a REPEATABLE READ transaction, writes portable SQL or a custom archive (-Fc, or -Fd with -j N for parallel dump and pg_restore -j for parallel restore), survives major-version upgrades, but cannot recover to a point in time and gets slow past a few hundred GB. pg_basebackup is physical: it copies the whole cluster over the replication protocol (--checkpoint=fast to avoid waiting for the next checkpoint, -X stream to include the WAL generated during the copy, --manifest-checksums=SHA256), is bound to the same major version and architecture, and is the base for PITR. Continuous archiving sets archive_mode=on and archive_command (or archive_library in PG15+) to ship every 16 MB WAL segment off-box, with archive_timeout bounding RPO on idle systems. Match method to failure: logical corruption needs PITR, migration needs pg_dump, RPO in minutes needs WAL archiving.",
+      "minutes": 25,
+      "resource": {
+        "label": "PostgreSQL docs - Chapter 25 Backup and Restore",
+        "url": "https://www.postgresql.org/docs/current/backup.html"
+      }
+    },
+    {
+      "name": "Point-in-time recovery by hand: recovery.signal, restore_command, recovery targets and timelines",
+      "learn": "Restore the base backup into an empty PGDATA, create recovery.signal, set restore_command='cp /archive/%f %p' (or the pgbackrest archive-get equivalent) and choose a target: recovery_target_time='2026-09-05 14:06:30+00', recovery_target_lsn, recovery_target_xid, or recovery_target_name pointing at a pg_create_restore_point() you made before a risky migration. Understand recovery_target_inclusive and recovery_target_action=pause (default) versus promote or shutdown, and that after pause you inspect the data and call pg_wal_replay_resume() to promote. Learn timelines: promotion writes a new .history file and starts a new timeline, so a second attempt after a wrong target needs recovery_target_timeline='latest' or the specific ID to replay the right branch. Watch the log for 'consistent recovery state reached' before trusting anything. Run this on a Kaupex clone and write down the wall-clock time of every phase.",
+      "minutes": 30,
+      "resource": {
+        "label": "PostgreSQL docs - 25.3 Continuous Archiving and Point-in-Time Recovery",
+        "url": "https://www.postgresql.org/docs/current/continuous-archiving.html"
+      }
+    },
+    {
+      "name": "Verifying backups: manifests, checksums and restore-as-test",
+      "learn": "pg_verifybackup validates a base backup against its backup_manifest (file list, sizes, per-file checksums) and confirms the WAL range needed to reach consistency is present (-w to point at the WAL directory, -n to skip WAL parsing, -i to ignore paths). Enable data checksums (initdb --data-checksums, or pg_checksums --enable on a stopped cluster) so torn or bit-rotted pages fail at read time on the primary rather than at restore time in a disaster. Treat a backup as verified only when it has been restored and queried: schedule an automated restore to a scratch instance, run SELECT count(*) on the largest table and the application's smoke query, and alert if the newest recoverable point is older than the RPO. Monitor pg_stat_archiver (failed_count, last_failed_wal, last_archived_time) because a silently failing archive_command is the most common way a PITR chain gets a gap.",
+      "minutes": 20,
+      "resource": {
+        "label": "PostgreSQL docs - pg_verifybackup",
+        "url": "https://www.postgresql.org/docs/current/app-pgverifybackup.html"
+      }
+    },
+    {
+      "name": "pgBackRest in production: stanza, S3 repo, retention and restore --type=time",
+      "learn": "Configure pgbackrest.conf with [global] repo1-type=s3, repo1-s3-bucket, repo1-s3-endpoint, repo1-s3-region, repo1-path, repo1-retention-full=2, repo1-retention-diff, repo1-cipher-type=aes-256-cbc with repo1-cipher-pass, process-max, start-fast=y, and a [kaupex] stanza with pg1-path; point Postgres at it with archive_command='pgbackrest --stanza=kaupex archive-push %p'. Run stanza-create, check (proves archiving works end to end), backup --type=full|diff|incr, info, and expire; understand why every incremental depends on a restorable full and how block incremental (repo-block) shrinks diffs. Restore with restore --type=time --target='...' --target-action=promote, and use --delta to reuse unchanged files in place for a faster RTO. Barman and WAL-G implement the same concepts; the vocabulary transfers.",
+      "minutes": 25,
+      "resource": {
+        "label": "pgBackRest User Guide",
+        "url": "https://pgbackrest.org/user-guide.html"
+      }
+    },
+    {
+      "name": "Streaming replication, synchronous_commit and what RPO zero costs",
+      "learn": "Build a hot standby: standby.signal, primary_conninfo, a physical replication slot on the primary with max_slot_wal_keep_size set so a dead standby cannot fill the primary's disk, hot_standby=on for reads. Learn the synchronous_commit ladder: off, local, remote_write, on (flushed on the standby), remote_apply (visible on the standby), and synchronous_standby_names='ANY 1 (s1, s2)' versus FIRST; with a single synchronous standby, losing it blocks every commit, which is the availability price of RPO zero. Read pg_stat_replication (sent_lsn, write_lsn, flush_lsn, replay_lsn, replay_lag) and derive RPO directly from replay lag; check pg_replication_slots.wal_status for 'lost'. Promote with pg_ctl promote or SELECT pg_promote(), then fence or pg_rewind the old primary so it can never accept writes again; this is why Patroni with a DCS exists.",
+      "minutes": 25,
+      "resource": {
+        "label": "PostgreSQL docs - 26.2 Log-Shipping Standby Servers (streaming, slots, synchronous replication)",
+        "url": "https://www.postgresql.org/docs/current/warm-standby.html"
+      }
+    },
+    {
+      "name": "Managed cross-region replication: RDS replicas, Aurora Global, S3 CRR",
+      "learn": "An RDS cross-region read replica is asynchronous streaming; its ReplicaLag metric is your RPO, promote-read-replica breaks replication and takes minutes, and the promoted instance needs Multi-AZ and automated backups turned on afterwards or you have just created a single point of failure with no backup. Aurora Global Database replicates at the storage layer with typical sub-second lag: managed switchover is planned and lossless, unplanned failover detaches and promotes with RPO equal to lag. S3 Cross-Region Replication copies only new objects unless you run Batch Replication, does not replicate delete markers unless DeleteMarkerReplication is enabled, needs KMS key configuration for encrypted objects, and Replication Time Control adds a 15-minute SLA. DynamoDB global tables are last-writer-wins. In every case the RPO is a lag metric, so alarm on it.",
+      "minutes": 20,
+      "resource": {
+        "label": "Amazon RDS User Guide - Creating a read replica in a different AWS Region",
+        "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.XRgn.html"
+      }
+    },
+    {
+      "name": "Immutable, cross-account backups against ransomware and fat fingers",
+      "learn": "The failure most DR plans forget: any credential that can delete production can usually delete the backups too. Copy backups to a separate backup account with AWS Backup cross-account copy, and lock the destination vault with Vault Lock in compliance mode, which after its cooling-off period cannot be shortened even by the account root; use S3 Object Lock compliance mode for object-store backups. Check the key path: a snapshot encrypted with a customer-managed key is unreadable if that key is scheduled for deletion or the DR account lacks kms:Decrypt and kms:CreateGrant, so use multi-Region keys or re-encrypt on copy and test decrypting from the DR account. For self-hosted Postgres, put the pgBackRest repo bucket in a different account with an IAM policy that allows PutObject and GetObject but not DeleteObject, turn on versioning, and expire old versions with lifecycle rules rather than credentials. This is the 3-2-1 rule made concrete: three copies, two media, one outside the blast radius of the production account.",
+      "minutes": 20,
+      "resource": {
+        "label": "AWS Backup Developer Guide - AWS Backup Vault Lock",
+        "url": "https://docs.aws.amazon.com/aws-backup/latest/devguide/vault-lock.html"
+      }
+    },
+    {
+      "name": "Kubernetes across AZs: topology spread, PodDisruptionBudgets and zonal volumes",
+      "learn": "Spread replicas with topologySpreadConstraints using topologyKey: topology.kubernetes.io/zone, maxSkew: 1, whenUnsatisfiable: DoNotSchedule (ScheduleAnyway when you would rather run unbalanced than not at all), and add a hostname-level podAntiAffinity so two replicas do not share a node. Write PodDisruptionBudgets with percentages: a PDB of minAvailable: 1 on a one-replica Deployment blocks every kubectl drain and every managed node-group upgrade indefinitely, and PDBs never protect against involuntary disruption such as node loss. EBS PersistentVolumes are zonal: set volumeBindingMode: WaitForFirstConsumer in the StorageClass so the volume is created where the pod lands, and understand that after an AZ loss a StatefulSet pod whose volume lives in the dead zone stays Pending until that zone returns, so database redundancy must come from Postgres replication, not from storage. Use one node group per AZ so the autoscaler can rebalance.",
+      "minutes": 25,
+      "resource": {
+        "label": "Kubernetes docs - Pod Topology Spread Constraints",
+        "url": "https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/"
+      }
+    },
+    {
+      "name": "Traffic failover: Route 53 health checks, failover records and the manual switch",
+      "learn": "Route 53 health checks come as endpoint, calculated and CloudWatch-alarm types; with the standard 30-second interval (10 seconds for fast) and FailureThreshold 3, detection alone is around 90 seconds before the record TTL and client caches add more. Failover routing uses PRIMARY and SECONDARY records, and alias records need EvaluateTargetHealth set to true or the health of the target is ignored. Point the health check at a deep endpoint that exercises the database, but keep it separate from the load balancer's shallow liveness path so a slow query under load does not fail the whole region. Fully automatic DNS failover of a database-backed application is dangerous because a transient primary blip can leave writes on both sides; Route 53 Application Recovery Controller routing controls give a highly available manual switch with readiness checks and safety rules. Explain to the customer that 'DNS failover' is minutes, not seconds, because of resolver and JVM caching.",
+      "minutes": 20,
+      "resource": {
+        "label": "Amazon Route 53 Developer Guide - Configuring DNS failover",
+        "url": "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/dns-failover.html"
+      }
+    },
+    {
+      "name": "Testing DR: game days, FIS AZ scenarios and a drill log that measures RTO",
+      "learn": "A DR test passes only when the application served real requests from recovered infrastructure and every phase has a timestamp; 'the snapshot exists' is not a test. Climb the ladder: tabletop walkthrough, single-component restore drill, AZ impairment using the AWS FIS 'AZ Availability: Power Interruption' scenario (stops instances in the AZ, pauses Auto Scaling, fails over Multi-AZ RDS, blackholes subnet traffic), then a full Region failover. Define the drill log columns before you start: T-declare, T-decision, T-restore-start, T-db-consistent, T-app-healthy, T-traffic-cut, T-verified, and record every surprise (missing secret, expired token, quota, wrong parameter group) as a ticket. Re-run until measured RTO is at or below objective, then schedule quarterly, because every deploy that adds a dependency silently rots the plan.",
+      "minutes": 25,
+      "resource": {
+        "label": "AWS Fault Injection Service User Guide - What is AWS FIS",
+        "url": "https://docs.aws.amazon.com/fis/latest/userguide/what-is.html"
+      }
+    },
+    {
+      "name": "Data integrity: soft deletes, logical corruption and defence in depth",
+      "learn": "Most real data loss is logical (a bad migration, a buggy batch job, an admin with the wrong WHERE clause) and replicates perfectly to every standby, which is why replication is availability and not backup. Layer the defences: soft deletion with a delayed purge and an application-level undelete, PITR for the recent window, cold backups for the long horizon, and continuous validation that compares counts and checksums across layers. Take from the SRE book the reframing that users want their data back, not backups, so the metric to own is time-to-restore-user-data, and that failures combine cause, scope and rate into many cases a single backup schedule cannot cover. Ask of every plan: what happens when the corruption started nine days ago and the PITR window is seven?",
+      "minutes": 20,
+      "resource": {
+        "label": "Google SRE Book - Chapter 26 Data Integrity: What You Read Is What You Wrote",
+        "url": "https://sre.google/sre-book/data-integrity/"
+      }
+    },
+    {
+      "name": "Writing and presenting the DR plan and runbook",
+      "learn": "Structure the document: scope and tiers; RTO/RPO objective versus measured for every data store; failure scenarios covered and, explicitly, those not covered; declaration criteria and who may declare; roles; a runbook with literal commands and expected output including prechecks (is pg_stat_archiver current, does the DR account decrypt a test snapshot); the DR-region prerequisites checklist (images, secrets, KMS grants, quotas, DNS, IdP); the communications template; the failback procedure, which is harder than failover because you must reverse replication and reconcile writes made during the outage; and the test history. Keep it in git beside the IaC, and make any change that adds a dependency also update the plan. Present it to a customer as a menu of tiers with cost against RTO and RPO, anchored to their own revenue-per-hour figure, not as a single recommendation.",
+      "minutes": 25,
+      "resource": {
+        "label": "Reliability Pillar - Plan for Disaster Recovery (DR)",
+        "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/plan-for-disaster-recovery-dr.html"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can take a customer's architecture diagram and within ten minutes list its failure domains, its hard dependencies with their availability ceilings, and state the highest availability it can honestly promise, with the multiplication shown.",
+    "You can perform a point-in-time restore of a self-hosted Postgres from a pgBackRest S3 repository to a named timestamp with --target-action=pause, verify a marker row, promote, and report RTO and RPO with wall-clock timestamps, in under 30 minutes for a roughly 10 GB database.",
+    "You can produce a tier table for a workload with objective and measured RTO and RPO for each data store, plus a monthly cost for backup-and-restore, pilot light and warm standby, and defend the recommended tier with the customer's own downtime cost.",
+    "You can configure a streaming standby with synchronous_commit=remote_apply, kill the primary mid-write-loop, promote, and show zero lost commits, then repeat with asynchronous replication and quantify both the lost commits and the commit-latency you saved.",
+    "You can write topologySpreadConstraints and PodDisruptionBudget manifests for a stateful service, cordon and drain every node in one zone, and show which pods kept serving, which went Pending, and why the Pending ones are tied to zonal volumes.",
+    "You can design a backup scheme that survives full compromise of the production account's credentials and prove it with a denied DeleteObject against the repo bucket and a rejected attempt to shorten a locked vault's retention.",
+    "You can run a timed DR drill, hand the customer a log with every phase timestamped, and present the gap between objective and measured along with the three changes that close it."
+  ],
+  "failureModes": [
+    "The team says 'we have HA' because there is a Multi-AZ standby and two read replicas, then a migration runs DROP TABLE orders and every replica applies it within a second; with no WAL archive, the only recovery point is last night's pg_dump and the RPO is 20 hours.",
+    "archive_command has been failing for five weeks since the object-storage credentials rotated, pg_stat_archiver.failed_count is in the thousands and nobody alerted on it, pg_wal fills the disk and crashes the primary, and the 'backups' turn out to be unrestorable because the WAL chain has a gap.",
+    "The DR runbook restores an encrypted snapshot into the recovery account, which has no grant on the production KMS key; the restore fails with a KMS access error, the key admin is on holiday, and a 30-minute RTO becomes a day of support tickets.",
+    "A PodDisruptionBudget with minAvailable: 1 sits on a single-replica StatefulSet; the managed node-group upgrade stalls for hours, the on-call force-deletes the pod to unblock it, and the only instance of the service goes down during the change window.",
+    "Automatic DNS failover flips traffic to the DR region during a 40-second primary blip; both regions accept writes for six minutes before anyone notices, and failback needs a manual reconciliation of orders that the customer's finance team has to sign off on.",
+    "A 'multi-AZ' Kubernetes cluster runs Postgres as a StatefulSet with an EBS volume in one zone; when that zone is impaired the pod stays Pending forever because the volume cannot move, and the customer discovers their database was single-AZ all along.",
+    "The DR plan is a Confluence page last edited eighteen months ago; it references a deprecated CLI flag, a Terraform workspace that no longer exists and an engineer who left, so the real RTO is the time it takes to rediscover the system under pressure."
+  ],
+  "interviewQuestions": [
+    "A customer wants 99.99% availability for an application that hard-depends on their SSO provider at 99.9% and on our LLM API at 99.9%. What do you tell them, what would you change in the design to get closer, and what number do you actually write into the SOW?",
+    "Design DR for a self-hosted Postgres plus a Kubernetes API tier with a 30-minute RTO and a 5-minute RPO across two regions, on a budget that rules out a hot standby. What replicates continuously, what stays cold, what must already exist in the DR region, and how do you prove the numbers to the customer?",
+    "Your restore drill came in at three hours against a one-hour objective. Walk me through how you break down where the time went, which phases are fixable with configuration versus architecture, and what you would ship this week.",
+    "A primary's pg_wal directory has grown to 400 GB and the disk is at 98%. Give me the candidate causes, how you confirm each in under a minute with pg_stat_archiver and pg_replication_slots, and the sequence of actions that recovers the disk without losing the ability to restore.",
+    "Should failover of a database-backed service between regions be automatic? Argue both positions, then tell me what you would actually build for a payments customer and how the switch would be implemented and protected.",
+    "A security questionnaire asks whether a compromised production admin credential could destroy your backups. Design the answer you want to give, name the controls behind each clause, and describe the test that proves it.",
+    "Compare a Multi-AZ standby, a cross-region read replica, continuous WAL archiving and a nightly snapshot: which failures does each recover from, what are their RTO and RPO, and in what scenario is the nightly snapshot the only thing that saves you?"
+  ],
+  "proofOfWork": "A public repository named kaupex-dr that turns the plan's DR document into reproducible evidence. It holds a pgbackrest.conf targeting an S3-compatible bucket in a separate account whose IAM policy allows PutObject and GetObject but denies DeleteObject, with versioning and a lifecycle rule, and a policy_test.sh showing the denied delete. A drill.sh seeds a Kaupex clone with pgbench, inserts a timestamped marker row, runs a destructive migration, then restores to a scratch cluster with pgbackrest restore --type=time --target-action=pause, checks the marker, promotes, and appends every phase timestamp to DRILL_LOG.md, which contains at least three runs with RTO and RPO and a sentence on what dominated each. A standby/ directory has a docker-compose with a primary and a synchronous standby plus kill_primary.py, which runs a write loop, kills the primary, promotes, and reports lost commits under remote_apply and under asynchronous replication. A k8s/ directory has a StatefulSet with topologySpreadConstraints and a percentage PDB, and zone_loss.sh cordons and drains one zone on a kind or EKS cluster and records how many pods kept serving versus went Pending. DR_PLAN.md contains the tier table with objective versus measured, declaration criteria, the literal runbook, the DR-region prerequisites checklist, failback steps and an explicit list of untested scenarios; a ten-minute recorded walkthrough presents it to an imagined customer CTO as a cost-versus-RTO menu."
+}

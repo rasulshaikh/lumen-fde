@@ -1,0 +1,191 @@
+{
+ "i": 63,
+ "topic": "Cloud and Kubernetes security games",
+ "track": "I. Security and Compliance",
+ "month": 8,
+ "hours": 6,
+ "why": "As an FDE you deploy into the customer's own AWS account and their Kubernetes cluster, often with a security team watching every IAM role you request and every Pod spec you apply, and 'the vendor's workload got popped and pivoted to our data' is the fastest way to be thrown off an account. Playing the attacker in flaws2.cloud and Kubernetes Goat teaches you exactly how a leaked credential, an SSRF, a privileged Pod or an over-broad Role turns into a full account compromise, so you can design the deployment that does not do that and defend the design in the architecture review. The tangible output is a client-facing hardening checklist you can hand a customer's platform team, which is worth more in a security review than any certificate.",
+ "prerequisites": [
+  "Kubernetes production ops and security (topics 8 and 10): RBAC verbs and resources, ServiceAccount tokens, requests/limits, NetworkPolicy and Pod Security concepts, plus kubectl -n, get -o yaml, exec, auth can-i.",
+  "IAM and cloud security (topic 15): IAM policies, roles vs users, STS temporary credentials, IRSA, and why long-lived access keys are the thing you are trying to eliminate.",
+  "AWS networking and compute (topic 13): VPC, security groups, EC2, Lambda, and the fact that 169.254.169.254 is the instance metadata endpoint.",
+  "Docker internals (topic 5): namespaces, cgroups, capabilities, the container filesystem, and what the Docker socket grants whoever can reach it.",
+  "Application security: OWASP Top 10 (topic 61) and threat modelling (topic 62): SSRF, broken access control, secrets management, and how to reason about an attacker's next hop.",
+  "Enough shell and curl to hit a metadata endpoint, decode a JWT, base64 a secret and read a kubeconfig without a tutorial."
+ ],
+ "subtopics": [
+  {
+   "name": "Set up the three ranges and adopt the attacker's loop",
+   "learn": "Stand up all three environments before you learn any theory: run flaws2.cloud's attacker and defender tracks in the browser, deploy Kubernetes Goat into a local kind or minikube cluster (never a shared or production cluster) with its setup script, and register the two free TryHackMe rooms. Internalise the attacker loop you will repeat in every scenario: enumerate what identity/token you currently hold, find what it can reach, use that to obtain the next credential, escalate, then persist. Keep a running lab journal keyed by scenario with the exact command, the credential or path it exposed, and the single control that would have stopped it - that journal becomes the client checklist at the end.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes Goat - official site and setup",
+    "url": "https://madhuakula.com/kubernetes-goat/"
+   }
+  },
+  {
+   "name": "flaws2 attacker track: SSRF to IMDS to account credentials",
+   "learn": "Work the full attacker chain: an image-parsing endpoint that fetches a URL you control (SSRF), which you point at http://169.254.169.254/latest/meta-data/iam/security-credentials/ to steal the container/instance role's temporary credentials, then load them with aws configure or environment variables and run aws sts get-caller-identity to confirm who you now are. Understand each hop as a distinct control failure: the app trusting an attacker-supplied URL, the workload holding a role far broader than it needs, and the metadata service handing tokens to anything that can make a local HTTP request. This exact chain (Capital One, 2019) is the canonical cloud breach and the one a security reviewer will ask you about by name.",
+   "minutes": 30,
+   "resource": {
+    "label": "AWS docs - Instance metadata and user data",
+    "url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html"
+   }
+  },
+  {
+   "name": "The IMDS fix: IMDSv2, hop limit, and blocking metadata from workloads",
+   "learn": "Learn the concrete defence you will recommend on every AWS engagement: enforce IMDSv2 (HttpTokens: required) so the metadata endpoint requires a PUT-issued session token that SSRF usually cannot obtain, set HttpPutResponseHopLimit to 1 so a container one network hop away cannot reach it, and on EKS block Pod egress to 169.254.169.254 entirely so workloads use IRSA instead of the node role. Know the difference between the node's instance role and the Pod's IRSA role, and why a Pod inheriting the node role is the single most common EKS privilege-escalation path. Be able to write the exact modify-instance-metadata-options call and the NetworkPolicy/iptables rule that implement this.",
+   "minutes": 20,
+   "resource": {
+    "label": "EKS Best Practices - Security",
+    "url": "https://aws.github.io/aws-eks-best-practices/security/docs/"
+   }
+  },
+  {
+   "name": "flaws2 defender track: CloudTrail, Athena and GuardDuty",
+   "learn": "Switch sides and reconstruct the same attack from logs: query CloudTrail (the account's API audit log) to find the sequence of calls the stolen credential made, run those queries at scale in Athena over CloudTrail-in-S3, and read what GuardDuty flags automatically (for example UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration, which fires when a role's credentials are used from an IP outside the instance). Learn to read the fields that matter: userIdentity, sourceIPAddress, eventName, and the tell-tale sign of credential theft - an instance role suddenly calling APIs from an external IP. This is the evidence trail every incident review and every SOC 2 auditor expects to exist.",
+   "minutes": 30,
+   "resource": {
+    "label": "AWS docs - CloudTrail user guide",
+    "url": "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-user-guide.html"
+   }
+  },
+  {
+   "name": "Secrets baked into images and Kubernetes objects",
+   "learn": "Run the Goat scenarios that plant credentials where they always end up: hardcoded keys in a Docker image layer (docker history / dive shows them even after a later RUN deletes the file), tokens in ConfigMaps, and secrets passed as environment variables that leak into crash dumps, logs and any process that can read /proc/<pid>/environ. Learn to hunt them the way an attacker does and the way you should before shipping: scan image layers, grep the manifests, and check kubectl get secrets across namespaces. The FDE lesson is that a Secret object is base64, not encryption, and that build-time secrets in images survive forever in the registry - so the fix is a real secrets manager (External Secrets, IRSA-scoped Secrets Manager) plus image scanning in CI, not deletion.",
+   "minutes": 25,
+   "resource": {
+    "label": "Trivy docs - vulnerability and secret scanning",
+    "url": "https://trivy.dev/docs/latest/guide/"
+   }
+  },
+  {
+   "name": "Container escape: privileged Pods, capabilities and hostPath",
+   "learn": "Do the escape scenarios and learn precisely what grants them: privileged: true (disables most isolation, hands you the host devices), hostPID/hostNetwork/hostIPC sharing the node's namespaces, dangerous capabilities such as CAP_SYS_ADMIN, and a hostPath volume mounting the node filesystem so you write to /var/lib/kubelet or read every other Pod's secrets. Practise the classic breakout: a privileged Pod that mounts the host root and chroots into it, giving root on the node and therefore on every workload scheduled there. Tie each to its control in the securityContext you will mandate: runAsNonRoot, allowPrivilegeEscalation: false, readOnlyRootFilesystem, drop ALL capabilities, and no host namespaces.",
+   "minutes": 30,
+   "resource": {
+    "label": "Kubernetes docs - Configure a security context for a Pod",
+    "url": "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/"
+   }
+  },
+  {
+   "name": "The mounted Docker socket and Docker-in-Docker",
+   "learn": "Exploit the scenario where /var/run/docker.sock is mounted into a container: whoever holds the socket can create a new container mounting the host root and is effectively root on the node, which is why 'just mount the socket for CI' is a full compromise waiting to happen. Understand the same risk for a shared containerd socket and for privileged Docker-in-Docker sidecars in build pipelines. Know the safe alternatives you will propose to customers - rootless build tooling such as Kaniko or Buildah, or a sandboxed builder - and be able to explain why mounting the socket is categorically different from any other volume mount.",
+   "minutes": 20,
+   "resource": {
+    "label": "Docker docs - Docker Engine security",
+    "url": "https://docs.docker.com/engine/security/"
+   }
+  },
+  {
+   "name": "Kubelet, NodePort and the exposed cluster attack surface",
+   "learn": "Enumerate the network-reachable attack surface the Goat scenarios expose: an unauthenticated or over-permissive kubelet API (port 10250) that lets you list Pods and exec into them, NodePort/LoadBalancer services that accidentally publish an internal dashboard or debug endpoint to the internet, and metadata or admin UIs reachable from inside the cluster. Practise using amicontained to fingerprint what your container can do (capabilities, seccomp, namespaces) and reasoning about what a compromised Pod can reach on the pod network. The FDE takeaway is an exposure review before every go-live: what did we accidentally publish, and can a single popped Pod talk to the control plane, the metadata service, or another tenant.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs - Securing a cluster",
+    "url": "https://kubernetes.io/docs/tasks/administer-cluster/securing-a-cluster/"
+   }
+  },
+  {
+   "name": "RBAC as an attack graph: from a token to cluster-admin",
+   "learn": "Treat RBAC the way an attacker does. From a compromised ServiceAccount token (mounted by default at /var/run/secrets/kubernetes.io/serviceaccount/token), run kubectl auth can-i --list to map your rights, then find the escalation edges: get/list secrets (steal every credential in the namespace), create pods (schedule a privileged Pod and escape), pods/exec (jump into other workloads), bind/escalate on roles (grant yourself more), and impersonate (become another identity). Use kubectl-who-can to invert the question and find who holds a dangerous verb. Learn the deployment discipline this forces: never automountServiceAccountToken unless the workload calls the API, and scope every Role to named resources rather than wildcards.",
+   "minutes": 30,
+   "resource": {
+    "label": "Kubernetes docs - RBAC good practices",
+    "url": "https://kubernetes.io/docs/concepts/security/rbac-good-practices/"
+   }
+  },
+  {
+   "name": "Where Kubernetes secrets really live: etcd and encryption at rest",
+   "learn": "Follow a Secret from kubectl to storage: it is base64-encoded (trivially decoded) and, unless you configure an EncryptionConfiguration with a KMS provider, it sits in plaintext in etcd, so anyone with etcd access or an etcd backup has every credential in the cluster. Practise pulling secrets via the API with a stolen token and understand that RBAC on the secrets resource, not the base64, is the only thing protecting them. Know the controls you will require on a customer cluster: encryption at rest with an external KMS, tight RBAC on secrets, disabling token automounting, and moving real secrets to an external store synced in with least-privilege IRSA rather than storing them long-term in the cluster.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs - Secrets",
+    "url": "https://kubernetes.io/docs/concepts/configuration/secret/"
+   }
+  },
+  {
+   "name": "Pod Security Standards and Admission enforcement",
+   "learn": "Learn the enforcement layer that would have blocked half the escapes above. Pod Security Admission applies the baseline and restricted profiles per namespace via labels (pod-security.kubernetes.io/enforce=restricted), rejecting privileged Pods, host namespaces, dangerous capabilities and root containers at admission time. Understand the three modes (enforce, audit, warn) so you can roll it out safely - run audit/warn first to find what breaks, then flip to enforce - and know restricted's exact requirements (runAsNonRoot, seccompProfile RuntimeDefault, drop ALL capabilities, no privilege escalation). This is the single highest-leverage cluster-wide control an FDE can turn on without rewriting any application.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs - Pod Security Standards",
+    "url": "https://kubernetes.io/docs/concepts/security/pod-security-standards/"
+   }
+  },
+  {
+   "name": "Default-deny networking with NetworkPolicy",
+   "learn": "Reproduce the lateral-movement scenario where a compromised Pod freely reaches every other service, the metadata endpoint and the control plane, then shut it down. Apply a default-deny-all ingress and egress NetworkPolicy per namespace and add explicit allow rules only for the flows the app actually needs, including a rule that denies Pod egress to 169.254.169.254. Understand that NetworkPolicy is enforced by the CNI (Calico, Cilium), so a cluster whose CNI does not support it silently ignores your policies - a trap you must check for. The deliverable mindset: every namespace ships with a default-deny baseline, and each allowed connection is a documented decision, not an accident.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kubernetes docs - Network Policies",
+    "url": "https://kubernetes.io/docs/concepts/services-networking/network-policies/"
+   }
+  },
+  {
+   "name": "Policy-as-code at admission: Kyverno and OPA Gatekeeper",
+   "learn": "Go beyond built-in Pod Security to custom guardrails enforced as admission webhooks. Write a Kyverno policy (or an OPA Gatekeeper ConstraintTemplate) that rejects, for example, images not from an approved registry, containers without resource limits, or any use of hostPath - and run it in audit mode before enforce. Understand the mechanism: a validating admission webhook that the API server calls on every create/update, which means a broken or slow webhook can block all deployments (failurePolicy matters), and that mutating policies can inject secure defaults such as dropping capabilities. This is how mature platform teams make insecure specs literally un-deployable, and knowing it lets you meet a customer's existing policy stack.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kyverno docs",
+    "url": "https://kyverno.io/docs/introduction/"
+   }
+  },
+  {
+   "name": "Runtime detection and cluster audit logging",
+   "learn": "Prevention fails, so learn detection. Deploy Falco and trigger its rules by doing something suspicious in a Pod - spawning a shell in a container, reading /etc/shadow, writing below a system binary directory, or making an unexpected outbound connection - and read the alert it produces. Turn on the Kubernetes API audit log and find the entries for token use, exec into Pods, and secret reads, mapping each to the attacker actions from earlier scenarios. The FDE point is that a customer's SOC needs the signal to exist: without audit logging and runtime detection, a compromise of your workload is invisible until data leaves, and 'we had no logs' is the worst sentence in a post-incident review.",
+   "minutes": 20,
+   "resource": {
+    "label": "Falco docs",
+    "url": "https://falco.org/docs/"
+   }
+  },
+  {
+   "name": "Benchmarks and scanners: kube-bench, Trivy, Prowler",
+   "learn": "Run the automated tools that turn a subjective review into a scored report you can hand a customer. kube-bench checks a cluster against the CIS Kubernetes Benchmark; Trivy scans images for CVEs, misconfigured manifests and leaked secrets; Prowler (and ScoutSuite) audit the AWS account against CIS and surface public S3 buckets, over-permissive roles and missing CloudTrail. Learn to read their output as a prioritised list - not every finding is real or reachable - and to separate 'must fix before go-live' from 'noise'. These reports are the evidence backbone of your hardening checklist and exactly what a security team expects a competent vendor to produce unprompted.",
+   "minutes": 20,
+   "resource": {
+    "label": "kube-bench - CIS Kubernetes Benchmark checker",
+    "url": "https://github.com/aquasecurity/kube-bench"
+   }
+  },
+  {
+   "name": "TryHackMe rooms and the client-facing hardening checklist",
+   "learn": "Finish the two free TryHackMe rooms to reinforce the attacker chain in a graded setting, then convert your entire lab journal into the deliverable: a one-to-two page client-facing hardening checklist grouped by layer - cloud identity (IMDSv2, no long-lived keys, scoped IRSA, block public S3, CloudTrail on), cluster (Pod Security restricted, RBAC least privilege, secrets encryption, default-deny NetworkPolicy), workload (non-root, drop capabilities, read-only rootfs, no socket mounts), and detection (audit log, Falco/GuardDuty). Each item states the risk in one line, the control, and how to verify it (the exact command or console check), so a customer's platform engineer can act on it without you in the room.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kubernetes docs - Security checklist",
+    "url": "https://kubernetes.io/docs/concepts/security/security-checklist/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can execute the full SSRF-to-IMDS-to-credentials chain in flaws2.cloud, load the stolen role, run aws sts get-caller-identity, and then name the three independent controls (app-level URL validation, least-privilege role, IMDSv2 with hop limit 1) that each break the chain.",
+  "You can reconstruct that same attack from CloudTrail in Athena, point to the exact fields that reveal instance-credential exfiltration, and say which GuardDuty finding would have fired.",
+  "You can escape a privileged Pod to root on the node in Kubernetes Goat and then write the securityContext plus Pod Security restricted profile that makes the escape impossible.",
+  "You can take a compromised ServiceAccount token, run kubectl auth can-i --list, identify the specific verb (secrets get, pods create, roles escalate, impersonate) that leads to cluster-admin, and remediate it to a scoped Role.",
+  "You can explain, and demonstrate, that a Kubernetes Secret is base64 not encryption, and configure encryption at rest plus RBAC so a leaked token cannot read every credential in the cluster.",
+  "You can apply a default-deny NetworkPolicy and a Kyverno/Pod Security admission rule to a namespace, verify they block a bad Pod, and explain the audit-then-enforce rollout that avoids breaking running workloads.",
+  "You can run kube-bench, Trivy and Prowler against a cluster and account, triage the findings into must-fix-before-go-live versus noise, and produce a scored report.",
+  "You can hand a customer's platform team a one-to-two page hardening checklist where every item has a risk, a control, and a verification command."
+ ],
+ "failureModes": [
+  "An FDE requests a broad node/instance role 'to move fast', the workload gets an SSRF, and the attacker uses the metadata endpoint to inherit that role and pivot across the customer's whole account.",
+  "A build or debug container ships with /var/run/docker.sock mounted, so a single application compromise becomes root on the node and every co-located tenant workload.",
+  "Pods run as root with default automounted ServiceAccount tokens and no Pod Security profile, so one popped container reads every Secret in the namespace and schedules a privileged escape Pod.",
+  "NetworkPolicies are written and applied but the cluster's CNI does not enforce them, so the team believes the namespace is isolated while all Pod-to-Pod and Pod-to-metadata traffic flows freely.",
+  "Secrets are stored as Kubernetes Secret objects with no encryption-at-rest configured, so an etcd backup copied to S3 exposes every credential in plaintext base64.",
+  "IMDSv2 is left optional (HttpTokens: optional) and the hop limit is default, so SSRF still trivially retrieves credentials despite the team assuming metadata is protected.",
+  "No API audit log or runtime detection is enabled, so the workload compromise is invisible until data exfiltration is noticed externally and the post-incident review finds no evidence to reconstruct the attack."
+ ],
+ "interviewQuestions": [
+  "Walk me through the Capital One-style breach: an app has an SSRF, it runs on EC2/EKS, and the attacker ends up reading an S3 bucket. Name every hop and the control at each hop that would have stopped it.",
+  "We are deploying your workload into our EKS cluster. What IAM and Pod-level configuration will you insist on, and how do you prevent your Pod from ever using the node's instance role?",
+  "A container in our cluster has been compromised. Assume it has a mounted ServiceAccount token. Walk me through, as the attacker, how you would try to reach cluster-admin, and then tell me which single RBAC change would most reduce that blast radius.",
+  "Explain the difference between Pod Security Admission and an OPA Gatekeeper / Kyverno policy. When would you reach for each, and what breaks if the admission webhook is down?",
+  "A customer says 'our Kubernetes Secrets are secure, they're in etcd'. What's wrong or incomplete about that, and what would you change?",
+  "You have two days before go-live in a customer account you've never seen. What do you run to assess cloud and cluster security posture, and how do you decide what is a blocker versus acceptable risk?",
+  "How would you detect that a workload in the cluster has been compromised, and what would you have needed to set up in advance for that detection to be possible?"
+ ],
+ "proofOfWork": "Produce a 'break-and-harden' report on a local Kubernetes Goat cluster and the flaws2.cloud ranges: for at least eight scenarios (SSRF-to-IMDS, privileged-Pod escape, mounted Docker socket, RBAC token escalation, secrets in image layers, exposed kubelet/NodePort, secret-in-etcd, and a lateral-movement path), document the exact attacker commands and captured evidence (the stolen credential, the node root shell, the auth can-i --list output), then remediate each and prove the fix - re-run the attack and show it now fails, with the securityContext, Pod Security label, RBAC Role, NetworkPolicy or Kyverno policy that blocked it. Attach machine-generated evidence: kube-bench, Trivy and Prowler reports before and after, plus a screenshot of a Falco alert and a CloudTrail/Athena query reconstructing the flaws2 attack. Conclude with the deployable one-to-two page client hardening checklist (cloud identity, cluster, workload, detection layers), where every line is a risk, a control, and the verification command a customer's engineer can run themselves."
+}

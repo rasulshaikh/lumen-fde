@@ -1,0 +1,173 @@
+{
+  "i": 19,
+  "topic": "Cloud cost and FinOps",
+  "track": "C. Cloud and IaC",
+  "month": 3,
+  "hours": 3.0,
+  "why": "An FDE quotes numbers that end up in a customer's budget: the pilot price, the 'what does this cost at 20 sites' question in the steering committee, and the run-rate that decides whether the deployment renews. When you deploy into the customer's own AWS account their invoice is your architecture made visible, and the platform team, procurement and eventually the CFO read it line by line; the FDE who can explain NAT processing and log ingestion in plain English, attribute cost per tenant, and name three levers with a dollar figure keeps trust that the design alone never earns. Cost is also the quietest way to lose an account: nobody files an incident for a bill that doubled, they just do not expand.",
+  "prerequisites": [
+    "AWS networking and compute from 'AWS networking and compute: VPC, subnets, SG, NACL, ALB across AZs, EC2, Lambda' (topic 13): every line on the bill maps to a resource you built there, and you need to know which are zonal, which bill per hour and which bill per GB",
+    "AWS data from 'AWS data: RDS Postgres, S3, ElastiCache, DynamoDB' (topic 14): RDS instance classes and the Multi-AZ flag, gp2 versus gp3, S3 storage classes, ElastiCache node types, DynamoDB on-demand versus provisioned",
+    "EKS from topic 16 and 'Kubernetes production ops' from topic 8: control plane versus node cost, managed node groups, Karpenter, and what requests and limits mean for bin packing",
+    "Terraform from topic 12: a provider block you can add `default_tags` to, remote state, and a CI plan step that Infracost can hook into",
+    "Working knowledge of the DefenderMate build so far: which components exist (Next.js front end, webhook ingestion, Redis idempotency store, Postgres with RLS, LLM classifier, S3 exports, weekly email) and a rough count of events, tokens and GB per tenant per month",
+    "An AWS account with Cost Explorer enabled at least 24 hours before you start, IAM permission for `ce:*`, `budgets:*` and `compute-optimizer:*`, and spreadsheet fluency (SUMPRODUCT, scenario columns, break-even)"
+  ],
+  "subtopics": [
+    {
+      "name": "FinOps vocabulary: the Inform, Optimize, Operate loop and the capabilities you will actually touch",
+      "learn": "Learn the three phases as a loop, not a ladder: Inform is allocation and visibility, Optimize is rate and usage levers, Operate is the cadence and guardrails that stop savings regressing. Memorise the principles because they settle arguments with a customer platform team, in particular 'decisions are driven by the business value of cloud' (never cut a cost that costs revenue) and 'everyone takes ownership for their cloud usage' (the FDE owns the pilot's bill, not the customer's FinOps team). Map the capabilities you use this week: Allocation, Reporting and Analytics, Anomaly Management, Rate Optimization, Workload Optimization, Unit Economics, Budgeting and Forecasting. Know that FOCUS is the vendor-neutral billing schema (BilledCost, EffectiveCost, ListCost, ChargeCategory) that AWS Data Exports, GCP and Azure can all emit, which is what lets a multi-cloud customer compare your GCP variant from topic 17 like for like.",
+      "minutes": 12,
+      "resource": {
+        "label": "FinOps Foundation: FinOps Principles",
+        "url": "https://www.finops.org/framework/principles/"
+      }
+    },
+    {
+      "name": "Reading the bill: Cost Explorer, the three cost metrics and `aws ce get-cost-and-usage`",
+      "learn": "Enable Cost Explorer on day one: it needs about 24 hours before data appears and only backfills about 13 months. Know the three cost metrics and when each is right: UnblendedCost is what the invoice line says (a Savings Plan purchase lands as a lump on the day you buy it), AmortizedCost spreads commitments across the hours they cover (use this for run-rate and unit economics), NetAmortizedCost also applies credits and negotiated discounts (use this for what the customer actually pays). Pull numbers with the CLI so they land in a sheet, not a screenshot: `aws ce get-cost-and-usage --time-period Start=2026-08-01,End=2026-09-01 --granularity DAILY --metrics AmortizedCost UsageQuantity --group-by Type=DIMENSION,Key=SERVICE`, then regroup by `Key=USAGE_TYPE` with a `--filter` on the EC2 service to discover that 'EC2-Other' is NAT gateways, EBS and data transfer, not instances. Each Cost Explorer API call costs 0.01 USD. When the console's grouping hides the answer, the CUR or Data Exports Parquet in S3 (`line_item_usage_type`, `line_item_line_item_type`, `line_item_unblended_cost`, `pricing_public_on_demand_cost`, `resource_tags`) is the source of truth you query with Athena or the DuckDB you use in topic 36.",
+      "minutes": 15,
+      "resource": {
+        "label": "AWS Cost Management User Guide: What is AWS Cost Explorer",
+        "url": "https://docs.aws.amazon.com/cost-management/latest/userguide/ce-what-is.html"
+      }
+    },
+    {
+      "name": "Cost allocation tags and attributing shared cost to tenants",
+      "learn": "Put `tenant`, `env`, `service` and `owner` on every resource through a `default_tags` block in the Terraform `aws` provider so nothing is created untagged, then activate them as user-defined cost allocation tags in the Billing console; activation takes up to 24 hours and is never retroactive, so an untagged first month is lost for good. Enforce the keys with an Organizations tag policy plus an SCP that denies `ec2:RunInstances` and `rds:CreateDBInstance` when `aws:RequestTag/tenant` is null. Learn what cannot carry a tenant tag: NAT processing, cross-AZ transfer, the EKS control plane, a shared RDS instance pooled behind RLS (topic 30), and every LLM token. For those, build a driver table per tenant per month (webhook events received, items classified, rows stored, tokens by `metadata.user_id`) and split the shared lines proportionally; that split, not the tag report, is what a customer's chargeback team will actually consume, so document the driver for every shared line.",
+      "minutes": 15,
+      "resource": {
+        "label": "AWS Billing User Guide: Using cost allocation tags",
+        "url": "https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/cost-alloc-tags.html"
+      }
+    },
+    {
+      "name": "Rate levers: Savings Plans, Reserved Instances, Spot and Graviton",
+      "learn": "A Savings Plan is a commitment to spend N USD per hour for one or three years, applied automatically to the most expensive eligible usage first: a Compute SP (up to about 66 percent off) covers EC2, Fargate and Lambda in any region or family, an EC2 Instance SP (up to about 72 percent) locks a family in one region, and the payment option (No, Partial, All Upfront) trades cash for a few more points. RDS and ElastiCache have no Savings Plans, only Reserved Instances, keyed to instance class and Multi-AZ flag and size-flexible only within a family, so a move from db.t4g to db.r7g strands the reservation. Spot is a different lever: up to 90 percent off for capacity AWS can reclaim with a two-minute warning on the `spot/instance-action` metadata path and an EventBridge event, right for stateless classifier workers and the k6 load generator, wrong for RDS and the Redis idempotency store. Graviton (arm64) is roughly 20 percent cheaper per vCPU and needs the multi-arch image from topic 6 plus a check that every native Node dependency ships an arm64 build. Rule for the cost sheet: commit only to the twelve-month floor you can prove from Cost Explorer; at one client that floor is small and the honest lever is rightsizing, at twenty it is a Compute SP.",
+      "minutes": 20,
+      "resource": {
+        "label": "Savings Plans User Guide: What are Savings Plans",
+        "url": "https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html"
+      }
+    },
+    {
+      "name": "Rightsizing: Compute Optimizer, Kubernetes requests versus usage, RDS class",
+      "learn": "Run `aws compute-optimizer get-ec2-instance-recommendations` and read the finding (Underprovisioned, Overprovisioned, Optimized) and projected utilisation; it looks back 14 days and cannot see memory unless the CloudWatch agent publishes `mem_used_percent`, so an instance at 5 percent CPU and 90 percent memory looks safe to shrink and is not. On EKS the bill follows requests, not usage: compare `kubectl top pods` against `kubectl get pods -o custom-columns` of `.spec.containers[*].resources.requests`, run the VPA recommender in `updateMode: Off` for a week and copy its targets, then let Karpenter consolidate with `consolidationPolicy: WhenEmptyOrUnderutilized` so emptied nodes actually leave. For RDS the signals are `CPUUtilization`, `FreeableMemory`, `DatabaseConnections` and `ReadIOPS` over a week; a db.t4g.medium is right for one client, and remember the T family burns CPU credits, so a steadily falling `CPUCreditBalance` is a hidden cost cliff (surplus credit charges) before it is a performance one.",
+      "minutes": 15,
+      "resource": {
+        "label": "AWS Compute Optimizer User Guide: What is Compute Optimizer",
+        "url": "https://docs.aws.amazon.com/compute-optimizer/latest/ug/what-is-compute-optimizer.html"
+      }
+    },
+    {
+      "name": "The network tax: NAT gateways, cross-AZ, egress, endpoints and public IPv4",
+      "learn": "Price the two per-AZ NAT gateways from topic 13 honestly: roughly 0.045 USD per hour each plus 0.045 USD per GB processed, so a classifier that pulls 300 GB a month of webhooks and model responses through NAT pays more for processing than for the gateways, and every byte to S3 or DynamoDB via NAT is waste when a gateway endpoint is free. An interface endpoint costs about 0.01 USD per AZ-hour plus 0.01 USD per GB, so across two AZs it beats NAT processing only above roughly 400 GB a month for that one service; do the arithmetic per service rather than adding endpoints reflexively. Cross-AZ traffic is about 0.01 USD per GB in each direction, which is why Multi-AZ RDS and a Redis replica are worth it but a chatty cross-zone service graph is not; where pods and ALB targets are zonal, use `service.kubernetes.io/topology-mode: Auto`. Internet egress is about 0.09 USD per GB after the first 100 GB, which is what SSE streaming to twenty customers' browsers and weekly export downloads turn into. Since 2024 every public IPv4 address costs 0.005 USD per hour whether attached or not, so count ALB nodes, NATs and forgotten EIPs on the sheet.",
+      "minutes": 15,
+      "resource": {
+        "label": "Amazon VPC pricing (NAT gateway, data transfer, IPv4)",
+        "url": "https://aws.amazon.com/vpc/pricing/"
+      }
+    },
+    {
+      "name": "Storage: RDS gp3 and backups, S3 lifecycle rules, orphaned EBS",
+      "learn": "Use gp3 for RDS storage: on RDS it is the same per-GB price as gp2 but includes 3000 IOPS and 125 MB/s below 400 GB (12000 and 500 above) with IOPS provisionable separately, so you stop buying capacity to get IOPS. Multi-AZ doubles both instance and storage cost, and automated backups are free only up to 100 percent of allocated storage, after which a long `backup_retention_period` and manual snapshots bill per GB-month. Put S3 exports under a lifecycle configuration: `Transition` to STANDARD_IA after 30 days (128 KB minimum billable size and 30-day minimum duration, so tiny objects get dearer, not cheaper), `Expiration` at the contractual retention, and `AbortIncompleteMultipartUpload` at 7 days; Intelligent-Tiering adds a per-object monitoring fee and ignores objects under 128 KB, so it is wrong for millions of small JSON events. Sweep EBS volumes in `available` state and snapshots of volumes that no longer exist; both bill until deleted.",
+      "minutes": 12,
+      "resource": {
+        "label": "Amazon S3 User Guide: Managing the lifecycle of objects",
+        "url": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lifecycle-mgmt.html"
+      }
+    },
+    {
+      "name": "Observability cost: CloudWatch Logs ingestion, retention, log classes and metrics",
+      "learn": "The line that surprises everyone is CloudWatch Logs at roughly 0.50 USD per ingested GB plus storage: a pod left at debug level logging 20 GB a day costs more than the node it runs on. Set `aws logs put-retention-policy --log-group-name <group> --retention-in-days 30` on every group (the default is never expire), drop health-check and readiness lines in Fluent Bit before they leave the node, log at INFO with sampling for hot paths, and use the Infrequent Access log class (about half the ingest price, but no metric filters, subscription filters or Live Tail) for audit trails you must keep but rarely read. Custom metrics bill per metric per month, so a `tenant` dimension on ten metrics across twenty tenants is two hundred metrics; Container Insights bills per metric too. Self-hosting Prometheus and Grafana as in topic 21 moves the cost to nodes and EBS rather than removing it, so put both options on the sheet. ALB access logs to S3, by contrast, are nearly free and answer most of the same questions.",
+      "minutes": 12,
+      "resource": {
+        "label": "Amazon CloudWatch Logs User Guide: Log classes",
+        "url": "https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch_Logs_Log_Classes.html"
+      }
+    },
+    {
+      "name": "LLM tokens as a bill line: caching, batch, routing and per-tenant attribution",
+      "learn": "Model the classifier as tokens per event times price per million, input and output separately, and read the current per-model table rather than remembering numbers. The three ratios that matter are stable: prompt caching charges 1.25x for a cache write and about 0.1x for a cache read on the prefix marked with `cache_control` (5-minute TTL refreshed on each hit, so a steady webhook stream keeps the system prompt and few-shot examples hot and cuts input cost by up to 90 percent), the Message Batches API halves the price for anything that can wait up to 24 hours (weekly email, backfills, not the live SSE path), and routing the easy 80 percent to a small model with a large model only on low-confidence cases changes the blended rate more than any infrastructure lever. Cap `max_tokens`, log `usage.input_tokens`, `usage.output_tokens`, `usage.cache_read_input_tokens` and `usage.cache_creation_input_tokens` with the tenant id on every request so the driver table has real numbers, and keep a per-tenant token budget with a kill switch so one customer's misconfigured webhook cannot burn the month's margin. Topic 59 goes deep on the engineering; here you need the arithmetic and the attribution.",
+      "minutes": 15,
+      "resource": {
+        "label": "Claude Developer Platform: Pricing",
+        "url": "https://platform.claude.com/docs/en/about-claude/pricing"
+      }
+    },
+    {
+      "name": "Fixed versus variable: the 1-client and 20-client model and unit economics",
+      "learn": "Split every line into a fixed floor that exists at zero tenants and a variable slope per tenant. For DefenderMate the floor is the EKS control plane (about 73 USD a month), two NAT gateways, the ALB, two minimum nodes across AZs, the Multi-AZ RDS instance, the Redis node, Route 53 zones and baseline logs, roughly 400 to 500 USD a month before the first customer; the slope is tokens, S3, egress and log volume, plus the step functions where a third node or a larger RDS class becomes necessary. Build the sheet with a tenants column, total = floor + tenants x slope + steps, and derive cost per tenant per month, gross margin against price per tenant, and break-even tenant count; at one client cost per tenant is dominated by the floor and no rate lever helps, at twenty it is dominated by tokens and NAT processing. Learn the SaaS Lens vocabulary the customer's architects will use: pooled (shared RDS with RLS, cheapest, noisy-neighbour risk), siloed (a full stack per tenant, twenty times the floor, what regulated customers ask for) and bridge, and be able to say in dollars what siloing one tenant costs.",
+      "minutes": 20,
+      "resource": {
+        "label": "FinOps Framework: Unit Economics capability",
+        "url": "https://www.finops.org/framework/capabilities/unit-economics/"
+      }
+    },
+    {
+      "name": "Pricing Calculator drill: estimate the stack, then reconcile against actuals",
+      "learn": "Build the estimate service by service with the real configuration from your Terraform, not defaults: region, 730 hours a month, EKS cluster, two m7g.large or t4g nodes, two NAT gateways with GB processed, ALB with LCUs derived from requests and new connections per second, RDS db.t4g.medium Multi-AZ with gp3 GB and backup GB, ElastiCache node, S3 GB plus PUT and GET counts, CloudWatch GB ingested, data transfer out in GB. Use the utilisation fields (percent of month) for non-prod, save the estimate to a share link and export the CSV so the CFO sheet cites it. Then reconcile after a week of actuals: `aws ce get-cost-and-usage` grouped by USAGE_TYPE against the calculator lines. The variance is always in the usage-based lines (NAT GB, log GB, LCUs, tokens) because those were guesses, and the reconciliation is what turns a quote into a forecast you can defend in a steering meeting.",
+      "minutes": 15,
+      "resource": {
+        "label": "AWS Pricing Calculator User Guide",
+        "url": "https://docs.aws.amazon.com/pricing-calculator/latest/userguide/what-is-pricing-calculator.html"
+      }
+    },
+    {
+      "name": "Guardrails: Budgets with actions, Cost Anomaly Detection, and cost in the pull request",
+      "learn": "Create a cost budget with alerts at 50, 80 and 100 percent of actual and at 100 percent of forecasted spend, plus a Savings Plans utilisation budget once you commit so an idle commitment is visible. Attach a budget action on the non-prod account that applies a deny IAM policy or stops tagged EC2 and RDS instances when the threshold trips; alerts get read the next morning, actions fire at 3am. Enable Cost Anomaly Detection with one monitor per AWS service and one per `tenant` cost allocation tag, delivering to an SNS topic wired to Slack; it is free, baselines on recent history and catches the NAT or logs spike a monthly budget would only report at invoice time. Put cost in the review loop with Infracost: `infracost breakdown --path infra/ --usage-file infracost-usage.yml` locally and the GitHub Action posting `infracost diff` on every Terraform PR, so a reviewer sees that a Multi-AZ flag or an instance class change is 95 USD a month before it merges.",
+      "minutes": 15,
+      "resource": {
+        "label": "AWS Cost Management User Guide: Managing your costs with AWS Budgets",
+        "url": "https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html"
+      }
+    },
+    {
+      "name": "Non-production hygiene: schedules, stop and destroy, orphan sweeps",
+      "learn": "Non-prod runs 168 hours a week but is used about 50, so a schedule is worth 60 to 70 percent of its cost: stop RDS with `aws rds stop-db-instance` (it auto-starts after seven days, storage and backups still bill, and it cannot be stopped while a read replica exists), scale EKS node groups to zero or let Karpenter drain to zero at night, and use the Instance Scheduler on AWS solution or a scheduled Lambda keyed on a `Schedule` tag for EC2. Give every preview environment a `ttl` tag and a nightly job that runs `terraform destroy` on anything past it. Run a weekly orphan sweep: `aws ec2 describe-volumes --filters Name=status,Values=available`, `aws ec2 describe-addresses` entries with no `AssociationId`, load balancers with zero healthy targets, snapshots older than the retention policy, and NAT gateways in VPCs with nothing left in them. Each orphan is small; a hundred of them is the mystery 15 percent on the invoice.",
+      "minutes": 12,
+      "resource": {
+        "label": "Amazon RDS User Guide: Stopping a DB instance temporarily",
+        "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_StopInstance.html"
+      }
+    },
+    {
+      "name": "The CFO page: translating levers into margin, payback and risk",
+      "learn": "Write one page in the CFO's units, not yours: monthly run-rate today, cost per tenant, gross margin per tenant at the current price, and the three levers as a table with saving per month, one-off effort in engineer-days, payback period, and the risk you are accepting (Spot interruption, a one-year commitment if the client churns, cache staleness, a smaller model's accuracy). State on-demand versus committed exposure, name the step costs coming (a third node at roughly 12 tenants, a bigger RDS class at 25), and separate COGS (per-tenant infrastructure and tokens) from opex (non-prod, tooling) because finance books them differently. End with the decision you are asking for and a date; a cost memo without a decision is a status report. Rehearse saying the three levers aloud in under a minute, the way you would in a steering call, and have the reconciliation from the calculator subtopic ready as the appendix nobody reads but everyone trusts.",
+      "minutes": 15,
+      "resource": {
+        "label": "AWS Well-Architected Framework: Cost Optimization Pillar",
+        "url": "https://docs.aws.amazon.com/wellarchitected/latest/cost-optimization-pillar/welcome.html"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can produce, from Cost Explorer or a CUR query, a monthly breakdown of the DefenderMate stack by service and by `tenant` tag, and explain every line above 5 percent of the total in one sentence each, including exactly what 'EC2-Other' contains.",
+    "You can build a spreadsheet model with a fixed floor, a per-tenant slope and step costs that outputs total cost, cost per tenant and break-even tenant count at 1, 5, 20 and 100 tenants, and it reconciles within 15 percent of a Pricing Calculator estimate and within 10 percent of actuals after one billing month.",
+    "You can name three savings levers for the stack with a dollar saving, effort, payback and risk for each, and defend why rightsizing beats a Savings Plan at one client and the reverse at twenty.",
+    "You can compute the token cost per classified event with and without prompt caching and batch from real `usage` fields in your logs, and attribute it per tenant.",
+    "You can tag every Terraform-managed resource through `default_tags`, activate the cost allocation tags, and show a Cost Explorer report grouped by `tenant` in the following billing cycle.",
+    "You can configure a budget with a stop-instances action, an anomaly monitor per tag with SNS delivery, and Infracost on PRs, and demonstrate each one firing.",
+    "You can explain to a non-engineer, in under two minutes and without jargon, what a NAT gateway is and why its line went up when traffic to the model API doubled.",
+    "You can do the interface-endpoint break-even and the Multi-AZ RDS cost delta on a whiteboard, with the per-hour and per-GB rates written down."
+  ],
+  "failureModes": [
+    "Cost allocation tags are activated in month two, so the pilot's first invoice cannot be split by tenant; the customer's chargeback team books the whole bill to the sponsoring department and the expansion conversation stalls on 'we do not know what this costs per team'.",
+    "Debug logging left on in one pod pushes CloudWatch Logs ingestion to 25 GB a day; logs quietly become the largest line on the invoice, larger than the EKS nodes, and nobody notices until invoice time because the budget was set on total spend rather than per service.",
+    "All traffic to S3 and the model API leaves through NAT; at 20 tenants NAT data processing exceeds the gateways and the compute combined, and a free S3 gateway endpoint would have removed a third of it on day one.",
+    "A three-year all-upfront RDS Reserved Instance is bought on a db.r6g.large; six months later the workload moves to a different family, the reservation is stranded, and 'unused commitment' appears in every quarterly review with your name on it.",
+    "Spot is used for webhook ingestion pods to save 70 percent; a capacity reclaim lands during a customer's bulk import, nodes disappear faster than the two-minute warning is handled, events are duplicated because the idempotency TTL was shorter than the retry window, and the saving is smaller than the one incident's service credit.",
+    "A preview environment per pull request is created with Terraform and never destroyed; forty stacks each with a NAT gateway, an ALB and a small RDS run for three months and the 'dev' account spends more than production.",
+    "The cost sheet is built in on-demand unblended cost while the customer's finance team reads net amortized in their own Cost Explorer; the two disagree by the Savings Plan and credits, and the FDE is accused of underquoting by 30 percent."
+  ],
+  "interviewQuestions": [
+    "Here is a Cost Explorer view for a small multi-tenant SaaS: EC2-Other is the second largest line and has grown four times while EC2 instance cost is flat. What is in it, how do you find out, and what are the first two changes you would make?",
+    "Cost a small multi-tenant LLM product on EKS plus Multi-AZ RDS at 1, 20 and 500 customers. Which lines scale with tenants, which are steps, where does your model break down, and at what tenant count does a Compute Savings Plan start making sense?",
+    "A customer's CFO asks why the pilot costs 900 USD a month when they were told 'a few hundred'. Walk me through the investigation and what you would say in the meeting, including what you would refuse to promise.",
+    "Design per-tenant cost attribution for a pooled architecture where tenants share a database, a Kubernetes cluster and one LLM API key. What can you tag, what must you estimate, and how do you make the estimate defensible to a chargeback team?",
+    "You are asked to cut infrastructure cost 30 percent without touching reliability on a two-AZ EKS plus Multi-AZ RDS stack. Rank the levers you would consider, and tell me which ones you would refuse and why.",
+    "Explain prompt caching and batch pricing to a finance person, then tell me how you decide which traffic goes down each path and how you prove the saving after the fact.",
+    "A Savings Plan you recommended shows 60 percent utilisation three months in. What happened, how do you find out, and what do you do about it this quarter?"
+  ],
+  "proofOfWork": "A public repository `defendermate-cost-model` containing the reproducible model behind the CFO sheet: a `model.csv` (or a short Python script with the same rows) listing every line item with its unit, unit price, fixed-or-per-tenant classification and step thresholds, which prints total cost, cost per tenant and gross margin at 1, 5, 20 and 100 tenants; an `infracost-usage.yml` plus a GitHub Actions workflow that posts `infracost diff` on every Terraform PR in the plan's infra repo, with one merged PR showing a real cost comment; Terraform for the guardrails (a `tenant`/`env`/`service` `default_tags` block, an AWS Budget with a stop-instances action on the non-prod account, and a Cost Anomaly Detection monitor per tag delivering to an SNS topic); a `reconcile.sh` that pulls thirty days of `aws ce get-cost-and-usage` by USAGE_TYPE and by `tenant` tag and diffs it against the model with a variance column; and a one-page `VARIANCE.md` written after the first full billing month explaining every line that missed by more than 10 percent and what changed in the model as a result. A reviewer should be able to change the tenant count or one unit price in a single cell and watch the three recommended levers re-rank."
+}

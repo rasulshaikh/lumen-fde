@@ -1,0 +1,227 @@
+{
+  "i": 71,
+  "topic": "Domain fluency: fintech ops, healthcare intake, procurement, logistics",
+  "track": "J. FDE Craft and Communication",
+  "month": 8,
+  "hours": 6,
+  "why": "An FDE gets roughly fifteen minutes inside a customer's operation to prove they understand the business before the conversation collapses into a feature demo, and the proof is not enthusiasm - it is vocabulary, an accurate workflow map, and knowing which data you are not allowed to look at. These four domains cover the bulk of enterprise AI deployments, and each has a hard regulatory edge (PCI, HIPAA, SOX, ITAR) where a wrong default is not a bug but a reportable disclosure or an audit finding that kills the renewal. Knowing exactly who signs off is what converts a working prototype into a deployment, because in all four domains the approval, not the model, is the thing standing between you and production.",
+  "prerequisites": [
+    "Discovery: finding the real problem (topic 66) - the question set and the listening discipline; this topic supplies the domain-specific ammunition that makes those questions land.",
+    "Compliance: SOC 2, GDPR, HIPAA, PCI (topic 64) - the control vocabulary, what a BAA and a DPA are, and the difference between a control and its evidence; here you apply it to four concrete operational domains.",
+    "Data modelling for multi-tenant AI systems (topic 30): PII handling, row-level security, encryption boundaries and audit trails - the mechanics behind every 'this data may not move' rule you are about to write.",
+    "Agents: workflows vs agents and human-in-the-loop (topic 48) plus guardrails and prompt injection (topic 51) - you need a real model of what an agent can be allowed to propose versus execute before you can draw the autonomy line per domain.",
+    "Engagement documents (topic 67) - the one-pagers here are engagement artifacts, so you need the site-survey and design-doc muscle already built.",
+    "SQL and Postgres at depth (topic 29) plus Temporal (topic 34): idempotency, exactly-once illusions, sagas and compensating actions - money movement and claim submission are the canonical cases."
+  ],
+  "subtopics": [
+    {
+      "name": "The three-artifact method, fixed before you learn any domain",
+      "learn": "Lock the template first so all four domains produce comparable output. Per domain you will produce: three workflows drawn as swimlanes with one actor per lane, a named trigger, the systems of record touched at each step, and the two or three points where the process actually stalls; a data-never-move table listing each restricted data class with the specific rule that forbids it and the four boundaries it may not cross (leaving the customer network, entering a model prompt, landing in a log or trace attribute, entering an eval fixture); and a sign-off matrix of decision class, human role, threshold that triggers them, and the evidence their approval leaves behind. Learn just enough BPMN vocabulary - pool, lane, task, exclusive versus parallel gateway, message versus timer start event - that a customer's process owner can read your map and correct it, which is the entire point.",
+      "minutes": 15,
+      "resource": {
+        "label": "OMG BPMN 2.0 specification",
+        "url": "https://www.omg.org/spec/BPMN/2.0/"
+      }
+    },
+    {
+      "name": "Classifying the data before you touch any of it",
+      "learn": "Fix the legal spine that runs under all four domains: Article 4 personal data, Article 9 special categories (health, biometric, union membership) which captures most healthcare payloads, Article 6 lawful basis, Article 28 processor duties and the requirement to act only on documented instructions, Articles 44-49 on transfers, Article 30 records of processing, and Article 22 on solely automated decisions with legal or similarly significant effects - the article that makes 'the agent decides and acts' a legal question rather than a product preference. Turn this into an engineering artifact: a column-level tag set (identifier, financial account, clinical, contractual price, export-controlled) with a per-class rule for network egress, embedding, prompt inclusion, trace attributes and retention. Write it before the first data-sharing call, not after.",
+      "minutes": 15,
+      "resource": {
+        "label": "Regulation (EU) 2016/679 (GDPR), consolidated text",
+        "url": "https://eur-lex.europa.eu/eli/reg/2016/679/oj"
+      }
+    },
+    {
+      "name": "Fintech: the rails, and what 'paid' actually means",
+      "learn": "For each rail know three things: who carries the risk, when finality occurs, and whether it is reversible. ACH moves in batches between an ODFI and an RDFI with SEC codes (PPD, CCD, WEB), same-day windows, and return codes that arrive after the fact - R01 insufficient funds within days, R10/R07 unauthorised within a sixty calendar-day consumer window, so an ACH 'success' is not final for two months. Fedwire is real-time gross settlement and effectively irrevocable; RTP and FedNow are instant, 24/7 and irrevocable, which flips every fraud control from detect-and-reverse to prevent-before-send. Cards run authorisation (hold, auth code, AVS and CVV results) then capture, clearing and settlement funding at T+1 or T+2 - an authorisation is not money. Learn the ISO 20022 families you will see in files: pain.001 initiation, pacs.008 interbank transfer, camt.053 end-of-day statement, camt.052 intraday, camt.054 notification, plus legacy MT940. Any workflow that says 'payment complete' must name which of these events it means.",
+      "minutes": 25,
+      "resource": {
+        "label": "ISO 20022 catalogue of message definitions (pain, pacs and camt payment message sets)",
+        "url": "https://www.iso20022.org/iso-20022-message-definitions"
+      }
+    },
+    {
+      "name": "Fintech: double-entry ledgers and the reconciliation break",
+      "learn": "Internalise the invariants: every movement is at least two entries, debits equal credits, the journal is append-only, and a correction is a reversing entry - never an UPDATE or a DELETE on a posted row. Know the account taxonomy you will meet (customer balance, clearing and settlement, fees, FX, suspense) and why a suspense account is where unexplained money lives until someone explains it. Learn the reconciliation loop concretely: ingest camt.053 or BAI2 or a processor payout report, match on amount plus value date plus reference, then classify every unmatched item as a timing break, fee break, FX break, duplicate, or genuinely missing; track break aging against the month-end close deadline because that deadline is the customer's real pain. Understand idempotency keys on every write path and that exactly-once is a lie without a dedupe table. The architectural line: an agent may propose a journal entry or explain a break, and must never post one or compute a balance - balances come from the ledger, the model narrates them.",
+      "minutes": 25,
+      "resource": {
+        "label": "TigerBeetle docs: Financial Accounting (double-entry, debits and credits, account types)",
+        "url": "https://docs.tigerbeetle.com/coding/financial-accounting/"
+      }
+    },
+    {
+      "name": "Fintech: disputes, chargebacks and the Regulation E clock",
+      "learn": "Dispute intake is the most heavily automated queue in fintech operations and it is entirely deadline-driven. Under 12 CFR 1005.11 a consumer has sixty days from the statement to assert an error; the institution has ten business days to investigate or must issue provisional credit and may then take up to forty-five days (ninety for new accounts, point-of-sale and foreign-initiated transactions), with notice of results within three business days of concluding. In parallel the card networks run their own machinery: reason codes, representment with compelling evidence, pre-arbitration and arbitration, each with deadlines counted in days. Know what goes in an evidence packet - AVS and CVV results, device and IP, delivery confirmation, terms acceptance, prior undisputed history - because assembling that packet is the automatable part while the disposition is regulated. The artifact you build here is a timer plus an immutable audit trail, not a chatbot.",
+      "minutes": 20,
+      "resource": {
+        "label": "eCFR: 12 CFR Part 1005 (Regulation E, Electronic Fund Transfers)",
+        "url": "https://www.ecfr.gov/current/title-12/chapter-X/part-1005"
+      }
+    },
+    {
+      "name": "Fintech: KYC, CDD and sanctions screening as an ops queue",
+      "learn": "Know the onboarding chain: CIP collection (name, date of birth, address, identification number) under 31 CFR 1020.220, identity verification, customer due diligence including beneficial ownership at the 25 percent threshold plus one control person, risk rating, enhanced due diligence for politically exposed persons and high-risk profiles, then ongoing monitoring. Suspicious activity reporting runs on a thirty-day filing clock and carries an absolute prohibition on tipping off the customer - the existence of a SAR is itself protected. Sanctions screening against the OFAC SDN and consolidated lists is a strict-liability regime, matching is fuzzy across name variants, transliterations, dates of birth and addresses, and the false-positive rate dominates the operating cost, which is exactly why this queue attracts AI. The autonomy line: an agent may triage, enrich, deduplicate and draft an alert narrative; it may never dispose of an alert or file, and no SAR content may ever appear in a shared log, a prompt to an uncontracted vendor, or a customer-visible surface.",
+      "minutes": 20,
+      "resource": {
+        "label": "eCFR: 31 CFR 1010.230 (FinCEN CDD rule - beneficial ownership for legal entity customers)",
+        "url": "https://www.ecfr.gov/current/title-31/subtitle-B/chapter-X/part-1010/subpart-B/section-1010.230"
+      }
+    },
+    {
+      "name": "Fintech: PCI scope and the fields a model must never see",
+      "learn": "Separate cardholder data (PAN, cardholder name, expiration date, service code) from sensitive authentication data (full track data, CAV2/CVC2/CVV2/CID, PIN and PIN block). SAD must never be stored after authorisation under any circumstance; PAN must be rendered unreadable in storage and masked on display to at most first six and last four. Learn what defines the cardholder data environment and how tokenization, hosted fields and iframes, and network tokens shrink it, along with what separates SAQ A from SAQ A-EP from SAQ D - because scope determines how expensive your integration is to the customer. Anything that can affect the security of the CDE is in scope, and that explicitly includes your log sink, your trace backend and your eval fixtures. The operating rule to write down: a PAN never enters a prompt, a span attribute, a screenshot in a demo deck, or a test dataset; if the model must reason about a card it gets last four plus BIN metadata plus a token.",
+      "minutes": 20,
+      "resource": {
+        "label": "PCI SSC: PCI Data Security Standard (scope, cardholder data and sensitive authentication data)",
+        "url": "https://www.pcisecuritystandards.org/standards/pci-dss/"
+      }
+    },
+    {
+      "name": "Fintech: who actually signs off",
+      "learn": "Learn the required program shape - internal controls, a designated BSA/AML compliance officer, training, independent testing, and customer due diligence - because those five pillars tell you which named human owns which decision. Then map real approvals: the BSA officer for alert and SAR dispositions, compliance for any customer-facing language and for adverse action notices, treasury or the controller for payment file release under dual control (maker-checker, two credentials, never one service account), the model risk function for anything that scores or ranks a customer, and - if your customer is a fintech riding a sponsor bank's charter - the partner bank, whose oversight team will read your agent's logs during their audit. Produce the matrix as change type to approver to evidence, and get it signed before you build, because retrofitting an approval step into a shipped agent is a rewrite.",
+      "minutes": 15,
+      "resource": {
+        "label": "eCFR: 31 CFR Part 1020 (AML program requirements for banks)",
+        "url": "https://www.ecfr.gov/current/title-31/subtitle-B/chapter-X/part-1020"
+      }
+    },
+    {
+      "name": "Healthcare: the intake workflow end to end",
+      "learn": "Walk the real sequence: referral or scheduling, pre-registration, insurance verification, prior authorisation, consent and intake forms, check-in and registration, patient matching and MRN assignment, triage, then the encounter. Patient identity is the load-bearing step and the one engineers underestimate: there is no national identifier, so matching is deterministic on MRN and probabilistic on name, date of birth, sex and address through an enterprise master patient index, duplicate rates of several percent are normal, and an incorrect merge is a clinical safety event rather than a data-quality ticket. Learn how FHIR models this - Patient.identifier as system plus value, the distinction between an MRN, a visit or account number and a payer member ID, and Patient.link for merges and replaces. Know where it stalls in practice: eligibility failures discovered at the desk, missing prior authorisation, and forms still arriving by fax.",
+      "minutes": 20,
+      "resource": {
+        "label": "HL7 FHIR R4: Patient resource",
+        "url": "https://hl7.org/fhir/R4/patient.html"
+      }
+    },
+    {
+      "name": "Healthcare: eligibility, prior authorisation and the claim lifecycle",
+      "learn": "Follow the money path: a 270 eligibility request returns a 271 with plan status, copay, deductible remaining and benefit detail (or an AAA rejection code that tells you why the payer refused to answer); a 278 services review carries prior authorisation, where the hard part is the payer-specific rule that determines whether an authorisation is even required; then an 837P or 837I claim, a 999 syntax acknowledgment and a 277CA claim acknowledgment, and finally an 835 remittance carrying CARC and RARC codes that explain each adjustment or denial, followed by appeal windows and the patient statement. Learn the code systems you will see in every payload: ICD-10-CM for diagnosis, CPT and HCPCS for procedures, NPI for providers, place-of-service and modifiers. The FDE-relevant conclusion: eligibility discovery, prior-auth packet assembly and denial triage are text-heavy, deadline-bound and non-clinical, which is where the value is; assigning or changing a diagnosis or procedure code is regulated billing work that a certified coder signs.",
+      "minutes": 25,
+      "resource": {
+        "label": "HL7 FHIR R4: CoverageEligibilityRequest",
+        "url": "https://hl7.org/fhir/R4/coverageeligibilityrequest.html"
+      }
+    },
+    {
+      "name": "Healthcare: the three interchange formats you will actually integrate",
+      "learn": "HL7 v2 is pipe-delimited with MSH, PID, PV1 and OBX segments, event types like ADT^A01 admit, A04 register, A08 update and A31 update person, ORU^R01 for results, transported over MLLP on a raw TCP port through an interface engine (Mirth Connect, Rhapsody, Cloverleaf) with ACK and NACK semantics - and every site has Z-segments and local deviations, so v2 is a family of dialects rather than a standard. FHIR R4 is REST over JSON with typed resources, search parameters, Bundles, US Core profiles, SMART on FHIR OAuth2 scopes such as patient/*.read and system/*.read, and Bulk Data $export producing NDJSON for population-scale pulls. X12 carries the money: 270/271, 278, 837, 835, moved over SFTP or a clearinghouse. The practical asymmetry to internalise: reads are increasingly FHIR and comparatively fast to approve; writes usually still go through v2 interfaces or an EHR-vendor-specific programme with a months-long approval path, and that path length is your project timeline.",
+      "minutes": 20,
+      "resource": {
+        "label": "HL7 FHIR R4 specification index",
+        "url": "https://hl7.org/fhir/R4/index.html"
+      }
+    },
+    {
+      "name": "Healthcare: PHI, minimum necessary, de-identification and BAAs",
+      "learn": "PHI is individually identifiable health information created, received or transmitted by a covered entity or business associate. There are exactly two lawful de-identification routes: Safe Harbor, which requires removing all eighteen identifier types - names, geography smaller than a state subject to the three-digit ZIP population rule, all date elements more specific than year, ages over 89, MRNs, account numbers, device identifiers, biometrics, full-face images and any other unique identifying number or code - plus no actual knowledge that re-identification is possible; or Expert Determination with documented statistical reasoning by a qualified person. Minimum necessary applies to everything except treatment. As a vendor you are a business associate: you need a signed BAA before touching PHI and a downstream BAA with every subprocessor, which includes your model provider - calling an inference endpoint with no BAA is the single most common violation in AI deployments. Assume free-text notes contain identifiers your scrubber missed, and contract accordingly rather than relying on regex.",
+      "minutes": 25,
+      "resource": {
+        "label": "HHS: Guidance on De-identification of PHI (Safe Harbor and Expert Determination)",
+        "url": "https://www.hhs.gov/hipaa/for-professionals/privacy/special-topics/de-identification/index.html"
+      }
+    },
+    {
+      "name": "Healthcare: who signs off, and the clinical autonomy line",
+      "learn": "Name the roles before the kickoff call: the designated Privacy Officer and Security Officer, compliance, health information management for record integrity, the CMIO or clinical informatics lead for anything that changes a clinician's screen or workflow, the revenue cycle director for billing-adjacent changes, legal for the BAA and its subprocessor list, and the IRB when data is used for research - and understand that secondary use of clinical data to train or tune a model reads as research to an IRB even when it feels like ordinary engineering. Write the autonomy line into the SOW in one sentence: the agent drafts, a licensed human signs; nothing autonomous writes to the chart; every suggestion carries its source so the clinician can inspect and override. Treat 'we would like to train on your data' as a separate approval requiring far more than a BAA - usually a data use agreement, an IRB determination and an executive sign-off.",
+      "minutes": 15,
+      "resource": {
+        "label": "HHS HIPAA for Professionals (rules index)",
+        "url": "https://www.hhs.gov/hipaa/for-professionals/index.html"
+      }
+    },
+    {
+      "name": "Procurement: requisition to pay and the three-way match",
+      "learn": "Trace the chain: requisition with cost centre and GL account, approval against a delegation-of-authority threshold, purchase order issued to the supplier, goods receipt when the item arrives, invoice receipt, then the three-way match comparing PO, GR and invoice on quantity and price within tolerance keys, posting through a GR/IR clearing account, then a payment run and remittance advice. Services differ: a service entry sheet replaces the goods receipt and many flows are two-way matched, while evaluated receipt settlement pays with no supplier invoice at all. The product surface is the exception queue - invoices blocked for price variance, quantity variance, missing goods receipt, duplicate invoice, wrong or missing PO (maverick spend), and mis-coded GL accounts - so learn what each block code actually means to an AP clerk. Pick up the buyer vocabulary too (spend under management, tail spend, catalogue versus punchout via cXML, contract price list, three-bid-and-a-buy), because misusing it in discovery costs credibility in the first ten minutes.",
+      "minutes": 20,
+      "resource": {
+        "label": "SAP Help Portal: SAP S/4HANA Cloud documentation",
+        "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD"
+      }
+    },
+    {
+      "name": "Procurement: supplier master data, onboarding and the fraud surface",
+      "learn": "The supplier master is the highest-value fraud target in the enterprise: legal name, tax identity (W-9 or W-8BEN-E, VAT number), remit-to address, bank account, payment terms, insurance and certifications, diversity flags, and identifiers such as DUNS, GLN and the internal vendor number. Onboarding runs tax validation, denied-party and sanctions screening, certificate checks and often a security review before a vendor can be transacted with. The control that matters most: any bank-detail change must be verified out of band against a number already on file, never against a number supplied in the requesting email, because supplier bank-change business email compromise is the most common seven-figure loss in this domain - which makes an agent with write access to vendor banking an attack surface rather than a feature. Duplicate and near-duplicate vendor records are also why every customer's spend analytics is wrong, and cleaning them is a legitimate, low-risk first deliverable.",
+      "minutes": 15,
+      "resource": {
+        "label": "FBI: Business Email Compromise (supplier bank-detail change fraud and out-of-band verification)",
+        "url": "https://www.fbi.gov/how-we-can-help-you/scams-and-safety/common-frauds-and-scams/business-email-compromise"
+      }
+    },
+    {
+      "name": "Procurement: segregation of duties, delegation of authority and SOX ITGC",
+      "learn": "Express separation of duties and least privilege in procurement terms: whoever creates a vendor cannot approve an invoice and cannot release a payment, and requester, approver and receiver must be different identities. Delegation of authority is a concrete table of spend thresholds by role and category, and splitting a purchase to stay under a threshold is a named audit finding, not a clever workaround. SOX IT general controls reduce to three things your deployment must produce evidence for: access provisioning and periodic review, change management, and job monitoring - who had access, what changed and who approved it, and proof that failed jobs were noticed and handled. The consequence that decides your architecture: a service account that can act as any user collapses SoD entirely, so the agent needs its own identity, its own narrow permission set, and an audit trail that distinguishes agent-proposed from human-approved on every record it touches.",
+      "minutes": 20,
+      "resource": {
+        "label": "NIST SP 800-53 Rev. 5 (AC-5 separation of duties, AC-6 least privilege)",
+        "url": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+      }
+    },
+    {
+      "name": "Logistics: order to delivery and the EDI backbone",
+      "learn": "Follow the physical and document chains together: order capture in the OMS, availability and allocation, warehouse work in the WMS (wave, pick, pack, SSCC-labelled cases), carrier selection and rating in the TMS, load tender, bill of lading, pickup, in-transit status, proof of delivery, then freight audit and pay. The message set you will integrate: 850 purchase order, 855 acknowledgment, 856 advance ship notice with its hierarchical shipment-order-pack-item loops, 810 invoice, 940 and 945 warehouse shipping order and advice, 204 motor carrier load tender, 990 tender response, 214 shipment status, 210 freight invoice, and the 997 functional acknowledgment that tells you whether anything was received at all. Transport is AS2 or SFTP through a VAN, and mapping errors surface as 997 or 824 rejects days after the fact. Understand that for a retail supplier the ASN is a financial document: a late or structurally invalid 856 triggers a vendor compliance chargeback regardless of whether the freight arrived.",
+      "minutes": 25,
+      "resource": {
+        "label": "Stedi EDI Reference: X12 856 Ship Notice/Manifest (ASN loops and segments)",
+        "url": "https://www.stedi.com/edi/x12/transaction-set/856"
+      }
+    },
+    {
+      "name": "Logistics: customs, classification and trade compliance",
+      "learn": "Every cross-border shipment carries a classification decision and a screening decision that attach personal liability to a named human. HS and HTS codes drive duty rates; country of origin drives eligibility and tariff treatment; incoterms (EXW, FOB, DAP, DDP) decide who owes duty and who bears risk at each point; ISF 10+2 must be filed before lading for ocean imports. Screening covers denied and restricted party lists, ECCN classification and licence exceptions under the EAR, ITAR for defence articles including technical data - which means a screen share or a shared drawing with a foreign national can itself be a deemed export - and embargoed destinations. Dangerous goods carry their own certification regime (IATA DGR, 49 CFR HMR) where only a trained, currently certified person may sign the declaration. The rule to state up front: classification and licence determination from an agent are advisory only, a licensed customs broker files the entry, and a certified human signs DG paperwork.",
+      "minutes": 15,
+      "resource": {
+        "label": "CBP: Importer Security Filing '10+2' (pre-lading filing requirements for ocean imports)",
+        "url": "https://www.cbp.gov/border-security/ports-entry/cargo-security/importer-security-filing-102"
+      }
+    },
+    {
+      "name": "Logistics: the exception queue and who has authority over it",
+      "learn": "The exceptions are the domain: OS&D (over, short, damaged), refused delivery, misroute, missed appointment, dwell, detention and demurrage accessorials, reweigh and reclass, and lost freight. Freight claims run under the Carmack Amendment with carrier liability limits and filing windows - commonly nine months to file and two years to sue after declination - and a claim needs the bill of lading, a proof of delivery with the exception actually noted at delivery, invoice value and photographs; an exception not written on the POD is usually an unwinnable claim, which is why capture-at-the-dock is the automation with real ROI. Detention and demurrage accrue by the hour or day and are disputed entirely from timestamps, so clean event data converts directly into recovered money. Authority: the dispatcher or transportation manager approves re-routes and accessorials, the shipper of record owns the claim, and carrier scorecards including OTIF decide who gets the freight next quarter.",
+      "minutes": 15,
+      "resource": {
+        "label": "eCFR: 49 CFR Part 370 (principles and practices for investigation of loss and damage claims)",
+        "url": "https://www.ecfr.gov/current/title-49/subtitle-B/chapter-III/subchapter-B/part-370"
+      }
+    },
+    {
+      "name": "Writing the four one-pagers and passing the vocabulary test",
+      "learn": "Compress each domain onto one page a practitioner would not need to correct: three workflows with actors, systems of record and the two real bottlenecks; the data-never-move table with the rule cited by name (PCI SAD storage prohibition, HIPAA Safe Harbor identifiers, GDPR Article 9, ITAR technical data, supplier pricing under NDA); the sign-off matrix as decision to role to threshold to evidence; and a single agent-autonomy line stating what the agent may read, draft, propose and never do. Append a glossary of ten terms and five acronyms per domain and rehearse them aloud until they are unselfconscious, because fluency is judged in the first fifteen minutes by whether you say 'prior auth' and 'the 835' naturally or say 'the insurance thing'. Apply plain-language editing discipline - short sentences, active voice, one idea per line, define an acronym exactly once - then test each page by sending it to someone who works in that domain and counting their corrections; fewer than three is a pass, and every correction becomes a line in the glossary.",
+      "minutes": 25,
+      "resource": {
+        "label": "Google Technical Writing One (plain-language editing: active voice, short sentences, defining terms)",
+        "url": "https://developers.google.com/tech-writing/one"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can sketch from memory, for any of the four domains, three end-to-end workflows with actors, systems of record and the two points where the process actually stalls, and name the exception queue that is the real automation target.",
+    "You can state per domain which data must never enter a prompt, a log, a span attribute or an eval fixture, and cite the specific rule that forbids it - PCI's prohibition on storing sensitive authentication data, HIPAA's eighteen Safe Harbor identifiers, GDPR Article 9, ITAR technical data, contract pricing under NDA.",
+    "You can name the human who signs each decision class and the threshold that pulls them in - BSA officer, Privacy Officer, controller under dual control, category manager against a delegation-of-authority table, licensed customs broker, dispatcher - and say what evidence their approval must leave behind.",
+    "You can run a thirty-minute discovery conversation in any of the four domains using the domain's own vocabulary (SEC code, R10 return, camt.053, 271, 278, CARC, three-way match, GR/IR clearing, ASN, SSCC, detention) without stopping to ask what an acronym means.",
+    "You can classify any proposed agent capability into may decide, may draft for human approval, or may not touch this data at all, and defend the placement with a named rule rather than an opinion.",
+    "You can pick the right integration surface and estimate its approval path: FHIR R4 read versus HL7 v2 write versus X12 837/835 through a clearinghouse, ISO 20022 camt.053 versus a processor payout report, cXML punchout versus ERP API, EDI 856 over AS2.",
+    "You can inspect a customer's sample file before a demo, identify the fields that would make loading it an unlawful disclosure or a PCI scope expansion, and propose a masked or synthetic substitute the same day.",
+    "You can produce a one-page domain brief that a working practitioner in that domain corrects fewer than three times."
+  ],
+  "failureModes": [
+    "Someone drops a 'quick sample' extract into Slack the night before a demo and it contains live PANs or unscrubbed clinical narratives, so the demo itself becomes a reportable disclosure and a PCI scope expansion before a single line of integration code exists.",
+    "The agent is given write access to the vendor master or the payment run so the workflow demos end to end, and the customer's SOX auditor records it as a segregation-of-duties failure that forces the integration out at renewal.",
+    "Payment success is modelled as the card authorisation or the ACH submission, so the product reports money that later returns under R10 up to sixty days afterwards, and the operations team stops trusting every number the system produces.",
+    "Free-text notes are sent to a model endpoint with no BAA because a data scientist removed the name column and called it de-identified, ignoring the seventeen other Safe Harbor identifiers embedded in the narrative text.",
+    "A prior-authorisation assistant optimised on approval rate quietly nudges toward diagnosis codes that get approved, which is billing fraud rather than a hallucination bug, and the eval set never catches it because it only scored approvals.",
+    "The generated 856 is syntactically valid but its shipment-order-pack hierarchy or SSCC labels are inconsistent, retailers reject it days later via 824 and levy vendor compliance chargebacks that exceed the value of the automation.",
+    "An export-controlled drawing is pasted into a shared workspace or shown on a troubleshooting screen share with a non-US engineer, which is a deemed export the customer's trade compliance officer is obliged to self-disclose."
+  ],
+  "interviewQuestions": [
+    "A payments customer wants an agent that runs the dispute queue end to end. Which steps would you let it perform, which would you refuse, what regulatory clocks constrain the design, and what exactly must the system log so their examiner can reconstruct a decision two years later?",
+    "You have read access to a hospital's EHR and are building an intake assistant. Walk me from scheduling to a paid claim, name the interface you would use at each hop, and tell me the first three places the workflow actually breaks for the staff rather than for the software.",
+    "A prospect emails you a CSV of sample data the night before a demo. Talk me through your next ten minutes - once for a fintech customer, once for a hospital - and tell me precisely what differs between the two.",
+    "Design an invoice-exception agent for a procurement organisation that is audited under SOX. What identity does it run as, what records can it change, and how would you demonstrate to an auditor that no approval in the system was made by the agent?",
+    "Explain to me, as the customer's VP of Global Trade, why your system will not classify our goods or file our customs entries - and then tell me what it will do that is still worth paying for.",
+    "In healthcare, what is the difference between data that is de-identified and data you are permitted to send to a model vendor? Give me a concrete case where a team gets that distinction wrong and does not notice.",
+    "Pick a domain you have never worked in. How do you get to a credible discovery call in three days, and how would you tell the difference between genuine understanding and repeating jargon back at the customer?"
+  ],
+  "proofOfWork": "Ship a public 'demo-safe data kit and domain risk register' covering all four domains, built as working code rather than documents. The core is a machine-readable data-class policy per domain - YAML or JSON declaring restricted field patterns and the rule that forbids each one - enforced by a linter you wire into CI against one of your own agent projects: a PAN detector with a Luhn check plus BIN and last-four allowance, MRN and account-number patterns, a clinical free-text detector that flags dates finer than year and ages over 89, ECCN and ITAR keyword patterns, and supplier bank-detail fields. The linter runs in three places and must fail the build in each: on any prompt payload before it leaves the process, on OpenTelemetry span attributes and log records, and on every eval fixture in the repository, with a test suite proving each rule catches a crafted violation. Alongside it, ship a synthetic data generator per domain producing realistic but non-real records - test PANs that pass Luhn but are not issuable, HL7 v2 ADT^A04 and X12 271 and 835 fixtures with realistic CARC codes, PO/goods-receipt/invoice triples with deliberate price and quantity variances that exercise a tolerance check, and 856 ASNs including intentionally broken SSCC hierarchies - so that no customer data is ever needed to demo anything. Wrap it with the four one-pagers (three workflows, data-never-move table, sign-off matrix, autonomy line) and, for each domain, a recorded twenty-minute mock discovery call with someone who actually works in it, plus a short diff listing every correction they made and how you changed the one-pager in response. The corrections list is the part that proves fluency, because it shows where you were wrong and that you found out before a customer did."
+}

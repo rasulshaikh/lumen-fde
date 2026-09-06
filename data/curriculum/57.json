@@ -1,0 +1,200 @@
+{
+  "i": 57,
+  "topic": "Drift, feedback loops, registries, rollout",
+  "track": "H. AI in Production",
+  "month": 7,
+  "hours": 5.0,
+  "why": "The deployment you hand over on day 90 is not the system the customer runs on day 180: they onboard a new mailbox, change their escalation policy, or the vendor rotates a model snapshot, and the classifier that scored 94% at go-live quietly stops working while every dashboard stays green. As the FDE you are the person who has to answer 'is it actually getting worse, or does it just feel worse?' with a number, and then change a prompt version in a live tenant without a deploy window and without breaking the eight analysts working the queue. Drift detection, a feedback loop that produces real labels, a registry that makes versions addressable, and a rehearsed rollout ladder are the four things that turn 'we shipped a demo' into 'we own this in production' - and they are what a customer's platform team will interrogate you about before they let you near their environment.",
+  "prerequisites": [
+    "Prompt engineering as code (topic 46): every call already logs prompt_id, prompt_version, prompt_hash, model snapshot and schema_version onto the llm_calls row - without those columns nothing in this topic is computable.",
+    "Evals as infrastructure (topic 53): a frozen held-out set with per-class accuracy, so you have a yardstick that does not move when the traffic does.",
+    "LLM observability (topic 54): traces with cost and latency joined to the business row, and a call_id/trace_id that appears on both the model call and the DefenderMate classification record.",
+    "Model gateway, routing, fallbacks, canaries (topic 55): a single choke point where a percentage split can be applied and a model snapshot can be pinned.",
+    "PostgreSQL at depth (topic 29): window functions, ON CONFLICT upserts, and enough planner sense to run weekly cohort queries over the calls table without locking the production path.",
+    "Basic inferential statistics: what a p-value does and does not say at n=50,000, effect size vs significance, and how wide a confidence interval is at n=50."
+  ],
+  "subtopics": [
+    {
+      "name": "Separate the four drifts before touching a chart",
+      "learn": "Write down which of four things you are claiming moved: input drift P(X) (the inbound emails changed), prediction drift P(y-hat) (your output class mix changed), label drift P(y) (the true mix changed), or concept drift P(y|X) (the same email now deserves a different label because the customer rewrote their escalation policy). Only concept and label drift necessarily cost accuracy; input and prediction drift are leading indicators that are frequently benign - a customer onboarding a second mailbox moves P(X) hard with accuracy unchanged. Prediction drift is your cheapest daily signal because it needs no labels and is downstream of both input and concept shifts, but on its own it cannot tell you which one happened. Be able to state, in one sentence each, what all four would look like in DefenderMate's data.",
+      "minutes": 15,
+      "resource": {
+        "label": "Lu et al. - Learning under Concept Drift: A Review (drift taxonomy: real vs virtual drift)",
+        "url": "https://arxiv.org/abs/2004.05785"
+      }
+    },
+    {
+      "name": "Pick and freeze a reference window",
+      "learn": "Every drift number is a comparison, so the baseline is the most important decision you will make. Choose a reference period that spans at least one full weekly cycle, contains no incident or backfill, and has a minimum sample per class (a class with 12 examples a week produces noise, not drift). Persist it as an immutable artifact - parquet plus row count, date range and git sha - rather than computing 'the last 30 days' at runtime, because a sliding baseline never alarms on slow creep: the thing you are most likely to be blamed for missing. Decide and write down the re-baseline policy up front (re-baseline only on an explicit, logged decision, never automatically), and know the tradeoff: fixed reference eventually alarms on legitimate business change, sliding reference hides gradual decay.",
+      "minutes": 20,
+      "resource": {
+        "label": "AWS SageMaker Model Monitor - Create a Baseline (baseline statistics and constraints artifacts)",
+        "url": "https://docs.aws.amazon.com/sagemaker/latest/dg/model-monitor-create-baseline.html"
+      }
+    },
+    {
+      "name": "Categorical drift on the prediction column",
+      "learn": "For the predicted-class distribution, know four instruments and when each is right: chi2_contingency for a contingency table, a two-proportion Z-test for binary, Jensen-Shannon distance (bounded 0-1, threshold around 0.1), and PSI with the conventional 0.1 / 0.2 bands. Evidently's default logic is worth internalising because it encodes the lesson: at n <= 1000 it uses statistical tests (chi-square for >2 categories, Z-test for binary, K-S for numeric); above 1000 it switches to distance metrics, because at n=50,000 a p-value of 1e-9 tells you only that your sample is large. Implement PSI yourself once - sum((a-b) * ln(a/b)) over bins - and handle the zero-count bin with smoothing or you will ship an inf. Always report effect size, n, and the raw before/after percentages per class, because 'escalate went 12% to 19% on 4,100 emails' is the sentence a customer's ops lead can act on.",
+      "minutes": 25,
+      "resource": {
+        "label": "SciPy - scipy.stats.chi2_contingency",
+        "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.chi2_contingency.html"
+      }
+    },
+    {
+      "name": "Numeric and embedding drift",
+      "learn": "For continuous columns use ks_2samp when you want sensitivity and wasserstein_distance when you want a magnitude you can compare across columns - normalise Wasserstein by the reference standard deviation or the number is uninterpretable next to another feature. For embeddings, the honest method is the domain classifier: train a binary model to separate reference vectors from current vectors and report ROC AUC with a confidence interval - about 0.5 means indistinguishable, sustained >0.7 means something real moved. Know the cheaper variants (mean-vector distance, share-of-drifted-components, MMD) and their weakness. Above all, know that embedding drift is nearly uninterpretable on its own: it says something changed and nothing about what, so never put it in a customer report without a descriptor or top-token diff beside it.",
+      "minutes": 20,
+      "resource": {
+        "label": "SciPy - scipy.stats.wasserstein_distance",
+        "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.wasserstein_distance.html"
+      }
+    },
+    {
+      "name": "Text descriptors as the first-line detector",
+      "learn": "Compute cheap, human-readable descriptors per row and then run ordinary distribution tests on those columns: text length, out-of-vocabulary share, non-letter character share, detected language, sentiment, and hit-rate for a handful of domain regexes (ticket ids, CVE patterns, forwarded-message markers). These localise drift in a way embedding AUC never will - 'median body length halved because their new ticketing system truncates at 500 chars' or '38% of last week's inbound is Spanish' are findings; 'embedding AUC 0.74' is not. Materialise descriptors as columns at ingest so the same drift job covers input text and model output text with one code path.",
+      "minutes": 15,
+      "resource": {
+        "label": "Evidently docs - All descriptors",
+        "url": "https://docs.evidentlyai.com/metrics/all_descriptors"
+      }
+    },
+    {
+      "name": "Multiple testing and the drift_share trap",
+      "learn": "Forty columns tested at alpha=0.05 gives you roughly two false alarms per run, every run, forever - that is how drift monitoring dies. Either apply Benjamini-Hochberg (multipletests(pvals, alpha=0.05, method='fdr_bh')) or abandon p-values for effect-size thresholds with a minimum-n gate. Understand the dataset-level rule Evidently ships (dataset drift when the share of drifted columns exceeds drift_share, default 0.5) and why it inverts importance: one column at JS 0.6 matters more than twenty at 0.11. Write down, before you build anything, the one column whose drift is an incident (the predicted class distribution) versus the columns that are context for a human.",
+      "minutes": 15,
+      "resource": {
+        "label": "statsmodels - multipletests",
+        "url": "https://www.statsmodels.org/stable/generated/statsmodels.stats.multitest.multipletests.html"
+      }
+    },
+    {
+      "name": "Run the drift check headless and store snapshots",
+      "learn": "Build a Report over your chosen metrics, run it with explicit reference and current frames, and persist the machine-readable snapshot (JSON/dict) - not the notebook HTML, which is a screenshot with extra steps. Declare column types and roles explicitly (target, prediction, text, categorical vs numerical); if you let the library infer, it will silently pick the wrong test for an integer-coded category. Wire it as a scheduled job that writes one snapshot row per (run_date, segment) to object storage plus a flat metrics table, so you can plot a metric across twelve weeks instead of eyeballing two static reports. Emit the three top-line numbers as gauges to your metrics backend and keep the HTML only as an artifact you attach to the customer-facing report.",
+      "minutes": 25,
+      "resource": {
+        "label": "Evidently docs - Library overview",
+        "url": "https://docs.evidentlyai.com/docs/library/overview"
+      }
+    },
+    {
+      "name": "Segment the drift, because the average lies",
+      "learn": "A global drift score is a volume-weighted average that hides exactly the case that will get escalated to you: run the identical report per tenant, per channel, per prompt_version, and per hour-of-week bucket. Add a minimum-n gate per segment (skip anything under a couple of hundred rows and label it 'insufficient data' rather than emitting a green tick that means nothing). Produce a ranked triage table sorted by effect size times volume so the order you investigate in is a number rather than a hunch. Internalise the arithmetic: a tenant at 4% of traffic can be 40% wrong while the dataset-level JS distance reads 0.03.",
+      "minutes": 20,
+      "resource": {
+        "label": "Evidently docs - Customising metrics and thresholds",
+        "url": "https://docs.evidentlyai.com/metrics/customize_metric"
+      }
+    },
+    {
+      "name": "Label-free quality proxies",
+      "learn": "While ground truth is missing you still have signals correlated with quality: fallback/refusal rate, structured-output schema validation failure rate, tool-call error rate, retry rate, output token count, the confidence or logprob distribution if the provider exposes it, human-override rate in the review UI, downstream escalation rate, and time-to-close. Instrument these as first-class metrics on the same time axis as the drift metrics so the report can say 'input drifted on the 3rd, override rate rose on the 5th' - correlation in time is most of what you need to open an investigation. Know which proxies lie: override rate falls when reviewers lose trust and stop reviewing, and refusal rate falls when you loosen a guardrail, so always pair a proxy with a volume denominator.",
+      "minutes": 20,
+      "resource": {
+        "label": "NannyML - Estimating performance without ground truth (CBPE and DLE)",
+        "url": "https://nannyml.readthedocs.io/en/stable/how_it_works/performance_estimation.html"
+      }
+    },
+    {
+      "name": "Capture feedback as immutable events at the point of work",
+      "learn": "The analyst changing a classification in the DefenderMate queue is producing your label - capture it at the moment of that click, never via a retrospective survey or a spreadsheet. The event row is: feedback_id, call_id, trace_id, prompt_version, model_snapshot, predicted_label, corrected_label, reviewer_id, reason_code (a small enum, not free text), source ('review_ui' | 'audit' | 'customer_report'), created_at. Make the write idempotent against double-clicks and retries with INSERT ... ON CONFLICT (call_id, reviewer_id) DO UPDATE, and append rather than overwrite so disagreement between two reviewers is visible instead of last-write-wins. The join key is the entire game: if call_id is not present on both the model-call row and the business row, every analysis in this topic becomes impossible after the fact.",
+      "minutes": 25,
+      "resource": {
+        "label": "PostgreSQL docs - INSERT ... ON CONFLICT",
+        "url": "https://www.postgresql.org/docs/current/sql-insert.html"
+      }
+    },
+    {
+      "name": "Audit sample versus complaint sample",
+      "learn": "Feedback gathered only where humans objected is a biased sample; accuracy computed on it is not accuracy, and it always looks catastrophic. Add a class-stratified random audit sample - say 50 calls a week, sampling weights recorded - and compute per-class precision and recall from that with Wilson intervals, using a classification report and confusion matrix rather than a single headline number. Report macro-F1 alongside the one class whose errors cost the customer money, since accuracy on an 80/20 class mix hides the failure that matters. Do the power arithmetic once: at n=50 and 90% accuracy your interval is roughly plus or minus 8-14 points, so a weekly audit cannot resolve a 3-point regression and you must either aggregate over a month or pre-register a larger effect.",
+      "minutes": 20,
+      "resource": {
+        "label": "scikit-learn - Metrics and scoring",
+        "url": "https://scikit-learn.org/stable/modules/model_evaluation.html"
+      }
+    },
+    {
+      "name": "Delayed labels, watermarks, per-version accuracy",
+      "learn": "The real label often lands days later - whether the ticket was genuinely escalated, whether the alert was a true positive. Define a label maturity watermark and compute cohort accuracy only where created_at < now() - interval '7 days'; skip this and the most recent window will always look different for purely mechanical reasons and you will 'detect drift' every single run. Write the analysis as an as-of join from calls to outcomes, bucketed by prompt_version so quality is attributable to a version rather than to a calendar week, and use window functions to produce cumulative and 7-day-moving accuracy per version in one pass instead of a dozen ad-hoc queries. Publish the maturity lag as a number in the report so nobody misreads a half-populated recent week as a regression.",
+      "minutes": 20,
+      "resource": {
+        "label": "PostgreSQL docs - Window functions",
+        "url": "https://www.postgresql.org/docs/current/tutorial-window.html"
+      }
+    },
+    {
+      "name": "Tracking as the run ledger",
+      "learn": "Use an experiment tracker as the append-only ledger of every evaluation you run: set an experiment, open a run, log params (prompt_version, model snapshot, temperature, dataset_version, git sha), log metrics with a step so you get a curve rather than a point, and attach per-example predictions as an artifact so a regression is inspectable instead of merely reported. The run_id becomes the immutable handle you cite from the drift report, the PR comment, and the rollout log. Understand the two-store layout - backend store for metadata, artifact store for files - because in a customer VPC the artifact store is the half that breaks, on egress rules or bucket credentials, and you will debug it on site.",
+      "minutes": 15,
+      "resource": {
+        "label": "MLflow docs - Tracking",
+        "url": "https://mlflow.org/docs/latest/ml/tracking/"
+      }
+    },
+    {
+      "name": "Registry mechanics: versions, aliases, tags, URIs",
+      "learn": "Learn the four nouns: registered model, model version, alias, tag. Aliases (set_registered_model_alias(name, 'champion', 7)) replaced the old Staging/Production stages, which are deprecated and removed in MLflow 3 - know why the change is right: aliases are multiple independent mutable pointers with no baked-in ordering, resolvable as a URI like models:/DefenderMateClassifier@champion. Use tags for facts (validation_status, eval_run_id, approved_by, incident_ref) and aliases strictly for pointers; conflating them is how teams end up with 'production-v2-final'. Be able to state precisely what a registry gives you that a git tag does not: a serving-time pointer you can flip without a deploy, and an audit trail of who flipped it and when.",
+      "minutes": 25,
+      "resource": {
+        "label": "MLflow docs - Model Registry",
+        "url": "https://mlflow.org/docs/latest/ml/model-registry/"
+      }
+    },
+    {
+      "name": "Prompt registry and resolve-at-request-time",
+      "learn": "Register the prompt text itself as a versioned object so prompt_version in a two-year-old audit log still resolves to exact text, and reference it by URI plus alias rather than by a file path baked into an image. Choose deliberately where resolution happens: at boot (fast, zero per-request cost, but rollback needs a rolling restart) or per request behind a short TTL cache of 5-60 seconds with a last-known-good fallback, so a registry outage degrades to the previous prompt instead of taking down the classifier. Pin the model too - a floating model name is an unversioned dependency that the vendor can change under you - and store the exact snapshot id alongside the prompt version. Emit prompt_version and model_snapshot as span attributes on every call so the live traffic split is observable rather than assumed.",
+      "minutes": 25,
+      "resource": {
+        "label": "MLflow docs - Prompt Registry",
+        "url": "https://mlflow.org/docs/latest/genai/prompt-registry/"
+      }
+    },
+    {
+      "name": "The rollout ladder: shadow, sticky canary, staged",
+      "learn": "Shadow first: dual-run both versions, serve only the old one, log both. It costs 2x tokens and catches schema, latency and cost surprises, and it gives you a paired comparison on identical inputs - statistically far stronger than an unpaired split. Then canary with sticky assignment - bucket = crc32(tenant_id or thread_id) % 100 < pct, never random per request, or the same customer thread gets classified two different ways and they will file it as a determinism bug. Then stage 10 / 50 / 100 with a bake time long enough to accumulate a decisive sample: at 2,000 classifications a day a 10% canary is 200 a day, so detecting a 5-point accuracy change takes days, and if you cannot wait then raise the percentage or admit you are only screening for catastrophes. Define the guardrail metrics and their automatic abort thresholds - schema failure rate, p95 latency, cost per call, recall on the class that costs money, override rate - in writing, before traffic moves.",
+      "minutes": 30,
+      "resource": {
+        "label": "Google SRE Workbook - Canarying Releases",
+        "url": "https://sre.google/workbook/canarying-releases/"
+      }
+    },
+    {
+      "name": "Rollback drill and the alert policy",
+      "learn": "Rehearse the rollback with a stopwatch: flip the alias, then verify by watching the prompt_version distribution in live traces cross over - verification is an observation, not an assertion that you ran the command. Enumerate everything that can keep the old behaviour alive after the flip: response caches keyed without prompt_version, in-process TTL caches, warm workers holding a boot-time resolution, queued jobs already carrying the old version, and a gateway pinning its own model default. On alerting, split by audience: page on customer-visible symptoms (queue backlog, escalation SLA burn), file a ticket on drift, and add deadbands, hysteresis and minimum-n gates so the Monday-morning weekend-shape alert stops firing and the team stops muting the channel.",
+      "minutes": 15,
+      "resource": {
+        "label": "Google SRE Workbook - Alerting on SLOs",
+        "url": "https://sre.google/workbook/alerting-on-slos/"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can run one scheduled job that compares a frozen reference window to the current window and emits a machine-readable snapshot with named metrics, explicit thresholds, per-segment breakdowns and a minimum-n gate - not a notebook HTML file.",
+    "You can classify an observed change as input, prediction, label or concept drift and defend the classification with the specific evidence that distinguishes them.",
+    "You can show per-class precision and recall for the classifier with confidence intervals computed from a stratified random audit sample, and explain why the same numbers computed from the complaint queue would be wrong.",
+    "You can trace any historical classification back to the exact prompt text and model snapshot that produced it with a single query on prompt_version.",
+    "You can flip a prompt version in production by changing a registry alias, and prove within two minutes that traffic actually moved by pointing at the prompt_version distribution in live traces.",
+    "You can compute the minimum detectable effect for a proposed canary given daily volume and baseline accuracy, and use it to choose a percentage and a bake time rather than defaulting to '10% for a day'.",
+    "You can write a drift report a customer's operations lead reads without help: three charts, the thresholds that were crossed, the segment ranking, and the decision taken.",
+    "You can list, from memory, the five places old behaviour survives a rollback and say how you would verify each is clear."
+  ],
+  "failureModes": [
+    "The drift alert fires every Monday because weekend traffic has a different shape, the team mutes the channel within three weeks, and the genuine distribution shift lands during the muted window.",
+    "A customer onboards a new mailbox and 30% of that tenant's inbound becomes a different language or a truncated format; the tenant is 4% of global volume so the dataset-level drift score stays green while their accuracy sits at 55%.",
+    "The reference window was captured during a backfill or an incident, so every comparison since has been against a broken baseline and the 'drift' being investigated is really the system returning to normal.",
+    "Feedback is only collected where reviewers objected, the prompt is tuned against that complaint distribution, and the new version gets measurably worse on the silent majority nobody ever labelled.",
+    "The alias is flipped at 14:05 but a response cache keyed on input hash without prompt_version keeps serving the bad version for another hour, and the team concludes the rollback mechanism does not work.",
+    "The champion points at a floating model name rather than a pinned snapshot, the vendor rotates the underlying model, and behaviour changes on a day when your own change log is empty - the hardest incident of the engagement to diagnose.",
+    "The registry exists and looks impressive in the architecture diagram, but the serving path still reads the prompt from a file baked into the container image, so version numbers are decorative and nobody can say what actually ran."
+  ],
+  "interviewQuestions": [
+    "Ground truth for this classifier arrives three weeks late, if at all. How do you know today whether quality is degrading, and what would make you page someone versus open a ticket?",
+    "Your drift dashboard is entirely green and the customer says the product got noticeably worse last Tuesday. Walk me through the first hour of that investigation, in order, naming what you query.",
+    "Design the feedback loop for a twelve-analyst SOC using this classifier: how do their corrections become usable labels, how do you stop that data poisoning your evaluation set, and what does the schema look like?",
+    "Take me from merged PR to 100% traffic for a prompt change on a tenant processing 2,000 classifications a day. What percentages, what gates, how long at each stage, what triggers an automatic abort, and how do you know the abort worked?",
+    "You run drift tests across 40 columns and get chi-square p < 0.001 on eleven of them. What do you do first, and what would you have done differently when building the monitor?",
+    "Explain aliases versus stages in a model registry, and argue for or against resolving the alias per request instead of at process start - including what breaks in each case.",
+    "A rollback was executed at 14:05 and errors continued until 15:10. Give me five candidate causes ranked by likelihood, and the single observation that would discriminate between the top two."
+  ],
+  "proofOfWork": "Ship a small repository, `defendermate-drift-watch`, that runs as a real scheduled job rather than a demo. It compares a frozen, committed reference window (parquet plus a manifest recording row count, date range, git sha and the explicit reason this period was chosen) against a rolling current window, computes prediction drift on the class distribution, input drift on cheap text descriptors, and label-free quality proxies on the same time axis - writing one JSON snapshot per (run_date, segment) plus a flat metrics table, so a twelve-week trend chart is a query and not a screenshot. It must break the results out per tenant with a minimum-n gate and produce a triage table ranked by effect size times volume, demonstrating at least one segment where the global number and the segment number disagree. Alongside it, register the classifier prompt as a versioned object with `champion` and `challenger` aliases resolved at request time behind a TTL cache with a last-known-good fallback, and include a rollout log covering shadow, 10%, 50% and 100% with the guardrail metrics recorded at each stage, plus the pre-registered abort thresholds you set before traffic moved. Finish with a recorded rollback drill: timestamps for the alias flip and for the observed crossover of prompt_version in live traces, and a RUNBOOK.md listing the five caches, queues and warm processes checked afterwards. The deliverable that makes it credible is a two-page drift report written for the customer's operations lead - three charts, the thresholds crossed, the segment ranking, and the decision taken - with every number in it reproducible from a stored run_id."
+}

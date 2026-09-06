@@ -1,0 +1,218 @@
+{
+  "i": 13,
+  "topic": "AWS networking and compute: VPC, subnets, SG, NACL, ALB across AZs, EC2, Lambda",
+  "track": "C. Cloud and IaC",
+  "month": 2,
+  "hours": 8.0,
+  "why": "FDEs almost never get a greenfield account: you deploy into a customer's VPC, get handed two private subnet IDs and a security-group naming convention, and are asked where your load balancer goes and why your app needs egress. The customer's network and security teams will review every rule before they sign the production change, and when the pilot cannot reach RDS or the model API at 4pm on go-live day, the FDE who can read a route table and a flow log in minutes keeps the account while the one who files a ticket with the customer's platform team loses a week. This topic is the mechanics behind every 'it works in our account but not in theirs' escalation.",
+  "prerequisites": [
+    "Networking from 'Networking: TCP/IP, DNS, TLS, HTTP/2, load balancers, firewalls' (topic 2): CIDR arithmetic by hand, the three-way handshake and what a SYN with no SYN-ACK looks like, ephemeral port ranges, TLS termination, L4 versus L7 balancing, stateful versus stateless filtering",
+    "Terraform from 'Terraform: state, modules, workspaces, drift, CI' (topic 12): providers, `for_each`, `cidrsubnet()`, data sources, remote state, and a clean `terraform destroy` habit, since the deliverable is written in it",
+    "Linux from topics 1 and 3: systemd units, cloud-init, and reading `ss -tlnp`, `ip route`, `tcpdump -i eth0 port 8080` and `curl -v` on an instance to distinguish a listening app from a blocked path",
+    "Enough IAM to attach an instance profile and a Lambda execution role and read a resource-based policy; 'IAM and cloud security: least privilege, roles, IRSA, no long-lived keys' (topic 15) goes deep afterwards",
+    "An AWS account with a budget alarm at 20 USD, AWS CLI v2 configured through IAM Identity Center or short-lived credentials (`aws sts get-caller-identity` works), and a DNS zone you control for ACM validation",
+    "Docker basics from topic 5 so you can run the sample app on the instance and know why 172.17.0.0/16 matters when you pick a VPC CIDR"
+  ],
+  "subtopics": [
+    {
+      "name": "Regions, AZs, and what is zonal versus regional",
+      "learn": "Know that an AZ name (us-east-1a) is randomised per account while the AZ ID (use1-az1) is stable, so two accounts in one customer agreeing on 'zone a' may be talking about different data centres; run `aws ec2 describe-availability-zones --query 'AvailabilityZones[].[ZoneName,ZoneId]'` and record the mapping on the diagram. Classify every resource you will create as zonal (subnet, EC2 instance, EBS volume, NAT gateway, ENI, each ALB node) or regional (VPC, route table, security group, NACL, IGW, the ALB as a whole, Lambda function, ACM certificate), because that classification is exactly what tells you which pieces must be duplicated for AZ resilience. A single-AZ event is the failure unit AWS designs for, and anything with one NAT gateway or one subnet has silently opted out of that protection.",
+      "minutes": 15,
+      "resource": {
+        "label": "EC2 User Guide: Regions and Availability Zones",
+        "url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-regions-availability-zones.html"
+      }
+    },
+    {
+      "name": "VPC CIDR planning against a customer's address space",
+      "learn": "Choose a VPC CIDR between /16 and /28 from RFC 1918 space that does not overlap the customer's on-prem ranges, their other VPCs, or the 172.17.0.0/16 Docker default that bites the moment a container talks to an instance; ask for the corporate IP plan before you pick. Every subnet loses five addresses (network, VPC router at +1, Route 53 Resolver at +2, reserved +3, broadcast), so a /28 has 11 usable IPs and an ALB refuses any subnet smaller than /27 or with fewer than 8 free addresses. Be able to add a secondary CIDR with `aws ec2 associate-vpc-cidr-block` when the first fills up, and know the restrictions (no overlap, at most 5 IPv4 blocks by default). Use `cidrsubnet()` arithmetic to carve a /16 into one block per tier per AZ and write the plan down before touching Terraform.",
+      "minutes": 25,
+      "resource": {
+        "label": "VPC User Guide: VPC CIDR blocks",
+        "url": "https://docs.aws.amazon.com/vpc/latest/userguide/vpc-cidr-blocks.html"
+      }
+    },
+    {
+      "name": "Subnets and route tables: public, private and isolated are just routes",
+      "learn": "A subnet is public only because its route table has 0.0.0.0/0 pointing at an igw; private means 0.0.0.0/0 points at a nat; isolated means only the implicit `local` route for the VPC CIDR exists. Every subnet is associated with exactly one route table and falls back to the main route table if you forget the association, which is how a 'private' subnet becomes public when someone edits main. Routes use longest-prefix match, the local route cannot be deleted, and targets can be igw, nat, eni, pcx (peering), tgw, vgw, a gateway-endpoint prefix list (pl-xxx), or a blackhole once the target is deleted. Draw the route table for every subnet on your diagram and be able to reproduce it from `aws ec2 describe-route-tables --filters Name=vpc-id,Values=vpc-xxx`.",
+      "minutes": 30,
+      "resource": {
+        "label": "VPC User Guide: Route tables",
+        "url": "https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Route_Tables.html"
+      }
+    },
+    {
+      "name": "Internet gateway, public IPs, and one NAT gateway per AZ",
+      "learn": "The IGW performs 1:1 NAT between an ENI's private IP and its public or Elastic IP; the instance never sees its public address, which is why `ip addr` shows only 10.x and why `curl 169.254.169.254/latest/meta-data/public-ipv4` exists. A public subnet still yields an instance with no public IP unless `map_public_ip_on_launch` is true or you attach an EIP. NAT gateways are zonal: one NAT in AZ-a serving private subnets in AZ-b means an AZ-a outage kills egress for both and you pay cross-AZ data charges on every byte, so the pattern is one NAT per AZ with one private route table per AZ. Know the limits that bite in production: 55,000 simultaneous connections to a single destination IP:port, surfaced as the `ErrorPortAllocation` metric and fixed by attaching secondary EIPs; 5 Gbps baseline scaling to 100 Gbps; and roughly 0.045 USD per hour plus 0.045 USD per GB processed, the line item that shocks customers when a pipeline pulls from S3 through NAT instead of a gateway endpoint. Use an egress-only internet gateway for IPv6 outbound.",
+      "minutes": 30,
+      "resource": {
+        "label": "VPC User Guide: NAT gateways",
+        "url": "https://docs.aws.amazon.com/vpc/latest/userguide/vpc-nat-gateway.html"
+      }
+    },
+    {
+      "name": "Security groups: stateful, ENI-scoped, reference by ID",
+      "learn": "Security groups attach to ENIs, not subnets; they are allow-lists only (no deny), stateful via connection tracking, and default to allow-all egress and deny-all ingress. The single most important habit is referencing other groups instead of CIDRs: the app SG allows tcp/8080 from the ALB's SG ID, the database SG allows tcp/5432 from the app SG ID, so scaling or IP churn never breaks a rule and the diagram reads as a graph of trust. Know the quotas: 60 inbound and 60 outbound rules per group, 5 groups per ENI by default (rules times groups must stay under 1000), and the tracking exception where flows allowed by 0.0.0.0/0 in both directions are untracked and so escape the conntrack table that otherwise shows up as `conntrack_allowance_exceeded` in `ethtool -S eth0`. Read rules with IDs and descriptions via `aws ec2 describe-security-group-rules --filters Name=group-id,Values=sg-xxx`, and in Terraform use `aws_vpc_security_group_ingress_rule` resources rather than inline blocks so two groups can reference each other without a dependency cycle.",
+      "minutes": 35,
+      "resource": {
+        "label": "VPC User Guide: Security groups",
+        "url": "https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-groups.html"
+      }
+    },
+    {
+      "name": "Network ACLs: stateless, ordered, and the ephemeral-port trap",
+      "learn": "NACLs attach to subnets, are stateless, and evaluate rules from the lowest number upward until one matches, ending in the implicit `*` deny. The default NACL allows everything; a custom NACL denies everything until you add rules, and because there is no connection tracking you must explicitly allow return traffic on ephemeral ports: 1024-65535 for NAT gateways and load balancers, 32768-60999 for modern Linux clients, 49152-65535 for Windows. Know when a NACL is the right tool (blocking a specific abusive CIDR, a compliance requirement for subnet-level deny, a second layer in front of the database tier) and when it is just a source of asymmetric-return bugs. Diagnose a NACL problem from flow logs by the signature ACCEPT inbound then REJECT outbound on the same flow, and remember the 20-rule default quota per NACL.",
+      "minutes": 20,
+      "resource": {
+        "label": "VPC User Guide: Network ACLs",
+        "url": "https://docs.aws.amazon.com/vpc/latest/userguide/vpc-network-acls.html"
+      }
+    },
+    {
+      "name": "DNS inside the VPC: the +2 resolver, private hosted zones, hybrid resolution",
+      "learn": "Every VPC gets a Route 53 Resolver at CIDR base +2 (also 169.254.169.253) that answers public names, VPC-internal hostnames such as ip-10-0-1-23.ec2.internal, private hosted zones associated with the VPC, and interface-endpoint private DNS. Both `enableDnsSupport` and `enableDnsHostnames` must be true for endpoint private DNS and public hostnames to work, and `enableDnsHostnames` is false by default on API-created VPCs, which is the first thing to check when a customer's new VPC cannot resolve `sqs.us-east-1.amazonaws.com` to a private IP. The resolver accepts 1024 packets per second per ENI, so a chatty service without a local DNS cache hits SERVFAIL under load. For hybrid setups understand inbound and outbound Resolver endpoints plus forwarding rules so `corp.example.com` resolves from inside the VPC and the customer's on-prem resolvers can see your private zone.",
+      "minutes": 20,
+      "resource": {
+        "label": "VPC User Guide: DNS attributes for your VPC",
+        "url": "https://docs.aws.amazon.com/vpc/latest/userguide/vpc-dns.html"
+      }
+    },
+    {
+      "name": "VPC endpoints: gateway versus interface, and why NAT bills drop",
+      "learn": "Gateway endpoints exist only for S3 and DynamoDB, cost nothing, and work by injecting a prefix-list route (pl-xxx to vpce-xxx) into selected route tables so traffic to those services never touches NAT or the IGW; an endpoint policy can restrict which buckets are reachable. Interface endpoints (PrivateLink) place an ENI with a private IP into each chosen subnet, are protected by a security group that must allow tcp/443 from your workloads, and with private DNS enabled make the normal service hostname resolve to that ENI so SDKs need no configuration; they cost about 0.01 USD per AZ-hour plus 0.01 USD per GB. Know which endpoints an isolated subnet needs to run a typical FDE workload with no internet at all: ssm, ssmmessages and ec2messages for Session Manager, ecr.api, ecr.dkr and the S3 gateway for image pulls, logs for CloudWatch, sts for role assumption, secretsmanager, and bedrock-runtime if the customer insists model calls stay on the AWS backbone.",
+      "minutes": 25,
+      "resource": {
+        "label": "AWS PrivateLink Guide: What is AWS PrivateLink",
+        "url": "https://docs.aws.amazon.com/vpc/latest/privatelink/what-is-privatelink.html"
+      }
+    },
+    {
+      "name": "Connecting VPCs: peering, Transit Gateway, and reaching the customer's network",
+      "learn": "VPC peering is a one-to-one, non-transitive link: CIDRs must not overlap, you add routes on both sides pointing at pcx-xxx, and within a region you can reference the peer's security group ID in your rules; DNS resolution across the peer is a separate flag on each side. Transit Gateway is a regional hub where each VPC is an attachment with its own TGW route table, so a customer with 40 VPCs and a Direct Connect gateway gives you one attachment and a CIDR allocation rather than 40 peerings. Understand enough about Site-to-Site VPN (two tunnels, BGP or static routes) and Direct Connect to hold a conversation with the customer's network team about how on-prem clients will reach your internal ALB, and know that whichever they choose, the return route from your subnet back to their CIDR still has to exist in your route table.",
+      "minutes": 20,
+      "resource": {
+        "label": "VPC Peering Guide: What is VPC peering",
+        "url": "https://docs.aws.amazon.com/vpc/latest/peering/what-is-vpc-peering.html"
+      }
+    },
+    {
+      "name": "ALB architecture: nodes per AZ, subnets, addressing, cross-zone",
+      "learn": "An ALB is a regional resource that materialises as one or more nodes (ENIs) in each subnet you enable; you must give it at least two subnets in different AZs, each /27 or larger with 8 free IPs, and the node IPs change as it scales, so clients and firewalls must use the DNS name, never a resolved address. Choose internet-facing (nodes get public IPs, subnets need an IGW route) or internal (private IPs only, the right choice when the customer fronts it with their own edge or VPN). Cross-zone load balancing is on by default for ALB, so a node in AZ-a will send requests to healthy targets in AZ-b; know the connection idle timeout (60 s default, 1-4000 s) and the client keepalive setting, and that the ALB has its own security group which should be the only source allowed to reach the target SG. Set `enable_deletion_protection` in production and understand that the ALB is billed per hour plus LCU-hours across new connections, active connections, processed bytes and rule evaluations.",
+      "minutes": 30,
+      "resource": {
+        "label": "ALB User Guide: What is an Application Load Balancer",
+        "url": "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html"
+      }
+    },
+    {
+      "name": "Listeners, rules and TLS termination",
+      "learn": "A listener is protocol plus port; a production ALB has an HTTP:80 listener whose only default action is `redirect` to HTTPS with status 301, and an HTTPS:443 listener carrying an ACM certificate, a security policy (`ELBSecurityPolicy-TLS13-1-2-2021-06` unless the customer's compliance team says otherwise) and additional certificates served via SNI. Rules are evaluated by priority (1 to 50000, lowest first, default rule last) and match on host-header, path-pattern, http-header, http-request-method, query-string or source-ip, then take an action: forward (optionally to several target groups with weights for canaries), redirect, fixed-response, or authenticate-oidc and authenticate-cognito to push login to the edge before traffic reaches your app. TLS terminates at the ALB, so the target sees plain HTTP plus `X-Forwarded-Proto: https`, `X-Forwarded-For` and `X-Forwarded-Port`. ACM public certificates are free but must be issued in the ALB's region and validated by a DNS record in the customer's zone, which is a ticket you open on day one.",
+      "minutes": 30,
+      "resource": {
+        "label": "ALB User Guide: Create an HTTPS listener",
+        "url": "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/create-https-listener.html"
+      }
+    },
+    {
+      "name": "Target groups, health checks and traffic shaping",
+      "learn": "Target groups have a target type (instance, ip, lambda, or alb) that cannot change after creation; instance targets register by ID and receive the client IP in X-Forwarded-For, while ip targets are how you point at ECS tasks, on-prem servers over Direct Connect, or a peered VPC. Health checks default to HTTP GET on `/` every 30 s with a 5 s timeout, 5 healthy and 2 unhealthy threshold, matcher 200; set the path to a real readiness endpoint, keep the interval short enough that a bad deploy is pulled within a minute, and know that when every target in a group is unhealthy the ALB fails open and routes to all of them. Tune `deregistration_delay` (300 s default) down to your longest request so rolling deploys are fast, enable `slow_start` for JVM or model-loading targets, pick `least_outstanding_requests` over round robin when request cost varies, and use `lb_cookie` stickiness (the AWSALB cookie) only when the app truly holds session state, because it defeats even distribution across AZs.",
+      "minutes": 35,
+      "resource": {
+        "label": "ALB User Guide: Health checks for target groups",
+        "url": "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/target-group-health-checks.html"
+      }
+    },
+    {
+      "name": "Debugging through the ALB: status codes, metrics and access logs",
+      "learn": "Separate `HTTPCode_ELB_5XX_Count` (the balancer generated it) from `HTTPCode_Target_5XX_Count` (your app did), and read the ELB-generated codes literally: 502 means the target closed the connection, sent a malformed response or the Lambda errored; 503 means no registered or no healthy targets; 504 means the target did not answer before the idle timeout or the TCP connect failed; 460 means the client gave up before the ALB idle timeout, common when a customer's proxy timeout is shorter than yours. Enable access logs to S3 and learn the field order well enough to `awk` them: `elb_status_code`, `target_status_code`, `request_processing_time`, `target_processing_time`, `response_processing_time`, where -1 in a processing time means no target was ever selected. Alarm on `UnHealthyHostCount`, `RejectedConnectionCount`, `TargetConnectionErrorCount` and p99 `TargetResponseTime`, and use `X-Amzn-Trace-Id` to join an access-log line to the application log on the instance.",
+      "minutes": 30,
+      "resource": {
+        "label": "ALB User Guide: Troubleshoot your Application Load Balancer",
+        "url": "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-troubleshooting.html"
+      }
+    },
+    {
+      "name": "EC2 as an FDE runs it: instance choice, IMDSv2, user data, no SSH",
+      "learn": "Pick the family by what the workload is bound by (m general, c compute, r memory, g or p GPU, t burstable) and understand the t-family CPU credit model, including that T3 launches in unlimited mode and will quietly bill for sustained CPU. Resolve the AMI at plan time from the SSM public parameter `/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64` rather than hardcoding an ID that differs per region. Enforce IMDSv2 with `HttpTokens=required`, understand the token dance (`PUT /latest/api/token` with `X-aws-ec2-metadata-token-ttl-seconds`, then GET with the token header) and the `HttpPutResponseHopLimit` of 1 that breaks the SDK inside a container until you raise it to 2. Bootstrap with user data through cloud-init, debug it in `/var/log/cloud-init-output.log`, attach an instance profile instead of keys, and reach the box with Systems Manager Session Manager (SSM agent, `AmazonSSMManagedInstanceCore`, outbound 443 to ssm, ssmmessages and ec2messages) so the security group has no port 22 at all. Know that bandwidth advertised as `Up to 5 Gbps` is a burst figure and that `ethtool -S` exposes `bw_in_allowance_exceeded` and `pps_allowance_exceeded` when you hit the real ceiling.",
+      "minutes": 35,
+      "resource": {
+        "label": "EC2 User Guide: Configure the Instance Metadata Service options",
+        "url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html"
+      }
+    },
+    {
+      "name": "Auto Scaling groups across AZs behind the ALB",
+      "learn": "An ASG built from a launch template with `vpc_zone_identifier` set to one private subnet per AZ and `target_group_arns` pointing at the ALB target group is the minimum unit of an AZ-resilient compute tier; min_size 2 with the ASG's automatic AZ balancing means one instance per AZ. Set `health_check_type = ELB` so a failed target-group health check replaces the instance instead of leaving a running-but-broken box in service, and set `health_check_grace_period` longer than boot plus warmup or the ASG will kill instances mid-startup in a loop. Use instance refresh with `min_healthy_percentage` to roll a new launch-template version, understand lifecycle hooks for draining, and know the ASG rebalances across AZs by launching in the under-served AZ before terminating in the over-served one. Confirm behaviour by terminating one instance and watching the target group go unhealthy, the ASG launch a replacement, and the access logs show zero ELB-generated 5XX.",
+      "minutes": 30,
+      "resource": {
+        "label": "EC2 Auto Scaling User Guide: Use Elastic Load Balancing to distribute traffic",
+        "url": "https://docs.aws.amazon.com/autoscaling/ec2/userguide/autoscaling-load-balancer.html"
+      }
+    },
+    {
+      "name": "Lambda execution model: init, invoke, concurrency and throttles",
+      "learn": "An execution environment goes through Init (runtime plus your module-level code, 10 s limit), Invoke (the handler, up to 900 s), and Shutdown; environments are reused, so anything at module scope (SDK clients, connection pools, model weights) is a cold-start cost paid once and a warm-path win thereafter, and `/tmp` (512 MB up to 10 GB) survives between invocations in the same environment. Memory is the only performance dial: 128 MB to 10,240 MB with CPU scaling linearly and a full vCPU at about 1,769 MB. Account concurrency defaults to 1,000 per region shared across all functions; each function can scale by 1,000 concurrent executions every 10 s; exceeding limits returns 429 `TooManyRequestsException` on synchronous calls and silently retries twice on asynchronous ones, so configure a destination or DLQ. Use reserved concurrency to cap a function that talks to a fragile customer system and provisioned concurrency or SnapStart when cold starts break an SLA; sync payloads cap at 6 MB and async at 256 KB.",
+      "minutes": 30,
+      "resource": {
+        "label": "Lambda Developer Guide: Lambda execution environment",
+        "url": "https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtime-environment.html"
+      }
+    },
+    {
+      "name": "Lambda inside the VPC and as an ALB target",
+      "learn": "Attaching a function to a VPC creates Hyperplane ENIs per unique subnet-plus-security-group combination, so the execution role needs `ec2:CreateNetworkInterface` and friends (`AWSLambdaVPCAccessExecutionRole`), the function never has a public IP, and it reaches the internet only through a NAT gateway in the private subnets you chose; pick subnets in at least two AZs. The function's security group is the source you reference in the RDS or ElastiCache SG. Behind an ALB, register the function in a target group of type lambda, grant `lambda:InvokeFunction` to `elasticloadbalancing.amazonaws.com` in the function's resource policy, return an object with statusCode, headers or multiValueHeaders, body and isBase64Encoded, and stay under the 1 MB response limit; the ALB health check, if enabled, is a real invocation you pay for. For a quick webhook receiver without an ALB, a function URL with `AuthType AWS_IAM` or `NONE` plus CORS is the right tool, and knowing which to choose is a common FDE trade-off with a customer's security team.",
+      "minutes": 30,
+      "resource": {
+        "label": "Lambda Developer Guide: Giving Lambda functions access to resources in a VPC",
+        "url": "https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html"
+      }
+    },
+    {
+      "name": "Seeing the packets: VPC Flow Logs and Reachability Analyzer",
+      "learn": "Turn on flow logs at the VPC level to CloudWatch Logs or S3 and read the default record (version account-id interface-id srcaddr dstaddr srcport dstport protocol packets bytes start end action log-status), then add the custom fields `tcp-flags`, `flow-direction`, `traffic-path`, `pkt-srcaddr` and `pkt-dstaddr` so you can tell a SYN that was REJECTed by a security group from a flow that was ACCEPTed in and then REJECTed on the way out by a NACL. Know what flow logs do not show: DNS to the VPC resolver, IMDS traffic to 169.254.169.254, DHCP, and anything inside the 60 s or 600 s aggregation window that has not flushed, which is why a fresh reproduction takes a minute to appear. Use Reachability Analyzer to prove a path between two ENIs or an ENI and an IGW; it evaluates route tables, SGs, NACLs and endpoints statically and names the exact component that blocks, which is the artifact to paste into the customer ticket instead of an opinion.",
+      "minutes": 25,
+      "resource": {
+        "label": "VPC User Guide: Logging IP traffic using VPC Flow Logs",
+        "url": "https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs.html"
+      }
+    },
+    {
+      "name": "Building the reference VPC and ALB tier in Terraform",
+      "learn": "Compose the whole diagram as code: `data.aws_availability_zones` (state available) feeding a `for_each` over two AZs, `aws_vpc`, `aws_subnet` per tier using `cidrsubnet(var.cidr, 4, index)`, `aws_internet_gateway`, one `aws_eip` and `aws_nat_gateway` per AZ, a public route table plus one private route table per AZ with their `aws_route_table_association`s, `aws_security_group` shells with separate `aws_vpc_security_group_ingress_rule` and `aws_vpc_security_group_egress_rule` resources using `referenced_security_group_id`, `aws_lb` (application, public subnets), `aws_lb_target_group` with a `health_check` block, `aws_lb_listener` for the 80 redirect and the 443 forward with `certificate_arn`, `aws_launch_template` with `metadata_options` setting http_tokens to required and an `iam_instance_profile`, and `aws_autoscaling_group` with `vpc_zone_identifier` and `target_group_arns`. Read the terraform-aws-modules/vpc module source to see how per-AZ NAT is handled, then decide deliberately whether to consume the module or own the resources. Run `terraform plan` until the diff is zero, `terraform destroy` at the end of every session, and keep a cost line in the README.",
+      "minutes": 40,
+      "resource": {
+        "label": "Terraform Registry: AWS provider documentation",
+        "url": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can draw a two-AZ VPC (public, private and isolated tiers, per-AZ NAT, IGW, endpoints) from memory and, for every arrow and every SG or NACL rule, state which resource it protects, which direction is stateful, and what breaks if it is removed.",
+    "You can stand up an internet-facing ALB in front of an ASG of two EC2 instances in two AZs with Terraform, TLS via ACM, an 80 to 443 redirect and a real readiness health check, and reach a zero-diff `terraform plan` in under an hour from an empty account.",
+    "You can take a 'the app is unreachable' report and, within fifteen minutes using only describe-route-tables, describe-security-group-rules, flow logs and Reachability Analyzer, name whether the block is routing, SG, NACL, health check or DNS, with the log line that proves it.",
+    "You can read an ALB access log and CloudWatch metrics and distinguish 502, 503, 504 and 460 by cause, tell whether the balancer or the target produced a 5XX, and correlate one request to the instance log via X-Amzn-Trace-Id.",
+    "You can explain to a customer's network team, without notes, why they need one NAT gateway per AZ, which VPC endpoints let your workload run with no internet route at all, and roughly what each costs per month.",
+    "You can deploy a Lambda function into private subnets, wire it to RDS through a security-group reference, put it behind the same ALB on a path rule, and explain its cold-start, concurrency and 429 behaviour under a burst of 2,000 requests.",
+    "You can lock down EC2 the way a security reviewer expects: IMDSv2 required, no port 22, instance profile instead of keys, Session Manager for access, and show the SSM session working from an isolated subnet through interface endpoints.",
+    "You can list the quotas that will bite this architecture first (SG rules per ENI, NAT ports per destination, ALB rules per listener, Lambda account concurrency, resolver packets per second) and name the CloudWatch metric or alarm that would tell you."
+  ],
+  "failureModes": [
+    "A single NAT gateway in AZ-a serves private subnets in both AZs: AZ-a degrades, every instance in AZ-b loses egress to the model API and package repos, and the 'multi-AZ' pilot goes down with one zone while the customer's dashboard still shows healthy EC2.",
+    "The app security group allows tcp/8080 from the ALB subnet CIDRs instead of the ALB's SG ID; a later subnet re-carve or a second ALB in the same subnets silently widens access, and the customer's pen test flags the app port reachable from a jump host.",
+    "A custom NACL on the database subnet allows inbound 5432 but the return rule only covers 32768-60999; ALB health checks and NAT-sourced connections using ports below 32768 fail intermittently, half the targets flap unhealthy, and on-call chases a phantom application bug for a day.",
+    "The health check path is left at `/` returning 200 from an nginx placeholder while the real app crashed on boot; the target group is green, the ALB happily forwards, and users get 502 from the balancer while every dashboard is healthy.",
+    "A Lambda function is attached to the VPC but placed in a subnet whose route table has no NAT route: calls to the Anthropic API hang until the 30 s timeout, the async invocations retry twice with no destination configured, and the customer sees three duplicated webhook side effects hours later.",
+    "A data-ingest job reads 20 TB from S3 through the NAT gateway because nobody added the S3 gateway endpoint; the month-end bill has a 900 USD NAT data-processing line, and the customer's FinOps lead asks why your design doc did not mention it.",
+    "Someone resolved the ALB DNS name once and put the two IPs into the customer's on-prem firewall allowlist; the ALB scaled and rotated its nodes overnight and the integration went dark, with nothing in your logs because the packets never arrived."
+  ],
+  "interviewQuestions": [
+    "Draw a two-AZ VPC for a web tier, an app tier and Postgres that a bank's security team will accept. For every security group and NACL rule you write, tell me exactly what would happen if I deleted it.",
+    "A customer says the app behind your ALB returns 502 intermittently, about 3 percent of requests, only during deploys. Walk me through the investigation from ALB metrics to access logs to target-group settings, and name the two configuration values you expect to change.",
+    "Explain what happens at each hop when a browser requests https://app.customer.com served by an internet-facing ALB in front of instances in private subnets: DNS, TLS, the ALB node, the target, and the response path. Where does NAT happen and where does it not?",
+    "The customer wants zero internet access from the VPC. List the endpoints you need for an EC2 fleet pulling from ECR, logging to CloudWatch, reached over Session Manager and calling Bedrock. What changes if they also need to call an external SaaS API?",
+    "Flow logs show ACCEPT on ingress and REJECT on egress for the same 5-tuple. What is the cause, why does a security group never produce that pattern, and how would you confirm without touching production?",
+    "When would you put a Lambda function in a VPC and when would you refuse to? Cover cold starts, ENIs, NAT cost, concurrency, and the failure modes of async invocation against a customer system that is not idempotent.",
+    "Our Terraform created an ALB in two subnets, but one AZ shows UnHealthyHostCount equal to HealthyHostCount and the other is fine. Give me three plausible root causes in order of likelihood and the single command or console view that rules each one in or out."
+  ],
+  "proofOfWork": "A public repository `aws-two-az-breakfix-lab` that extends the plan's Terraform with a `faults/` directory of six deliberately broken variants selected via `terraform apply -var fault=<name>`: missing NAT route in one AZ, NACL ephemeral-port block on the app subnet, app SG allowing from a CIDR rather than the ALB SG, health check on a placeholder path, Lambda in a subnet without egress, and a single-AZ NAT. For each fault the README records the exact evidence that identifies it (the flow-log line with tcp-flags, the Reachability Analyzer blocking component, the ALB access-log fields, or the CloudWatch metric) and the one-line fix, plus a `cost.md` estimating the monthly bill for the reference architecture with and without endpoints. Finish with a ten-minute recorded walkthrough in which you terminate every instance in one AZ while running a load generator against the ALB and show the access logs registering zero ELB-generated 5XX during recovery."
+}

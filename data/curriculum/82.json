@@ -1,0 +1,209 @@
+{
+ "i": 82,
+ "topic": "Target list: 40 companies, referrals, warm intros",
+ "track": "L. Portfolio, Positioning, Pipeline",
+ "month": 4,
+ "hours": 8,
+ "why": "Forward-deployed work is portfolio management under scarcity: you cannot deploy into every account, so you qualify hard, rank on a rubric you can defend, find the one human inside each account who can actually unblock you, and keep a live state machine of who owes what to whom by when. Running your own search that way is the identical skill with your career as the account, and the interviewer will read the quality of your list as a direct sample of how you would triage their customers. The mechanics also matter on their own terms - FDE is the least consistently-titled and most location-gated engineering role in the market, so a list built by keyword search alone will be 60-70% roles you are not legally eligible for and reqs that were filled before you found them.",
+ "prerequisites": [
+  "The positioning spine, company dossier format and comp model from 'Narrative: why FDE, why this company, travel, comp' (topic 72) - this topic feeds that one forty targets, and the walk-away number and travel/authorisation limits from topic 72 become gate columns here.",
+  "A resume that already survives 'Resume defence: every line' (topic 73), because a referrer forwards the resume, not your intentions.",
+  "At least two public artifacts a stranger can read in five minutes - a write-up or repo from 'Technical writing and public write-ups' (topic 69). A referral with nothing to link to is a name, not a referral.",
+  "Spreadsheet mechanics beyond typing: named ranges, data validation with a fixed enum list, conditional formatting, filter views, and one of QUERY / FILTER / ARRAYFORMULA. You will be maintaining forty rows weekly for five months.",
+  "Enough Python to GET a JSON endpoint, persist a snapshot, and diff two snapshots - the packaging and script hygiene from 'Production Python architecture' (topic 25) is sufficient; you do not need a framework.",
+  "A LinkedIn profile already updated to the FDE positioning, since every person you contact will open it within thirty seconds of your message and the profile is what they judge, not the message."
+ ],
+ "subtopics": [
+  {
+   "name": "Build the title taxonomy: what actually counts as an FDE role",
+   "learn": "There is no single title. Collect the real vocabulary and learn which words map to the job you want: Forward Deployed Engineer / FDSE, Deployment Strategist, Applied AI Engineer, Solutions Engineer, Solutions Architect, Resident Solutions Architect, Delivery / Implementation Engineer, Professional Services Engineer, Customer Engineer, Field Engineer, Partner Solutions Architect. Then learn the disqualifiers, because half of these titles are pre-sales with a quota: search the JD text for 'quota', 'attainment', 'territory', 'support the AE', 'pipeline generation' (pre-sales) versus 'post-signature', 'production', 'on-call', 'customer's environment', 'own the deployment' (delivery). Record two fields per row - title_family and pre_or_post_sales - because they change the comp structure (variable component), the interview loop, and whether the job is engineering at all.",
+   "minutes": 30,
+   "resource": {
+    "label": "Exponent - Forward Deployed Engineer interview guide",
+    "url": "https://www.tryexponent.com/blog/forward-deployed-engineer-interview-the-definitive-2026-guide-fde"
+   }
+  },
+  {
+   "name": "Map the sourcing surfaces before writing a single row",
+   "learn": "Enumerate where reqs actually live so you are not repeatedly scraping the same surface: company-hosted ATS boards (Greenhouse, Lever, Ashby, Workday, SmartRecruiters), the aggregators (LinkedIn Jobs, Wellfound, Naukri for India-entity roles), curated startup directories with filters for stage, batch and location, monthly community hiring threads, and the highest-signal surface of all - the careers page of a company you already have a person inside. Note which surfaces are queryable programmatically and which are not; the ATS boards are, the aggregators are not. Assign each of your forty rows a source column so that six weeks in you can see which surface produced the rows that actually converted, and stop working the ones that produced noise.",
+   "minutes": 25,
+   "resource": {
+    "label": "Hacker News - 'Ask HN: Who is hiring?' monthly thread archive (whoishiring submissions)",
+    "url": "https://news.ycombinator.com/submitted?id=whoishiring"
+   }
+  },
+  {
+   "name": "Query craft: boolean and search operators against ATS domains",
+   "learn": "Stop browsing job boards; query them. Learn the operator set and use it against the domains that host reqs: site: restricts to a host (job-boards.greenhouse.io, boards.greenhouse.io, jobs.lever.co, jobs.ashbyhq.com), quotes force an exact phrase, OR groups synonyms, a leading minus excludes, intitle:/inurl: target the slug, and after:YYYY-MM-DD limits to recently indexed pages. Build and save six to ten canonical queries - one per title-family crossed with a location qualifier - rather than improvising each session, e.g. an exact-phrase query for the title, OR'd with two synonyms, minus the words that signal pre-sales. Log which query produced each row so you can retire the ones with a zero hit rate.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google Search Help - Refine Google searches (site:, exact phrase, minus, before:/after:, filetype:)",
+    "url": "https://support.google.com/websearch/answer/2466433"
+   }
+  },
+  {
+   "name": "Pull reqs from public ATS job-board APIs instead of scraping",
+   "learn": "The major ATS vendors expose a public, unauthenticated job-board API intended for embedding a careers page - use it. Greenhouse serves a board's whole req list as JSON at boards-api.greenhouse.io/v1/boards/{board_token}/jobs, with ?content=true to include the full JD body, and a per-job endpoint for detail; Lever serves api.lever.co/v0/postings/{company}?mode=json. Find a company's board token by opening their careers page and reading the embed URL or the network requests. Write one script that takes a list of (company, ats_vendor, token) and emits a normalised row per req: req_id, title, location, department, absolute_url, updated_at, and the raw JD text. This is the single highest-leverage thirty minutes in the whole topic - it turns list maintenance from an hour a week into a command.",
+   "minutes": 35,
+   "resource": {
+    "label": "Greenhouse Job Board API - board jobs endpoint and ?content=true for full JD bodies",
+    "url": "https://docs.greenhouse.io/job-board.html"
+   }
+  },
+  {
+   "name": "LinkedIn Jobs as a filter, not a firehose",
+   "learn": "Use the structured filters rather than scrolling: Date posted (past 24 hours / past week - anything older than three weeks on an aggregator is usually stale or reposted), Experience level, Remote / On-site / Hybrid, Company, and Job function. Put boolean in the keyword box with quotes, OR and NOT. Then learn to distrust the 'Remote' facet: it is set by whoever posted the req and routinely means remote-within-one-country. Open the actual req on the company's own ATS board before you create a row, because the aggregator copy is frequently a truncated or out-of-date mirror. Set up saved searches with alerts so new reqs arrive rather than being hunted, and treat the alert email as an inbox to triage into the sheet, not as reading material.",
+   "minutes": 25,
+   "resource": {
+    "label": "LinkedIn Help - Filter and sort job search results (date posted, experience level, company, function)",
+    "url": "https://www.linkedin.com/help/linkedin/answer/a507441/filter-and-sort-job-search-results"
+   }
+  },
+  {
+   "name": "The eligibility gate: entity, employer-of-record, contractor, timezone",
+   "learn": "This gate kills more rows than fit does, so evaluate it before you invest in a referral path. For each company answer four booleans with evidence: does it have an Indian legal entity or GCC that hires directly (check the careers-page location filter and the headcount on their LinkedIn people-by-location view); will it hire in India through an employer-of-record or PEO arrangement (common for US startups without an entity, and it determines whether you get RSUs or nothing); will it engage you as an independent contractor (USD invoiced, you carry GST registration, advance tax and FEMA/FIRC paperwork, usually no equity plan eligibility); and is the req's 'remote' actually 'remote, must be authorised to work in the US'. Add a numeric overlap_hours column: IST is UTC+05:30, which gives roughly two to three usable hours with US Eastern and effectively zero with US Pacific during their working day - for a customer-facing role that means evening customer calls, and you should price it, not discover it.",
+   "minutes": 30,
+   "resource": {
+    "label": "Wikipedia - Professional employer organization (PEO / employer-of-record model)",
+    "url": "https://en.wikipedia.org/wiki/Professional_employer_organization"
+   }
+  },
+  {
+   "name": "Attach a comp band to every row before you rank",
+   "learn": "A fit score without a band is a wish list. For each row record comp_low, comp_high, currency, level_assumption and comp_source. Calibrate the level first - senior at a frontier lab, at a public data-infrastructure company, and at a Series B are three different ladders and three different bands - then read the band for that level and location. Critically, tag whether the band is a US band or an India band: for the same title and level these commonly differ by a factor of two to four, and a global-remote role paid on a US band is the rare row worth twenty ordinary rows. Never carry a single number; carry a range with the assumption written beside it, and mark rows where you are extrapolating rather than reading.",
+   "minutes": 30,
+   "resource": {
+    "label": "Levels.fyi - engineering compensation by company, level and location",
+    "url": "https://www.levels.fyi/t/software-engineer"
+   }
+  },
+  {
+   "name": "Triangulate the band: filed wage data and pay-transparency variants",
+   "learn": "Self-reported aggregators skew high and are thin at senior levels for niche titles, so add two independent reads. First, statutory wage filings for work-visa petitions give real base salaries by employer, title and year - base only, no equity or bonus, so never compare them to a total-comp figure. Second, exploit pay-transparency law: several US jurisdictions require a posted salary range, so when a company posts the same req across multiple locations, open the Colorado, New York City, California or Washington variant of that req on their own ATS board and read the band off it even though you are applying elsewhere. Reconcile the three sources instead of averaging them, and write one sentence per row explaining why they differ - that sentence is what you say when a recruiter asks how you arrived at your number.",
+   "minutes": 20,
+   "resource": {
+    "label": "US DOL Office of Foreign Labor Certification - performance and disclosure data (filed H-1B/PERM wages by employer and job title)",
+    "url": "https://www.dol.gov/agencies/eta/foreign-labor/performance"
+   }
+  },
+  {
+   "name": "A fit rubric that another person could reproduce",
+   "learn": "Score on named, bounded dimensions rather than gut feel: role authenticity (is this post-signature delivery engineering, 0-3), stack overlap with your actual proof - Kubernetes, Python/FastAPI, Postgres, LLM evals, Temporal - (0-3), domain you can speak to (0-2), company trajectory measured by hiring velocity and funding or revenue stage (0-2), referral reachability (0-3), and comp band versus your target (0-3). Keep the eligibility booleans out of the score - they are gates that zero the row, not weights, otherwise a high-fit ineligible role floats to the top. Implement it as spreadsheet columns with data validation on the 0-3 inputs and a formula for the weighted total normalised to 100; hand the rubric and three JDs to someone else and check they land within ten points of you. If they cannot, your rubric is vibes with arithmetic on top.",
+   "minutes": 30,
+   "resource": {
+    "label": "Carnegie Mellon Eberly Center - Creating and using rubrics (bounded dimensions, sample rubrics)",
+    "url": "https://www.cmu.edu/teaching/assessment/assesslearning/rubrics.html"
+   }
+  },
+  {
+   "name": "Tracker schema: columns, enums, and an explicit state machine",
+   "learn": "Design the sheet as a table a script can write to, not a document. Minimum columns: company, hq, ats_vendor, board_token, req_id, req_title, req_url, posted_date, first_seen, last_seen, jd_snapshot_path, archetype, gate_eligible, overlap_hours, fit_score, comp_low, comp_high, comp_source, referral_path_type, referral_person, referral_relationship, intro_broker, status, owner, next_step, next_step_due, last_touch, outcome, notes. Constrain status to a real enum with data validation - sourced, qualified, path_identified, intro_requested, intro_made, applied, recruiter_screen, loop, offer, closed_lost, closed_no_path - and define the legal transitions in a comment so 'applied' cannot silently become the terminal state for eleven rows. Every non-closed row must always have a non-empty next_step and a next_step_due date; a row with neither is not in your pipeline, it is a memory.",
+   "minutes": 30,
+   "resource": {
+    "label": "Google Sheets API - guides (values, ranges, batch updates)",
+    "url": "https://developers.google.com/workspace/sheets/api/guides/concepts"
+   }
+  },
+  {
+   "name": "Dedup, freshness decay, and snapshotting the JD",
+   "learn": "Reqs are mutable and mortal. Snapshot the full JD text to a file the moment you create a row, because postings get edited (scope, level, location, and especially the posted salary range) and deleted, and you need the original text later for resume tailoring, for the 'why this company' hypothesis, and to notice when they quietly downgrade the level. Poll the ATS endpoints weekly and diff by req_id: a req_id that disappears is closed, a new req_id with an identical title is a repost - which is a signal, usually meaning the first hire failed or the band was too low. Do the set operations in SQL over the snapshot CSVs rather than by eye - anti-joins for closed, joins on normalised company+title for duplicates across surfaces - and treat any row whose posted_date is older than about eight weeks with no movement as decayed.",
+   "minutes": 25,
+   "resource": {
+    "label": "DuckDB docs - SQL set operations (UNION / EXCEPT / INTERSECT for diffing snapshots)",
+    "url": "https://duckdb.org/docs/current/sql/query_syntax/setops"
+   }
+  },
+  {
+   "name": "Enumerate your referral graph exhaustively, then intersect it with the list",
+   "learn": "Do this as a data exercise, not as remembering. Export every edge you already have into one file: first-degree connections, former colleagues at every employer, university and school alumni, people you worked with as a vendor or client, community members from Slack/Discord/meetups, contributors to repos you contributed to, people who replied to or shared your write-ups, and second-degree connections where you have a strong shared connection who would actually vouch. Then inner-join that person table against your forty companies on current employer - the joins you did not expect are the point. The research on this is old and stable: the ties that produce job outcomes are disproportionately weak ties, people outside your daily circle who sit in different information pools, so do not stop at the ten people you talk to weekly. Target a named human at twenty of the forty rows.",
+   "minutes": 35,
+   "resource": {
+    "label": "Wikipedia - Interpersonal ties (strength of weak ties)",
+    "url": "https://en.wikipedia.org/wiki/Interpersonal_ties"
+   }
+  },
+  {
+   "name": "Find the right human inside the account, not just any human",
+   "learn": "Rank who to reach in this order: a peer FDE at your target level in the same org (their referral carries the most weight, they are usually paid a bonus for it, and they can tell you what the loop actually contains), then the hiring manager named or implied by the req (search titles like Head of / Director of Forward Deployed, Solutions Engineering, Professional Services, Delivery), then anyone in the org who can route you internally, then the recruiter. A recruiter conversation is not a referral - keep them in different columns. Use people search with the current-company facet plus the connection-degree facet, and read the profile before contacting: tenure under three months means they cannot refer you yet at most companies, and someone who joined from a company you also worked at is a warmer edge than a stranger with a shared logo.",
+   "minutes": 30,
+   "resource": {
+    "label": "LinkedIn Help - search, filters and connection degrees",
+    "url": "https://www.linkedin.com/help/linkedin"
+   }
+  },
+  {
+   "name": "The forwardable blurb and the double opt-in intro",
+   "learn": "Never ask a broker to compose anything. Send them a self-contained block under 120 words they can forward untouched: one line of who you are with a single verifiable proof, the exact req (title, req id, link) so nobody has to search, one line on why you are credible for that specific req, one explicit ask - a referral submission or a fifteen-minute call, pick one, not both - and a graceful out that makes 'no' cheap. Run it double opt-in: ask the broker for permission before they forward, so the target is never ambushed and the broker is never embarrassed. Attach nothing; put the resume behind a link. Give a soft deadline anchored to the req's posted date rather than to your anxiety, and thank the broker with the outcome afterwards whether or not it worked - that is what makes the second ask possible.",
+   "minutes": 30,
+   "resource": {
+    "label": "Fred Wilson (AVC) - The Double Opt-In Introduction, the post that defined the practice",
+    "url": "https://avc.com/2009/11/the-double-optin-introduction/"
+   }
+  },
+  {
+   "name": "Manufacturing a path where none exists",
+   "learn": "For the twenty rows with no edge, build one over four to six weeks instead of cold-applying and hoping. The plays that work, in descending order of yield: make a real contribution to the company's public repos or docs - a reproducible bug report with a minimal repro, a failing test, a docs fix - which puts your name in front of the engineers who review it; publish a technical write-up that uses their product on a real problem and share it where their team already reads; answer questions in their community forum or Discord well enough to be recognised; show up to their meetup, office hours or conference talk and ask one specific question. All of these leave an artifact you can reference in the first line of an outreach message, which converts it from cold to warm. Budget this as real engineering time - a drive-by typo PR fools nobody.",
+   "minutes": 25,
+   "resource": {
+    "label": "Open Source Guides - How to Contribute to Open Source",
+    "url": "https://opensource.guide/how-to-contribute/"
+   }
+  },
+  {
+   "name": "Outreach cadence, and not burning the asset",
+   "learn": "Fix the cadence in advance so it is mechanical: initial ask, then one follow-up at about five business days that adds new information rather than repeating the request, then one final gracious close at about two weeks. Three touches, then stop and record closed_no_path - a fourth touch converts almost nothing and costs the relationship. Enforce a per-person budget so no single well-connected contact gets asked for four intros in a month. Read the professional network's user agreement before you automate anything: automated access and scraping are prohibited and enforcement is account-level, so a scraper run from your primary account can cost you the connection graph that is the entire asset of this topic. Use the public ATS APIs for volume and human hands for the network.",
+   "minutes": 25,
+   "resource": {
+    "label": "LinkedIn - User Agreement (automated access and scraping restrictions)",
+    "url": "https://www.linkedin.com/legal/user-agreement"
+   }
+  },
+  {
+   "name": "Pipeline arithmetic: concurrency, cycle time, and batching offers",
+   "learn": "Treat the search as a queueing system. Little's law says average items in the system equals arrival rate times average time in system, so if a loop takes five weeks end to end and you want four loops running concurrently, you need roughly 0.8 new loops entering per week - which, back-propagated through your own conversion rates, tells you how many intros and applications per week the list must sustain. Measure your real conversion at each transition rather than using folklore, but expect referred applications to convert to a recruiter screen roughly an order of magnitude better than cold ones, which is the entire justification for the referral work. Set an explicit WIP limit - about five active loops - because quality collapses past that, and deliberately batch the start dates so that offers land inside a two-week window; sequential offers give you no leverage, concurrent ones give you all of it.",
+   "minutes": 25,
+   "resource": {
+    "label": "Wikipedia - Little's law (L = λW)",
+    "url": "https://en.wikipedia.org/wiki/Little%27s_law"
+   }
+  },
+  {
+   "name": "Weekly cadence, automated refresh, and kill criteria",
+   "learn": "Make maintenance a thirty-minute scheduled ritual with a script doing the mechanical half. Automate: re-poll every board, mark reqs that vanished as closed, flag new reqs at existing target companies, and highlight every row whose next_step_due is past or whose last_touch is older than fourteen days - a time-driven trigger on the sheet or a cron'd script writing back through the Sheets API both work. Do by hand only what needs judgement: set next_step and next_step_due for every open row, and apply kill criteria without sentiment - no referral path found after two weeks of trying, or a req older than eight weeks with no movement, or an eligibility gate that flipped false, closes the row and you source a replacement the same session. The invariant is forty live rows, not forty rows ever created.",
+   "minutes": 30,
+   "resource": {
+    "label": "Google Apps Script - installable triggers (time-driven / clock triggers for scheduled refresh)",
+    "url": "https://developers.google.com/apps-script/guides/triggers/installable"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can produce forty live rows where every row has a req_url, req_id, posted_date, a stored JD snapshot, an explicit eligibility verdict with the evidence behind it, and a comp band tagged as a US band or an India band with two independent sources.",
+  "You can refresh the live/closed status of all forty rows in under ten minutes by running one command against the public ATS endpoints, and produce a diff listing closed reqs, reposts and newly opened reqs at existing targets.",
+  "You can point at twenty rows that each name a specific human, your actual relationship to them, the exact ask you will make, and the date you last touched them.",
+  "You can hand your rubric and three unseen job descriptions to another engineer and their fit scores land within ten points of yours.",
+  "You can state, without opening a calculator, your current loop concurrency, your average cycle time in weeks, and how many new intros per week you need to hold four concurrent loops.",
+  "You can explain for any given row why 'Remote' on that posting does or does not include you, citing the specific sentence in the JD or the entity/EOR evidence you found.",
+  "You can name the five rows you would leave your current role for and defend the ranking on fit, band and eligibility rather than on brand.",
+  "You can show a weekly review that finishes in under thirty minutes and ends with every non-closed row carrying a next_step and a next_step_due."
+ ],
+ "failureModes": [
+  "The sheet is built in one enthusiastic weekend and never re-verified, so by week four a third of the reqs are closed, you apply into dead requisitions, and you read the resulting silence as rejection instead of as a stale list.",
+  "You ask a weak-tie contact for a referral before they have seen any of your work, they submit a lukewarm one-line referral, and the req is now burned - a tepid referral is strictly worse than a cold application and it costs you the contact too.",
+  "You filter on the word 'Remote', skip the 'must be authorised to work in the United States' line buried in the requirements, spend five weeks in a loop, and the offer dies at the immigration check with the hiring manager annoyed at both of you.",
+  "You anchor your expectation on a US band for a role that will be paid on an India GCC band, and either price yourself out of a screen you would have passed or accept feeling cheated - because you never recorded which band the number came from.",
+  "You submit all forty applications in week one, rejections and offers land months apart, and you negotiate the only offer you have with zero concurrency and therefore zero leverage.",
+  "You automate against the professional network from your primary account, get restricted or banned, and lose the connection graph that twenty of your forty rows depended on - to save an hour of clicking.",
+  "'Applied' becomes a terminal state: a dozen rows sit with no owner and no next_step_due, the pipeline silently drains over six weeks, and you conclude the market is bad when what actually happened is that nobody was assigned the follow-up."
+ ],
+ "interviewQuestions": [
+  "Walk me through your search. Which other companies are you talking to, how did you pick them, and what does that list tell me about what you actually want?",
+  "You are the first FDE on a new product. Two hundred customers have asked for a deployment and you have capacity for six this quarter. How do you build the shortlist, what do you measure, and what exactly do you say to the other one hundred and ninety-four?",
+  "You have been dropped into an account where you know nobody. Map the stakeholders in your first week: who do you need to find, how do you find them, and what is the one question you ask each of them?",
+  "Design the tracker for twelve concurrent customer deployments run by three engineers. What are the fields, what are the states and legal transitions, and what single metric would you put on the wall?",
+  "How do you decide to stop working an account that is not converting? Give me the actual criteria, not the principle - and tell me about a time you kept pushing past the point where you should have stopped.",
+  "Your champion offers to introduce you to their CTO next week. What exactly do you send the champion beforehand, and why that and not more?",
+  "You are comparing two engagements - one with a bigger logo and a worse-defined problem, one smaller with a crisp problem and an engaged owner. How do you compare them quantitatively, and what would change your answer?"
+ ],
+ "proofOfWork": "Build a small private pipeline repo that turns the forty-row sheet into a system rather than a document, and prove the loop ran rather than that the folder exists. It contains a refresh script that reads a config of (company, ats_vendor, board_token), pulls the public job-board JSON for each, writes a dated snapshot to disk, diffs it against the previous snapshot, and emits three things: a machine-written changelog of closed / reposted / newly-opened requisitions with req ids and dates, a write-back into the tracker that flips status and last_seen automatically, and a one-page weekly markdown digest listing every row whose next_step_due has passed or whose last_touch is more than fourteen days old. Alongside it, keep a referral graph file with a node per person (relationship, company, degree, tie strength, last_asked date) and an edge per way you know them, plus a rendered image of the graph with your forty target companies highlighted so the gaps are visible at a glance. Add a redacted outreach log with the exact text of every intro ask you sent, the broker, the date, the response and the time-to-response, and the exact text of any ask that got no reply so you can diff the ones that worked against the ones that did not. Finish with a six-week retro that states your predicted funnel conversion at each transition beside the observed one, names the two sourcing surfaces and the two referral path types that actually produced screens, and lists the rows you killed with the criterion that killed each - including at least one row you kept too long and what that cost you in weeks."
+}

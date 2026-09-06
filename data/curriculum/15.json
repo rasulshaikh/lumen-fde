@@ -1,0 +1,218 @@
+{
+ "i": 15,
+ "topic": "IAM and cloud security: least privilege, roles, IRSA, no long-lived keys",
+ "track": "C. Cloud and IaC",
+ "month": 2,
+ "hours": 6.0,
+ "why": "Every FDE deployment into a customer's AWS account ends at the same gate: their security team opens your Terraform, finds the role your workers run as, and asks 'why does this need s3:* and where do the credentials live?' If the answer involves an access key in an environment variable, the pilot stalls for weeks and you are now the vendor who put an AKIA key in a container. The FDE also owns the other side of the boundary: your product assuming a role in the customer's account, CI deploying without stored secrets, and the ExternalId conversation with their CISO. Being able to write the worker policy by hand, wire IRSA correctly the first time, and read an AccessDenied message to its root cause in ten minutes is what separates the engineer who unblocks go-live from the one who files a ticket with the platform team.",
+ "prerequisites": [
+  "Kubernetes from topics 7 and 8: what a ServiceAccount is, how a projected volume mounts a token into a pod, that a mutating admission webhook rewrites the Pod spec at creation time (IRSA is exactly those three things glued to STS), and enough RBAC to keep 'Kubernetes RBAC' and 'AWS IAM' straight when a customer conflates them in a review",
+  "AWS networking and compute from topic 13: EC2 instance lifecycle, Lambda, VPC endpoints (aws:SourceVpce), security groups, and the link-local 169.254.0.0/16 range where IMDS and container credential endpoints live",
+  "AWS data from topic 14: S3 bucket versus object ARNs, SSE-KMS, Secrets Manager, and DynamoDB table ARNs, since those are the resources every worker policy scopes",
+  "Terraform from topic 12: data.aws_iam_policy_document, aws_iam_role, aws_iam_openid_connect_provider, and why a secret in state is a secret in plaintext",
+  "Networking from topic 2: TLS, HTTP headers, and enough JWT to base64-decode a token payload and read iss, sub, aud, exp; every keyless mechanism in this topic is an OIDC JWT exchanged for STS credentials",
+  "An AWS account you control with a billing alarm, AWS CLI v2, and either a small EKS cluster for two or three hours (about $0.10/hour for the control plane plus one t3.small node) or eksctl to create one on demand; flaws.cloud needs only the CLI"
+ ],
+ "subtopics": [
+  {
+   "name": "Policy evaluation order: why an Allow is never the whole story",
+   "learn": "Trace a request through the evaluation logic in the order AWS applies it: implicit deny by default, any explicit Deny anywhere wins, then the request must be allowed by (in a single account) the SCP, the permissions boundary if one is attached, the session policy if one was passed to AssumeRole, and finally either an identity-based policy or a resource-based policy. Know the same-account shortcut (a resource policy that names the principal is sufficient on its own) and the cross-account rule (identity policy in the caller's account AND resource policy in the resource's account must both allow). Know the two nuances that bite: a resource policy that names a role ARN also matches that role's sessions, but one that names a specific assumed-role session ARN does not match the role; and KMS key policies are the one resource policy that is required even for same-account access. Be able to say which document you would open first for a given AccessDenied.",
+   "minutes": 25,
+   "resource": {
+    "label": "IAM User Guide: Policy evaluation logic",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic.html"
+   }
+  },
+  {
+   "name": "Policy grammar and ARN shapes you must write without a reference",
+   "learn": "Write the JSON from memory: Version 2012-10-17 (without it, policy variables like ${aws:username} are treated as literals), Statement array, Sid, Effect, Action or NotAction, Resource or NotResource, Condition, and Principal only in resource-based and trust policies. Know the ARN format arn:partition:service:region:account-id:resource and the per-service quirks: S3 bucket ARNs have no region or account, s3:ListBucket targets the bucket ARN while s3:GetObject targets bucket/*, Secrets Manager secret ARNs end in a six-character random suffix so you match them with -??????, and actions such as ec2:DescribeInstances or s3:ListAllMyBuckets do not support resource-level permissions and require Resource *. Treat iam:PassRole as the privilege-escalation action it is: whoever can pass an admin role to Lambda or ECS is an admin, so scope it by Resource and by the iam:PassedToService condition. Know the limits: 6144 characters for a managed policy, 10240 for inline on a role, 10 managed policies per role by default.",
+   "minutes": 30,
+   "resource": {
+    "label": "IAM User Guide: IAM JSON policy elements reference",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements.html"
+   }
+  },
+  {
+   "name": "Condition keys and operators: the difference between scoped and theatre",
+   "learn": "Use the global keys that actually constrain blast radius: aws:SourceArn and aws:SourceAccount in service trust policies, aws:PrincipalOrgID in resource policies, aws:PrincipalTag and aws:ResourceTag for ABAC, aws:SecureTransport for TLS-only buckets, aws:SourceVpce to pin access to a VPC endpoint, aws:RequestedRegion in SCPs, aws:CalledVia and aws:ViaAWSService for service-mediated calls, and service keys such as kms:ViaService, s3:prefix, sts:ExternalId and iam:PassedToService. Know the operators (StringEquals, StringLike, ArnLike, Bool, Null, IpAddress, DateGreaterThan) and the two modifiers that change semantics: the ...IfExists suffix, and ForAllValues/ForAnyValues for multi-valued keys such as aws:TagKeys. Memorise the classic trap: aws:MultiFactorAuthPresent is absent, not false, on requests signed with long-term keys, so a Deny with Bool false never matches and you must write BoolIfExists or use Null. Know that a wrongly typed key in a Condition is not an error; it just silently never matches, which is why validate-policy matters.",
+   "minutes": 25,
+   "resource": {
+    "label": "IAM User Guide: AWS global condition context keys",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html"
+   }
+  },
+  {
+   "name": "Exercise: write the worker policy by hand and validate it",
+   "learn": "Write, from a blank file, the identity policy for a queue worker: sqs:ReceiveMessage, sqs:DeleteMessage, sqs:ChangeMessageVisibility and sqs:GetQueueAttributes on one queue ARN; s3:GetObject on arn:aws:s3:::bucket/input/* and s3:ListBucket on the bucket ARN with a s3:prefix condition; s3:PutObject on bucket/output/*; secretsmanager:GetSecretValue on one secret ARN with the -?????? suffix; kms:Decrypt on the customer-managed key constrained by kms:ViaService secretsmanager.<region>.amazonaws.com; and logs:CreateLogStream plus logs:PutLogEvents on one log group and its streams. Run `aws accessanalyzer validate-policy --policy-type IDENTITY_POLICY --policy-document file://worker.json` and drive the findings to zero ERROR and zero SECURITY_WARNING, then run parliament locally for the same check offline. Know what validate-policy catches (invalid actions, mismatched action and resource types, overly permissive wildcards, unsupported condition keys) and what it cannot (whether the policy is more than the job needs). Keep this policy: the proof-of-work repo and the interview whiteboard both reuse it.",
+   "minutes": 35,
+   "resource": {
+    "label": "IAM User Guide: Validate policies with IAM Access Analyzer",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-policy-validation.html"
+   }
+  },
+  {
+   "name": "Roles, trust policies and STS sessions",
+   "learn": "A role is two documents: a trust policy (who may call sts:AssumeRole, sts:AssumeRoleWithWebIdentity or sts:AssumeRoleWithSAML) and one or more permission policies. AssumeRole returns an ASIA access key, a secret, a session token and an Expiration; DurationSeconds runs from 900 seconds up to the role's MaxSessionDuration (1 hour by default, 12 hours maximum), and any session obtained through role chaining is capped at 1 hour regardless. The RoleSessionName you pass becomes the CloudTrail identity arn:aws:sts::acct:assumed-role/RoleName/SessionName, so make it meaningful (pod name, CI run id, human username); SourceIdentity does the same across chains and cannot be changed downstream. Know the trust-policy footgun: naming a specific role ARN as Principal stores the role's unique AROA id, so deleting and recreating that role silently breaks the trust; name the account root and constrain with the identity policy on the other side, or use aws:PrincipalArn in a Condition. Confirm what you are with `aws sts get-caller-identity` before debugging anything else.",
+   "minutes": 25,
+   "resource": {
+    "label": "IAM User Guide: Roles terms and concepts",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles.html#id_roles_terms-and-concepts"
+   }
+  },
+  {
+   "name": "The credential provider chain and how to see which link fired",
+   "learn": "Know the order the SDKs walk: explicit code parameters, environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN), web identity (AWS_ROLE_ARN plus AWS_WEB_IDENTITY_TOKEN_FILE), shared config profiles (role_arn with source_profile or credential_source, sso-session, credential_process), container credentials (AWS_CONTAINER_CREDENTIALS_RELATIVE_URI on 169.254.170.2 for ECS, or AWS_CONTAINER_CREDENTIALS_FULL_URI plus AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE for EKS Pod Identity on 169.254.170.23), and finally IMDS; the exact ordering differs slightly per SDK, so check the table for the language you ship. Know that temporary credentials are refreshed by the SDK in the background before expiry, so a long-running process never needs to restart for rotation. Debug with `aws configure list` (shows the source of each value), `aws sts get-caller-identity`, `--debug` to watch providers being tried, and AWS_EC2_METADATA_DISABLED=true to stop a laptop from hanging on IMDS. Half of all production 'AccessDenied' tickets are a process that picked up a stale env var ahead of the role you intended.",
+   "minutes": 20,
+   "resource": {
+    "label": "AWS SDKs and Tools Reference Guide: Standardized credential providers",
+    "url": "https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html"
+   }
+  },
+  {
+   "name": "Why a key in a container is a finding",
+   "learn": "Be able to explain, in the customer's security review, exactly what is wrong with an AKIA key in an image or env var: it never expires, it is bound to an IAM user rather than the workload, it is indistinguishable in CloudTrail from anyone who copied it, it cannot be rotated without a redeploy, and it leaks through `docker inspect`, `docker history` (ENV layers persist), `/proc/<pid>/environ`, crash dumps, CI logs and any registry the image is pushed to. Contrast with ASIA credentials from a role: short-lived, scoped, auto-refreshed, attributed to a session name. Know the compliance hooks the customer will cite: CIS AWS Foundations Benchmark on root keys and 90-day rotation, SOC 2 CC6 logical access, and that AWS itself attaches an AWSCompromisedKeyQuarantine policy within minutes of a key appearing in a public repository. Know the detection tooling you will run on their repos and images: trufflehog and gitleaks for AKIA[0-9A-Z]{16} patterns, `aws iam list-access-keys` and `aws iam get-access-key-last-used` for the account side.",
+   "minutes": 20,
+   "resource": {
+    "label": "IAM User Guide: Manage access keys for IAM users",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html"
+   }
+  },
+  {
+   "name": "EC2 instance profiles and IMDSv2 as the SSRF firewall",
+   "learn": "An instance profile is the container for exactly one role attached to an EC2 instance; the SDK fetches ASIA credentials from http://169.254.169.254/latest/meta-data/iam/security-credentials/<role-name>. IMDSv1 answers any GET, which is how an SSRF bug in a web app on the instance (the Capital One breach, and flaws.cloud level 5) becomes stolen role credentials. IMDSv2 requires a PUT to /latest/api/token with X-aws-ec2-metadata-token-ttl-seconds (max 21600) and then that token in the X-aws-ec2-metadata-token header; PUT requests carrying X-Forwarded-For are rejected, and the response hop limit (default 1) means a packet from a container on a bridge network cannot get the token. Enforce with `aws ec2 modify-instance-metadata-options --instance-id i-xxx --http-tokens required --http-put-response-hop-limit 1`, set the account default with `modify-instance-metadata-defaults --http-tokens required`, and prove it with a plain curl returning 401. In Terraform this is metadata_options { http_tokens = \"required\" } on every aws_instance and launch template.",
+   "minutes": 20,
+   "resource": {
+    "label": "EC2 User Guide: Configure the Instance Metadata Service options",
+    "url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html"
+   }
+  },
+  {
+   "name": "ECS task roles and Lambda execution roles: two identities per workload",
+   "learn": "Separate the ECS taskRoleArn (what your code is allowed to do) from the executionRoleArn (what the ECS agent needs: ecr:GetAuthorizationToken and pulls, logs:CreateLogStream and PutLogEvents, secretsmanager:GetSecretValue for secrets injected into env); mixing them is the most common over-permissioning in customer task definitions. Task credentials are served at 169.254.170.2 through AWS_CONTAINER_CREDENTIALS_RELATIVE_URI, and on the EC2 launch type you must block tasks from reaching the instance role with ECS_AWSVPC_BLOCK_IMDS=true in ecs.config or an iptables rule, otherwise every task inherits the node's permissions. Lambda's execution role credentials arrive as temporary AWS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN env vars, and the function needs only its own log group. Whoever registers the task definition or creates the function needs iam:PassRole on that specific role with iam:PassedToService set to ecs-tasks.amazonaws.com or lambda.amazonaws.com, never PassRole on *.",
+   "minutes": 15,
+   "resource": {
+    "label": "Amazon ECS Developer Guide: Task IAM role",
+    "url": "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html"
+   }
+  },
+  {
+   "name": "IRSA mechanics end to end, and debugging it when the pod cannot assume",
+   "learn": "Wire it by hand once: read the cluster's issuer with `aws eks describe-cluster --query cluster.identity.oidc.issuer`, create an IAM OIDC identity provider for it (aws_iam_openid_connect_provider with the thumbprint, or `eksctl utils associate-iam-oidc-provider`), write a trust policy with Principal Federated set to that provider ARN, Action sts:AssumeRoleWithWebIdentity, and StringEquals on <issuer-host>:sub = system:serviceaccount:<namespace>:<sa-name> and <issuer-host>:aud = sts.amazonaws.com, then annotate the ServiceAccount with eks.amazonaws.com/role-arn. The amazon-eks-pod-identity-webhook mutates pods at creation, injecting AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE=/var/run/secrets/eks.amazonaws.com/serviceaccount/token, AWS_STS_REGIONAL_ENDPOINTS=regional and a projected volume with audience sts.amazonaws.com and expirationSeconds 86400; the SDK's web identity provider then exchanges the JWT for ASIA credentials. Debug in order: `kubectl describe pod` shows the env vars (if not, the annotation was added after the pod existed or the SA is wrong; restart the pod); `kubectl exec ... -- cat $AWS_WEB_IDENTITY_TOKEN_FILE | cut -d. -f2 | base64 -d` shows the sub and aud you must match exactly in the trust policy; 'Not authorized to perform sts:AssumeRoleWithWebIdentity' means the trust policy condition does not match (namespace typo, wrong OIDC id, StringLike wildcard that does not cover it). Never write sub as system:serviceaccount:*:* with StringLike; that is every pod in the cluster.",
+   "minutes": 35,
+   "resource": {
+    "label": "Amazon EKS User Guide: IAM roles for service accounts",
+    "url": "https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html"
+   }
+  },
+  {
+   "name": "EKS Pod Identity versus IRSA: when to pick which",
+   "learn": "Pod Identity replaces the per-cluster OIDC provider with a single service principal: the trust policy allows pods.eks.amazonaws.com to sts:AssumeRole and sts:TagSession, and the mapping lives in `aws eks create-pod-identity-association --cluster-name X --namespace ns --service-account sa --role-arn ...` rather than a ServiceAccount annotation. The eks-pod-identity-agent add-on (a DaemonSet) serves credentials on 169.254.170.23 and the SDK reaches it through the container credential provider with AWS_CONTAINER_CREDENTIALS_FULL_URI and AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE, so it needs SDK versions from late 2023 or newer. Sessions carry tags (eks-cluster-name, kubernetes-namespace, kubernetes-service-account, kubernetes-pod-name) you can use in aws:PrincipalTag conditions for ABAC, and one role can serve many clusters without editing trust. Limits to state in a design review: EC2 nodes only (no Fargate at time of writing), Linux first, and cross-account access via role chaining. Pick IRSA when the customer already runs it, has Fargate, or uses older SDKs; pick Pod Identity for new clusters where you want to stop managing OIDC providers per cluster.",
+   "minutes": 15,
+   "resource": {
+    "label": "Amazon EKS User Guide: EKS Pod Identities",
+    "url": "https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html"
+   }
+  },
+  {
+   "name": "Keyless CI: GitHub Actions to AWS with OIDC",
+   "learn": "Create an IAM OIDC provider for https://token.actions.githubusercontent.com with audience sts.amazonaws.com, give the job `permissions: id-token: write` and `contents: read`, and use aws-actions/configure-aws-credentials with role-to-assume; the action requests a JWT from GitHub and calls sts:AssumeRoleWithWebIdentity. The trust policy must have two conditions: StringEquals on token.actions.githubusercontent.com:aud = sts.amazonaws.com AND a StringEquals or tight StringLike on :sub, e.g. repo:org/repo:ref:refs/heads/main or repo:org/repo:environment:production. A trust policy with only the aud condition lets any GitHub repository on the internet assume your deploy role, and sub set to repo:org/* lets any repo in the org; both are real findings. Know that pull_request events from forks produce a different sub, that reusable workflows expose job_workflow_ref for pinning, and that you can customise the sub claim format per repo through the GitHub API when you need environment plus branch. Session duration comes from role-duration-seconds and is bounded by MaxSessionDuration.",
+   "minutes": 20,
+   "resource": {
+    "label": "GitHub Docs: Configuring OpenID Connect in Amazon Web Services",
+    "url": "https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws"
+   }
+  },
+  {
+   "name": "Humans without keys: Identity Center profiles, MFA conditions, root hygiene",
+   "learn": "Humans use IAM Identity Center permission sets, not IAM users: `aws configure sso` writes an sso-session block into ~/.aws/config, `aws sso login --profile x` caches a short-lived token under ~/.aws/sso/cache, and the CLI mints role credentials per profile for 1 to 12 hours as set on the permission set. For legacy accounts that still have user keys, aws-vault keeps them in the OS keychain and hands processes only session tokens. Where IAM users still exist, the MFA guard is a Deny on everything except the MFA and password actions with BoolIfExists aws:MultiFactorAuthPresent false. Root: hardware MFA, no access keys, and `aws iam get-account-summary` showing AccountAccessKeysPresent 0 is the line you paste into the customer's evidence folder.",
+   "minutes": 10,
+   "resource": {
+    "label": "AWS CLI User Guide: Configuring IAM Identity Center authentication",
+    "url": "https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html"
+   }
+  },
+  {
+   "name": "Cross-account roles, ExternalId and the confused deputy",
+   "learn": "The standard FDE integration is your product's role in your account assuming a role the customer creates in theirs: their trust policy names your account (or your specific role ARN via aws:PrincipalArn) and requires sts:ExternalId equal to a value you generated and showed them; your identity policy allows sts:AssumeRole on their role ARN. Be able to explain confused deputy in one breath: without ExternalId, a malicious customer of yours could hand you the ARN of a different customer's role, and your service would happily assume it because your account is trusted; the ExternalId you generate per tenant is the proof that the caller was actually the one who set up the integration, which is why the vendor, not the customer, must mint it. Apply the same defence to service principals: any trust or resource policy with Principal Service (cloudtrail.amazonaws.com, sns.amazonaws.com, events.amazonaws.com) must carry aws:SourceArn or aws:SourceAccount, or another account's CloudTrail can write into your bucket. Know which resource policies you will touch in customer accounts (S3 bucket, KMS key, SQS, SNS, Lambda, Secrets Manager), that aws:PrincipalOrgID is the clean way to say 'anyone in our org', and that the S3 AuthenticatedUsers grantee means every AWS account on earth.",
+   "minutes": 20,
+   "resource": {
+    "label": "IAM User Guide: The confused deputy problem",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/confused-deputy.html"
+   }
+  },
+  {
+   "name": "Guardrails that let developers create roles safely: boundaries and SCPs",
+   "learn": "A permissions boundary is a managed policy attached to a user or role that caps what its identity policies can grant; the effective permission is the intersection, and the boundary itself grants nothing. The delegated-admin pattern you will propose to customers who refuse to let you create roles: your deploy role may iam:CreateRole, iam:AttachRolePolicy and iam:PutRolePolicy only when iam:PermissionsBoundary equals the approved boundary ARN, and the boundary denies iam:DeleteRolePermissionsBoundary and iam:PutRolePermissionsBoundary, so nothing you create can escalate. SCPs are the organisation-level ceiling: they apply to every principal in member accounts including root, never grant, and are commonly used to deny leaving the org, deny regions outside an allow-list with aws:RequestedRegion (exempting global services), deny disabling CloudTrail or GuardDuty, and deny iam:CreateUser and iam:CreateAccessKey so no new long-lived keys appear. Resource control policies extend the same idea to the resource side, for example denying S3 access to principals outside aws:PrincipalOrgID. When an AccessDenied cites 'an explicit deny in a service control policy' you are done debugging and start negotiating.",
+   "minutes": 20,
+   "resource": {
+    "label": "IAM User Guide: Permissions boundaries for IAM entities",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html"
+   }
+  },
+  {
+   "name": "Right-sizing from evidence: CloudTrail, Access Analyzer generation, last-accessed, iamlive",
+   "learn": "Never guess a policy down; measure it. `aws accessanalyzer start-policy-generation` reads up to 90 days of CloudTrail for a role and emits a policy of the actions actually used (action-level for services that report it, service-level otherwise). `aws iam generate-service-last-accessed-details --arn <role> --granularity ACTION_LEVEL` then `get-service-last-accessed-details` tells you which of the granted services and actions were touched and when, so you can delete the rest with evidence; the paid unused-access analyzer does the same continuously and flags roles and keys idle for 90 days. For a workload you can run locally, iamlive sits as a proxy (or via AWS_CSM_ENABLED=true client-side monitoring) and writes the least-privilege policy from the calls the SDK actually makes. Run `aws iam generate-credential-report` then `get-credential-report --query Content --output text | base64 -d` for the CSV of every user's key ages and last-used dates; it is the first artifact you produce in a customer account.",
+   "minutes": 20,
+   "resource": {
+    "label": "IAM User Guide: Generate policies based on access activity",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-policy-generation.html"
+   }
+  },
+  {
+   "name": "Debugging AccessDenied in fifteen minutes",
+   "learn": "Read the message before anything else: since 2021 it names the policy type, e.g. 'because no identity-based policy allows the s3:GetObject action', 'with an explicit deny in a service control policy', 'because no resource-based policy allows', 'with an explicit deny in a permissions boundary'; each clause tells you which document to open. Then `aws sts get-caller-identity` to confirm the principal is the one you think, then CloudTrail (errorCode AccessDenied with the same errorMessage; remember S3 and DynamoDB data events are not in a default management trail), then `aws iam simulate-principal-policy --policy-source-arn <role> --action-names s3:GetObject --resource-arns <arn>` to see EvalDecision and MatchedStatements; the simulator cannot see resource policies unless you pass --resource-policy and cannot see anything in another account. Know the disguised cases: S3 returns 403 instead of 404 for a missing object when you lack s3:ListBucket, a GetObject denial on an SSE-KMS bucket is usually kms:Decrypt, EC2 encoded messages need `aws sts decode-authorization-message`, and IAM is eventually consistent so a policy you attached five seconds ago may not be live yet.",
+   "minutes": 20,
+   "resource": {
+    "label": "IAM User Guide: Troubleshoot access denied error messages",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/troubleshoot_access-denied.html"
+   }
+  },
+  {
+   "name": "The migration runbook: every key in the stack replaced by a role",
+   "learn": "Inventory first: the credential report plus `aws iam list-users` and `list-access-keys`, then trufflehog or gitleaks across repos, CI variable stores, Helm values, .env files and Terraform state for AKIA patterns. Map each consumer to its keyless mechanism: EC2 to instance profile, ECS to task role, Lambda to execution role, EKS to IRSA or Pod Identity, CI to OIDC, humans to Identity Center, third-party SaaS to cross-account role with ExternalId, on-prem servers to IAM Roles Anywhere with X.509. Cut over one consumer at a time: attach the role, deploy, confirm `sts get-caller-identity` inside the workload shows an assumed-role ARN, watch `get-access-key-last-used` go stale for a week, `aws iam update-access-key --status Inactive` (reversible), wait another week, then `delete-access-key` and delete the user. In Terraform express everything as data.aws_iam_policy_document for trust and permissions and never create an aws_iam_access_key resource, because the secret lands in state in plaintext.",
+   "minutes": 15,
+   "resource": {
+    "label": "IAM User Guide: Find unused credentials",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_finding-unused.html"
+   }
+  },
+  {
+   "name": "Attacker's view: the flaws.cloud kill chain mapped to controls",
+   "learn": "Work every level with the CLI and, for each, write down the misconfiguration, the preventive control and the detective signal: level 1 is a public ListBucket on a static-site bucket found from its DNS name (S3 Block Public Access at the account level); level 2 grants to AuthenticatedUsers, which is any AWS account (same fix, plus Access Analyzer external-access findings); level 3 is an AKIA key in a .git directory uploaded to S3 (secret scanning, rotation, no keys at all); level 4 is a public EBS snapshot containing credentials on disk (`aws ec2 describe-snapshots --owner-ids self --restorable-by-user-ids all`, and again no keys on disk); level 5 is an open HTTP proxy on EC2 used for SSRF to IMDSv1 (IMDSv2 required, hop limit 1); level 6 is a key holding SecurityAudit used to enumerate Lambda and API Gateway (least privilege, unused-access findings). flaws2.cloud adds the container case you are here for: task credentials readable at 169.254.170.2 through an over-trusting app, then the defender path reading CloudTrail for the whole chain. Your write-up of this mapping is what you hand a customer when they ask why your review found their setup wanting.",
+   "minutes": 20,
+   "resource": {
+    "label": "flaws.cloud: AWS security CTF (levels 1-6)",
+    "url": "http://flaws.cloud/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can write, from a blank file and without documentation, a least-privilege identity policy for a queue worker touching SQS, an S3 prefix, one Secrets Manager secret and its KMS key, and it passes `aws accessanalyzer validate-policy` with zero ERROR or SECURITY_WARNING findings on the first run.",
+  "You can convert a container that ships an AKIA key in its environment to IRSA or EKS Pod Identity, show `aws sts get-caller-identity` inside the pod returning an assumed-role ARN with a meaningful session name, and decode the projected token to show the exact sub and aud claims the trust policy matches.",
+  "You can take an AccessDenied from a customer's Slack message and, using only the error text, CloudTrail and simulate-principal-policy, name the policy type and statement responsible within fifteen minutes, including the disguised KMS and S3 403-for-404 cases.",
+  "You can write the cross-account trust policy for a SaaS integration with ExternalId and aws:PrincipalArn, and explain to a CISO in two sentences which attack ExternalId prevents and why the vendor must generate it.",
+  "You can make a GitHub Actions workflow deploy to an AWS account with no stored secrets, with a trust policy pinned to one repository and one branch or environment, and demonstrate that a workflow from another repository is refused.",
+  "You can enforce IMDSv2 on an instance and as the account default, prove with curl that an untokened GET returns 401, and prove from a pod that the node's credentials are unreachable.",
+  "You can produce a credential report for an account, list every long-lived key with its last-used date, and execute the deactivate, observe, delete sequence with a documented rollback for each key.",
+  "You can complete all six flaws.cloud levels plus flaws2.cloud and hand over a one-page table mapping each level to the misconfiguration, the preventive control and the CloudTrail or GuardDuty signal that would have detected it."
+ ],
+ "failureModes": [
+  "A GitHub OIDC trust policy that conditions only on aud, or on sub with repo:org/*: any repository on GitHub (or any repo in the org) can assume the production deploy role, and the first sign is CloudTrail showing AssumeRoleWithWebIdentity from a workflow nobody recognises.",
+  "The IRSA annotation is added to a ServiceAccount after its pods were created; the webhook only mutates at admission, so half the fleet keeps using the node role, which works because the node role is over-permissioned, and everything breaks six months later when the platform team finally tightens the node role.",
+  "EKS nodes run with an IMDS hop limit of 2 for Docker-bridge compatibility, so every pod can read the node role's credentials; one SSRF in one tenant's app becomes cluster-wide access to ECR, autoscaling and every bucket the node role was ever granted.",
+  "A worker policy names a Secrets Manager secret by the exact ARN copied from the console; Terraform recreates the secret with a new six-character suffix during a refactor and the worker starts failing with AccessDenied at 03:00 while the secret visibly exists.",
+  "A long batch job assumes the customer role through a CI role and requests DurationSeconds 14400; STS rejects it with the one-hour role-chaining limit, so someone 'fixes' it by baking a user key into the job, and the key is still there at the next audit.",
+  "The customer's MFA-required deny is written with Bool aws:MultiFactorAuthPresent false; the key is absent on long-term-key requests so the deny never fires, and every IAM user with keys has been bypassing MFA since the policy was written.",
+  "A CI role holds iam:PassRole on Resource *; a contributor with push access passes the account's admin role to a throwaway Lambda, invokes it, and has full control of the account without a single access key ever leaving the building."
+ ],
+ "interviewQuestions": [
+  "The customer's security team flagged an AWS access key in the environment of the worker we deployed on their EKS cluster. Explain to me, as if I were their CISO, why that is a finding, what you will replace it with, and what evidence you will send them to close the finding.",
+  "Walk through IAM evaluation for a request from an IRSA-assumed role in account A reading an object in account B's SSE-KMS bucket. Which documents have to agree, in what order are they evaluated, and where do you look first when it returns AccessDenied?",
+  "Design the identity model for a multi-tenant pilot where our control plane in our account reads each customer's S3 data in their account. What do their roles and trust policies look like, what stops customer X's ARN from being used to read customer Y's data, and who generates the ExternalId and why?",
+  "A pod on the customer's cluster logs 'Not authorized to perform sts:AssumeRoleWithWebIdentity'. Give me the ordered checks you run with kubectl and the AWS CLI, and the three most likely root causes in order of frequency.",
+  "You inherit a nightly ETL role with AdministratorAccess. How do you shrink it to least privilege without breaking the job, how long does that take, and how do you know when you are done?",
+  "Whiteboard the policy for a worker that reads one SQS queue, reads objects under one S3 prefix and one Secrets Manager secret encrypted with a customer-managed KMS key. Then tell me what is still wrong with it and what you would need from the customer to fix it.",
+  "Design CI that deploys into a customer's account with zero stored secrets. Show me the trust policy, tell me which sub condition you choose and why, and describe what an attacker could do if you got it wrong."
+ ],
+ "proofOfWork": "A public repository named keyless-aws-lab containing Terraform that expresses every identity in a small stack as a role with a hand-written data.aws_iam_policy_document: the queue worker's IRSA role and its validated policy, an equivalent EKS Pod Identity association, a GitHub OIDC deploy role pinned to one repo and environment, a developer role that can only create roles under a permissions boundary, and a cross-account integration role with ExternalId and aws:PrincipalArn. A `make audit` target runs the credential report and fails if any user has an active access key, runs `aws accessanalyzer validate-policy` over every policy file and fails on ERROR or SECURITY_WARNING, checks `describe-instances` for any instance with HttpTokens not required, and lists any role with iam:PassRole on Resource *. A `make prove` target execs into the worker pod, prints `aws sts get-caller-identity`, decodes the projected token's sub and aud, and shows the matching AssumeRoleWithWebIdentity event from CloudTrail. The README carries the flaws.cloud and flaws2.cloud debrief as a table (level, misconfiguration, preventive control, detective signal) and a ten-minute recorded walkthrough of converting a container that had an AKIA key to IRSA, ending with the key's deactivation and deletion in the credential report."
+}

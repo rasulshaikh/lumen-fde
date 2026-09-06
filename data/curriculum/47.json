@@ -1,0 +1,219 @@
+{
+ "i": 47,
+ "topic": "Tool use, structured outputs and MCP servers",
+ "track": "G. AI Engineering",
+ "month": 6,
+ "hours": 8,
+ "why": "Tool use is the seam where an FDE's work actually touches the customer: the model stops describing what it would do and starts writing into their HubSpot, their Snowflake, their ticketing system, inside their network, under their auth. An MCP server is the deliverable form of that seam - a small, reviewable process whose tool list is the exact set of capabilities you are asking the customer's security team to approve, and whose input schemas are the only thing standing between a hallucinated argument and a mutation of production data. Getting this right is the difference between a pilot that clears security review in a week and one that dies in it, so the FDE skill here is not 'can you call an API from an LLM' but 'can you draw the trust boundary, defend every arrow across it, and prove with tests that the server does nothing else'.",
+ "prerequisites": [
+  "OAuth 2.x, OIDC and JWT validation from 'Auth: OAuth2, OIDC, JWT, RBAC, multi-tenant claims' (topic 27): authorization code flow with PKCE, what the aud, iss and exp claims mean, JWKS-based signature verification, and token introspection - the MCP authorization spec is a profile over these, not a new idea.",
+  "FastAPI/ASGI production shape from topic 26: lifespan startup and shutdown, dependency injection, settings via environment, and how you mount a sub-application - the Streamable HTTP MCP server is an ASGI app you will mount next to your existing routes.",
+  "pytest and contract testing from 'Testing and contracts' (topic 35): fixtures, parametrisation, async test support, and the idea that a schema is a contract you can assert on in CI rather than a comment.",
+  "Structured-output discipline from 'Prompt engineering as code' (topic 46): versioned prompts, regression sets and the habit of pinning a JSON Schema and diffing outputs against it - a tool description is a prompt and needs the same treatment.",
+  "HTTP and TLS mechanics from topic 2 plus SSE from 'Real-time transports' (topic 32): request framing, Content-Type and Accept negotiation, Origin and CORS, and what a text/event-stream response actually looks like on the wire.",
+  "The LLM-serving constraints from 'LLM-era system design' (topic 43): token and request rate limits, 429 with retry-after, retries with jitter, idempotency keys - your tools sit between a retrying agent loop and a customer API with a hard quota.",
+  "Python 3.10+ with async/await and Pydantic v2 model definitions, plus uv or pip, since the MCP Python SDK derives every input schema from type hints and Pydantic models."
+ ],
+ "subtopics": [
+  {
+   "name": "The trust boundary: name the five parties and the four attackers",
+   "learn": "Before writing code, draw the deployment: the human user, the host application (Claude Desktop, an IDE, your agent), the MCP client inside it, your MCP server, and the upstream system (the customer's CRM or database). Then name what crosses each arrow and who can lie on it. Four concrete attackers: a malicious or compromised server sending poisoned tool descriptions into the model's context; untrusted data returned by a tool that the model treats as instructions; a confused-deputy attack where your server holds a static upstream client_id and forwards consent it never obtained; and a stolen or misdirected token that your server accepts because it never validated the audience. Write the sentence you will say to a customer security reviewer: 'the server can do exactly these seven things, with these scopes, on behalf of this authenticated user, and every call is logged with the caller identity.' Everything later in this topic is a mechanism that makes one clause of that sentence true.",
+   "minutes": 25,
+   "resource": {
+    "label": "MCP Specification - Authorization: Security Considerations (confused deputy, token passthrough, SSRF, session hijacking)",
+    "url": "https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/security-considerations"
+   }
+  },
+  {
+   "name": "JSON-RPC 2.0 framing and the MCP method surface",
+   "learn": "MCP is JSON-RPC 2.0 and nothing more exotic, so learn the envelope cold: a request has jsonrpc, id, method, params; a response has jsonrpc, id and exactly one of result or error; a notification has no id and gets no response. Memorise the reserved error codes you will actually see - -32700 parse error, -32600 invalid request, -32601 method not found, -32602 invalid params, -32603 internal error - and know that MCP partitions the server-error range: -32000 to -32019 stay implementation-defined while -32020 to -32099 are reserved for the spec (HeaderMismatch -32020, MissingRequiredClientCapability -32021, UnsupportedProtocolVersion -32022). Learn the method surface by heart: server/discover, tools/list, tools/call, resources/list, resources/read, resources/templates/list, prompts/list, prompts/get, subscriptions/listen, plus notifications/progress, notifications/cancelled and notifications/message. Be able to hand-write a tools/call request and read a raw frame from a log without an SDK.",
+   "minutes": 20,
+   "resource": {
+    "label": "JSON-RPC 2.0 Specification",
+    "url": "https://www.jsonrpc.org/specification"
+   }
+  },
+  {
+   "name": "Protocol eras: what 2026-07-28 removed, and why the customer's client is older",
+   "learn": "The protocol went stateless in the 2026-07-28 revision and you must be able to explain both sides of the change. Gone: the initialize / notifications/initialized handshake, the Mcp-Session-Id header, SSE resumability via Last-Event-ID, ping, logging/setLevel, and server-initiated JSON-RPC requests. In their place: every request carries _meta.io.modelcontextprotocol/protocolVersion, clientInfo and clientCapabilities; server/discover advertises supported versions and capabilities up front; subscriptions/listen is the single opt-in stream for toolsListChanged, promptsListChanged, resourcesListChanged and resourceSubscriptions; results carry a required resultType of complete or input_required. Roots, Sampling and Logging are deprecated (SEP-2577). Now the FDE part: a customer running a client pinned to 2025-06-18 or 2025-11-25 still expects initialize and a session header, so read the versioning and backward-compatibility rules and decide explicitly whether your server serves legacy clients, and record that decision in the README.",
+   "minutes": 25,
+   "resource": {
+    "label": "MCP Specification 2026-07-28 - Key Changes (changelog)",
+    "url": "https://modelcontextprotocol.io/specification/2026-07-28/changelog"
+   }
+  },
+  {
+   "name": "Transports: stdio subprocess versus Streamable HTTP",
+   "learn": "Know the two bindings and when each is right. stdio: the client launches your server as a subprocess, messages are newline-delimited UTF-8 JSON on stdin/stdout, and the single rule that breaks more servers than anything else is that you MUST NOT write anything to stdout that is not an MCP message - a stray print() or a logging handler defaulting to stdout corrupts the stream, so send every log line to stderr. Credentials on stdio come from the environment, not OAuth. Streamable HTTP: one endpoint path serving POST, Accept must list both application/json and text/event-stream, a JSON-RPC request gets back either a single JSON object or a request-scoped SSE stream, and notifications/responses get 202 Accepted with no body. Two security musts before you expose it: validate the Origin header on every request to block DNS-rebinding from a web page, and bind to 127.0.0.1 rather than 0.0.0.0 when running locally. Learn the Mcp-Method and Mcp-Name request headers that mirror body fields for intermediaries, and that the body remains the source of truth.",
+   "minutes": 25,
+   "resource": {
+    "label": "MCP Specification - Streamable HTTP transport binding",
+    "url": "https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http"
+   }
+  },
+  {
+   "name": "Designing narrow tools: naming, descriptions, annotations, token budget",
+   "learn": "A tool list is a prompt, and a bad one costs tokens on every single turn. Design rules to apply and be able to defend: one verb-noun name per capability (hubspot_find_contact_by_email, not hubspot_query), names 1-128 characters and case-sensitive; a description that states what it does, what it will not do, and when the model should prefer a sibling tool; a title for human UI and description for the model. Use annotations (readOnlyHint, destructiveHint, idempotentHint, openWorldHint) to let hosts gate confirmation prompts - and know the spec's rule that clients MUST treat annotations as untrusted unless the server is trusted, so they are a hint to the host, never your authorisation mechanism. Prefer five narrow tools over one tool with a mode enum, because narrow tools are what a security reviewer can approve individually and what the model picks correctly. Serve tools/list in a deterministic order so clients can cache and prompt-cache hit rates hold. Count the tokens your tool list costs and treat 20+ tools as a design smell to be solved with scoping, not with a longer list.",
+   "minutes": 35,
+   "resource": {
+    "label": "MCP Specification - Server Features: Tools",
+    "url": "https://modelcontextprotocol.io/specification/2026-07-28/server/tools"
+   }
+  },
+  {
+   "name": "inputSchema as the validation boundary, not documentation",
+   "learn": "The inputSchema is JSON Schema (2020-12 when no $schema is present) and it is the only thing between a model's guess and your upstream API. Write it so invalid calls fail before your function body runs: type: object with additionalProperties: false so a hallucinated extra field is rejected rather than silently dropped, explicit required, enum for closed sets, format: date / email / uri, minimum/maximum and minLength/maxLength on anything that becomes a query, and a description on every property because that string is what the model reads when choosing arguments. For a tool with no parameters, use {\"type\": \"object\", \"additionalProperties\": false} rather than an empty or null schema. In the Python SDK the type hints are the schema - a limit: int is rejected before your code sees \"ten\" - and Annotated[..., Field(description=..., ge=..., le=...)] is how you add constraints. Then internalise the limit: schema validation is a type check, not authorisation; tenant_id must never be a tool argument the model can set.",
+   "minutes": 25,
+   "resource": {
+    "label": "JSON Schema - Understanding JSON Schema: object (properties, required, additionalProperties)",
+    "url": "https://json-schema.org/understanding-json-schema/reference/object"
+   }
+  },
+  {
+   "name": "outputSchema and structuredContent, and why it is not 'LLM structured output'",
+   "learn": "A tool result has two channels and they serve different consumers. content is the array the model reads (text, image, audio, resource_link, embedded resource); structuredContent is a JSON object the client application consumes programmatically. If you declare an outputSchema, the server MUST return structured results conforming to it and clients SHOULD validate - so the schema becomes a contract you can regression-test. For backwards compatibility, also serialise the same JSON into a TextContent block. Learn the distinction that trips people up in interviews: structuredContent is server-produced result data, unrelated to schema-constrained model generation; one is your API's response type, the other is a decoding constraint on the model. In the Python SDK, declaring a Pydantic model or a dataclass as the return annotation generates the outputSchema and fills structured_content for you, and a bare -> str is wrapped as {\"result\": ...}. Design the payload for the model, not for your database: return the three fields it needs and a resource_link for the rest, not a 40-key row.",
+   "minutes": 25,
+   "resource": {
+    "label": "MCP Python SDK - Structured Output",
+    "url": "https://py.sdk.modelcontextprotocol.io/servers/structured-output/"
+   }
+  },
+  {
+   "name": "The client side: the tool_use loop end to end",
+   "learn": "Build the loop once by hand so you can debug it anywhere. Send a request with a tools array of {name, description, input_schema}; the response comes back with stop_reason: \"tool_use\" and a tool_use content block carrying id, name and input; you execute it and append a user message containing a tool_result block whose tool_use_id matches, with content and is_error where relevant; you resend the whole conversation. Know the controls: tool_choice of auto, any, tool or none; disabling parallel tool use when your upstream cannot handle concurrent writes; and that tool definitions sit at the front of the prompt so marking them with cache_control makes prompt caching pay for itself on multi-turn loops. Know the failure signatures: a missing tool_result for an emitted tool_use is a hard API error, not a warning; a tool result that is 50 KB of JSON blows the context window three turns later; and the model retrying the same failing call forever is what you get when is_error carries no actionable message.",
+   "minutes": 30,
+   "resource": {
+    "label": "Claude Developer Platform - Handle tool calls",
+    "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls"
+   }
+  },
+  {
+   "name": "Constrained decoding: when to force the shape of the model's output",
+   "learn": "Separate two mechanisms that both get called 'structured output'. Tool calling gets you a typed call to a function; constrained decoding gets you a response body that provably parses against a schema. Learn what each provider guarantees and what it costs: Claude's structured outputs and strict tool use both restrict which JSON Schema keywords are honoured, and unsupported keywords are ignored rather than enforced, so read the supported-subset list before you rely on a regex or a nested anyOf. The equivalent on OpenAI's API is response_format with type json_schema and strict: true, which requires additionalProperties: false and every key listed in required. Decide by consumer: if a human or a downstream service parses it, constrain it; if the model itself is going to read it back next turn, plain text is often cheaper and less brittle. Always keep a parse-failure path - schema-constrained does not mean semantically correct, and a refusal or a truncated max_tokens still yields unparseable output.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude Developer Platform - Structured outputs",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/structured-outputs"
+   }
+  },
+  {
+   "name": "Errors: three kinds, and which one the model is supposed to fix",
+   "learn": "There are exactly three failure classes and choosing wrong is a production bug. (1) A recoverable business error - record not found, bad argument value - is a successful JSON-RPC response with isError: true and a message the model can act on ('No contact with that email; try searching by domain'); in the Python SDK that is raise ToolError(...). Never return an error string, because is_error stays false and every client renders it as a successful answer. (2) A protocol error - unknown tool, invalid params, unsupported version - is a JSON-RPC error object with a code; the host sees it, the model does not; in the SDK that is raise MCPError(code=INVALID_PARAMS, ...). (3) An unexpected crash is neither: the SDK sanitises it into a generic internal error over the wire so you do not leak stack traces or connection strings to a remote caller, and the traceback goes to your log. Map upstream HTTP statuses deliberately: 404 to ToolError, 401/403 to a protocol error the host can act on by re-authorising, 429 to a ToolError that names the retry-after so the agent backs off instead of hammering the customer's quota.",
+   "minutes": 20,
+   "resource": {
+    "label": "MCP Python SDK - Handling errors (ToolError vs MCPError)",
+    "url": "https://py.sdk.modelcontextprotocol.io/servers/handling-errors/"
+   }
+  },
+  {
+   "name": "Resources, prompts, pagination and cacheable results",
+   "learn": "Know the three primitives and who controls each: tools are model-controlled, resources are application/user-controlled context addressed by URI (including URI templates like hubspot://contact/{id}), and prompts are user-invoked templates - which is why a slash-command workflow belongs in prompts/get, not in a tool. Implement cursor pagination on every list and read endpoint: return an opaque nextCursor, never an offset, and treat the cursor as an implementation detail clients must not parse. Learn the 2026-07-28 caching contract: tools/list, prompts/list, resources/list, resources/read and resources/templates/list results carry ttlMs (freshness hint in milliseconds) and cacheScope of public or private, and getting cacheScope wrong on a per-tenant result is how one customer's data ends up cached by a shared intermediary and served to another. Pair TTLs with the listChanged notification rather than choosing one.",
+   "minutes": 25,
+   "resource": {
+    "label": "MCP Specification - Server Utilities: Caching (ttlMs and cacheScope)",
+    "url": "https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/caching"
+   }
+  },
+  {
+   "name": "Long-running work: progress, cancellation, MRTR and the tasks extension",
+   "learn": "A tool that takes 90 seconds needs a plan, because the client will otherwise time out and the agent will retry into a duplicate write. Learn the four mechanisms. notifications/progress flows on the response stream of the request it relates to, so emit it with a monotonically increasing progress and a total when you know it. Cancellation is transport-specific: notifications/cancelled on stdio, closing the response stream on Streamable HTTP - so your handler must actually observe cancellation (asyncio.CancelledError) and roll back or mark the upstream write. Multi Round-Trip Requests replaced server-initiated requests: to ask the user something mid-tool you return resultType: \"input_required\" with inputRequests (for example an elicitation/create with a requestedSchema) plus an opaque requestState, and the client retries the original call with inputResponses and a new JSON-RPC id. For genuinely long jobs, use the io.modelcontextprotocol/tasks extension with tasks/get polling and tasks/update, rather than holding a stream open. Make every mutating tool idempotent on a caller-supplied key so a retried call is a no-op.",
+   "minutes": 25,
+   "resource": {
+    "label": "MCP Specification - Multi Round-Trip Requests (MRTR)",
+    "url": "https://modelcontextprotocol.io/specification/2026-07-28/basic/patterns/mrtr"
+   }
+  },
+  {
+   "name": "Build it: MCPServer, typed handlers, lifespan and dependencies",
+   "learn": "Install with uv add \"mcp[cli]\", create an MCPServer, and register tools with @mcp.tool() on plain typed functions - the name comes from the function, the model-facing description from the docstring, the schema from the type hints. Run it two ways and know the difference: uv run mcp dev server.py to open the Inspector against a stdio subprocess, and uv run mcp run server.py --transport streamable-http to serve HTTP. Put every expensive or connection-owning object in the lifespan - an httpx.AsyncClient with explicit timeouts and connection limits, a database pool, a cached OAuth token - so it is created once at startup and closed on shutdown, and reach it from handlers via the Context / dependency mechanism rather than a module-level global. Use Context for progress and per-request logging. Structure the repo so business logic is a plain, importable Python package and the MCP layer is a thin adapter over it; that is what lets you unit-test the logic and contract-test the protocol separately, and what lets you expose the same logic as a REST endpoint when the customer asks.",
+   "minutes": 40,
+   "resource": {
+    "label": "MCP Python SDK - Lifespan (startup, shutdown, shared state)",
+    "url": "https://py.sdk.modelcontextprotocol.io/handlers/lifespan/"
+   }
+  },
+  {
+   "name": "Auth: your server is an OAuth 2.1 resource server, nothing more",
+   "learn": "For HTTP transports, MCP authorization is a profile over OAuth 2.1 and you must be able to walk it on a whiteboard. Your server is a resource server: it never signs anyone in and never mints a token. It MUST publish OAuth 2.0 Protected Resource Metadata (RFC 9728) containing authorization_servers, and MUST return 401 with a WWW-Authenticate header pointing at that metadata URL. The client discovers the authorization server, reads its metadata (RFC 8414), optionally registers dynamically (RFC 7591, now with an appropriate application_type), runs authorization code with PKCE, and MUST send the RFC 8707 resource parameter naming your canonical server URI on both the authorization and token requests. You then validate the token's audience against your own resource URL and reject anything else - this is the single control that stops a token minted for another service being replayed at you. Two rules to state out loud in a review: never pass a client's token through to an upstream API, and never accept a token you did not verify was issued for you. In the Python SDK this is a TokenVerifier plus AuthSettings with issuer_url, resource_server_url, required_scopes and validate_token_resource=True.",
+   "minutes": 45,
+   "resource": {
+    "label": "MCP Specification - Authorization (OAuth 2.1 profile, RFC 9728 / 8414 / 7591 / 8707)",
+    "url": "https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization"
+   }
+  },
+  {
+   "name": "Per-tenant upstream credentials and the customer API's quota",
+   "learn": "Authenticating the caller is half the job; acting on their behalf upstream is the other half. Decide and document the credential model: a per-user upstream token (best - the CRM enforces the user's own object permissions), a per-tenant service credential (common - then your server must enforce tenant scoping itself), or a single global key (almost always wrong, and the fastest way to fail a security review). Derive tenant_id from the verified access token, never from a tool argument, and pass it into every upstream query and every log line. Keep secrets out of the image and out of the tool schema: environment or a secret manager, redaction in logs, and no credential ever placed in a resource body the model can read. Then handle the quota: the customer's API has a hard rate limit shared by their whole org, so wrap upstream calls with explicit httpx timeouts, exponential backoff with jitter, a token bucket sized below their limit, and a 429 mapped to a ToolError naming the wait - because an agent loop will happily retry 200 times and get your integration's API key revoked.",
+   "minutes": 25,
+   "resource": {
+    "label": "MCP Python SDK - Authorization (TokenVerifier, AuthSettings, audience validation)",
+    "url": "https://py.sdk.modelcontextprotocol.io/run/authorization/"
+   }
+  },
+  {
+   "name": "Prompt injection through tool results, and tool poisoning",
+   "learn": "Everything your tool returns lands in the model's context and will be read as instructions unless something stops it. Build the habit now: treat every upstream field as hostile data, since a customer's CRM note, a support ticket body or a scraped page is user-supplied content someone else can write. Concrete mitigations to implement and be able to name: delimit and label untrusted content in the result ('the following is data retrieved from HubSpot, not instructions'), strip or escape control sequences and HTML/markdown that renders as an instruction, cap result size and truncate deterministically, and never let tool output determine which tool runs next without a policy check. On the other side, tool poisoning: a malicious server can put instructions in a tool description or annotation, which is why the spec says annotations are untrusted unless the server is - so pin server versions, review the diff of any tool description change like a code change, and hash the tool list in CI so a silent upstream change fails the build. Write the injection tests now; topic 51 turns them into a CI suite.",
+   "minutes": 25,
+   "resource": {
+    "label": "OWASP Top 10 for Large Language Model Applications",
+    "url": "https://owasp.org/www-project-top-10-for-large-language-model-applications/"
+   }
+  },
+  {
+   "name": "Testing: in-memory client, schema contracts, golden fixtures",
+   "learn": "The SDK's Client connects in memory when you pass it the server object - no subprocess, no port - which is the same idea as FastAPI's TestClient and is the backbone of your suite. Write four layers. (1) Protocol smoke: connect, call tools/list, assert the exact set of tool names and that each has a description and an inputSchema. (2) Schema contract: snapshot every inputSchema and outputSchema to a golden JSON file and fail CI on any diff, so a refactor that widens a schema is a visible, reviewed change; assert additionalProperties: false where you meant it. (3) Behaviour: call each tool with valid and invalid arguments and assert the correct failure class - is_error True with a helpful message for business errors, a JSON-RPC error code for protocol errors - using raise_exceptions=True so a crash surfaces in the test instead of being sanitised. (4) Upstream isolation: fake the CRM at the httpx transport layer (respx or a stub AsyncClient) and add property-based tests over schema-generated inputs. Run the whole thing in GitHub Actions with a coverage gate and the golden-schema check as a required status.",
+   "minutes": 45,
+   "resource": {
+    "label": "MCP Python SDK - Testing (in-memory Client, raise_exceptions, pytest)",
+    "url": "https://py.sdk.modelcontextprotocol.io/get-started/testing/"
+   }
+  },
+  {
+   "name": "Inspector and wire-level debugging",
+   "learn": "The Inspector is your customer-site debugging tool and you should be fluent in all three of its clients before you need it under pressure. Use the web UI to browse tools, submit generated forms and read raw JSON-RPC frames; use the CLI (npx @modelcontextprotocol/inspector --cli) to script method calls with deterministic output and exit codes so the same checks run in CI; use the protocol-eras behaviour to confirm what your server does when a legacy client connects. Learn the standard debugging ladder: reproduce with the Inspector CLI first (it removes the host from the equation), then read stderr (on stdio, your only log channel), then capture the HTTP exchange. Know the top three silent failures and their signatures - a print() to stdout corrupting a stdio stream, a missing Origin check or CORS header making a browser-based client fail with no server-side error, and an OAuth 401 loop where the WWW-Authenticate header or the resource metadata URL is wrong. Keep a `make inspect` target in the repo so a customer engineer can reproduce your findings.",
+   "minutes": 25,
+   "resource": {
+    "label": "MCP Inspector - CLI client (scripting, output formats, exit codes, CI recipes)",
+    "url": "https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector/cli"
+   }
+  },
+  {
+   "name": "Ship it: stateless deploy, tracing and publishing",
+   "learn": "Because the protocol is stateless, a Streamable HTTP server scales like any other web service - multiple replicas behind a normal load balancer with no sticky sessions - provided you kept no per-connection state; any cross-call state must be an explicit, server-minted handle passed back as an ordinary tool argument. Containerise with a multi-stage build, a non-root user and a pinned lockfile (topic 6), expose one port, add a plain HTTP health endpoint alongside the MCP endpoint, and set resource limits. Wire observability that answers customer questions: propagate OpenTelemetry trace context via the _meta keys traceparent, tracestate and baggage, emit a span per tools/call with tool name, tenant, duration, outcome and upstream status, and log an audit line per mutating call with caller identity. Then publish: a server.json for the MCP registry, semantic versioning, a README that states supported protocol revisions, required scopes and the exact tool list, and a SECURITY.md. Deployment and the README are what the customer's platform team reviews, not your handler code.",
+   "minutes": 30,
+   "resource": {
+    "label": "MCP Python SDK - Deploy and scale",
+    "url": "https://py.sdk.modelcontextprotocol.io/run/deploy/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can draw the MCP trust boundary for a customer deployment on a whiteboard - user, host, client, server, upstream - and for each arrow name what crosses it, who authenticates it, and one concrete attack it enables if unprotected.",
+  "You can hand-write a valid tools/call JSON-RPC request and its two possible failure responses (a -32602 protocol error object versus a result with isError: true) without an SDK, and say which one the model is meant to recover from.",
+  "You can build a Streamable HTTP MCP server that validates Origin, publishes RFC 9728 protected resource metadata, returns 401 with a correct WWW-Authenticate header, and rejects a token whose audience is not your canonical server URI - demonstrated by a test that passes a valid token and one issued for another resource.",
+  "You can write a tool whose inputSchema rejects an unknown field, a wrong type and an out-of-range value before your handler body runs, and show the three rejections in test output.",
+  "You can declare an outputSchema, return conforming structuredContent plus a serialised TextContent fallback, and fail CI when a schema changes by diffing against a golden snapshot.",
+  "You can explain in one minute what the 2026-07-28 revision removed (initialize handshake, Mcp-Session-Id, SSE resumability, server-initiated requests) and state whether your server supports legacy clients and why.",
+  "You can debug a broken integration at a customer site using only the Inspector CLI and stderr, and identify a stdout-corrupted stdio stream, a missing Origin check, and an OAuth discovery misconfiguration from their distinct symptoms.",
+  "You can run a mutating tool twice with the same idempotency key against a stubbed upstream and show a single write, and show that a 429 becomes a backoff rather than a retry storm."
+ ],
+ "failureModes": [
+  "A logging handler defaults to stdout in a stdio server, so one INFO line lands between two JSON-RPC frames, the client's parser dies mid-session, and the customer reports 'the integration randomly disconnects' with nothing in your logs because the log line was the bug.",
+  "The server accepts any signed JWT without checking the audience, so a token the customer's IdP minted for their internal analytics API is replayed at the MCP endpoint and grants full CRM tool access to a service that was never approved for it.",
+  "tenant_id is exposed as a tool argument because it made testing easier; the model, given a prompt containing another company's name, passes that tenant's id, and a multi-tenant data leak is discovered by the customer rather than by you.",
+  "A contact-search tool returns the full CRM record - 40 fields including notes - so three tool calls into an agent loop the context window is exhausted, the earliest turns are dropped, and the model starts re-calling tools it already called and duplicating writes.",
+  "A tool returns a business error as a plain string instead of raising, so isError stays false, the client UI shows 'Contact not found' as a successful result, and the agent proceeds to create a duplicate record on top of the one it failed to find.",
+  "A tool description is quietly changed upstream when a dependency is bumped, the model starts preferring a destructive tool over a read-only sibling, and nothing catches it because tool descriptions were never treated as reviewable, hash-pinned artifacts.",
+  "An agent retries a failing upstream call without jitter or a budget, burns the customer's shared API quota inside ten minutes, and their platform team disables the integration's key during business hours for every other consumer of that API."
+ ],
+ "interviewQuestions": [
+  "Walk me through the trust boundary of an MCP server you would deploy inside a customer's VPC against their CRM. Who authenticates whom, where does the upstream credential live, and what exactly stops a prompt injection in a CRM note from causing a write to a different record?",
+  "Your MCP server is an OAuth 2.1 resource server. Trace the full flow from a client's first unauthenticated request to a successful tools/call: which metadata documents are fetched, what the resource parameter is for, what you validate on the token, and what you would deliberately not do with it.",
+  "A customer says the integration 'randomly drops' about once an hour. It is a stdio server behind Claude Desktop and there is nothing in your application log. How do you diagnose it, and what are the three most likely causes in order?",
+  "Design the tool surface for an agent that manages a customer's support tickets: create, update, escalate, close, search. How many tools, what are their schemas, which are annotated destructive, and how do you make the mutating ones safe to retry when the agent loop resends a call?",
+  "Explain the difference between a tool's outputSchema with structuredContent and schema-constrained model generation. When would you use each, and what does each actually guarantee about the bytes you receive?",
+  "The 2026-07-28 revision made MCP stateless and removed the initialize handshake and session header. What did that buy operationally, what did it cost, and how would you serve a customer whose client is pinned to an older revision without forking the server?",
+  "You inherit an internal MCP server with 34 tools that a customer's security team has rejected. How do you get it approved in two weeks - what do you cut, what do you instrument, and what document do you hand them?"
+ ],
+ "proofOfWork": "A written security and integration review of somebody else's MCP server - pick a non-trivial one from the modelcontextprotocol/servers repository or any public server your target companies would plausibly deploy - published as a repo or dashboard page, in the form a customer would receive from an FDE. It contains: (1) a one-page trust-boundary diagram with every arrow labelled by what crosses it, who authenticates it, and the concrete attack it enables if unprotected; (2) a tool-surface audit table listing every tool with its annotations, whether the inputSchema actually constrains (additionalProperties, enums, bounds) or merely documents, the token cost of the full tools/list payload, and a recommended cut list with reasoning; (3) reproducible findings driven by the Inspector CLI and a small pytest harness using the in-memory Client - each finding with the exact command, the raw JSON-RPC frames, and a pass/fail assertion, covering at minimum audience validation, Origin handling, error-class correctness (isError versus JSON-RPC error), result size, and behaviour on a malformed argument; (4) one deliberate injection test where a fixture puts instruction-shaped text in an upstream field and you show whether the result is delimited and labelled or passed through raw; (5) a protocol-era compatibility note stating which revisions the server serves and what breaks on the others; and (6) an upstream pull request or issue implementing or reporting the highest-severity finding, linked from the review. The review must be readable by a security engineer who has never used MCP, and it demonstrates the FDE skill the deliverable repo alone does not: evaluating and defending someone else's integration in front of a customer."
+}

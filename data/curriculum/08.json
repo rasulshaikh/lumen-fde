@@ -1,0 +1,210 @@
+{
+ "i": 8,
+ "topic": "Kubernetes production ops: probes, HPA, requests and limits, storage, RBAC, NetworkPolicy, debugging",
+ "track": "B. Containers and Kubernetes",
+ "month": 2,
+ "hours": 12.0,
+ "why": "An FDE rarely owns the cluster: you are handed a namespace, a kubeconfig with whatever RBAC the customer's platform team allows, a ResourceQuota you did not choose, and a go-live date. When the pilot's pods sit in Pending or CrashLoopBackOff at 5pm with the customer's VP watching, the person who can read describe/events/logs and name the root cause in ten minutes is the one who keeps the account; the one who says 'let me ask our infra team' is a guest. Requests, limits, probes and HPA decide whether the deployment survives the customer's first real traffic, and RBAC plus NetworkPolicy are the two artifacts their security team will demand to see before they sign the production change ticket.",
+ "prerequisites": [
+  "Kubernetes core from 'Kubernetes core: Pod, Deployment, Service, Ingress, ConfigMap, Secret, namespaces' (topic 7): write a Deployment + Service + ConfigMap from memory, understand label selectors and how a Service finds pods",
+  "Docker internals from 'Docker internals: namespaces, cgroups, layers, networking' (topic 5): cgroup v2 memory.max and cpu.max, PID 1 signal handling, why `exec` in an entrypoint matters for SIGTERM",
+  "Linux internals from topic 1: reading dmesg/journalctl, what the OOM killer does, systemd units (the kubelet is one), file ownership and fsGroup semantics",
+  "Networking from topic 2: L3/L4 versus L7, CIDR notation, how DNS search domains and ndots work, since NetworkPolicy is purely L3/L4 and cluster DNS is the first thing policies break",
+  "Single-box troubleshooting from topic 3: interpret CPU steal, RSS versus cache, and thread counts, so `kubectl top` and cAdvisor counters mean something",
+  "A cluster you can break: kind with the default CNI swapped for Calico or Cilium (kindnet does not enforce NetworkPolicy), metrics-server installed, and kubectl 1.28+ so `kubectl debug` and `kubectl create token` exist"
+ ],
+ "subtopics": [
+  {
+   "name": "Pod phases, container states, exit codes, and reading describe top-down",
+   "learn": "Separate Pod phase (Pending, Running, Succeeded, Failed, Unknown) from container state (Waiting, Running, Terminated) and know the Waiting reasons that actually show up: ContainerCreating, CrashLoopBackOff, ImagePullBackOff/ErrImagePull, CreateContainerConfigError, and the Terminated reasons OOMKilled, Error, Completed. Read `kubectl describe pod` in a fixed order: Status and Reason, the four Conditions (PodScheduled, Initialized, ContainersReady, Ready), per-container Last State with Exit Code and Restart Count, then Events by age. Map exit codes without looking them up: 0 completed, 1 application error, 137 SIGKILL (OOM or grace period expired), 143 SIGTERM handled, 139 SIGSEGV, 126/127 entrypoint not executable or not found. Know CrashLoopBackOff doubles from 10s to a 5m cap and resets after the container runs cleanly for 10 minutes, which is why a flapping pod looks 'fine' every so often.",
+   "minutes": 30,
+   "resource": {
+    "label": "Kubernetes docs: Pod Lifecycle",
+    "url": "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"
+   }
+  },
+  {
+   "name": "Liveness, readiness and startup probes: three different contracts",
+   "learn": "Readiness controls membership in EndpointSlices and never restarts anything; liveness makes the kubelet kill and restart the container; startup disables both until it first succeeds, which is how you protect a slow JVM or a model-loading container without a huge initialDelaySeconds. Know every field and default: initialDelaySeconds 0, periodSeconds 10, timeoutSeconds 1 (the single most common misconfiguration on Python services), successThreshold (must be 1 for liveness and startup), failureThreshold 3, terminationGracePeriodSeconds override per probe. Know handler types: httpGet succeeds on 200-399, tcpSocket, exec (a fork per probe, expensive at scale), grpc. Rule you must be able to defend: liveness checks only the process itself, never a downstream dependency, otherwise a database blip restarts the whole fleet; readiness may check dependencies. Compute time-to-first-restart as initialDelaySeconds + failureThreshold x periodSeconds and time-to-ready the same way.",
+   "minutes": 50,
+   "resource": {
+    "label": "Kubernetes docs: Configure Liveness, Readiness and Startup Probes",
+    "url": "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+   }
+  },
+  {
+   "name": "Requests, limits and QoS: what the scheduler uses versus what the kubelet enforces",
+   "learn": "Requests are consumed by the scheduler against node Allocatable (Capacity minus kube-reserved, system-reserved and eviction threshold); limits are enforced by the kubelet through cgroups: a CPU limit becomes a cpu.max quota over a 100ms period and produces throttling, never a kill, while a memory limit becomes memory.max and produces an OOM kill. Derive QoS class by inspection: Guaranteed when every container has requests equal to limits for both CPU and memory, Burstable when any request is set, BestEffort when none; eviction order under node pressure is BestEffort, then Burstable pods exceeding their request, then Guaranteed. Use `kubectl describe node` Allocated resources and `kubectl top pod --containers` to size. Know the defensible production pattern: set memory limit equal to memory request, set a CPU request and either no CPU limit or a generous one, and set ephemeral-storage limits because exceeding them evicts the pod with no other warning.",
+   "minutes": 45,
+   "resource": {
+    "label": "Kubernetes docs: Resource Management for Pods and Containers",
+    "url": "https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/"
+   }
+  },
+  {
+   "name": "OOMKilled, CFS throttling and node-pressure eviction: proving it from the node",
+   "learn": "OOMKilled appears as Last State Terminated, Reason OOMKilled, Exit Code 137; confirm from the node with `dmesg -T | grep -i 'killed process'` or `journalctl -k`, and from the container's cgroup with the oom_kill counter in memory.events and the high-water mark in memory.peak. Throttling leaves no event at all: compute container_cpu_cfs_throttled_periods_total divided by container_cpu_cfs_periods_total from cAdvisor and treat anything above 20-25% as a too-low limit or a runtime spawning more threads than the limit (Go GOMAXPROCS, Java, uvicorn workers); fix by raising the limit or pinning GOMAXPROCS/UV workers from the downward API resourceFieldRef limits.cpu. Node-pressure eviction: the kubelet watches memory.available, nodefs.available, imagefs.available and pid.available against --eviction-hard and --eviction-soft; evicted pods show Reason Evicted with a message naming the resource. Distinguish this from API-initiated eviction (drain, PDB-respecting) and from scheduler preemption by PriorityClass.",
+   "minutes": 45,
+   "resource": {
+    "label": "Kubernetes docs: Node-pressure Eviction",
+    "url": "https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/"
+   }
+  },
+  {
+   "name": "LimitRange and ResourceQuota: the guardrails on a per-client namespace",
+   "learn": "A LimitRange of type Container injects default and defaultRequest into pods that omit them and rejects pods outside min/max or exceeding maxLimitRequestRatio at admission; a ResourceQuota caps the namespace aggregate of requests.cpu, requests.memory, limits.cpu, limits.memory, pods, persistentvolumeclaims, requests.storage per StorageClass (e.g. gp3.storageclass.storage.k8s.io/requests.storage) and object counts like count/deployments.apps. Know the trap you will hit in a customer cluster: once a ResourceQuota constrains cpu or memory, every pod that omits requests is rejected with 'must specify requests.cpu' unless a LimitRange supplies defaults, and the rejection surfaces only as a ReplicaSet FailedCreate event, not on any pod. Read `kubectl describe quota -n <ns>` Used versus Hard before every deploy, and know scopeSelector for quotas by PriorityClass.",
+   "minutes": 30,
+   "resource": {
+    "label": "Kubernetes docs: Resource Quotas",
+    "url": "https://kubernetes.io/docs/concepts/policy/resource-quotas/"
+   }
+  },
+  {
+   "name": "Pending forever: decoding FailedScheduling, taints, affinity and topology spread",
+   "learn": "Read the FailedScheduling event as a per-node tally and decode each clause: 'Insufficient cpu/memory' means requests exceed Allocatable on those nodes; 'untolerated taint' means a NoSchedule/NoExecute/PreferNoSchedule taint without a matching toleration (and NoExecute with tolerationSeconds evicts running pods after the timer); 'didn't match Pod's node affinity/selector' means nodeSelector or requiredDuringSchedulingIgnoredDuringExecution; 'didn't match pod anti-affinity rules' points at podAntiAffinity with topologyKey kubernetes.io/hostname or topology.kubernetes.io/zone; 'didn't satisfy topology spread constraints' at maxSkew with whenUnsatisfiable DoNotSchedule. Also know the non-scheduler causes of Pending: an unbound PVC with WaitForFirstConsumer waiting on a zonal disk, a referenced PriorityClass that does not exist, and a ResourceQuota rejection that never produces a pod at all. Know that cluster-autoscaler only reacts to Pending pods whose reason is Insufficient, so a taint mistake will never scale a node group.",
+   "minutes": 45,
+   "resource": {
+    "label": "Kubernetes docs: Taints and Tolerations",
+    "url": "https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/"
+   }
+  },
+  {
+   "name": "HPA v2: metrics-server, the replica formula, and scaling behaviour",
+   "learn": "HPA needs metrics-server (verify with `kubectl top pod`) and per-container requests, because type Resource with averageUtilization is a percentage of the request, not the limit. Compute by hand: desiredReplicas = ceil(currentReplicas x currentMetricValue / desiredMetricValue) with a 10% tolerance band; pods not yet Ready and pods missing metrics are treated conservatively on scale-up and ignored on scale-down. Tune behavior.scaleDown.stabilizationWindowSeconds (default 300) and policies (Percent or Pods per periodSeconds) to stop flapping, and know scaleUp defaults to the larger of doubling or adding 4 pods every 15s. Know when to reach for type Pods, type Object and type External (queue depth via Prometheus Adapter or KEDA). Read `kubectl describe hpa` Conditions: ScalingActive False with FailedGetResourceMetric means missing requests or a dead metrics-server; ScalingLimited means you hit minReplicas/maxReplicas. Never let an HPA and a GitOps-managed spec.replicas fight; remove replicas from the manifest.",
+   "minutes": 55,
+   "resource": {
+    "label": "Kubernetes docs: Horizontal Pod Autoscaling",
+    "url": "https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/"
+   }
+  },
+  {
+   "name": "PersistentVolumes, claims and StorageClasses: binding modes, access modes, reclaim",
+   "learn": "Know that a PVC binds to a PV by StorageClass, accessModes and capacity, and that ReadWriteOnce is per node not per pod (ReadWriteOncePod is the per-pod variant; ReadWriteMany needs NFS, EFS, CephFS or similar). Read a StorageClass: provisioner (ebs.csi.aws.com, pd.csi.storage.gke.io), volumeBindingMode WaitForFirstConsumer (binds in the AZ of the scheduled pod, mandatory for zonal disks) versus Immediate (binds in a random AZ and strands the pod), reclaimPolicy Delete versus Retain, allowVolumeExpansion. Know the failure signatures: Pending with 'pod has unbound immediate PersistentVolumeClaims'; FailedAttachVolume 'Multi-Attach error' when an RWO volume's old node has not detached; a PV stuck in Released that needs spec.claimRef cleared to rebind. Before any risky operation on a customer database, patch the PV to persistentVolumeReclaimPolicy Retain so deleting the PVC cannot delete the disk.",
+   "minutes": 45,
+   "resource": {
+    "label": "Kubernetes docs: Persistent Volumes",
+    "url": "https://kubernetes.io/docs/concepts/storage/persistent-volumes/"
+   }
+  },
+  {
+   "name": "StatefulSets for the client database: ordinals, volumeClaimTemplates, expansion",
+   "learn": "A StatefulSet gives stable names (db-0, db-1), per-pod DNS through a headless Service (db-0.db.<ns>.svc.cluster.local), ordered rollout and teardown under podManagementPolicy OrderedReady (or Parallel), and volumeClaimTemplates that create one PVC per ordinal which survives pod deletion; persistentVolumeClaimRetentionPolicy whenDeleted/whenScaled controls whether the PVCs outlive the set. Use updateStrategy RollingUpdate with partition to canary a single ordinal. Know the immutability trap: volumeClaimTemplates cannot be edited, so to grow storage you edit each PVC's spec.resources.requests.storage directly (requires allowVolumeExpansion), then `kubectl delete sts db --cascade=orphan` and recreate with the new template so future ordinals match. Set securityContext.fsGroup so the database process owns the mounted volume, and know that a StatefulSet pod stuck Terminating on a dead node needs `kubectl delete pod --force --grace-period=0` only after you have confirmed the node is really gone.",
+   "minutes": 35,
+   "resource": {
+    "label": "Kubernetes docs: StatefulSets",
+    "url": "https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/"
+   }
+  },
+  {
+   "name": "RBAC: Role versus ClusterRole, bindings, subresources and kubectl auth can-i",
+   "learn": "Role and RoleBinding are namespaced; ClusterRole and ClusterRoleBinding are cluster-wide; a RoleBinding may reference a ClusterRole to grant it inside one namespace, which is how you reuse the built-in view, edit and admin roles. Write rules as apiGroups + resources + verbs (get, list, watch, create, update, patch, delete, deletecollection) and know the subresources that matter for a read-only role: pods/log yes, pods/exec and pods/portforward no, deployments/scale no; use resourceNames to scope to specific objects. Subjects are User, Group, or ServiceAccount addressed as system:serviceaccount:<ns>:<name>. Prove behaviour rather than assert it: `kubectl auth can-i get secrets -n client-a --as system:serviceaccount:client-a:reader` and `kubectl auth can-i --list --as ...`. Know RBAC is deny-by-default and purely additive, there is no deny rule, so audit with `kubectl get rolebindings,clusterrolebindings -A -o wide` and grep for the subject; and know the escalation guard: you cannot grant verbs you do not hold unless you hold escalate or bind on roles.",
+   "minutes": 50,
+   "resource": {
+    "label": "Kubernetes docs: Using RBAC Authorization",
+    "url": "https://kubernetes.io/docs/reference/access-authn-authz/rbac/"
+   }
+  },
+  {
+   "name": "ServiceAccounts and tokens: projected tokens, automount, a kubeconfig for the customer",
+   "learn": "Every pod runs as a ServiceAccount (default unless set) and, unless automountServiceAccountToken is false on the pod or the SA, gets a projected token at /var/run/secrets/kubernetes.io/serviceaccount/token that is time-bound (expirationSeconds, default 1h, rotated by the kubelet) and audience-bound to the API server. Mint a human-usable short-lived token with `kubectl create token reader -n client-a --duration=1h`; know that long-lived Secret-backed tokens are legacy and only exist if you create a Secret of type kubernetes.io/service-account-token by hand. Build the auditor kubeconfig with `kubectl config set-cluster`, `set-credentials --token`, `set-context --namespace` and hand it over with the expiry stated. Know the API server validates via TokenReview and the token's sub claim is system:serviceaccount:<ns>:<name>, which is what shows up in audit logs.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs: Configure Service Accounts for Pods",
+    "url": "https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/"
+   }
+  },
+  {
+   "name": "NetworkPolicy: default-deny, selector semantics, DNS egress and CNI enforcement",
+   "learn": "NetworkPolicy is an additive allow-list at L3/L4 keyed on podSelector; a pod becomes isolated in a direction only when at least one policy selects it with that direction in policyTypes. Write the canonical default-deny (podSelector {} with policyTypes Ingress and Egress and no rules), then the allows: ingress to app=postgres on TCP 5432 from app=api only; egress from every pod to CoreDNS on UDP and TCP 53 using namespaceSelector kubernetes.io/metadata.name kube-system plus podSelector k8s-app=kube-dns; egress to the internet via ipBlock 0.0.0.0/0 with except for the RFC1918 ranges. Know the YAML gotcha that fails security reviews: two list items `- namespaceSelector` and `- podSelector` are OR, both keys in one item are AND. Enforcement is the CNI's job: Calico, Cilium and AWS VPC CNI with network policy enabled enforce; kindnet, flannel and default kubenet silently accept and ignore the object. Always prove it with `kubectl exec api -- nc -zv -w2 db 5432` and from an unlabeled pod before and after applying.",
+   "minutes": 55,
+   "resource": {
+    "label": "Kubernetes docs: Network Policies",
+    "url": "https://kubernetes.io/docs/concepts/services-networking/network-policies/"
+   }
+  },
+  {
+   "name": "The ten-minute debugging sequence: describe, events, logs --previous, kubectl debug",
+   "learn": "Run the same sequence every time so you never skip a step under pressure: `kubectl get pod -o wide` (phase, restarts, node, IP); `kubectl describe pod` (events, last state, exit code); `kubectl logs <pod> -c <container> --previous` for the crashed instance, since the current one has nothing yet; `kubectl get events -n <ns> --sort-by=.lastTimestamp` for scheduler, ReplicaSet and quota events that never attach to a pod; then `kubectl debug -it <pod> --image=busybox:1.36 --target=<container>` to add an ephemeral container sharing the PID namespace when the image is distroless, or `kubectl debug <pod> --copy-to=dbg --set-image='*=ubuntu' --share-processes -- sleep 1d` to replace a crashing entrypoint and inspect the filesystem. Know the CreateContainerConfigError causes by heart: a ConfigMap or Secret key that does not exist, a subPath on a missing key, runAsNonRoot against an image whose USER is root. Pull structured facts with `kubectl get pod -o jsonpath='{.status.containerStatuses[*].lastState}'` when the customer wants the evidence in a ticket.",
+   "minutes": 50,
+   "resource": {
+    "label": "Kubernetes docs: Debug Running Pods",
+    "url": "https://kubernetes.io/docs/tasks/debug/debug-application/debug-running-pod/"
+   }
+  },
+  {
+   "name": "Debugging Services and cluster DNS: endpoints, selectors, ports, CoreDNS",
+   "learn": "A Service with zero endpoints (`kubectl get endpointslices -l kubernetes.io/service-name=<svc>`) means its spec.selector matches no Ready pod: diff the selector against pod labels and check readiness before anything else. Second cause is a targetPort that does not match containerPort or a named port that does not exist. Test resolution from inside a pod: `nslookup <svc>.<ns>.svc.cluster.local`, then read /etc/resolv.conf for ndots:5 and the search list to understand why short names cost five lookups and why external names occasionally NXDOMAIN under load. Read CoreDNS logs with `kubectl logs -n kube-system -l k8s-app=kube-dns` and temporarily add the log plugin to the Corefile ConfigMap. Know which dataplane you are on (kube-proxy iptables, ipvs, or Cilium eBPF kube-proxy replacement) because the debugging commands differ, and remember that headless Services return pod IPs and ExternalName returns a CNAME that NetworkPolicy cannot see.",
+   "minutes": 35,
+   "resource": {
+    "label": "Kubernetes docs: Debug Services",
+    "url": "https://kubernetes.io/docs/tasks/debug/debug-application/debug-service/"
+   }
+  },
+  {
+   "name": "Deployment rollouts: maxSurge, progress deadlines, history, undo, and what undo cannot fix",
+   "learn": "Know RollingUpdate with maxSurge and maxUnavailable as absolute counts or percentages, minReadySeconds as the gate before a new pod counts as available, and progressDeadlineSeconds (default 600) flipping the Progressing condition to False with reason ProgressDeadlineExceeded when the rollout stalls. Drive it with `kubectl rollout status`, `rollout history`, `rollout undo --to-revision=N`, `rollout pause`/`resume` to batch several edits into one revision, and `kubectl set image` for an emergency pin; history is the retained ReplicaSets under revisionHistoryLimit (default 10) and CHANGE-CAUSE comes from the kubernetes.io/change-cause annotation. Understand what undo reverts (the pod template only) and what it does not: a ConfigMap or Secret edited in place under the same name, a database migration, PVC contents, an Ingress change. Fix the first with immutable ConfigMaps under hashed names (Kustomize configMapGenerator, Helm checksum annotations). Rehearse the drill: push a bad tag, watch ProgressDeadlineExceeded, undo, confirm with `kubectl get rs` that the previous ReplicaSet scaled back up.",
+   "minutes": 50,
+   "resource": {
+    "label": "Kubernetes docs: Deployments",
+    "url": "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/"
+   }
+  },
+  {
+   "name": "Graceful shutdown and PodDisruptionBudgets: SIGTERM, preStop, the endpoint race",
+   "learn": "On delete the API server marks the pod Terminating; the endpoints controller removes it from EndpointSlices and the kubelet runs preStop then sends SIGTERM in parallel, so for a few hundred milliseconds kube-proxy and the Ingress controller still route new connections to a process that is shutting down. Eliminate the resulting 502s with `preStop: exec: command: [sleep, '5']` and an application that handles SIGTERM by draining in-flight requests; make sure the entrypoint uses `exec` so PID 1 is your process and not a shell that swallows the signal. After terminationGracePeriodSeconds (default 30) the kubelet sends SIGKILL and you see exit 137 that is not an OOM. PodDisruptionBudget with minAvailable or maxUnavailable constrains voluntary disruptions only (drain, cluster-autoscaler, node upgrades), never node crashes; a single-replica Deployment with minAvailable 1 makes `kubectl drain` hang forever, which is the most common reason a managed cluster upgrade stalls. Check `kubectl get pdb` ALLOWED DISRUPTIONS before touching nodes.",
+   "minutes": 35,
+   "resource": {
+    "label": "Kubernetes docs: Specifying a Disruption Budget for your Application",
+    "url": "https://kubernetes.io/docs/tasks/run-application/configure-pdb/"
+   }
+  },
+  {
+   "name": "Node-level debugging: kubectl debug node, kubelet journal, crictl, cordon and drain",
+   "learn": "When the pod view says the node is the problem (NotReady, MemoryPressure, DiskPressure, PIDPressure, PLEG is not healthy), start with `kubectl describe node` Conditions and Events, then `kubectl debug node/<name> -it --image=ubuntu` for a privileged pod with the host filesystem at /host; `chroot /host` and run `journalctl -u kubelet -n 300`, `crictl ps -a`, `crictl logs <id>`, `crictl inspect <id>` to find the cgroup path, and `df -h /var/lib/containerd` for the disk-pressure culprit (usually image layers or emptyDir). Know the kubelet flags a customer's platform team will quote at you: --max-pods, --kube-reserved, --system-reserved, --eviction-hard. Take a node out safely with `kubectl cordon` (no new scheduling) then `kubectl drain --ignore-daemonsets --delete-emptydir-data` (evicts respecting PDBs), and `kubectl uncordon` when done.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs: Troubleshooting Clusters",
+    "url": "https://kubernetes.io/docs/tasks/debug/debug-cluster/"
+   }
+  },
+  {
+   "name": "Assembling the per-client namespace as the tenancy unit",
+   "learn": "Compose everything into one kustomization per client: a Namespace labelled with kubernetes.io/metadata.name and pod-security.kubernetes.io/enforce restricted (deepened in topic 10), a ResourceQuota and LimitRange, the default-deny NetworkPolicy plus DNS and ingress allows, a client-reader Role bound to both a ServiceAccount and the customer's OIDC group, the API Deployment with tuned probes and resources, the Postgres StatefulSet with Retain, an HPA and a PDB. Know precisely where namespace tenancy stops: CRDs, nodes, StorageClasses, ClusterRoles and the kernel are shared, a noisy neighbour on the same node still competes for CPU and network, and a compromised pod with a hostPath still owns the node, so hard isolation means dedicated node pools via taints and nodeSelector or separate clusters. Be able to explain this trade-off to a customer security lead in two minutes with the specific controls that mitigate each gap. This kustomization is the input to the Helm/ArgoCD work in topic 9.",
+   "minutes": 35,
+   "resource": {
+    "label": "Kubernetes docs: Multi-tenancy",
+    "url": "https://kubernetes.io/docs/concepts/security/multi-tenancy/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take a pod in CrashLoopBackOff, ImagePullBackOff, Pending or CreateContainerConfigError in an unfamiliar namespace and state the root cause with evidence within ten minutes using only get, describe, events, logs --previous and kubectl debug, then apply a one-line fix.",
+  "You can read `kubectl describe hpa`, explain each Condition, compute the desired replica count by hand from current utilisation and target, and set stabilizationWindowSeconds and scale policies so a bursty API does not flap.",
+  "You can set requests and limits for a Python API and a Postgres StatefulSet with a one-sentence rationale per number, name the resulting QoS class, and prove OOM or CFS throttling from cgroup counters rather than guessing.",
+  "You can write a read-only Role that includes pods/log but excludes pods/exec and secrets, bind it to a ServiceAccount, mint a one-hour token, produce a working kubeconfig, and demonstrate the boundaries with `kubectl auth can-i --list`.",
+  "You can write a default-deny NetworkPolicy set that still permits API-to-DB on 5432 and DNS for every pod, and prove enforcement with nc from an allowed and a denied pod on a CNI that actually enforces.",
+  "You can break a rollout with a bad image tag, watch ProgressDeadlineExceeded fire, roll back with `kubectl rollout undo`, verify via ReplicaSets, and list the classes of change that undo cannot revert.",
+  "You can rebind a Released PersistentVolume to a fresh claim after an accidental PVC deletion because you set Retain first and know how to clear claimRef.",
+  "You can drain a node for a customer's cluster upgrade without violating a PDB, or explain in one sentence exactly which PDB blocks it and what to change."
+ ],
+ "failureModes": [
+  "A liveness probe on /health that also pings Postgres: a 30-second RDS failover restarts every API pod at once, and the reconnect storm turns a blip into a ten-minute outage that the customer blames on your product.",
+  "timeoutSeconds left at the default 1s on a Python service that pauses for GC under load: probes time out, the kubelet restarts healthy pods, restarts add load, and the fleet enters CrashLoopBackOff while the customer reports that Kubernetes keeps killing the app.",
+  "A CPU limit set equal to a low request on a Go or Java service: CFS throttling adds 100-300ms of tail latency with zero errors and a calm `kubectl top`; only container_cpu_cfs_throttled_periods_total reveals it, weeks later.",
+  "HPA scales the API to 40 replicas during the customer's load test, each opening a 20-connection pool, exhausting Postgres max_connections at 100 and taking down the very database the autoscaler was meant to protect.",
+  "The platform team adds a ResourceQuota to the client namespace; the next CronJob without requests fails admission at 02:00 as a ReplicaSet FailedCreate event nobody watches, and the nightly report silently stops for a week.",
+  "A NetworkPolicy is signed off in the security review on a cluster whose CNI does not enforce policy (kindnet in staging, AWS VPC CNI without network policy enabled in prod); a pentest six months later finds the DB reachable from every pod.",
+  "A managed cluster upgrade hangs for hours because a single-replica Deployment has a PDB with minAvailable 1; the drain never completes, someone force-deletes the pod, and in-flight requests are lost during the customer's business hours.",
+  "An RWO EBS volume's pod is rescheduled to a different AZ after a node failure and sits Pending on a zone mismatch or Multi-Attach error while the customer's database is down, because the StorageClass used Immediate binding."
+ ],
+ "interviewQuestions": [
+  "A customer pages you: the new version will not start and pods keep restarting. You have kubectl and ten minutes. Walk me through exactly what you run, in what order, and what each output rules in or out.",
+  "Explain how requests and limits flow from the manifest through the scheduler and the kubelet into cgroups. Now a service shows p99 latency doubling under load with no errors and CPU at 60% in kubectl top; what do you check and why?",
+  "Design the probes, resources, HPA and PDB for a FastAPI service with a Postgres backend on a customer's EKS cluster where the platform team enforces ResourceQuota and Pod Security restricted. Give actual numbers and defend each one.",
+  "A NetworkPolicy is applied and `kubectl get netpol` shows it, but the API can still reach a database it should not. Give three distinct root causes and how you would distinguish them in under five minutes.",
+  "Your `kubectl rollout undo` succeeded and every pod is Ready, but the application is still broken. What kinds of change does undo not revert, and how do you structure deploys so a rollback is actually atomic?",
+  "The customer's security team wants read-only access for their auditors. Describe the Role, the binding, the token lifetime and how you prove to them what the identity can and cannot do, including Secrets and pods/exec.",
+  "Walk through everything that happens between `kubectl delete pod` and the container exiting, including the race that produces 502s during a rolling update and how you eliminate it without slowing deploys."
+ ],
+ "proofOfWork": "A public repository named k8s-client-tenancy-lab containing a kind cluster config with Calico installed so NetworkPolicy is enforced, a Kustomize base per client namespace (Namespace with PSA labels, ResourceQuota, LimitRange, default-deny plus DNS and API-to-DB NetworkPolicies, client-reader Role and ServiceAccount), a sample API Deployment with tuned probes and resources, a Postgres StatefulSet with Retain, an HPA and a PDB. A `make chaos` target injects one failure at a time (bad image tag, missing ConfigMap key, memory limit below RSS, probe timeout at 1s under load, NoSchedule taint on every node, PVC deleted under the StatefulSet) and RUNBOOK.md pairs each with an asciinema recording of the diagnosis finishing under ten minutes, ending with the rollout undo drill and the `kubectl auth can-i --list` output for the reader identity. A `make verify` target asserts with nc that an unlabeled pod is refused on 5432 while the API pod connects, that the reader token cannot read Secrets, and that the HPA reports ScalingActive True, so a reviewer can clone and watch every claim pass."
+}

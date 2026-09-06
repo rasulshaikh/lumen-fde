@@ -1,0 +1,228 @@
+{
+ "i": 42,
+ "topic": "System design playbook: load balancing, caching, sharding, queues, rate limits, IDs, search",
+ "track": "F. Distributed Systems and System Design",
+ "month": 5,
+ "hours": 10,
+ "why": "An FDE is the person in the room when the customer's architect asks 'and what happens when we roll this to all 500 clients?' and you have to answer on a whiteboard with numbers, inside their constraints (their VPC, their Postgres, their Kafka, their security team) rather than in the abstract. Every deployment you scope is assembled from the same seven building blocks: something in front spreading traffic, something remembering answers, something splitting data, something absorbing bursts, something saying no, something naming things, and something finding them. The system design round is also where senior FDE loops at Palantir, Anthropic and Databricks separate 'can build a feature' from 'can own a customer's production system', and the interviewer is grading the same thing the customer is: can you run the conversation end to end, attach numbers, name trade-offs, and tell a credible story about what breaks first.",
+ "prerequisites": [
+  "Networking from topic 2 (TCP/IP, DNS, TLS, HTTP/2, load balancers): handshake and TLS-termination cost, HTTP/1.1 keep-alive vs HTTP/2 multiplexing, DNS TTL behaviour, and exactly what an L4 proxy can and cannot see compared with an L7 proxy",
+  "PostgreSQL from topic 29: B-tree vs GIN indexes, `EXPLAIN (ANALYZE, BUFFERS)`, row locks and MVCC bloat, `max_connections` and pooling, and why random keys hurt insert locality; plus the RLS multi-tenant schema from topic 30",
+  "Redis from topic 31: TTL and expiry, `maxmemory` and eviction, `SET NX PX` locks, Lua/`MULTI` atomicity, and the token-bucket limiter and idempotency store you already built for DefenderMate",
+  "Kafka from topic 33: partitions as the ordering unit, consumer groups and rebalances, offset commits, `acks`, the idempotent producer, and the DefenderMate ingestion consumers with their duplicate/reorder drill results",
+  "DDIA vocabulary from topic 39 and Raft/linearizability from topic 40: single-leader replication and lag, read-your-writes, hash vs range partitioning and rebalancing, quorum, CAP/PACELC, and what 'exactly once' can and cannot mean",
+  "SLIs/SLOs and error budgets from topic 20, HA/DR (multi-AZ vs multi-region, RTO/RPO) from topic 24, and load testing with k6 from topic 22 so failure stories can be reproduced rather than imagined",
+  "A running DefenderMate stack (FastAPI, Postgres with RLS, Redis, Kafka/Redpanda, Next.js, SSE relay of Claude) and at least one week of real numbers: requests per endpoint, p50/p99, tokens per call, documents per tenant per day"
+ ],
+ "subtopics": [
+  {
+   "name": "The 45-minute delivery frame: requirements, non-functionals as numbers, and the API you commit to",
+   "learn": "Run the clock deliberately: minutes 0-5 functional requirements (three core flows, an explicit out-of-scope list), 5-10 non-functionals written as numbers not adjectives (p99 per endpoint, availability target, consistency per operation, retention, tenancy isolation, cost ceiling), 10-15 core entities and the API (verbs, cursor pagination, `Idempotency-Key` on every write), 15-30 a high-level design that satisfies every functional requirement before any optimisation, 30-45 two or three deep dives chosen by the non-functionals, closing with the failure story. Write assumptions in a corner of the board and say them aloud so the interviewer or customer architect can correct them early; a wrong assumption stated is recoverable, a wrong assumption hidden is fatal. Adopt one trade-off vocabulary for the whole session (consistency vs availability per operation, latency vs cost, simplicity vs scale) and use it every time you pick between two options.",
+   "minutes": 30,
+   "resource": {
+    "label": "Hello Interview - System Design Delivery Framework",
+    "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery"
+   }
+  },
+  {
+   "name": "Back-of-envelope estimation: DefenderMate at 500 clients",
+   "learn": "Derive every number from a stated chain of assumptions and round aggressively: 500 tenants x 200 seats = 100k users; 10% daily active = 10k; 20 messages each = 200k messages/day = ~2.3/s average, x10 diurnal peak = ~25/s; each message is one Claude call at ~3k input and ~500 output tokens = 600M input tokens/day, so at roughly $3 per million input the bill is thousands of dollars a day and the largest lever is prompt caching (topic 59), not servers; 100 documents per tenant per day = 50k docs, 20 chunks each = 1M chunks/day, 1536 float32 dims = 6 KB each = ~6 GB of vectors per day = ~2 TB/year, which is what forces per-tenant partitioning and a real vector store rather than a single pgvector table; messages at 2 KB = 400 MB/day = 150 GB/year, so Postgres holds the transactional data for years without sharding. Memorise the latency table (L1 ~1 ns, RAM ~100 ns, SSD random read ~100 us, same-region RTT ~0.5 ms, cross-continent ~70-150 ms) and the powers of two (2^20 ~ 1M, 2^30 ~ 1G). Convert QPS to capacity: a FastAPI worker doing 50 ms of DB-bound work handles ~20 rps, a 4-worker pod ~80 rps, so 25 msg/s needs one pod plus headroom and the bottleneck is the queue and the upstream model, not the API tier. Always end the estimate with 'the thing that saturates first is X'.",
+   "minutes": 35,
+   "resource": {
+    "label": "System Design Primer - Back-of-the-envelope calculations",
+    "url": "https://github.com/donnemartin/system-design-primer#back-of-the-envelope-calculations"
+   }
+  },
+  {
+   "name": "Traffic entry: DNS, anycast, CDN and where TLS terminates",
+   "learn": "Know the Route 53 routing policies (simple, weighted, latency, failover with health checks, geolocation, geoproximity, multivalue answer) and what each is actually for: weighted for canaries and migrations, latency for multi-region reads, failover for DR with a health-checked primary. Understand what a 60 s TTL buys and what it does not: recursive resolvers, JVM default caching, and mobile OS caches routinely ignore it, so DNS failover is minutes not seconds, which is why anycast or an ALB in front of both regions is the answer when RTO is tight. Draw the TLS termination point and defend it: terminate at the edge or ALB for cheap certificate management, re-encrypt to origin or run mTLS to pods when the customer's security team requires it, and price the handshake (1-RTT TLS 1.3, 2-RTT TLS 1.2, resumption avoids both). Put the customer's WAF on the diagram and state what it can inspect at each termination choice.",
+   "minutes": 30,
+   "resource": {
+    "label": "Amazon Route 53 - Choosing a routing policy",
+    "url": "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy.html"
+   }
+  },
+  {
+   "name": "L4 vs L7 load balancing, algorithms and connection reuse",
+   "learn": "L4 (NLB, IPVS) balances TCP flows, preserves source IP and cannot see paths or headers; L7 (ALB, Nginx, Envoy) terminates HTTP and can route on path/host/header/cookie, retry idempotent requests, add `X-Forwarded-For` and `X-Request-ID`, and terminate TLS. Know the Nginx upstream algorithms and when each wins: default weighted round-robin for uniform short requests, `least_conn` for long-lived SSE and LLM streams whose durations vary by 100x, `hash $key consistent` (ketama ring, minimal remapping when a server leaves) for cache locality per tenant, `ip_hash` only when you have no better affinity key. Configure connection reuse or pay a handshake per request: `keepalive 32;` in the upstream block plus `proxy_http_version 1.1;` and `proxy_set_header Connection \"\";` in the location. Use `max_fails` and `fail_timeout` for passive health detection and understand their default (1 failure, 10 s). Know two ways balancing silently goes wrong: HTTP/2 multiplexes many requests onto one client connection so an L4 balancer in front sees one flow and cannot spread them, and least-connections cannot tell a 30-second SSE stream from a 30 ms JSON call until the connection count already skewed.",
+   "minutes": 40,
+   "resource": {
+    "label": "nginx - ngx_http_upstream_module (least_conn, hash consistent, keepalive, max_fails)",
+    "url": "https://nginx.org/en/docs/http/ngx_http_upstream_module.html"
+   }
+  },
+  {
+   "name": "Health checks, draining and zero-downtime rollouts behind the balancer",
+   "learn": "Separate liveness (the process is alive, restart me if not) from readiness (I can serve: pool warm, config loaded, not shutting down) and never make the balancer's check hit the database on every probe. Know the ALB target-group knobs and defaults: `HealthCheckIntervalSeconds` 30, `HealthyThresholdCount` 5, `UnhealthyThresholdCount` 2, `HealthCheckTimeoutSeconds` 5, and success matcher defaulting to `200` (a range such as `200-299` is opt-in), and that a target takes interval x threshold seconds to become healthy after a deploy, which sets your minimum rollout time. Reason about draining: the deregistration delay (default 300 s) must be longer than your longest in-flight request (an SSE stream can be 60 s) and shorter than or equal to the pod's `terminationGracePeriodSeconds`, and the app must flip `/readyz` to 503 on SIGTERM and keep serving in-flight requests until the balancer stops sending new ones. Name the cascading risk of deep health checks: when a shared dependency blips, every target fails its check at once and the balancer takes the whole fleet out of rotation.",
+   "minutes": 30,
+   "resource": {
+    "label": "AWS ALB - Health checks for target groups",
+    "url": "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/target-group-health-checks.html"
+   }
+  },
+  {
+   "name": "Cache placement and invalidation: cache-aside, write-through, TTLs, eviction and stampedes",
+   "learn": "Choose where the cache lives (in-process LRU, Redis, CDN) by hit ratio times cost-of-miss, and choose the write pattern: cache-aside (miss, load, `SET key val EX ttl`) is the default; write-through keeps the cache authoritative at the cost of write latency; write-behind buys write throughput at the cost of losing data on a crash. Design the key schema to include tenant and schema version (`t:{tenant}:conv:{id}:v3`) so a deploy can move to `v4` instead of flushing. Know the `maxmemory-policy` options (`allkeys-lru`, `allkeys-lfu`, `volatile-lru`, `volatile-ttl`, `noeviction`) and that `noeviction` at `maxmemory` makes writes fail with an OOM error rather than evicting, which turns a full cache into an outage. Prevent stampedes three ways and know when each applies: a single-flight lock (`SET lock:{key} 1 NX PX 5000`, others wait or serve stale), probabilistic early expiration (recompute before expiry with probability rising as TTL approaches zero), and jittered TTLs so a million keys written at deploy time do not expire in the same second. Cache 'not found' with a short TTL to stop lookups of nonexistent ids hammering the database. Compute what the database absorbs if the cache disappears: at 90% hit ratio, losing the cache is a 10x read spike.",
+   "minutes": 40,
+   "resource": {
+    "label": "Redis docs - Key eviction (maxmemory-policy)",
+    "url": "https://redis.io/docs/latest/develop/reference/eviction/"
+   }
+  },
+  {
+   "name": "HTTP and CDN caching semantics: Cache-Control, ETag, Vary and purge",
+   "learn": "Use the directives precisely: `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=30, stale-if-error=600` for shared caches, `private` for per-user responses, `no-store` for anything with secrets; hashed static assets get `max-age=31536000, immutable`. Implement conditional requests: `ETag` plus `If-None-Match` returns 304 and saves bandwidth but not compute unless the ETag is cheap to derive. Understand `Vary`: omit `Vary: Accept-Encoding` and you serve gzip to a client that cannot decode it; omit `Vary: Authorization` (or fail to key on tenant) on a CDN-cached API response and one tenant sees another's data. Know the purge models: URL purge is exact and slow at scale, surrogate-key or tag purge invalidates every object tagged `tenant:42` in one call. Apply to DefenderMate: Next.js `_next/static` is immutable, the tenant branding/config endpoint gets a short `s-maxage` with an ETag, and nothing under `/api/conversations` is ever shared-cacheable.",
+   "minutes": 30,
+   "resource": {
+    "label": "MDN - HTTP caching",
+    "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching"
+   }
+  },
+  {
+   "name": "Read replicas, replication lag and read-your-writes",
+   "learn": "Streaming replication is the first scale-out step for reads and the first place users see 'my data disappeared'. Know the `synchronous_commit` levels (`off`, `local`, `remote_write`, `on`, `remote_apply`) and `synchronous_standby_names`: only `remote_apply` guarantees a replica read sees the committed write, and it charges every commit a network round trip. Measure lag with `pg_stat_replication` (`write_lag`, `flush_lag`, `replay_lag`) and on the standby `pg_last_wal_replay_lsn()`; decide about `hot_standby_feedback` (prevents query cancellation on the replica, causes bloat on the primary). Route reads by consistency requirement: writes and anything read-after-write go to the primary; pin a session to the primary for N seconds after it writes, or record the commit LSN in the response and have the replica route compare it with `pg_last_wal_replay_lsn()` before serving; send list views, dashboards and analytics to replicas. Rehearse the failure: a user posts a message, the next GET hits a replica 300 ms behind, the message is missing, the UI retries the POST and creates a duplicate.",
+   "minutes": 35,
+   "resource": {
+    "label": "PostgreSQL docs - High Availability, Load Balancing, and Replication",
+    "url": "https://www.postgresql.org/docs/current/high-availability.html"
+   }
+  },
+  {
+   "name": "Partitioning and sharding: key choice, hash vs range, rebalancing and scatter-gather",
+   "learn": "Partition inside one Postgres before sharding across many: `PARTITION BY RANGE (created_at)` for append-heavy time series such as `llm_calls` and `audit_log` (retention becomes `DETACH PARTITION` + `DROP` instead of a week-long DELETE), `PARTITION BY HASH (tenant_id)` to spread a hot table; partition pruning only happens when the partition key appears in the WHERE clause, so every query path must carry it. Shard across databases only when the single primary's write throughput, working set or blast radius forces it, and pick the key by three rules: high cardinality, present in every hot query, spreads writes. Hash keys spread evenly but kill range scans; range keys keep locality but make the newest range the hottest (a `created_at` shard key puts every write on one shard). Use consistent hashing with virtual nodes so rebalancing moves a fraction of keys, and study Redis Cluster's 16384 fixed hash slots and `{tenant}` hash tags as the concrete model for slot-based resharding without a stop-the-world. Anything not keyed by the shard key becomes scatter-gather: the slowest shard defines p99, and secondary indexes are either local (query every shard) or global (async, eventually consistent).",
+   "minutes": 45,
+   "resource": {
+    "label": "PostgreSQL docs - Table Partitioning",
+    "url": "https://www.postgresql.org/docs/current/ddl-partitioning.html"
+   }
+  },
+  {
+   "name": "Hot keys, skew and the noisy-neighbour tenant",
+   "learn": "Detect skew before customers do: per-partition-key consumption in DynamoDB via CloudWatch Contributor Insights, per-partition end offsets in Kafka via `rpk topic describe -p`, hot Redis keys via `redis-cli --hotkeys` (requires an LFU policy) or `MONITOR` samples, per-tenant row counts and QPS in Postgres. Know the canonical hard ceiling, DynamoDB's 3,000 RCU and 1,000 WCU per physical partition, so 'one hot tenant' has a number attached. Mitigate in order of cost: cache the hot object; per-tenant rate limits so one bulk import cannot starve 499 tenants; write sharding (append `#0..N` to the key and fan in on read); move the whale tenant to its own shard or cell via a tenant-to-shard directory; split the partition key. State the price of each mitigation (write sharding makes reads N times more expensive; a directory becomes a critical dependency).",
+   "minutes": 25,
+   "resource": {
+    "label": "DynamoDB - Best practices for designing and using partition keys",
+    "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html"
+   }
+  },
+  {
+   "name": "Multi-tenant data layouts: pooled, siloed, bridge and cells",
+   "learn": "Compare the four layouts with numbers for 500 tenants: pooled (shared tables + `tenant_id` + RLS, one migration, largest blast radius, noisy neighbours), schema-per-tenant (500 schemas means 500x migration fan-out and catalog bloat), database-per-tenant (isolation and per-tenant restore, but 500 connection pools and 500 backups), and cell-based (a full stack per group of tenants, tenant-to-cell directory, a bad deploy or hot tenant hurts one cell). Recommend tiers: pooled for standard tenants, siloed for regulated or whale tenants, and make the tenant directory (`tenant_id -> cell, shard, region, tier, limits, keys`) an explicitly cached, versioned service because every request depends on it. Study Citus's distribute-by-tenant model as the middle path: tables co-located on the `tenant_id` distribution column so joins stay local, small reference tables replicated to every node. Know the tenant-move procedure (dual-write or CDC into the destination, backfill, verify counts, cut over behind the directory, keep the source read-only for rollback) because a customer will ask for it.",
+   "minutes": 35,
+   "resource": {
+    "label": "Citus docs - Multi-tenant Applications",
+    "url": "https://docs.citusdata.com/en/stable/use_cases/multi_tenant.html"
+   }
+  },
+  {
+   "name": "Queues and async work: delivery semantics, visibility timeouts, ordering, DLQs",
+   "learn": "Put every LLM call and document ingest behind a queue for three reasons you can state: decouple request latency from processing, absorb bursts up to the queue's depth, retry without the user. Define the semantics precisely: at-most-once (ack before work), at-least-once (ack after work, duplicates on crash), and 'exactly once' meaning at-least-once plus an idempotent consumer with a dedup key, or Kafka transactions for Kafka-to-Kafka only. SQS mechanics: `VisibilityTimeout` must exceed worst-case processing or be extended with `ChangeMessageVisibility` on a heartbeat, `maxReceiveCount` in the redrive policy moves poison messages to the dead-letter queue, FIFO queues with `MessageGroupId` give per-tenant ordering at a 300 requests/s per-queue ceiling (3,000 batched) unless high-throughput mode is enabled. Kafka mechanics: the partition is the ordering unit, a rebalance pauses the group, commit the offset after the side effect, and `max.poll.interval.ms` (default 300 s) kicks slow consumers out. Design the DLQ path: who is paged, how a message is inspected and replayed, and how a poison message in a FIFO group is quarantined so it stops blocking the tenant behind it.",
+   "minutes": 40,
+   "resource": {
+    "label": "Amazon SQS - Visibility timeout",
+    "url": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html"
+   }
+  },
+  {
+   "name": "Backpressure, load shedding and queue sizing",
+   "learn": "Size with Little's Law (L = lambda x W): at 25 jobs/s and 8 s per Claude call you need ~200 concurrent workers or the queue grows without bound; an unbounded queue converts an overload into a latency disaster hours later when it finally drains and re-runs thousands of jobs nobody wants. Shed early and cheaply: bound concurrency at the balancer or gateway and return 503 with `Retry-After` when exceeded, keep separate queues and worker pools for interactive vs batch so a bulk import never queues in front of a chat message, and enforce per-tenant quotas so fairness is a property of the system rather than luck. Propagate deadlines (`X-Request-Deadline` or gRPC deadlines) and drop work whose caller has already timed out. Recognise the cascading pattern from the SRE book: one server dies, survivors take its load and slow down, clients retry, the retries kill the survivors.",
+   "minutes": 35,
+   "resource": {
+    "label": "Google SRE Book - Handling Overload",
+    "url": "https://sre.google/sre-book/handling-overload/"
+   }
+  },
+  {
+   "name": "Transactional outbox and CDC: publishing events without dual-write bugs",
+   "learn": "Dual-write (commit to Postgres, then publish to Kafka) loses events when the process dies between the two and publishes phantom events when the commit rolls back. Fix with an outbox table written in the same transaction as the business row and drained by a relay: either a poller (`SELECT ... FROM outbox ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED`) or Debezium's outbox event router reading the WAL (`wal_level=logical`, columns `id`, `aggregatetype`, `aggregateid`, `type`, `payload`, routing to `outbox.event.<aggregatetype>` keyed by `aggregateid` so a tenant's or document's events stay ordered). The relay is at-least-once, so consumers still need idempotency (topic 33's dedup drill). Know the operational hazards: a stalled replication slot retains WAL until the primary's disk fills, and a poller with no index on the unsent flag becomes the slowest query in the database. Map it to DefenderMate: `document.uploaded` fans out to ingestion, `message.created` to the classifier and analytics.",
+   "minutes": 30,
+   "resource": {
+    "label": "Debezium docs - Outbox Event Router",
+    "url": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html"
+   }
+  },
+  {
+   "name": "Rate limiting: algorithms, placement and the 429 contract",
+   "learn": "Know the algorithms and their exact failure: fixed window (a 2x burst straddling the boundary), sliding window log (exact, O(n) memory per key), sliding window counter (O(1), approximate), token bucket (rate plus burst, the default for APIs), leaky bucket and GCRA (a single timestamp per key, no burst above rate). Place limits at three layers with different keys: edge via Nginx `limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;` and `limit_req zone=api burst=20 nodelay;` (set `limit_req_status 429;` because the default is 503), gateway per API key, and application per tenant in Redis with an atomic Lua script or `MULTI`/`EXEC` on `rl:{tenant}:{window}`. Apportion inherited upstream limits: the Claude tokens-per-minute budget is shared by 500 tenants, so the per-tenant limiter must sum to less than the upstream ceiling and reserve headroom for retries. Honour the response contract: 429 with `Retry-After` and the IETF `RateLimit-Policy` / `RateLimit` headers (older drafts used `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`) so client SDKs back off correctly, and distinguish 429 (you asked too often) from 503 (we are overloaded).",
+   "minutes": 40,
+   "resource": {
+    "label": "nginx - ngx_http_limit_req_module (limit_req_zone, burst, nodelay, limit_req_status)",
+    "url": "https://nginx.org/en/docs/http/ngx_http_limit_req_module.html"
+   }
+  },
+  {
+   "name": "Timeouts, retries, backoff with jitter and circuit breakers",
+   "learn": "Every hop gets a timeout shorter than its caller's, so a 60 s user budget becomes 55 s at the API, 50 s at the worker and 45 s at the model call, and nothing waits on a caller that has already gone. Retry only idempotent operations, only on retryable errors (connection reset, 429, 503, 529), and only within a retry budget (retries never exceed ~10% of first attempts) so a partial outage cannot triple load. Use full jitter (`sleep = random(0, min(cap, base * 2^attempt))`) rather than plain exponential so retries do not arrive in synchronised waves. Add a circuit breaker per dependency (closed, open after N failures in a window, half-open with a single probe) to fail fast instead of consuming every worker's timeout on a dead dependency, and reserve hedged requests for read paths where duplicate work is safe. Multiply the layers to see a retry storm: client SDK 3x times API 3x times queue consumer 5x is 45 attempts per failed call.",
+   "minutes": 30,
+   "resource": {
+    "label": "Amazon Builders' Library - Timeouts, retries, and backoff with jitter",
+    "url": "https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"
+   }
+  },
+  {
+   "name": "Unique IDs at scale: UUIDv4 vs UUIDv7, Snowflake, ULID, sequences",
+   "learn": "Random UUIDv4 primary keys scatter inserts across the whole B-tree, causing page splits, WAL amplification and cache misses on a large `messages` table; UUIDv7 (RFC 9562: 48-bit Unix milliseconds, then version, then 74 bits of random or counter) and ULID are k-sortable so inserts append at the right-hand edge, and PostgreSQL 18 ships `uuidv7()` natively. Know the Snowflake layout and its arithmetic: 41-bit millisecond timestamp (about 69 years), 10-bit worker id (1,024 generators), 12-bit sequence (4,096 ids per ms per worker), and the two operational problems, assigning worker ids without collision (ZooKeeper, StatefulSet ordinal, database lease) and refusing to issue ids when the clock moves backwards. `bigserial` sequences are simplest on one primary but leak volume to customers and do not survive sharding; sharded systems either embed the shard id in the key or use a k-sortable id plus a directory. Decide per table: `bigint` sequence for internal joins, UUIDv7 for anything externally visible or destined for a shard.",
+   "minutes": 30,
+   "resource": {
+    "label": "RFC 9562 - Universally Unique IDentifiers (UUIDv7)",
+    "url": "https://www.rfc-editor.org/rfc/rfc9562.html"
+   }
+  },
+  {
+   "name": "Idempotency keys and safe write APIs",
+   "learn": "Clients send an `Idempotency-Key` (a UUID they generate) on every POST that creates something; the server stores key, tenant/user scope, a fingerprint of the request body and the final response, with a TTL (Stripe keeps them 24 hours). A repeat with the same key and same body replays the stored status and body; the same key with a different body is rejected (Stripe returns 400, you may choose 422); a concurrent duplicate while the first is still running is fenced with `SET idem:{tenant}:{key} NX PX 30000` or a unique index on the key column and told 409 to retry later. Scope keys per tenant so two tenants using the same UUID cannot collide or leak. Chain it with consumer dedup so a retried webhook or a re-driven queue message cannot create a second document, and store the key with the row so support can answer 'why do I have two of these'.",
+   "minutes": 25,
+   "resource": {
+    "label": "Stripe API reference - Idempotent requests",
+    "url": "https://docs.stripe.com/api/idempotent_requests"
+   }
+  },
+  {
+   "name": "Search: inverted indexes, analyzers, BM25, Postgres FTS and when to add a search engine",
+   "learn": "An inverted index maps term to posting list; the analyzer (tokenise, lowercase, stop words, stem) runs at index time and query time and must be identical or recall silently collapses. Understand BM25 versus TF-IDF in one sentence each (term-frequency saturation and document-length normalisation) so you can explain a ranking to a customer. Start in Postgres: a stored generated column `GENERATED ALWAYS AS (to_tsvector('english', body)) STORED` with a GIN index, `@@ websearch_to_tsquery('english', $1)`, `ts_rank_cd` for ordering, and `pg_trgm` with `gin_trgm_ops` for fuzzy and `ILIKE '%x%'`; always AND a `tenant_id` predicate and let RLS enforce it. Move to OpenSearch or Elasticsearch when you need facets, relevance tuning, highlighting, or search QPS that competes with OLTP, and know the costs: near-real-time visibility governed by `refresh_interval` (1 s default, so 'I just uploaded it and cannot find it'), mapping changes requiring a reindex behind an alias, tenant isolation via a mandatory `term` filter on `tenant_id` or an index per whale tenant. Hybrid retrieval that fuses BM25 with vector search via reciprocal rank fusion is topic 49.",
+   "minutes": 40,
+   "resource": {
+    "label": "PostgreSQL docs - Full Text Search",
+    "url": "https://www.postgresql.org/docs/current/textsearch.html"
+   }
+  },
+  {
+   "name": "Telling the failure story: trigger, propagation, detection, mitigation, design change",
+   "learn": "Close every design with a three-to-five-minute 'what breaks first' narrative built from the cascading-failure catalogue: a replica lags and users see vanished messages; Redis restarts and the database takes a 10x read spike; one tenant's bulk import fills the classifier queue for everyone; a deploy with a short grace period leaves the balancer sending to dead pods. Use a fixed structure so it lands under time pressure: trigger, propagation (why it spread instead of staying local), detection (which SLI moved, which alert fired, how long until a human knew), the 3 a.m. mitigation (shed, fail over, flip a flag, scale), and the design change that prevents recurrence, each with a number attached (lag in ms, queue depth, minutes to detect). Rehearse aloud until the story takes under five minutes and names at least one thing you would monitor from day one.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google SRE Book - Addressing Cascading Failures",
+    "url": "https://sre.google/sre-book/addressing-cascading-failures/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can run a 45-minute design of a stated system (DefenderMate at 500 tenants, or an unfamiliar prompt) against a visible clock and leave behind written requirements, a numbers table, a component diagram, two deep dives and a failure story without being prompted for any of them.",
+  "You can produce a capacity estimate in under five minutes from stated assumptions (average and peak QPS, storage per year, bandwidth, cache size for a target hit ratio, worker count from Little's Law) and name the component that saturates first with the number that proves it.",
+  "You can choose a load-balancing algorithm and connection-reuse configuration for a stated workload (short JSON calls vs long SSE streams) and write the Nginx upstream block or ALB target-group settings, including health-check thresholds and a deregistration delay that matches the pod's grace period.",
+  "You can specify a cache layer end to end (key schema with tenant and version, TTL with jitter, eviction policy, invalidation trigger, stampede protection) and state the database load if the cache is lost.",
+  "You can pick a partition or shard key for a given query mix, state the hot-spot risk and which queries become scatter-gather, and describe the rebalancing and tenant-move procedure step by step.",
+  "You can design a per-tenant rate limiter (algorithm, storage, key, 429 and header contract) and a retry policy (timeouts per hop, jitter, retry budget, circuit breaker) that together provably cannot amplify a partial outage, and show it with a k6 run.",
+  "You can design an async pipeline (outbox, queue with visibility timeout and DLQ, idempotent consumer) and say exactly what happens to a message on a crash at each of the five points between the user's POST and the stored result.",
+  "You can decide between Postgres full-text search and a dedicated search engine for a stated workload and write either the generated tsvector column with its GIN index or the index mapping and mandatory tenant filter."
+ ],
+ "failureModes": [
+  "A Redis restart during a deploy expired every key at once; thousands of concurrent misses hit Postgres, connections pinned at `max_connections`, and the API served 500s for twenty minutes even though the database itself was healthy; jittered TTLs and a single-flight lock would have held.",
+  "The customer's Nginx ran round-robin with no upstream `keepalive` in front of SSE streams; every stream opened a fresh TCP connection and long conversations pinned one pod while others idled, tripling p99 time-to-first-token under mild load until `least_conn` and `keepalive 32` were added.",
+  "Reads were routed to a replica 400 ms behind the primary; a user posted a message, the conversation list did not show it, the frontend retried the POST without an idempotency key, and the tenant saw duplicates that support then had to delete by hand.",
+  "`created_at` was chosen as the shard key for `llm_calls`; every write landed on the newest shard, and one tenant's overnight bulk re-classification saturated that shard for all 500 tenants while the other shards sat idle.",
+  "Retries in the client SDK (3x), the API (3x) and the queue consumer (5x) compounded to 45 attempts per failed call during an upstream 529 event, exhausting the shared Claude rate limit for every tenant and leaving a backlog that took six hours to drain after the upstream recovered.",
+  "Deregistration delay was 300 s but `terminationGracePeriodSeconds` was 30 s, so on every rollout the ALB kept routing to pods that had already been SIGKILLed; the resulting five minutes of 502s per deploy were blamed on 'the network' for a month.",
+  "A CDN-cached per-tenant branding endpoint lacked `Vary` and a tenant-aware cache key; the first tenant to request after a purge had its logo and name served to every other tenant for the next five minutes."
+ ],
+ "interviewQuestions": [
+  "Design DefenderMate for 500 tenants: 100k users, 200k messages a day, each message one Claude call with a 60-second user budget, plus 50k document uploads a day. Walk me through the queues, the shard or partition key, the per-hop latency budget, and the one component you expect to saturate first, with numbers.",
+  "A customer says 'just add read replicas' to fix a slow dashboard and a slow conversation view. When does that help, when does it not, and how do you handle the user who just posted a message and immediately reloads? Show me the routing rule and how you would measure lag.",
+  "You have a Redis-backed per-tenant limiter and an upstream Claude tokens-per-minute limit shared by all tenants. Design the fairness policy: how do you apportion the upstream budget, what does a tenant see when they hit their share, and how does a bursty tenant not starve a steady one? What headers do you return?",
+  "Debug: after every deploy, 502s spike for about four minutes then recover. The path is ALB to Kubernetes pods running FastAPI. Give me the three most likely causes, the exact ALB access-log fields and pod events you would check for each, and the fix.",
+  "Explain the transactional outbox pattern. Why is writing to Postgres and then publishing to Kafka broken, what does the outbox change, why do consumers still need idempotency, and what happens to the primary if the Debezium replication slot stalls for a day?",
+  "The `messages` table has reached 2 TB and the customer wants sub-100 ms conversation loads. Walk through partitioning versus sharding: how you choose the key, which queries break, how you migrate with zero downtime, and how you prove afterwards that it worked.",
+  "A tenant reports two search problems: newly uploaded documents are missing for up to a minute, and once a document from another tenant appeared in results. Diagnose both, name the exact settings or query clauses involved, and say what you would monitor to catch each before the customer does."
+ ],
+ "proofOfWork": "A public 'design dossier' repository that goes beyond the six written designs: (1) a numbers workbook for DefenderMate at 500 tenants in which every capacity figure is derived from a named assumption cell, with a sensitivity column showing what changes at 5,000 tenants and which component saturates first at each scale; (2) an executable slice in docker-compose: Nginx with `least_conn`, upstream `keepalive` and a documented drain sequence, Redis running a Lua sliding-window per-tenant limiter that returns 429 with `Retry-After` and `RateLimit` headers, Postgres with a range-partitioned `llm_calls` table, a streaming replica, and a lag probe reading `pg_stat_replication`, plus an outbox table drained into Redpanda; (3) three k6 scripts that reproduce three failure stories (cache-flush stampede, replica-lag read-your-writes, layered retry storm) with before/after Grafana screenshots showing the mitigation working; and (4) a recorded 45-minute self-run of the DefenderMate design against a timer, scored on a written rubric (requirements, numbers, diagram, two deep dives, failure story) with timestamps for each section. A reviewer can clone the repo, run `make demo`, and watch each failure story happen and then not happen."
+}

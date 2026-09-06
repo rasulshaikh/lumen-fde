@@ -1,0 +1,208 @@
+{
+ "i": 56,
+ "topic": "Serving at scale: vLLM, quantisation, KV cache, batching, GPU maths",
+ "track": "H. AI in Production",
+ "month": 7,
+ "hours": 10,
+ "why": "The moment a customer says 'we cannot send this data to an API' or 'the per-token bill does not survive procurement', the FDE becomes the person who has to say how many GPUs it takes, how fast it will feel, and what it costs per user per month - with numbers that hold up in front of their infrastructure lead and their CFO on the same call. Nobody else on the engagement can do that: the model vendor sells tokens, the platform team does not know transformer inference, and the customer's own estimate is a leaderboard screenshot. Being able to derive KV cache bytes per token on a whiteboard, tune vLLM until you find the knee of the load curve, and turn that into a one-page capacity plan is the difference between a deployment that ships and one that stalls in an architecture review for six weeks.",
+ "prerequisites": [
+  "LLM fundamentals (topic 45): tokens, attention, what the KV cache actually stores, parameter counts, and the difference between prefill and decode as compute phases.",
+  "Serving models on Kubernetes and GPUs (topic 11): device plugin, GPU requests/limits, node pools with taints, image size and model-weight loading, and why a 40 GB weight pull dominates pod startup.",
+  "LLM-era system design (topic 43): latency budgets, streaming transports, retries and rate limits - serving tuning is meaningless unless you know the SLO the number has to satisfy.",
+  "Load testing and chaos (topic 22): open-loop vs closed-loop load generation, Poisson arrivals, percentile reporting, and warmup discipline; a benchmark run wrong is worse than no benchmark.",
+  "Observability (topic 21): Prometheus scraping, histogram quantiles, Grafana dashboards - you will be reading vLLM's /metrics and DCGM exporter for the whole engagement.",
+  "Cloud cost and FinOps (topic 19): on-demand vs reserved vs spot pricing, committed-use discounts, and unit-economics framing - the deliverable here is a cost model, not a benchmark table - plus enough comfort with bytes, GiB vs GB and FLOP/s to do 2 x 32 x 8 x 128 x 2 out loud in a meeting."
+ ],
+ "subtopics": [
+  {
+   "name": "The VRAM budget: what actually occupies a GPU",
+   "learn": "Decompose GPU memory into five buckets and be able to size each: model weights (params x bytes per param - 8B in bf16 is 16 GB, 70B is 140 GB and therefore does not fit one 80 GB card), the KV cache pool, peak activation and workspace memory during a forward pass, fixed overhead (CUDA context, NCCL communication buffers, CUDA graph pools - typically 1-3 GB), and fragmentation. Understand exactly what vLLM's --gpu-memory-utilization (default 0.90) means: a fraction of TOTAL card memory that vLLM may occupy, after which it runs a profiling forward pass, subtracts weights plus peak activations, and hands the entire remainder to the KV block pool. That is why the flag over-commits and OOMs at startup on any card that is shared with a monitoring agent, a second replica, or a leftover process - check nvidia-smi before you set it, and never assume 0.95 is free performance.",
+   "minutes": 35,
+   "resource": {
+    "label": "vLLM docs - Optimization and Tuning (KV cache memory, gpu_memory_utilization, preemption)",
+    "url": "https://docs.vllm.ai/en/latest/configuration/optimization/"
+   }
+  },
+  {
+   "name": "Roofline: why decode is bandwidth-bound and prefill is not",
+   "learn": "Derive it rather than memorising it. A decode step reads every weight from HBM to produce one token per sequence, so FLOPs are roughly 2N per token per sequence while bytes moved are roughly 2N once for the whole batch - arithmetic intensity is approximately the batch size. Compute the ridge point of your GPU: an H100 SXM at about 3.35 TB/s HBM and about 990 TFLOP/s dense bf16 turns over at roughly 300 FLOP/byte, an A100 80GB at 2.0 TB/s and 312 TFLOP/s at roughly 156, so decode stays memory-bound until batch sizes in the hundreds. That gives you a hard upper bound to sanity-check any vendor claim: 3.35e12 bytes/s divided by 16e9 bytes of bf16 8B weights is about 209 tokens/s for a single stream, and anyone quoting 800 is quoting aggregate throughput. The consequence drives every later decision: at batch 1 shrinking weights (quantisation) buys latency, at batch 256 only fewer FLOPs or faster tensor cores do.",
+   "minutes": 35,
+   "resource": {
+    "label": "NVIDIA Deep Learning Performance Documentation (GPU performance background)",
+    "url": "https://docs.nvidia.com/deeplearning/performance/index.html"
+   }
+  },
+  {
+   "name": "The four numbers: TTFT, TPOT, throughput, goodput",
+   "learn": "Fix the vocabulary before you measure anything. Time to first token (TTFT) is dominated by prefill and queueing; time per output token (TPOT, also inter-token latency) is dominated by decode and by how many sequences share the batch; end-to-end latency is TTFT plus TPOT times output length; throughput is output tokens/s in aggregate and per GPU. Add goodput - requests per second that meet BOTH a p95 TTFT and a p95 TPOT target - because it is the only one of these that maps to 'the customer is happy', and it is the number your capacity plan must be denominated in. Internalise the tension: every knob that raises aggregate throughput (bigger batch, more concurrent sequences) raises per-user TPOT, so 'tokens per second' with no qualifier - input or output, per user or aggregate, at what concurrency, under what SLO - is not a number, it is a marketing artefact.",
+   "minutes": 30,
+   "resource": {
+    "label": "Lilian Weng - Large Transformer Model Inference Optimization",
+    "url": "https://lilianweng.github.io/posts/2023-01-10-inference-optimization/"
+   }
+  },
+  {
+   "name": "KV cache arithmetic and why GQA changed the economics",
+   "learn": "Memorise the formula: bytes per token = 2 (K and V) x num_layers x num_kv_heads x head_dim x bytes_per_element. Work three examples until they are automatic - Llama-3-8B (32 layers, 8 KV heads, head_dim 128, bf16) is 2x32x8x128x2 = 131,072 B = 128 KiB/token; Llama-2-7B with full multi-head attention (32 KV heads) is 512 KiB/token, four times worse, which is precisely why grouped-query attention made long context affordable; Llama-3-70B (80 layers, 8 KV heads) is 320 KiB/token. Then close the loop: an 8B on an 80 GB H100 at utilisation 0.90 leaves roughly 72 - 16 - 4 = 52 GiB of KV pool, which is about 426,000 tokens, which is about 52 concurrent sequences at 8k context or 6 at 64k. Know the variants you will meet - MQA (one KV head), GQA (grouped), MLA (DeepSeek's compressed latent KV) - and know that --max-model-len is the single largest lever on concurrency because it caps the per-sequence worst case the scheduler must respect.",
+   "minutes": 40,
+   "resource": {
+    "label": "GQA: Training Generalized Multi-Query Transformer Models (arXiv 2305.13245)",
+    "url": "https://arxiv.org/abs/2305.13245"
+   }
+  },
+  {
+   "name": "PagedAttention: blocks, block tables, preemption",
+   "learn": "Understand the actual mechanism, not the analogy. KV is stored in fixed-size non-contiguous blocks (block_size default 16 tokens) with a per-sequence block table, so the engine stops reserving max_model_len of contiguous memory per request - which in pre-paged servers wasted 60-80% of the pool to internal and external fragmentation. Copy-on-write block sharing means parallel samples, beam search and identical prefixes cost one copy of the shared blocks. Most importantly, know what happens when the pool fills mid-generation: the scheduler PREEMPTS a running sequence, either RECOMPUTE (discard its KV and re-run prefill when it is rescheduled) or SWAP (move blocks to pinned CPU memory, sized by --swap-space, default 4 GiB). Preemption surfaces to the user as a multi-second stall, never as an error, so vllm:num_preemptions_total is a first-class alert and not a curiosity.",
+   "minutes": 40,
+   "resource": {
+    "label": "Efficient Memory Management for LLM Serving with PagedAttention (arXiv 2309.06180)",
+    "url": "https://arxiv.org/abs/2309.06180"
+   }
+  },
+  {
+   "name": "Continuous batching and the two admission knobs",
+   "learn": "Static batching waits for the longest generation in the batch before anything is returned; continuous (iteration-level) batching evicts finished sequences and admits queued ones at every decode step, which is where most of vLLM's throughput advantage over a naive HuggingFace generate loop comes from. Learn the two knobs that control it and what each costs: --max-num-seqs caps concurrently running sequences (raises aggregate throughput, raises per-user TPOT, raises KV pressure and therefore preemption risk) and --max-num-batched-tokens caps tokens processed per scheduler step (raises prefill throughput and TTFT recovery, but a large value lets one big prefill dominate a step). Defaults have moved between the V0 and V1 engines, so read the values off the startup log for the version you are actually running rather than quoting a blog post, and always change one knob at a time against a fixed load profile.",
+   "minutes": 35,
+   "resource": {
+    "label": "vLLM repository (engine arguments and scheduler source)",
+    "url": "https://github.com/vllm-project/vllm"
+   }
+  },
+  {
+   "name": "Chunked prefill and prefill/decode disaggregation",
+   "learn": "This is the fix for the single most common complaint in a RAG deployment: 'the app freezes for everyone when one person pastes a document'. Without chunked prefill, a 32k-token prompt consumes an entire scheduler step and every streaming user's inter-token latency spikes by seconds. Chunked prefill splits that prefill into --max-num-batched-tokens-sized pieces and mixes them with decode tokens each step, trading a modest TTFT increase for the long request against a flat ITL for everyone else; it is on by default in the V1 engine, and you should be able to show the before/after ITL histogram. At larger scale, understand disaggregated serving - a prefill pool sized for compute and a decode pool sized for HBM bandwidth and KV capacity, with KV blocks shipped between them over NVLink or RDMA via a KV connector - and be equally able to say when that is over-engineering for a customer running four GPUs.",
+   "minutes": 30,
+   "resource": {
+    "label": "LMCache (KV cache offloading and disaggregated prefill for vLLM)",
+    "url": "https://github.com/LMCache/LMCache"
+   }
+  },
+  {
+   "name": "Automatic prefix caching and prefix-aware routing",
+   "learn": "Blocks are hashed by their content plus the hash of all preceding blocks, so any request sharing a prefix reuses those KV blocks instead of recomputing them. The wins are enormous and predictable: a 2,000-token system prompt plus few-shot examples on every request, a shared RAG document across a question set, and multi-turn chat where turn N re-sends turns 1..N-1. Watch the prefix cache hit-rate metrics (a gauge in V0, hits and queries counters in V1) as a primary KPI. Then learn the two production traps: the cache is per-replica and per-GPU, so a round-robin load balancer across eight replicas drives the hit rate towards zero and you need prefix-aware or session-affine routing to recover it; and cached blocks are evicted LRU from the same pool that serves running sequences, so hit rate collapses exactly when KV pressure is highest - which is exactly when you were counting on it.",
+   "minutes": 30,
+   "resource": {
+    "label": "vLLM design docs - Automatic Prefix Caching (hash-based block reuse and eviction)",
+    "url": "https://docs.vllm.ai/en/latest/design/prefix_caching/"
+   }
+  },
+  {
+   "name": "Speculative decoding and when it backfires",
+   "learn": "A cheap drafter proposes k tokens, the target model verifies all k in a single forward pass, and the accepted prefix is kept - with rejection-sampling verification the output distribution is provably identical to the target model's, so this is a pure latency optimisation, not a quality trade. The governing quantity is the acceptance rate alpha; expected tokens per verification step is (1 - alpha^(k+1)) / (1 - alpha), so a drafter with alpha = 0.7 and k = 4 yields roughly 2.8 tokens per step before you subtract draft cost. Know the method families - n-gram / prompt-lookup drafting (free, and spectacular for code editing, diff generation and extractive RAG where output copies input), EAGLE-style and Medusa-style heads, and a genuinely smaller draft model - and configure them through vLLM's --speculative-config. The trap that catches people: speculation spends spare compute to save bandwidth, so it wins at batch 1 and can reduce total throughput at production concurrency; benchmark it at your real batch size or you will ship a regression.",
+   "minutes": 30,
+   "resource": {
+    "label": "Fast Inference from Transformers via Speculative Decoding (arXiv 2211.17192)",
+    "url": "https://arxiv.org/abs/2211.17192"
+   }
+  },
+  {
+   "name": "Quantisation: formats, granularity, and where the win is",
+   "learn": "Separate the axes. What is quantised: weight-only (W4A16, W8A16) versus weights and activations (W8A8). Format: INT4, INT8, FP8 e4m3 and e5m2, NVFP4. Granularity: per-tensor, per-channel, per-group of 128 - finer granularity costs a little memory and recovers most of the accuracy. Calibration method: GPTQ (second-order/Hessian error compensation), AWQ (activation-aware per-channel scaling to protect salient weights), SmoothQuant (migrating activation outliers into weights so INT8 activations behave). The operational rule that matters: weight-only INT4 shrinks weights 4x and therefore wins at LOW batch where you are bandwidth-bound, but the dequantisation costs compute, so without Marlin/Machete-class kernels it can be slower than bf16 at high batch; FP8 W8A8 on Hopper or Ada (SM 8.9/9.0) actually executes on FP8 tensor cores and so raises throughput at high batch too, at near-lossless quality. Always re-run the customer's own eval after quantising - the degradation lands on rare entities, non-English text and code, not on your three smoke-test prompts.",
+   "minutes": 45,
+   "resource": {
+    "label": "llm-compressor (vLLM project) - quantisation recipes and formats",
+    "url": "https://github.com/vllm-project/llm-compressor"
+   }
+  },
+  {
+   "name": "KV cache quantisation for long-context workloads",
+   "learn": "Separate from weight quantisation and often more valuable: --kv-cache-dtype fp8 (choose e4m3 for range-limited precision or e5m2 for more exponent) halves KV bytes per token, which directly doubles either concurrency or maximum context at the same VRAM, and speeds decode because attention reads half the bytes. Understand that it needs scaling factors - either shipped in the checkpoint or derived at startup with --calculate-kv-scales - and that quality loss concentrates in exactly the place customers notice: very long contexts and needle-in-a-haystack retrieval from the middle of a document. Measure it with a long-context retrieval eval at the customer's real context length, never with perplexity on a generic corpus. Check kernel and backend support before you promise INT8 or INT4 KV to anyone; support varies by attention backend and GPU generation.",
+   "minutes": 25,
+   "resource": {
+    "label": "vLLM docs - Quantized KV Cache (kv-cache-dtype fp8 e4m3/e5m2, calibrated scales)",
+    "url": "https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache/"
+   }
+  },
+  {
+   "name": "Attention kernels, CUDA graphs, and eager mode",
+   "learn": "FlashAttention tiles the attention computation so the N x N score matrix is never materialised in HBM, turning attention memory from quadratic to linear and making it IO-aware; FlashAttention-2/3 and FlashInfer add paged-KV decode kernels, and decode attention is a genuinely different kernel from prefill attention with different bottlenecks. CUDA graphs capture a whole decode iteration as one replayable graph, eliminating per-kernel launch overhead that dominates wall time at small batch sizes; vLLM captures graphs for a set of batch sizes at startup and pads to the nearest captured size, which is why startup takes a minute and why memory usage jumps at the end of initialisation. Know what --enforce-eager actually costs: it disables graph capture, saving a couple of GB and startup time, at a real decode throughput loss at low concurrency - it is a debugging flag, not a production setting, and shipping it because it silenced a startup error is a classic quiet regression.",
+   "minutes": 30,
+   "resource": {
+    "label": "FlashAttention repository (Dao-AILab)",
+    "url": "https://github.com/Dao-AILab/flash-attention"
+   }
+  },
+  {
+   "name": "Multi-GPU: tensor, pipeline, data and expert parallelism",
+   "learn": "Tensor parallelism shards every weight matrix across GPUs and requires an all-reduce roughly twice per transformer block, so it lives or dies on interconnect - excellent over NVLink/NVSwitch, potentially slower than a single GPU over PCIe. TP size must divide the attention head count, and with GQA at 8 KV heads a TP of 16 replicates KV rather than sharding it, which quietly costs you cache capacity. Pipeline parallelism shards layers with only point-to-point sends between stages, tolerates Ethernet or InfiniBand between nodes, and pays in bubbles unless enough requests are in flight - it is the cross-node tool. Data parallelism is N independent replicas, and it is the correct default answer whenever the model fits on one GPU: N replicas almost always beat TP=N on throughput per dollar and on blast radius. Add expert parallelism for MoE models. In vLLM these are -tp, -pp, --data-parallel-size and --enable-expert-parallel; be able to argue a topology from model size, interconnect and SLO rather than habit.",
+   "minutes": 35,
+   "resource": {
+    "label": "NVIDIA NCCL User Guide (collectives and topology)",
+    "url": "https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/index.html"
+   }
+  },
+  {
+   "name": "Running a benchmark that is worth quoting",
+   "learn": "Drive a running server with vllm bench serve (previously benchmarks/benchmark_serving.py): --dataset-name sharegpt or random with --random-input-len / --random-output-len, --num-prompts, --request-rate for Poisson arrivals, --burstiness to control clumping, and --ignore-eos when you need output length pinned. Discard a warmup phase - CUDA graph capture, torch.compile and a cold prefix cache make the first requests unrepresentative. Never quote --request-rate inf: that measures saturation throughput, which is the one number you can never promise a customer. Match the customer's real length distribution, because a 200-in/200-out benchmark tells you nothing about a 20k-in RAG workload and the difference is an order of magnitude in prefill cost. Record, alongside every result row, the GPU SKU, driver, vLLM version, model revision, quantisation, and the complete server and client command lines - a benchmark you cannot re-run is a rumour.",
+   "minutes": 40,
+   "resource": {
+    "label": "vLLM benchmarks directory (serving, throughput and latency harnesses)",
+    "url": "https://github.com/vllm-project/vllm/tree/main/benchmarks"
+   }
+  },
+  {
+   "name": "Finding the knee: queueing, Little's law, admission control",
+   "learn": "Sweep offered load and plot output tokens/s and p95 TTFT against request rate. Below the knee, latency is flat and set by service time; above it, the queue grows, TTFT rises without bound, and throughput merely plateaus - so the knee, not the peak, is the capacity number. Use Little's law (L = lambda x W) to convert '500 users' into concurrent in-flight requests: concurrency equals arrival rate times mean time in system, which is how a per-user behavioural estimate becomes a GPU count. Size to roughly 60-70% of the knee because arrivals are bursty and business-hour peaks are 3-5x the daily mean. Then close the failure mode: vLLM's queue is effectively unbounded, so an overload degrades into universal timeouts rather than partial service - add admission control (max queue depth, 429 with Retry-After, per-tenant concurrency caps) and decide deliberately who gets shed first.",
+   "minutes": 35,
+   "resource": {
+    "label": "Google SRE Book - Handling Overload",
+    "url": "https://sre.google/sre-book/handling-overload/"
+   }
+  },
+  {
+   "name": "Production observability for an inference server",
+   "learn": "Scrape vLLM's /metrics and build the dashboard before the first customer request: vllm:num_requests_running and vllm:num_requests_waiting, vllm:gpu_cache_usage_perc, prefix cache hits/queries, vllm:num_preemptions_total, and the histograms vllm:time_to_first_token_seconds, vllm:time_per_output_token_seconds and vllm:e2e_request_latency_seconds (use histogram_quantile, and alert on the quantile, never the mean). The critical insight for autoscaling: nvidia-smi GPU utilisation sits near 100% by design under continuous batching and is therefore useless as a scaling signal - scale on queue depth (num_requests_waiting) and KV cache utilisation instead. Add DCGM exporter for HBM used, SM occupancy, power draw against cap, clock throttle reasons and XID errors, because 'inference got slow this week' is sometimes a thermally throttled or power-capped card in the customer's under-provisioned rack, and you want that on a graph rather than in an argument.",
+   "minutes": 30,
+   "resource": {
+    "label": "Prometheus documentation (querying, histograms, alerting)",
+    "url": "https://prometheus.io/docs/introduction/overview/"
+   }
+  },
+  {
+   "name": "GPU economics and the self-host vs API break-even",
+   "learn": "Reduce serving to one unit: cost per million output tokens = (GPU price per hour) / (output tokens per second at SLO x 3600) x 1e6. Work it end to end - an H100 at roughly $3/hour sustaining 2,000 output tok/s at the SLO produces 7.2M tokens/hour, about $0.42 per million - and then price the same workload against list API pricing so the comparison is concrete. Model the costs people leave out of the spreadsheet: idle hours (a reserved GPU bills at 3am, a token API does not), N+1 redundancy, a staging replica, weight storage and egress, and the engineer-time to keep an inference stack patched. Understand the shape of the curve rather than a single answer: APIs win for spiky, low-volume and early-stage workloads; self-hosting wins on sustained high utilisation, data residency and air-gap requirements, custom or fine-tuned weights, and price predictability - and the crossover is a monthly token volume you can compute and defend.",
+   "minutes": 40,
+   "resource": {
+    "label": "Google Cloud documentation - GPU platforms and machine types",
+    "url": "https://docs.cloud.google.com/compute/docs/gpus"
+   }
+  },
+  {
+   "name": "Writing the capacity plan a CFO will actually sign",
+   "learn": "One page, four blocks. Assumptions: users, sessions per user per day, requests per session, mean and p95 input and output tokens, peak-to-mean factor, business-hours concentration - every one of these a number the customer supplied or approved, not one you invented. Derivation: peak token rate, measured output tokens/s per GPU at the stated SLO with a link to the benchmark run id, GPU count with headroom and redundancy shown separately. Economics: monthly cost split into fixed and variable, cost per user per month, and the API alternative at the same volume so this is a comparison rather than a request. Sensitivity: what happens if output length doubles, if adoption is 2x plan, or if the SLO tightens by 200ms. State the SLO as a sentence a non-engineer can hold ('the first word appears within a second and text arrives faster than a person reads'), name the two or three assumptions the whole number rests on, and give the trigger conditions for buying the next GPU.",
+   "minutes": 35,
+   "resource": {
+    "label": "Google SRE Book - Software Engineering in SRE (intent-based capacity planning)",
+    "url": "https://sre.google/sre-book/software-engineering-in-sre/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can compute, on a whiteboard in under three minutes and without a calculator, KV cache bytes per token for a named model and the maximum concurrent sequences it supports at a named context length on a named GPU, then state which of --max-model-len, --max-num-seqs or --gpu-memory-utilization you would move first and what it costs.",
+  "You can derive the roofline ridge point for a given GPU from its HBM bandwidth and bf16 TFLOP/s, state the batch size at which decode stops being memory-bound, and use it to predict which optimisations will and will not help before running them.",
+  "You can produce a benchmark table with at least five configurations (bf16 baseline, FP8 weights, FP8 KV cache, chunked prefill on/off, TP1 replicas vs TP2) reporting p50/p95 TTFT, p95 TPOT, output tokens/s per GPU and goodput at a stated SLO, where every row is reproducible from a recorded server and client command line.",
+  "You can plot the load curve, identify the knee (the request rate at which p95 TTFT leaves its flat region), and defend the utilisation target you sized to using Little's law and the customer's peak-to-mean factor.",
+  "You can diagnose a serving latency regression to a specific cause - KV preemption, prefill starvation, prefix cache miss from round-robin routing, a power-capped or throttled card, tensor parallelism over PCIe - from vLLM metrics and DCGM within an hour, and show the metric that proves it.",
+  "You can quantise a model, demonstrate the throughput change at the customer's production concurrency rather than at batch 1, and report the eval delta on the customer's own eval set instead of asserting that it is lossless.",
+  "You can write a one-page capacity plan for 50 and 500 users, with assumptions, sensitivity analysis, cost per user per month and the self-host-vs-API break-even token volume, that survives questions from both an infrastructure lead and a finance partner in the same meeting."
+ ],
+ "failureModes": [
+  "--gpu-memory-utilization is set to 0.95 on a card that also runs a monitoring agent or a second container, so vLLM's startup profiling over-allocates the KV pool and the server CUDA-OOMs hours later under real traffic rather than at deploy time.",
+  "--max-model-len is left at the model's advertised maximum (say 128k) 'just in case', which shrinks the KV budget to a handful of concurrent sequences, so requests queue and TTFT climbs at a load the hardware could easily handle.",
+  "An INT4 weight-only quantised model is shipped for 'speed' after benchmarking at batch 1; at the production concurrency the workload is compute-bound, dequantisation overhead makes it slower than bf16, and the quality regression only surfaces weeks later on the customer's rare-entity queries.",
+  "Chunked prefill is disabled or max_num_batched_tokens is set very large, so one user pasting a 30k-token document stalls every other user's stream for seconds and the customer reports the product as 'randomly freezing'.",
+  "Prefix caching is enabled and demoed on one replica, then the deployment scales to eight pods behind a round-robin service, the hit rate falls to near zero, and the customer's 2,000-token system prompt is re-prefilled on every single request at full cost.",
+  "A capacity plan is sized on a benchmark run with --request-rate inf, so the quoted throughput is saturation throughput; in production at 60% of that load p95 TTFT is twelve seconds because the number never had an SLO attached to it.",
+  "The HPA scales on GPU utilisation, which continuous batching pins near 100% by design, so the autoscaler never fires while num_requests_waiting grows unbounded and the queue converts a modest traffic increase into a full timeout cascade."
+ ],
+ "interviewQuestions": [
+  "Estimate the KV cache footprint per token for Llama-3-70B, then tell me the maximum number of concurrent 8k-context sessions you can serve on four H100s in bf16. Walk me through every term, including what you subtract for weights and overhead, and tell me the first thing you would change to double that concurrency.",
+  "A customer's streaming assistant is fine at 20 concurrent users. At 100 users, per-token streaming speed is unchanged but time to first token has gone from 400ms to nine seconds. What is happening, what do you look at first, and what do you change?",
+  "Explain why single-stream decode is memory-bandwidth-bound and roughly at what batch size that stops being true on an H100. Then tell me which of quantisation, speculative decoding, FlashAttention and a bigger batch actually helps at batch 1 versus at batch 128, and why.",
+  "Design the serving tier for 500 concurrent users on a mixed workload: 80% of requests are 300-token prompts and 20% are 30k-token RAG prompts, with a p95 TTFT target of one second. How many GPUs, what topology, which vLLM flags, and what breaks first as load grows past your plan?",
+  "The customer wants to self-host instead of paying per-token API pricing, and their CFO wants a number. Build the break-even analysis out loud. What non-obvious costs make self-hosting worse than the sticker price, and at what monthly token volume does the answer flip?",
+  "You quantised a model to INT4 and aggregate throughput went down. Give me at least three plausible causes and tell me the specific measurement that would distinguish between them.",
+  "Explain PagedAttention as if to the customer's platform architect: what problem it solves, what the block size trades off, and precisely what happens to a running request when the KV pool fills. Then tell me which metric you would alert on and at what threshold."
+ ],
+ "proofOfWork": "Publish a small open repository - call it gpu-serving-calculator - that pairs a deterministic model with measured evidence for a single open-weight model on one rented GPU. The calculator half is a single Python module plus CLI that takes a model config (layers, KV heads, head_dim, params), a GPU spec (VRAM, HBM bandwidth, bf16 TFLOP/s), a dtype and a context length, and emits: KV bytes per token, the KV pool remaining after weights and overhead at a given --gpu-memory-utilization, maximum concurrent sequences, the roofline ridge point and the theoretical batch-1 decode ceiling in tokens/s. The evidence half is a benchmarks/ directory containing raw vllm bench serve JSON for at least five configurations (bf16 baseline, FP8 weights, FP8 KV cache, chunked prefill off vs on, and one replica-vs-tensor-parallel comparison) swept across four request rates each, with a generated results.md whose table shows p50/p95 TTFT, p95 TPOT, output tokens/s per GPU and goodput at a declared SLO, plus two plots: p95 TTFT versus offered load with the knee annotated, and predicted-versus-measured max concurrency so the reader can see how close the calculator got and where it was wrong. Close with a CAPACITY_PLAN.md written for a non-engineer - assumptions table, derived GPU counts for 50 and 500 users, cost per user per month, sensitivity to a doubled output length, and the computed monthly token volume at which self-hosting beats the API - and a short 'what I got wrong' section naming at least one prediction the benchmark falsified, because the calibration story is what makes the artefact credible rather than the numbers."
+}

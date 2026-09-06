@@ -1,0 +1,209 @@
+{
+ "i": 60,
+ "topic": "Platform fluency for take-homes: Anthropic and OpenAI APIs side by side",
+ "track": "H. AI in Production",
+ "month": 7,
+ "hours": 5,
+ "why": "FDE take-homes and customer POCs are timeboxed, and the person grading you is watching whether your budget went into the problem or into plumbing you should already know. Customers almost never let you pick the vendor either — they are already on Bedrock, or Azure, or have a procurement contract with one provider — so 'can you do this on our stack?' has to be answerable with a running demo rather than a maybe. Being able to write the tool loop, the strict output schema, the streaming consumer and the batch job on either API from memory turns a two-day integration into an afternoon, and turns a vendor-migration question into a one-page diff instead of a project.",
+ "prerequisites": [
+  "Topic 47 (tool use, structured outputs and MCP servers): the concepts of a tool schema, a tool-execution loop and a JSON output contract. This topic is those same ideas executed twice, fast, from memory, under a stopwatch.",
+  "Topic 46 (prompt engineering as code): a versioned prompt file, a golden set of inputs, and a one-command regression run — you need these to prove the two implementations actually produce equivalent output rather than merely both returning 200.",
+  "Fluent Python (and enough TypeScript to read SDK examples): `httpx`/`requests`, SSE parsing, `asyncio.gather`, Pydantic v2 models, `os.environ` secret handling, and comfort reading a raw `curl -i` response including headers.",
+  "JSON Schema literacy: `type`, `properties`, `required`, `additionalProperties`, `enum`, `const`, `anyOf`, `$ref`/`$defs`, and specifically the difference between a property that is not in `required` and one whose type is a union with `null`.",
+  "Topic 43 (LLM-era system design): retries with exponential backoff and jitter, timeouts, idempotency and latency budgets — without these your client is tutorial-shaped, not production-shaped, and graders notice.",
+  "Two funded API keys (Anthropic and OpenAI, roughly $20 each) and a stopwatch. This topic is a drill; without live keys against current models you are reading documentation, not building fluency."
+ ],
+ "subtopics": [
+  {
+   "name": "Auth, base URLs, and a scaffold you can type from memory",
+   "learn": "Both platforms are POST-JSON over HTTPS and the auth differs in exactly one header. Anthropic: `POST https://api.anthropic.com/v1/messages` with `x-api-key: $ANTHROPIC_API_KEY`, `anthropic-version: 2023-06-01` (required — omitting it is a 400), and `content-type: application/json`. OpenAI: `POST https://api.openai.com/v1/responses` with `Authorization: Bearer $OPENAI_API_KEY`, plus optional `OpenAI-Organization` and `OpenAI-Project` headers. Both SDK clients read the key from the environment with zero arguments (`anthropic.Anthropic()`, `OpenAI()`). Build yourself a scaffold — pinned SDK versions, `.env.example`, a `smoke.py` that makes one call on each provider, and the equivalent `curl` in the README — and time it: keys to first 200 should be under ten minutes on both.",
+   "minutes": 15,
+   "resource": {
+    "label": "Claude Docs — API getting started",
+    "url": "https://platform.claude.com/docs/en/api/overview"
+   }
+  },
+  {
+   "name": "Request and response shapes, memorised in parallel",
+   "learn": "Anthropic minimal body: `{model, max_tokens (REQUIRED — omitting it 400s), messages: [{role, content}], system (top-level, there is no \"system\" role)}`, returning `{id, type: \"message\", role: \"assistant\", content: [blocks], stop_reason, usage: {input_tokens, output_tokens}}`. OpenAI Responses minimal body: `{model, input (string or item array), instructions, max_output_tokens (optional)}`, returning `{id: \"resp_...\", status, output: [items], usage: {input_tokens, output_tokens, total_tokens}}` with `output_text` as an SDK-only convenience. Anthropic `content` is always a list, so `response.content[0].text` breaks the moment a `thinking` or `tool_use` block precedes the text. Know the `stop_reason` enum — `end_turn`, `max_tokens`, `stop_sequence`, `tool_use`, `pause_turn`, `refusal`, `model_context_window_exceeded` — and its OpenAI counterpart `status: \"incomplete\"` plus `incomplete_details.reason`. Know too that `temperature`, `top_p` and `top_k` are deprecated on Claude models released after Opus 4.6 (non-default values are rejected with a 400) and that OpenAI reasoning models reject `temperature` as well.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude Docs — Messages API reference (body parameters and returns)",
+    "url": "https://platform.claude.com/docs/en/api/messages"
+   }
+  },
+  {
+   "name": "System prompt placement and who owns conversation state",
+   "learn": "Anthropic has no system role: the system prompt is the top-level `system` parameter, either a string or an array of `TextBlockParam` (the array form exists so you can attach `cache_control` to it). OpenAI Responses uses top-level `instructions`, or a `developer`/`system` role item inside `input` — and `instructions` is not carried forward when you chain with `previous_response_id`, which surprises people mid-conversation. The larger difference is statefulness: Anthropic is always stateless, so you resend the full `messages` array every turn and you own truncation; OpenAI Responses can be stateful via `store: true` plus `previous_response_id`. Decide deliberately and be able to defend it: stateful means fewer tokens on the wire and less code, stateless is what most enterprise customers with data-retention rules will actually approve. Practise forcing stateless on OpenAI with `store: false` and resending the item list yourself.",
+   "minutes": 15,
+   "resource": {
+    "label": "OpenAI Platform — Conversation state guide",
+    "url": "https://developers.openai.com/api/docs/guides/conversation-state"
+   }
+  },
+  {
+   "name": "Content blocks and multimodal input on both",
+   "learn": "Anthropic message `content` is a string or a list of typed blocks: `{\"type\":\"text\"}`, `{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":...}}` or a `{\"type\":\"url\"}` source, `{\"type\":\"document\"}` for PDFs, plus `tool_use`, `tool_result` and `thinking`. OpenAI Responses uses input parts `{\"type\":\"input_text\"}`, `{\"type\":\"input_image\",\"image_url\": <data URI or https URL>}` and `{\"type\":\"input_file\"}`, with model text returning as `output_text` parts carrying `annotations`. Drill both directions: base64 a PNG and a five-page PDF and get the same structured extraction out of each API. Respect the ceilings — an Anthropic Messages request caps at 32 MB and returns 413 `request_too_large` above it, so anything larger goes through the Files API rather than inline base64.",
+   "minutes": 15,
+   "resource": {
+    "label": "Claude Docs — Vision (image and document inputs)",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/vision"
+   }
+  },
+  {
+   "name": "Tool schemas: three envelopes around one JSON Schema",
+   "learn": "The parameter schema is identical JSON Schema on both platforms; only the wrapper differs, and this is the single most-fumbled thing under time pressure. Anthropic: `tools: [{name, description, input_schema: {type: \"object\", properties, required}}]` — note `input_schema`, not `parameters`. OpenAI Responses: `tools: [{type: \"function\", name, description, parameters, strict}]`, flat. OpenAI Chat Completions: `tools: [{type: \"function\", function: {name, description, parameters, strict}}]`, nested one level deeper. Build a `toolspec.py` that holds the raw JSON Schema once plus two adapter functions emitting the two envelopes, and unit-test the adapters. That file is the reusable asset a take-home actually rewards, and it is what you paste into a customer repo on day one.",
+   "minutes": 20,
+   "resource": {
+    "label": "OpenAI Platform — Function calling guide",
+    "url": "https://developers.openai.com/api/docs/guides/function-calling"
+   }
+  },
+  {
+   "name": "The agent loop: tool_result vs function_call_output",
+   "learn": "Write both loops from memory. Anthropic: the response arrives with `stop_reason: \"tool_use\"` and one or more `{\"type\":\"tool_use\",\"id\":\"toolu_...\",\"name\",\"input\"}` blocks where `input` is already a parsed object; you append the assistant message verbatim with all blocks in original order, then append a **user** message whose content is `[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_...\",\"content\": <string or blocks>, \"is_error\": bool}]`, and every `tool_use` in a turn must get a matching `tool_result` in the immediately following message or the API 400s. OpenAI Responses: the model emits a `function_call` item with `call_id` and `arguments` as a **JSON string** you must `json.loads` (and defend against malformed JSON unless `strict: true`); you append that item plus `{\"type\":\"function_call_output\",\"call_id\":...,\"output\":\"<string>\"}`. Chat Completions instead uses `tool_calls` on the assistant message answered by a `{\"role\":\"tool\",\"tool_call_id\":...}` message. Always add a hard `max_iterations` guard.",
+   "minutes": 25,
+   "resource": {
+    "label": "Claude Docs — Implementing tool use (the tool-result round trip)",
+    "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools"
+   }
+  },
+  {
+   "name": "tool_choice, forcing, and parallel tool calls",
+   "learn": "Anthropic `tool_choice` takes `{\"type\":\"auto\"}`, `{\"type\":\"any\"}` (must call some tool), `{\"type\":\"tool\",\"name\":\"x\"}` (must call that one) and `{\"type\":\"none\"}`, with `disable_parallel_tool_use: true` capping a turn at one call. OpenAI takes `tool_choice: \"auto\" | \"none\" | \"required\" | {\"type\":\"function\",\"name\":\"x\"}` plus `parallel_tool_calls: false`. Understand what forcing costs before you reach for it: forced tool use is incompatible with some thinking configurations on Claude and returns a 'Forced tool use not supported' 400, and on both platforms forcing removes the model's ability to say 'I don't have enough information to call this' — exactly the behaviour a customer-facing agent needs. Handle the multi-call case properly: one assistant turn can contain N tool calls, you execute all N (concurrently is fine), and you return all N results together in the next turn.",
+   "minutes": 15,
+   "resource": {
+    "label": "Claude Docs — Tool use overview (tool_choice and parallel use)",
+    "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview"
+   }
+  },
+  {
+   "name": "Structured output on OpenAI: text.format and the strict subset",
+   "learn": "Responses API: `text: {format: {type: \"json_schema\", name: \"...\", schema: {...}, strict: true}}`. Chat Completions: `response_format: {type: \"json_schema\", json_schema: {name, schema, strict: true}}`. Under `strict: true` every object needs `\"additionalProperties\": false` and every declared property must appear in `required`; optionality is expressed as a union with null (`\"type\": [\"string\", \"null\"]`), and getting this wrong is the most common 400 in this whole topic. Prefer the SDK helpers over hand-rolled schemas: `client.responses.parse(..., text_format=MyPydanticModel)` then read `.output_parsed`, or `zodTextFormat()` in TypeScript. Handle the two escape hatches that both return HTTP 200 and neither matches your schema: a `refusal`, and `status: \"incomplete\"` with `incomplete_details.reason == \"max_output_tokens\"`.",
+   "minutes": 20,
+   "resource": {
+    "label": "OpenAI Platform — Structured Outputs guide",
+    "url": "https://developers.openai.com/api/docs/guides/structured-outputs"
+   }
+  },
+  {
+   "name": "Structured output on Anthropic: output_config.format and strict tools",
+   "learn": "Anthropic gives two independent levers you can use together. JSON outputs: top-level `output_config: {format: {type: \"json_schema\", schema: {...}}}` constrains the assistant's text block to schema-valid JSON. Strict tool use: `strict: true` on an individual tool grammar-constrains that tool's name and inputs. Note the migration trap — the older beta field was `output_format` with header `structured-outputs-2025-11-13`, still accepted for a transition period, so old sample code compiles and modern SDKs may raise a `TypeError` on it. Use `client.messages.parse()` with a Pydantic model for the ergonomic path. Keep the portable fallback in muscle memory too: define one tool and force it with `tool_choice: {\"type\":\"tool\",\"name\":\"emit\"}`, then read `block.input` — it works on every model, every gateway, and older Bedrock deployments where constrained decoding is unavailable.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude Docs — Structured outputs",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/structured-outputs"
+   }
+  },
+  {
+   "name": "The schema subset both engines refuse, and grammar limits",
+   "learn": "Constrained decoding compiles your schema into a grammar, so both platforms support only a subset, and the subsets differ. On Anthropic, supported: `enum`, `const`, `anyOf`, `$ref`/`$defs`, `default`, string formats (`date-time`, `date`, `email`, `uri`, `uuid`, `ipv4`), and array `minItems` of 0 or 1 only. Not supported: recursive schemas, external `$ref`, numeric constraints (`minimum`, `maximum`, `multipleOf`), `minLength`/`maxLength`, and regex lookahead/lookbehind or backreferences — each returns a 400. Hard limits per request: 20 strict tools, 24 optional parameters across all strict schemas, 16 union-typed parameters, plus an internal compiled-grammar ceiling that surfaces as 'Schema is too complex for compilation' and a 180-second compile timeout. Compiled grammars cache for 24 hours from last use, so never benchmark latency on a cold schema. Finally: enum capitalisation is not guaranteed, so compare enum values case-insensitively.",
+   "minutes": 15,
+   "resource": {
+    "label": "Claude Docs — Strict tool use",
+    "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use"
+   }
+  },
+  {
+   "name": "Streaming Anthropic: the content-block state machine",
+   "learn": "With `stream: true` you get SSE with typed events: `message_start` (carries `usage.input_tokens`), then per block `content_block_start` → repeated `content_block_delta` → `content_block_stop`, then `message_delta` (carries the final `stop_reason` and cumulative `usage.output_tokens`), then `message_stop`, with `ping` and `error` interleaved. Learn the delta types: `text_delta`; `input_json_delta`, whose `partial_json` fragments you must concatenate before parsing (tool arguments stream as a fragmented JSON string even though the non-streaming field is an object); `thinking_delta`; and `signature_delta`. Use `with client.messages.stream(...) as stream:` and `stream.get_final_message()` (TypeScript `stream.finalMessage()`) rather than reassembling blocks by hand. Know the operational reason this matters: long non-streaming requests hit a server-side time limit, so high-`max_tokens` calls must stream.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude Docs — Streaming Messages (event types and deltas)",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/streaming"
+   }
+  },
+  {
+   "name": "Streaming OpenAI: semantic events vs raw token deltas",
+   "learn": "The Responses API streams semantic events with a `type` and a monotonic `sequence_number`: `response.created`, `response.output_item.added`, `response.content_part.added`, `response.output_text.delta`, `response.function_call_arguments.delta`, `response.output_text.done`, then `response.completed` / `response.failed` / `response.incomplete`. Chat Completions instead streams raw `choices[0].delta` chunks terminated by `data: [DONE]`, and returns no usage numbers at all unless you pass `stream_options: {include_usage: true}` — forgetting that flag is why a cost dashboard goes blank the day someone enables streaming. Write one normaliser that reduces both providers' streams to the same `(event, text_chunk, tool_arg_fragment, usage)` tuple, and instrument it to report time-to-first-text-token separately from total wall-clock, because those two numbers move independently and customers feel the first one.",
+   "minutes": 20,
+   "resource": {
+    "label": "OpenAI Platform — Streaming responses guide",
+    "url": "https://developers.openai.com/api/docs/guides/streaming-responses"
+   }
+  },
+  {
+   "name": "Anthropic thinking blocks inside a tool loop",
+   "learn": "Configure with `thinking: {type: \"enabled\", budget_tokens: N}` where N >= 1024 and N < `max_tokens`, or `{type: \"adaptive\"}`. Responses then carry `thinking` blocks before text, each with an encrypted `signature`. The rule that breaks people: in multi-turn and tool-use conversations you must pass thinking blocks back unchanged and in original order — you cannot edit, reorder or partially drop them (including `redacted_thinking` blocks) or you get a 400 saying the thinking block no longer matches the conversation, which typically fires on turn three of a live demo. Use `display: \"omitted\"` when you are not showing reasoning to users: the thinking text is empty but the signature is preserved for continuity, and time-to-first-text improves because the server skips streaming thinking tokens. Remember thinking tokens count against `max_tokens`, so a 10k budget under an 8k cap is a 400.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude Docs — Thinking (signatures, preservation, tool use)",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/thinking"
+   }
+  },
+  {
+   "name": "OpenAI reasoning items, effort, and reasoning tokens",
+   "learn": "Set `reasoning: {effort: \"low\"|\"medium\"|\"high\", summary: \"auto\"}` on reasoning models. You pay for hidden reasoning tokens, reported at `usage.output_tokens_details.reasoning_tokens`; they bill as output and they consume `max_output_tokens`, so a tight cap plus high effort yields `status: \"incomplete\"`, an empty message, and a full invoice. In a tool loop you must preserve reasoning context across turns: either chain with `previous_response_id`, or when running stateless (`store: false`) pass the reasoning items back in `input` and request `include: [\"reasoning.encrypted_content\"]`. Build the same two-tool agent with reasoning enabled on both platforms and record tokens, latency and answer quality per effort level — that comparison table is precisely the kind of evidence a take-home write-up should lead with.",
+   "minutes": 20,
+   "resource": {
+    "label": "OpenAI Platform — Reasoning models guide",
+    "url": "https://developers.openai.com/api/docs/guides/reasoning"
+   }
+  },
+  {
+   "name": "Prompt caching: explicit breakpoints vs automatic prefix caching",
+   "learn": "Anthropic is explicit: put `cache_control: {\"type\": \"ephemeral\"}` on a content block, or once at the top level of the request to let the breakpoint auto-advance as the conversation grows. The cached prefix spans `tools`, then `system`, then `messages`, in that order, up to and including the marked block; default TTL is 5 minutes, refreshed free on every hit, with a 1-hour option. Writes cost 1.25x base input and reads 0.1x, and you verify a hit by comparing `usage.cache_creation_input_tokens` against `usage.cache_read_input_tokens` — if reads stay zero your prefix is not byte-identical, and a timestamp in the system prompt, a reordered tool list, or a changed `output_config.format` will each do that silently. OpenAI caches automatically above roughly 1024 tokens with no breakpoints; you steer routing with `prompt_cache_key` and verify with `usage.input_tokens_details.cached_tokens`. Same discipline on both: static content first, volatile content last.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude Docs — Prompt caching",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+   }
+  },
+  {
+   "name": "Batch: inline requests array vs JSONL file upload",
+   "learn": "Both are 50% cheaper with a 24-hour window; the mechanics are entirely different. Anthropic: `POST /v1/messages/batches` with `requests: [{custom_id, params: {<full Messages body>}}]` sent inline, up to 100,000 requests or 256 MB, where `custom_id` must match `^[a-zA-Z0-9_-]{1,64}$`; poll `processing_status` until it reads `\"ended\"` (not `\"completed\"`), read `request_counts.{processing,succeeded,errored,canceled,expired}`, then stream the `.jsonl` at `results_url` — results are unordered, so you join on `custom_id`. `max_tokens: 0` cache pre-warming is rejected inside a batch. OpenAI: first upload a JSONL of `{custom_id, method: \"POST\", url: \"/v1/responses\", body: {...}}` with `purpose: \"batch\"`, then `POST /v1/batches` with `input_file_id`, `endpoint` and `completion_window: \"24h\"`; poll `status` through `validating → in_progress → finalizing → completed`, then download `output_file_id` and, separately, `error_file_id`. Write one bulk-classification job both ways and record wall-clock and cost.",
+   "minutes": 25,
+   "resource": {
+    "label": "Claude Docs — Batch processing (Message Batches API)",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/batch-processing"
+   }
+  },
+  {
+   "name": "Errors, retries, timeouts, rate-limit headers, request IDs",
+   "learn": "Memorise the Anthropic taxonomy: 400 `invalid_request_error`, 401 `authentication_error`, 403 `permission_error`, 404 `not_found_error`, 413 `request_too_large` (32 MB on Messages), 429 `rate_limit_error`, 500 `api_error`, 529 `overloaded_error`. Retry 429/500/529 with exponential backoff and jitter, honour `retry-after`, and never retry a 400. Read your remaining budget from `anthropic-ratelimit-{requests,input-tokens,output-tokens}-{limit,remaining,reset}` — `reset` is an RFC 3339 timestamp, not a seconds count — and from OpenAI's `x-ratelimit-remaining-{requests,tokens}` and `x-ratelimit-reset-*`. Both SDKs retry by default: set `max_retries` and a per-request `timeout` explicitly instead of inheriting defaults, and think hard about retrying a stream, since a mid-stream failure has already emitted partial output to the user. Log the `request-id` header (Anthropic) and `x-request-id` (OpenAI) on every call — without it you cannot file a useful support ticket, and filing one is a real FDE deliverable.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude Docs — Rate limits (response headers and 429 handling)",
+    "url": "https://platform.claude.com/docs/en/api/rate-limits"
+   }
+  },
+  {
+   "name": "The portability layer and the 90-minute timed port",
+   "learn": "Build the thinnest abstraction that survives contact: one `generate(messages, tools, schema) -> Result` interface, two adapters, and a golden-file test asserting both providers parse to the same object across 20 fixed inputs. Resist the urge to add a config DSL — abstract the request envelope and the tool-result plumbing, and deliberately leave caching, thinking and batch leaky per-provider. Know the shortcut and its price: Anthropic exposes an OpenAI-SDK-compatible endpoint (point the OpenAI client at `base_url=\"https://api.anthropic.com/v1/\"` with an Anthropic key), which is fine for a same-day bake-off but drops thinking, prompt caching, PDF support and citations, so it never ships to a customer. Then drill: set a 90-minute timer and rebuild the same feature — tool loop, strict schema, streaming, and a cost/latency report — on the other API without looking at the first repo. Log every stall and turn each one into a snippet in your scaffold.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude Docs — OpenAI SDK compatibility (and its documented limitations)",
+    "url": "https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can open a blank file with no documentation and write a working multi-turn tool-calling loop on the Anthropic Messages API and on the OpenAI Responses API in under twenty minutes each, including correct `tool_result` and `function_call_output` plumbing and a `max_iterations` guard.",
+  "You can recite the field-level diffs on demand — `input_schema` vs `parameters`, top-level `system` vs `instructions`, `max_tokens` required vs `max_output_tokens` optional, parsed `input` object vs `arguments` JSON string — and correct a colleague's code by reading it, without running it.",
+  "You can enforce a JSON contract three ways (OpenAI `text.format` with `strict: true`, Anthropic `output_config.format`, and the forced-tool fallback) and justify which one you would deploy on a customer's Bedrock estate and why.",
+  "You can consume both streaming protocols, reassemble a complete tool call from `input_json_delta` and `response.function_call_arguments.delta` fragments, and report time-to-first-token separately from total latency on the same prompt.",
+  "You can push the same 5,000-item job through both Batch APIs, join unordered results on `custom_id`, account for expired and errored requests, and produce a cost and wall-clock comparison table.",
+  "You can demonstrate a prompt-cache hit on both platforms by pointing at `cache_read_input_tokens` and `input_tokens_details.cached_tokens`, and diagnose in one sentence why a previously-hitting cache stopped hitting.",
+  "You can classify any API failure as retryable or not within seconds, name the header that tells you how long to wait, and produce the provider request ID needed to open a support ticket.",
+  "You can complete a 90-minute timed port of a feature from one API to the other and hand a grader a README they can run end to end with two commands."
+ ],
+ "failureModes": [
+  "Returning only some of a turn's `tool_result` blocks — or dropping the assistant's `tool_use` blocks while trimming history for context — producing an opaque 400 that only appears on the third turn of a live customer demo.",
+  "Treating OpenAI's `arguments` as a dict because the Anthropic equivalent is one: the code passes on happy-path fixtures and throws the first time a real customer prompt yields a nested object under load.",
+  "Carrying `temperature=0` across from an older repo onto a current Claude or an OpenAI reasoning model, which hard-400s in the customer's environment while continuing to work locally against a pinned older model.",
+  "Setting `max_tokens` / `max_output_tokens` below the thinking or reasoning budget, so responses come back `stop_reason: \"max_tokens\"` or `status: \"incomplete\"` with empty content and a full bill, and the team spends a day blaming the prompt.",
+  "Enabling streaming on Chat Completions without `stream_options: {include_usage: true}`, silently zeroing the token counts that feed the customer's cost dashboard and internal chargeback report.",
+  "Putting a timestamp, session ID or reordered tool list at the front of the prompt, destroying every prompt-cache hit and roughly tripling input cost with no error surfacing anywhere.",
+  "Shipping the OpenAI-compatibility endpoint into a customer POC because it made the demo fast, then discovering during hardening that prompt caching, thinking and PDF support are unavailable on that path and the rewrite lands in the go-live week."
+ ],
+ "interviewQuestions": [
+  "Whiteboard the tool-calling loop for the Anthropic Messages API and the OpenAI Responses API in parallel columns. Where does the tool result go in each, what is its identifier called, and what does the API do if you return two results for one call or none for one that was requested?",
+  "A customer must run on Bedrock and needs guaranteed schema-valid JSON on every request. Walk me through your options, what each costs in latency and flexibility, and what you do if their pinned model version does not support constrained decoding.",
+  "We swapped models and p95 latency doubled while input and output token counts stayed flat. Give me your debugging order across both APIs — what do you check first, and which specific usage field settles the argument?",
+  "Design a provider-agnostic LLM client for a team shipping to three customers on three different clouds. What do you abstract, what do you deliberately leave leaky, and how do you test that the abstraction has not started lying to you?",
+  "A bulk-extraction job over 200,000 documents must finish overnight at minimum cost. Compare the two Batch APIs concretely — submission, polling, result retrieval — and tell me exactly what you do about the requests that expire at the 24-hour boundary.",
+  "Explain prompt caching on both platforms to a customer's finance lead in plain language, then tell me three changes an engineer could ship tomorrow that would silently destroy the savings without raising a single error.",
+  "You have ninety minutes and a take-home that says 'build a research agent, any provider.' Which do you pick, what do you cut, what do you instrument, and what goes in the README?"
+ ],
+ "proofOfWork": "Beyond the two per-API repos, publish a third repo called `llm-api-parity` whose entire purpose is to prove the two are interchangeable and to document precisely where they are not. It contains one provider-neutral scenario file of roughly thirty cases — plain completion, single tool call, parallel tool calls, a tool that raises and must come back as `is_error` / an error string, strict-schema extraction, a deliberately unsupported schema feature, an oversized image, a forced stop at `max_tokens`, a cache-warm then cache-hit pair, and a ten-item batch — plus two thin adapters and a single `pytest` suite that runs every scenario against both providers and asserts the same parsed result object. `PARITY.md` is generated by the run, not hand-written: a table with one row per scenario and columns for both providers showing pass/fail, the exact request field names used, latency p50 and TTFT, input/output/cached/reasoning token counts, and cost, with a footnote for each behavioural divergence you found (for example which schema keywords 400 on which side, and what each returns when a tool result is missing). Add `CHEATSHEET.md`: a one-page side-by-side of endpoint, auth header, required fields, tool envelope, tool-result envelope, structured-output field, streaming event names, batch submission shape, and error taxonomy — short enough to read in ninety seconds before an interview. Add `PORT_LOG.md` recording the timed drill: start time, stop time, every point where you had to look something up, and the snippet you added to your scaffold so it never costs you a lookup again. Finally include `scripts/verify.sh` that runs the whole suite against live keys in under five minutes and prints a spend total, so anyone — a grader, a customer architect, a future you — can reproduce the parity claims rather than take your word for them."
+}

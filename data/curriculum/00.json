@@ -1,0 +1,218 @@
+{
+ "i": 0,
+ "topic": "Shell mastery and scripting",
+ "track": "A. Linux, Networking, Shell",
+ "month": 1,
+ "hours": 8,
+ "why": "An FDE lands on customer infrastructure you did not build: a bastion host, an air-gapped VM, a pod with no pip and no internet, where the only tooling guaranteed to exist is bash plus coreutils. The glue you write on-site during week one (data loads, migration runners, log triage, deploy hooks, cron jobs) becomes the customer's production overnight, and a script that exits 0 on partial failure silently corrupts their data and your credibility in the same afternoon. You also inherit the customer's own scripts and must read, debug and harden them live, in front of their engineers, without looking anything up.",
+ "prerequisites": [
+  "Comfortable navigating a terminal: cd, ls, cat, less, man, pipes and redirection at a basic level",
+  "Knows what a process, PID, parent/child, stdin/stdout/stderr and an environment variable are (the later Track A topics on processes, signals and networking build on this)",
+  "Basic regular expressions (character classes, anchors, groups) as used by grep -E",
+  "git basics (clone, branch, commit, push) so the deliverable and proof-of-work can live in a repo with CI",
+  "bash 4+ installed locally (macOS ships 3.2; brew install bash) and a Linux VM or container to test portability",
+  "Understands what an HTTP API call with a bearer token is, since the research-script rewrite will call one"
+ ],
+ "subtopics": [
+  {
+   "name": "Execution model and the exit-status contract",
+   "learn": "Trace how a line becomes a process: alias, then function, then builtin, then PATH lookup (`type -a cmd`, `command -v cmd`, `hash -r` after installing a binary), then fork+exec; understand why `cd` and `export` must be builtins and why `exec cmd` as the last line of an entrypoint replaces the shell so PID 1 receives signals directly. Know the exit-status contract cold: 0 success, 1-125 yours, 126 found but not executable, 127 not found, 128+N killed by signal N (130 SIGINT, 137 SIGKILL, 143 SIGTERM), and that `$?` is overwritten by every command including `[ ]`. Adopt sysexits conventions (64 usage, 65 bad input data, 69 service unavailable, 70 internal error, 75 temporary failure, retry) so cron, CI and other scripts can branch on your codes.",
+   "minutes": 25,
+   "resource": {
+    "label": "GNU Bash Manual - Exit Status",
+    "url": "https://www.gnu.org/software/bash/manual/bash.html#Exit-Status"
+   }
+  },
+  {
+   "name": "Quoting, word splitting and the -- guard",
+   "learn": "Internalise the expansion order (brace, tilde, parameter, command substitution, arithmetic, word splitting on IFS, pathname expansion, quote removal) so you can predict what `$var`, `\"$var\"`, `$@`, `\"$@\"` and `$*` each produce when the value contains spaces, `*`, or a leading `-`. Rule: every expansion is double-quoted unless you can say why not; iterate lists with `\"${arr[@]}\"`, never `for f in $(ls)` or `$(find ...)`, and terminate option parsing with `--` before user-supplied paths (`rm -- \"$f\"`, `grep -e \"$pat\" -- \"$file\"`). Build a hostile fixture directory with `touch -- '-rf' 'a b' $'new\\nline' '*'` and prove your script survives it; use `printf '%q'` when you must serialise a value back into a shell command line.",
+   "minutes": 30,
+   "resource": {
+    "label": "ShellCheck wiki - SC2086 Double quote to prevent globbing and word splitting",
+    "url": "https://www.shellcheck.net/wiki/SC2086"
+   }
+  },
+  {
+   "name": "Strict mode: what -e, -u and pipefail actually do, and where they lie",
+   "learn": "`set -e` exits on a failing simple command but is suppressed inside `if`/`while`/`until` conditions, on the left of `&&`/`||`, in every pipeline stage except the last (without pipefail), and inside `$(...)` in an assignment unless `shopt -s inherit_errexit`; a function invoked from a condition runs with -e disabled for its entire body. `set -u` makes an unset expansion fatal, so write `${VAR:-}` or `${VAR:?message}` deliberately, and know that `$1` with no args and `\"${arr[@]}\"` on an empty array (bash < 4.4) both trip it. `set -o pipefail` returns the rightmost non-zero status of a pipeline; combine as `set -Eeuo pipefail` (`-E` so ERR traps fire inside functions) and still write explicit `cmd || die 'msg'` on every step that matters, because -e is a safety net, not the design.",
+   "minutes": 35,
+   "resource": {
+    "label": "Greg's Wiki BashFAQ/105 - Why doesn't set -e do what I expected?",
+    "url": "https://mywiki.wooledge.org/BashFAQ/105"
+   }
+  },
+  {
+   "name": "Traps: EXIT, ERR, INT/TERM and cleanup that always runs",
+   "learn": "Register `trap cleanup EXIT` immediately after creating anything that needs undoing (temp dirs, lock fds, background PIDs); EXIT fires on normal completion, `exit N`, and after a caught signal, but never on SIGKILL or a dead host, so cleanup must also be idempotent on the next start. Use `trap 'on_err $? $LINENO \"$BASH_COMMAND\"' ERR` with `set -E` to log the failing command and line, and `trap 'exit 130' INT` / `trap 'exit 143' TERM` so the EXIT trap still runs and the parent sees the conventional status; a trap that swallows a signal without exiting turns Ctrl-C into a hang. Save `$?` on the first line of the EXIT handler before anything clobbers it, inspect with `trap -p`, reset with `trap - INT`, and remember traps are not inherited by subshells or `$(...)`.",
+   "minutes": 30,
+   "resource": {
+    "label": "GNU Bash Manual - Bourne Shell Builtins (trap)",
+    "url": "https://www.gnu.org/software/bash/manual/bash.html#Bourne-Shell-Builtins"
+   }
+  },
+  {
+   "name": "getopts, usage() and CLI ergonomics",
+   "learn": "Parse flags with `while getopts ':hvo:n:' opt; do case $opt in o) out=$OPTARG;; :) die \"-$OPTARG requires a value\";; \\\\?) usage >&2; exit 64;; esac; done; shift $((OPTIND-1))` - the leading `:` in the optstring puts getopts in silent mode so you own the error text. Write `usage()` with a one-line synopsis, every flag with its default, honoured env vars and exit codes; `-h` prints to stdout and exits 0, errors print to stderr and exit 64, and required-argument checks happen after the loop (`[[ -n ${out:-} ]] || { usage >&2; exit 64; }`). Read secrets from env or a `--token-file`, never argv (visible in `ps` and trace logs); long options are not in getopts, so either add a `case \"$1\" in --output=*)` pre-loop or accept that a tool with many long flags is a Python argparse job.",
+   "minutes": 30,
+   "resource": {
+    "label": "POSIX.1-2017 Shell & Utilities - getopts",
+    "url": "https://pubs.opengroup.org/onlinepubs/9699919799/utilities/getopts.html"
+   }
+  },
+  {
+   "name": "Parameter expansion instead of forking sed and basename",
+   "learn": "Use `${x:-default}`, `${x:=default}`, `${x:?error text}` and `${x:+alt}` for defaults and required-var checks; `${path##*/}` (basename), `${path%/*}` (dirname), `${f%.*}` / `${f##*.}` (strip or get extension), `${s//pat/rep}` for global replace, `${s^^}` / `${s,,}` for case (bash 4+), `${#s}` for length, `${s:off:len}` for slicing, `${@:2}` to drop the first positional. Know that `${x-d}` triggers only when unset while `${x:-d}` also triggers on empty, and that the patterns are globs, not regex. Every one of these in a loop body replaces a fork+exec of `sed`, `cut` or `basename`, which is the difference between 2 seconds and 2 minutes on a 100k-line file on an underpowered customer jump host.",
+   "minutes": 25,
+   "resource": {
+    "label": "GNU Bash Manual - Shell Parameter Expansion",
+    "url": "https://www.gnu.org/software/bash/manual/bash.html#Shell-Parameter-Expansion"
+   }
+  },
+  {
+   "name": "Arrays, mapfile and the read -r loop",
+   "learn": "Build lists with `arr=()`, `arr+=(\"$item\")`, iterate `\"${arr[@]}\"`, count `${#arr[@]}`, list indices `${!arr[@]}`, and use `declare -A map` for associative lookups with `[[ -v map[$k] ]]` to test presence. Read files line by line with `while IFS= read -r line || [[ -n $line ]]; do ...; done < \"$file\"` (`-r` stops backslash mangling, the `|| [[ -n ]]` catches a final line without a newline), slurp with `mapfile -t lines < <(cmd)`, and consume `find -print0` with `while IFS= read -r -d '' f`. `cmd | while read` runs the loop body in a subshell so counters and arrays set inside vanish afterwards - fix with `done < <(cmd)` process substitution or `shopt -s lastpipe`.",
+   "minutes": 30,
+   "resource": {
+    "label": "GNU Bash Manual - Arrays",
+    "url": "https://www.gnu.org/software/bash/manual/bash.html#Arrays"
+   }
+  },
+  {
+   "name": "Conditionals: [[ ]], (( )), case and =~",
+   "learn": "Prefer `[[ ]]` over `[ ]` in bash scripts: no word splitting inside, `&&`/`||` work, unquoted right-hand `==` does glob matching (quote it for a literal compare), and `=~` does ERE with captures in `BASH_REMATCH[n]` (store the regex in a variable to sidestep quoting bugs). Know the file tests ops scripts actually need: `-e -f -d -L -r -w -x -s`, `-nt`/`-ot`, `-v var` (is set), `-z`/`-n`, and use `(( n > 0 ))` for integers because `[[ $n > 0 ]]` is a string comparison. Dispatch on strings and globs with `case` (`*.csv|*.tsv)`), and use `;;&` / `;&` fall-through only with a comment justifying it.",
+   "minutes": 20,
+   "resource": {
+    "label": "GNU Bash Manual - Bash Conditional Expressions",
+    "url": "https://www.gnu.org/software/bash/manual/bash.html#Bash-Conditional-Expressions"
+   }
+  },
+  {
+   "name": "Redirection, file descriptors and a real log() function",
+   "learn": "Master the ordering rule: `cmd >file 2>&1` sends both streams to the file, `cmd 2>&1 >file` does not; all diagnostics go to `>&2` so stdout stays a clean data channel for the next pipe stage. Open a dedicated descriptor for logs (`exec 3>>\"$LOG\"`) and write `log() { printf '%(%Y-%m-%dT%H:%M:%S%z)T %-5s %s\\n' -1 \"$1\" \"${*:2}\" >&3; }` (bash 4.2+ `%(...)T` avoids forking `date`), or mirror everything with `exec > >(tee -a \"$LOG\") 2>&1` at the top; add `exec </dev/null` in cron scripts so nothing blocks waiting on a TTY. Gate verbosity on `LOG_LEVEL=${LOG_LEVEL:-info}`, ship to syslog/journald with `logger -t \"$prog\"` when you cannot copy files off a customer host, and redact tokens before they reach any log line.",
+   "minutes": 30,
+   "resource": {
+    "label": "GNU Bash Manual - Redirections",
+    "url": "https://www.gnu.org/software/bash/manual/bash.html#Redirections"
+   }
+  },
+  {
+   "name": "Pipelines, process substitution and SIGPIPE (exit 141)",
+   "learn": "`$(...)` strips all trailing newlines and runs in a subshell; `<(cmd)` yields a path you can hand to programs that need two inputs (`diff <(sort a) <(sort b)`) and `>(cmd)` feeds output to a process with no temp file. Capture per-stage status with `status=(\"${PIPESTATUS[@]}\")` on the very next line (any command clobbers it). Understand exit 141: with pipefail, `producer | head -1` fails because `head` closes the pipe and the producer dies of SIGPIPE - handle by consuming fully, checking `${PIPESTATUS[0]} -eq 141`, or restructuring with `awk 'NR==1{print; exit}'` style consumers. Note that pipefail is what finally makes `cmd | tee log` report `cmd`'s failure instead of `tee`'s success.",
+   "minutes": 25,
+   "resource": {
+    "label": "GNU Bash Manual - Pipelines",
+    "url": "https://www.gnu.org/software/bash/manual/bash.html#Pipelines"
+   }
+  },
+  {
+   "name": "Temp files, atomic writes, flock and restartability",
+   "learn": "Create scratch space with `tmp=$(mktemp -d \"${TMPDIR:-/tmp}/$prog.XXXXXX\")` and remove it in the EXIT trap; never write output in place - write `\"$out.tmp.$$\"` on the same filesystem and `mv -f` onto the target so readers see the old file or the new one, never a truncated one. Prevent overlapping runs with `exec 9>\"/var/lock/$prog.lock\"; flock -n 9 || { log warn 'already running'; exit 75; }` - the kernel releases the lock when the process dies, unlike a PID file that goes stale after `kill -9`. Make batch work restartable with a checkpoint (a `last_id` file or a `done/<id>` marker per item) so a mid-run crash plus a rerun converges instead of double-inserting rows into the customer's table.",
+   "minutes": 30,
+   "resource": {
+    "label": "man7.org - flock(1)",
+    "url": "https://man7.org/linux/man-pages/man1/flock.1.html"
+   }
+  },
+  {
+   "name": "Concurrency: background jobs, wait, xargs -P and timeouts",
+   "learn": "Fan out with `work \"$item\" & pids+=($!)` and collect each result with `for p in \"${pids[@]}\"; do wait \"$p\" || failed+=(\"$p\"); done`; `wait -n` (bash 4.3+) lets you keep exactly N jobs in flight. For lists use `printf '%s\\0' \"${items[@]}\" | xargs -0 -P 8 -n 1 -I{} bash -c 'work \"$1\"' _ {}` and know xargs exits 123 when any invocation failed. Wrap every network or DB call in `timeout --signal=TERM --kill-after=10 60 cmd` (exit 124 on timeout) and make the parent's INT/TERM trap `kill \"${pids[@]}\"` or `kill -- -$$` on the process group so children do not survive as orphans holding locks when Kubernetes or a human stops the job.",
+   "minutes": 30,
+   "resource": {
+    "label": "man7.org - xargs(1)",
+    "url": "https://man7.org/linux/man-pages/man1/xargs.1.html"
+   }
+  },
+  {
+   "name": "The text toolbox: grep, sed, awk, sort, uniq, cut, comm",
+   "learn": "Compose one-liners at typing speed: `grep -E -o -c -v -n -r -l`, `sed -E 's/(a)(b)/\\\\2\\\\1/'` and `sed -n '/start/,/end/p'`, `awk -F'\\t' '$3 > 100 {sum+=$3} END {print sum}'`, `sort -t, -k2,2n -k1,1 | uniq -c | sort -rn | head`, `cut -d: -f1,3`, `tr -s ' ' '\\n'`, `comm -23 <(sort a) <(sort b)` for set difference, `paste -sd,`, `column -t`. Know the sharp edges: `sed -i` differs between GNU (`-i`) and BSD/macOS (`-i ''`); `LC_ALL=C` makes sort and grep byte-wise and several times faster on large logs; `sort -u` dedupes on the sort key only; and the moment you need a variable or a second field, reach for awk before a bash `while read` loop.",
+   "minutes": 30,
+   "resource": {
+    "label": "MIT Missing Semester - Data Wrangling",
+    "url": "https://missing.csail.mit.edu/2020/data-wrangling/"
+   }
+  },
+  {
+   "name": "curl + jq: hardened API calls from a script",
+   "learn": "Call APIs with `curl -sS --fail-with-body --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 10 --max-time 60 -H @headers.txt -o \"$body\" -w '%{http_code}'` so transient 5xx/429 are retried, non-2xx returns non-zero, and you keep the body for the error log; put the bearer token in the header file or a `-K` config, never argv. Parse with `jq -r '.items[] | [.id, .name] | @tsv'` into `while IFS=$'\\t' read -r id name` loops, use `jq -e` so a null/false result exits non-zero, `--arg k \"$v\"` / `--argjson` to inject values safely, `-c` for one-object-per-line NDJSON, and drive pagination with `while cursor=$(jq -r '.next_cursor // empty' \"$body\"); [[ -n $cursor ]]`. Assert the response shape (`jq -e '.items | type == \"array\"' \"$body\"`) before anything is written downstream.",
+   "minutes": 35,
+   "resource": {
+    "label": "jq Manual",
+    "url": "https://jqlang.org/manual/"
+   }
+  },
+  {
+   "name": "Debugging: bash -x, PS4, BASH_XTRACEFD and ERR context",
+   "learn": "Run `bash -n script` for a syntax check and `bash -x` for a trace, with `PS4='+ ${BASH_SOURCE##*/}:${LINENO}:${FUNCNAME[0]:-main}(): '` so every traced line names file, line and function; send the trace to its own descriptor (`exec 5>trace.log; BASH_XTRACEFD=5; set -x`) so stdout data stays clean. Scope tracing to one block with `{ set -x; risky_step; set +x; } 2>/dev/null`, and keep `trap 'echo \"ERR $? at ${BASH_SOURCE}:${LINENO}: $BASH_COMMAND\" >&2' ERR` in production scripts. When the shell itself is not the problem, `strace -f -e trace=execve,openat -o st.log bash script` shows exactly which binaries and files were touched - usually the fastest route to a wrong PATH or missing config on a customer host.",
+   "minutes": 25,
+   "resource": {
+    "label": "MIT Missing Semester - Debugging and Profiling",
+    "url": "https://missing.csail.mit.edu/2020/debugging-profiling/"
+   }
+  },
+  {
+   "name": "ShellCheck as a merge gate",
+   "learn": "Run `shellcheck -S style -x -o all script.sh` locally and in CI and learn the codes you will hit weekly: SC2086 (unquoted expansion), SC2046 (unquoted `$(...)`), SC2155 (`local x=$(cmd)` masks the exit status), SC2164 (`cd` without `|| exit`), SC2115 (`rm -rf \"$dir/\"` when dir may be empty), SC2181 (testing `$?` instead of the command), SC2034 (unused variable, usually a typo). Silence a finding only with an inline `# shellcheck disable=SCxxxx` plus a reason on the same line, use `# shellcheck source=lib.sh` so sourced files are followed, and `# shellcheck shell=bash` when the shebang is `env`. Wire it into pre-commit and a GitHub Actions step so a customer-facing script cannot merge with warnings.",
+   "minutes": 20,
+   "resource": {
+    "label": "ShellCheck wiki - checks index and directives",
+    "url": "https://www.shellcheck.net/wiki/"
+   }
+  },
+  {
+   "name": "Testing with BATS: fixtures, PATH shims and exit-code assertions",
+   "learn": "Write `@test 'fails with 64 on missing -o' { run ./tool -n 3; [ \"$status\" -eq 64 ]; [[ ${lines[0]} == Usage:* ]]; }` using bats-core's `run`, `$status`, `$output` and `${lines[@]}`, with `setup()`/`teardown()` building a fixture under `$BATS_TEST_TMPDIR` that includes the hostile filenames from the quoting subtopic. Stub external commands by prepending a shim directory to PATH containing fake `curl`, `psql` or `aws` scripts that assert their arguments and emit canned JSON, so the suite runs offline in CI; exercise the retry path by making the shim fail on the first N calls via a counter file. Run `bats -r tests/ --tap`, add `bats-assert` and `bats-support` for readable failures, and treat any script without a `.bats` file as unshippable.",
+   "minutes": 35,
+   "resource": {
+    "label": "bats-core documentation",
+    "url": "https://bats-core.readthedocs.io/en/stable/"
+   }
+  },
+  {
+   "name": "Portability and style: bash 3.2, GNU vs BSD, sh vs dash",
+   "learn": "Ship with `#!/usr/bin/env bash` and guard `((BASH_VERSINFO[0] >= 4)) || die 'bash 4+ required'` because macOS still ships 3.2 (no `mapfile`, `declare -A`, `${x,,}`, `wait -n`); on Debian/Ubuntu `#!/bin/sh` is dash, where `[[`, arrays and `local -n` do not exist, and Alpine containers run busybox ash. Keep a mental diff table for GNU vs BSD userland: `sed -i` vs `sed -i ''`, `date -d` vs `date -v`, `readlink -f` (absent on older macOS), `stat -c` vs `stat -f`, `xargs -r`, `grep -P`. Follow the Google Shell Style Guide (`main \"$@\"` last, `local` everything, `readonly` constants, `snake_case` functions, 2-space indent) including its rule that anything past ~100 lines or needing real data structures gets rewritten in Python.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google Shell Style Guide",
+    "url": "https://google.github.io/styleguide/shellguide.html"
+   }
+  },
+  {
+   "name": "Interactive fluency: readline, history and dotfiles",
+   "learn": "Work at typing speed on any customer box: `Ctrl-R` incremental search, `Ctrl-A/E/W/U/K/Y`, `Alt-.` for the last argument, `!!`, `!$`, `!:2`, `^wrong^right`, `fc` to edit the previous command in `$EDITOR`, `cd -`, `pushd`/`popd`, `Ctrl-Z`/`fg`/`bg`/`jobs`. Set `HISTSIZE=100000 HISTFILESIZE=200000 HISTCONTROL=ignoreboth:erasedups`, `shopt -s histappend`, and `HISTTIMEFORMAT='%F %T '` so you have an audit trail of exactly what you ran during an incident. Know which file loads when - `.bash_profile` for login shells, `.bashrc` for interactive non-login, `BASH_ENV` for non-interactive - so aliases you defined for yourself never leak into a script's behaviour, and keep dotfiles in a repo you can bootstrap onto a fresh host with one command.",
+   "minutes": 20,
+   "resource": {
+    "label": "GNU Bash Manual - Bash Startup Files",
+    "url": "https://www.gnu.org/software/bash/manual/bash.html#Bash-Startup-Files"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can write, closed-book in under 45 minutes, a 200-line bash CLI with set -Eeuo pipefail, EXIT/ERR/INT/TERM traps, getopts with usage(), leveled logging to stderr and a log file, and it passes `shellcheck -S style -o all` with zero disables.",
+  "You can read an unfamiliar script and mark every line where set -e will not fire (conditions, &&/||, non-final pipeline stages, $(...) in assignments, functions called from tests) and rewrite each with an explicit `|| die`.",
+  "You can take a script that uses `for f in $(ls)` and unquoted variables and make it pass a fixture directory containing filenames with spaces, newlines, globs and a leading dash, verified by a BATS test.",
+  "You can make a batch job idempotent and restartable - mktemp + atomic mv, flock so two cron runs cannot overlap, checkpoint file - and demonstrate it by `kill -9` mid-run and rerunning to a converged result.",
+  "You can fan out 200 API calls with xargs -P or background jobs + wait, enforce a per-call timeout and a total budget, collect per-item exit codes, and ensure Ctrl-C or SIGTERM kills every child.",
+  "You can write a BATS suite that stubs curl/psql via PATH shims and asserts exit code, stdout and stderr for the success, usage-error, upstream-failure and retry paths, running offline in GitHub Actions.",
+  "You can locate the failing line in a 300-line script on a host you have never seen using only PS4 with BASH_SOURCE/LINENO, BASH_XTRACEFD and an ERR trap, without polluting the script's stdout.",
+  "You can state, for any given script, whether it will run on macOS bash 3.2, Debian dash and Alpine busybox, name the constructs that break it, and either fix them or justify requiring bash 4+."
+ ],
+ "failureModes": [
+  "The nightly loader has `set -e` but its critical step is `extract | tee extract.log`; without pipefail the pipeline exits 0 when extract fails, the empty file loads cleanly, and cron reports success for three weeks before the customer notices stale dashboards.",
+  "A cleanup trap runs `rm -rf \"$WORKDIR/\"` and WORKDIR is unset because the config file failed to source earlier; without `set -u` or `${WORKDIR:?}` the expansion becomes `/` and the script wipes the host it is running on.",
+  "A script developed against tidy test data uses `for f in $(find $dir -name '*.csv')`; the customer's export directory has filenames with spaces, so half the files are split into non-existent paths and skipped silently while the summary line still says 'processed N files'.",
+  "A 5-minute cron job has no flock and no timeout; one run stalls on a hung upstream API, the next twelve runs stack up, and the customer's database connection pool is exhausted by your script rather than their application.",
+  "A script written on a Mac uses `mapfile`, `declare -A` and `sed -i ''`; it fails with 'command not found' on the customer's RHEL bastion, or the reverse - `sed -i ''` on GNU sed treats the empty string as a filename and edits nothing.",
+  "The bearer token is passed as `curl -H \"Authorization: Bearer $TOKEN\"` while `set -x` is on for debugging; the token lands in the trace log, which is shipped to the customer's central log store and read by everyone with Kibana access.",
+  "`psql ... | while read -r id; do count=$((count+1)); done` runs the loop in a subshell, so the final report says '0 rows migrated' and the on-call engineer rolls back a migration that actually succeeded."
+ ],
+ "interviewQuestions": [
+  "Walk me through exactly what `set -euo pipefail` does, then give me three concrete cases where `set -e` will not stop the script. How would you structure a script so it is correct even if -e were removed?",
+  "Design: you need a nightly job on a customer's bastion that pulls 50k records from a paginated REST API, transforms them, and loads them into Postgres. Only bash, curl, jq and psql are available. How do you make it idempotent, restartable after a crash, observable, and safe if cron fires it twice concurrently?",
+  "Debug: a cron job's log says 'done' every night but the target table has not updated in three weeks. The script is 300 lines of bash written by someone who has left. Where do you look first, what tools do you use and in what order, and how do you avoid making it worse while you investigate?",
+  "A script has a `trap cleanup EXIT` and three background `curl` jobs. The user presses Ctrl-C. Which processes receive SIGINT, which do not, what does the EXIT trap see in `$?`, and how do you guarantee the children die with the parent?",
+  "When do you refuse to write something in bash and reach for Python? Name the specific signals in the requirements that trip that decision, and how you would explain the trade-off to a customer engineer who insists on 'just a shell script'.",
+  "How do you test a bash script that calls curl, psql and the aws CLI without touching real services? Describe the test structure, how you fake the external commands, how you exercise the retry and failure paths, and what runs in CI.",
+  "Your script works on your MacBook and fails on the customer's Ubuntu host - or the other way around. Explain the portability landscape (bash 3.2 vs 5, GNU vs BSD coreutils, sh as dash, busybox) and what policy you would set for scripts shipped to customers."
+ ],
+ "proofOfWork": "A public repo `shell-hardening-kata` containing a deliberately broken 80-line 'legacy' script that exhibits the seven failure modes above, a fixture generator that reproduces each one (hostile filenames, unset config var, a `sleep`-based hung upstream, two concurrent invocations, a Mac-only construct), and a hardened rewrite in `bin/` that passes every reproduction. The repo runs `shellcheck -S style -o all` and a BATS suite with PATH-shimmed curl/psql in a GitHub Actions matrix across bash 3.2, bash 5 and dash (for the POSIX-only helper), plus a one-page BASH-HARDENING-CHECKLIST.md written for a customer's platform team. The README includes the closed-book timing: you wrote the 200-line template from memory, timed, and diffed it against the reference with the delta listed."
+}

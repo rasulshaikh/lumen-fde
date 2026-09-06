@@ -1,0 +1,227 @@
+{
+ "i": 9,
+ "topic": "GitOps: Helm charts and ArgoCD",
+ "track": "B. Containers and Kubernetes",
+ "month": 2,
+ "hours": 8,
+ "why": "An FDE ships into a cluster the customer owns: their platform team holds the kubeconfig, their change-control process wants a reviewable diff and a rollback story, and you will not be on call after you leave. A Helm chart plus an Argo CD Application manifest is the deliverable that gets through that gate, because it turns your deployment into a pull request their team can read, approve and revert without you. Argo CD is also what you will meet on-site at most Palantir, Databricks and Anthropic enterprise customers, so you need to be able to debug their Argo (perpetual OutOfSync, hooks that never run, a rollback that disabled auto-sync) as fluently as your own.",
+ "prerequisites": [
+  "Topic 7 (Kubernetes core): can write Deployment, Service, Ingress, ConfigMap and Secret manifests by hand and use kubectl apply, get, describe, diff and rollout status",
+  "Topic 8 (Kubernetes production ops): readiness and liveness probes, rolling update strategy (maxSurge, maxUnavailable), resource requests and limits, HPA, and basic RBAC, because Argo CD's health assessment and sync waves depend on probes and status",
+  "Topic 6 (production images): the Dokeo image is already built non-root, tagged and pushed to a registry such as ghcr.io, since the CI to CD handoff promotes image tags and digests",
+  "Topic 4 (Git at depth): git revert, tags, protected branches, PR review flow and webhooks, because in GitOps a rollback is a Git operation",
+  "A local cluster (kind or k3d) with about 4 GB RAM free plus kubectl, helm 3.x and the argocd CLI installed and on PATH",
+  "Read the Go text/template syntax page once and understand YAML block scalars, indentation semantics and why two-space drift silently changes meaning"
+ ],
+ "subtopics": [
+  {
+   "name": "GitOps operating model and the reconciliation loop",
+   "learn": "State the four OpenGitOps principles (declarative, versioned and immutable, pulled automatically, continuously reconciled) and what each one rules out in practice: kubectl apply from CI (push model, cluster credential leaves the cluster), kubectl edit hotfixes, floating image tags like latest. Trace the loop Argo CD runs: fetch desired state from Git, render it (helm template or kustomize build), compare to live state through the Kubernetes API, report Synced or OutOfSync, optionally apply. Be able to explain why the agent lives inside the cluster (outbound-only, works through customer firewalls, no kubeconfig in CI secrets) and why 'Git is the audit log' only holds when branch protection, required reviews and signed commits are enforced. Draw the whole thing on a whiteboard in two minutes and mark where CI ends and CD begins.",
+   "minutes": 20,
+   "resource": {
+    "label": "OpenGitOps - the GitOps principles (CNCF GitOps Working Group)",
+    "url": "https://opengitops.dev/"
+   }
+  },
+  {
+   "name": "Chart anatomy and where Helm stores release state",
+   "learn": "Know every file `helm create` emits and which to delete: Chart.yaml (apiVersion: v2; `version` is the chart SemVer, `appVersion` is the packaged app; `type: application|library`; `kubeVersion` constraint), values.yaml, templates/, templates/_helpers.tpl, templates/NOTES.txt, templates/tests/, charts/, crds/, .helmignore. Understand that Helm 3 stores each release revision as a Secret of type `helm.sh/release.v1` named `sh.helm.release.v1.<release>.v<N>` in the release namespace (gzipped, base64-encoded protobuf), so `helm list`, `helm history`, and `helm get manifest|values|notes -n ns rel --revision N` all read from those Secrets and deleting them orphans the release. Know that crds/ is installed on first install and never upgraded or deleted by Helm, and what that means when a customer runs an operator chart for two years.",
+   "minutes": 25,
+   "resource": {
+    "label": "Helm docs - Charts (file structure, Chart.yaml, CRDs)",
+    "url": "https://helm.sh/docs/topics/charts/"
+   }
+  },
+  {
+   "name": "Template engine: builtin objects, Sprig functions, pipelines",
+   "learn": "Use .Values, .Release.{Name,Namespace,IsUpgrade,IsInstall,Revision}, .Chart.{Name,Version,AppVersion}, .Capabilities.APIVersions.Has \"autoscaling/v2\", .Capabilities.KubeVersion.Version, .Files.Get|Glob|AsConfig|AsSecrets and .Template.Name. Chain Sprig functions in pipelines: `default`, `required \"image.tag is required\" .Values.image.tag`, `quote`, `toYaml | nindent 8`, `tpl` for values that themselves contain templates, `trunc 63 | trimSuffix \"-\"` for DNS-1123 names, `sha256sum` of a rendered ConfigMap as a pod-template annotation so config changes restart pods, and `lookup \"v1\" \"Secret\" .Release.Namespace \"name\"` to read existing objects, knowing it returns empty under `helm template` and inside Argo CD's repo-server so correctness can never depend on it. Whitespace control: `{{-` eats to the left, `-}}` to the right; the classic bug is `indent` where `nindent` was needed, producing YAML that lints clean but nests under the wrong key.",
+   "minutes": 30,
+   "resource": {
+    "label": "Helm Chart Template Guide - Template Functions and Pipelines",
+    "url": "https://helm.sh/docs/chart_template_guide/functions_and_pipelines/"
+   }
+  },
+  {
+   "name": "Control flow, scope and named templates",
+   "learn": "Use if/else if/with/range and understand that `with` and `range` rebind `.`, so inside them you reach the root through `$` (`$.Release.Name`) or a captured `{{- $root := . }}`. Range over maps with `{{- range $k, $v := .Values.env }}` and rely on Go sorting map keys so output is stable and diffs are quiet. Define helpers in _helpers.tpl with `{{ define \"dokeo.fullname\" }}` and call them with `include` (returns a string you can pipe to nindent), not `template` (cannot be piped); prefix every define with the chart name because defines are global across parent and subcharts and the last loaded wins. Build `dokeo.labels` (app.kubernetes.io/name, instance, version, managed-by, helm.sh/chart) and a separate `dokeo.selectorLabels` without version or chart, because Deployment `spec.selector` is immutable and a chart bump would otherwise break every upgrade.",
+   "minutes": 30,
+   "resource": {
+    "label": "Helm Chart Template Guide - Named Templates",
+    "url": "https://helm.sh/docs/chart_template_guide/named_templates/"
+   }
+  },
+  {
+   "name": "Values design, precedence and values.schema.json",
+   "learn": "Know the precedence: chart values.yaml < parent-chart values for a subchart < `-f a.yaml -f b.yaml` (last wins; maps deep-merge, lists replace) < `--set`, `--set-string`, `--set-file`, `--set-json` (last wins). Know the `--set` coercion traps: `--set port=8080` becomes an int, `--set image.tag=1.10` becomes the float 1.1, `--set list[0]=x` replaces the whole list; use `--set-string` for tags. Write values.schema.json (JSON Schema draft 7) with `required`, `enum`, a `pattern` for image tags and `additionalProperties: false` at the top level; it is enforced by helm install, upgrade, lint and template, which turns a typo in a customer's values file into a hard failure before anything reaches the cluster. Follow the conventions: camelCase keys, flat over nested, every key commented, `image.repository` / `image.tag` / `image.digest` kept separate, `resources: {}` so the deployer must choose, and no environment names baked into the chart.",
+   "minutes": 30,
+   "resource": {
+    "label": "Helm Chart Best Practices - Values",
+    "url": "https://helm.sh/docs/chart_best_practices/values/"
+   }
+  },
+  {
+   "name": "Dependencies, subcharts and global values",
+   "learn": "Declare `dependencies:` in Chart.yaml with name, version (a SemVer range such as `~15.2.0`), repository (`https://`, `oci://` or `file://../local`), `condition: redis.enabled`, `alias`, `tags` and `import-values`. Run `helm dependency update` (writes Chart.lock and charts/*.tgz) and `helm dependency build` (from the lock); commit Chart.lock and decide explicitly whether to commit charts/*.tgz, because Argo CD's repo-server must be able to fetch them at render time (vendor them, or give repo-server registry access and accept the render latency). Values reach a subchart only under its name key (`redis:`) or under `global:`; a subchart can never see parent values. Know when to wrap an upstream Bitnami or vendor chart as a dependency behind a thin parent versus fork it: fork only when a template must change, and record the upstream version and the diff in the repo.",
+   "minutes": 20,
+   "resource": {
+    "label": "Helm Chart Template Guide - Subcharts and Global Values",
+    "url": "https://helm.sh/docs/chart_template_guide/subcharts_and_globals/"
+   }
+  },
+  {
+   "name": "Chart verification: lint, template, kubeconform, unittest, helm test",
+   "learn": "Build a pre-commit and CI gate: `helm lint --strict -f ci/prod-values.yaml`; `helm template rel . -f values.yaml --debug` (renders even invalid YAML so you can see it); `helm template ... | kubeconform -strict -kubernetes-version 1.29.0 -schema-location default` plus a CRD schema location for cert-manager or ESO kinds; `helm install --dry-run=server` (needs a cluster; catches admission webhooks and unknown fields); the helm-unittest plugin asserting rendered paths such as `spec.template.spec.containers[0].image`; chart-testing `ct lint` and `ct install` across `ci/*-values.yaml`; and `helm test` running pods in templates/tests annotated `helm.sh/hook: test`. Add `helm template ... | kubectl diff -f -` to see what a change does to a real cluster. Decode the three classic errors on sight: `nil pointer evaluating interface` (missing values key, fix with default or schema), `error converting YAML to JSON: mapping values are not allowed` (indent bug), and `unable to recognize` (apiVersion not served by this cluster).",
+   "minutes": 30,
+   "resource": {
+    "label": "Helm Chart Template Guide - Debugging Templates",
+    "url": "https://helm.sh/docs/chart_template_guide/debugging/"
+   }
+  },
+  {
+   "name": "Upgrade mechanics, hooks, three-way merge and immutable fields",
+   "learn": "Run `helm upgrade --install rel . -n ns --create-namespace --atomic --wait --wait-for-jobs --timeout 5m --cleanup-on-fail --history-max 10` and know what each flag buys: --atomic rolls back on failure, --wait blocks until Deployments hit minimum ready and PVCs bind. Helm 3 performs a three-way merge (previous manifest, new manifest, live object), so manual edits to fields the chart never set survive an upgrade while fields the chart used to set and then dropped are reverted. Hooks: `helm.sh/hook: pre-install,pre-upgrade`, `helm.sh/hook-weight: \"-5\"` (string, ascending), `helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded`; hook resources are not part of the release and a failed hook aborts the upgrade. Know the immutable-field failures cold: Deployment spec.selector, StatefulSet volumeClaimTemplates, Job spec.template, Service spec.clusterIP; the only fixes are `--force` (delete and recreate, with downtime) or a rename. `helm rollback rel N` reapplies a stored manifest; `helm.sh/resource-policy: keep` protects PVCs on uninstall; `helm uninstall --keep-history` keeps forensics.",
+   "minutes": 30,
+   "resource": {
+    "label": "Helm docs - Chart Hooks",
+    "url": "https://helm.sh/docs/topics/charts_hooks/"
+   }
+  },
+  {
+   "name": "Packaging and publishing charts to an OCI registry",
+   "learn": "`helm package . --version 1.4.0 --app-version 2.3.1` produces dokeo-1.4.0.tgz; `helm registry login ghcr.io -u $USER --password-stdin`; `helm push dokeo-1.4.0.tgz oci://ghcr.io/org/charts`; consumers run `helm install rel oci://ghcr.io/org/charts/dokeo --version 1.4.0` and `helm show values oci://...`. The OCI tag is the chart version, so SemVer `+build` metadata is rewritten to `_`. OCI charts have no index.yaml, so `helm repo add` does not apply; Argo CD references them with `repoURL: ghcr.io/org/charts`, `chart: dokeo`, `targetRevision: 1.4.0` and needs a repository credential of type helm with `enableOCI: \"true\"`. Sign with `helm package --sign --key ... --keyring ...` or cosign the OCI artifact so the customer's admission policy can verify provenance. Bump chart `version` on any template change and `appVersion` on any image change; never overwrite a published version.",
+   "minutes": 15,
+   "resource": {
+    "label": "Helm docs - Use OCI-based registries",
+    "url": "https://helm.sh/docs/topics/registries/"
+   }
+  },
+  {
+   "name": "Argo CD architecture and how it actually renders Helm",
+   "learn": "Name each component and what breaks when it is down: argocd-server (API, UI, CLI; stateless), argocd-repo-server (clones repos, runs helm template or kustomize build, caches rendered manifests in Redis; CPU-bound; `--parallelismlimit`), argocd-application-controller (reconciles every Application on `timeout.reconciliation`, default 180s, or on webhook; compares live to target; runs the sync), redis (cache only, safe to lose), dex (SSO), applicationset-controller, notifications-controller. The crucial fact: Argo CD never runs helm install. It runs `helm template` with your values and applies the output, so there are no sh.helm.release.v1 Secrets, `helm list` is empty, `.Release.IsUpgrade` is always false, `lookup` returns nothing, and Helm hooks are mapped to Argo hooks (pre-install and pre-upgrade become PreSync, post-* become PostSync, crd-install and test hooks are ignored). Know the two resource-tracking methods (default label app.kubernetes.io/instance, or annotation `argocd.argoproj.io/tracking-id` via `application.resourceTrackingMethod: annotation` in argocd-cm) and why the label default collides with Helm's own instance label when several apps share a namespace.",
+   "minutes": 30,
+   "resource": {
+    "label": "Argo CD Operator Manual - Architectural Overview",
+    "url": "https://argo-cd.readthedocs.io/en/stable/operator-manual/architecture/"
+   }
+  },
+  {
+   "name": "The Application CRD end to end",
+   "learn": "Write an argoproj.io/v1alpha1 Application from memory: `metadata.namespace: argocd`, `finalizers: [resources-finalizer.argocd.argoproj.io]` (so deleting the Application cascades to its resources; without it they are orphaned), `spec.project`, `spec.source.{repoURL,path,targetRevision}`, `spec.destination.{server: https://kubernetes.default.svc | name, namespace}`, `spec.syncPolicy.automated.{prune: true, selfHeal: true, allowEmpty: false}`, `syncOptions: [CreateNamespace=true, PruneLast=true, ApplyOutOfSyncOnly=true, ServerSideApply=true, RespectIgnoreDifferences=true, PrunePropagationPolicy=foreground]`, `retry.{limit: 5, backoff.{duration: 5s, factor: 2, maxDuration: 3m}}`, `revisionHistoryLimit`, `ignoreDifferences`, `info`. Read `status.sync.status` (Synced/OutOfSync), `status.health.status`, `status.operationState.phase` and `status.history[].id` (what rollback consumes). Drive it with `argocd app create|get|sync|diff|history|wait --health --timeout 300|delete --cascade`, and know that `kubectl apply -f app.yaml` of the Application itself is how you bootstrap without the CLI or UI.",
+   "minutes": 35,
+   "resource": {
+    "label": "Argo CD User Guide - Application Specification Reference",
+    "url": "https://argo-cd.readthedocs.io/en/stable/user-guide/application-specification/"
+   }
+  },
+  {
+   "name": "Helm source settings inside an Application",
+   "learn": "Under `spec.source.helm`: `releaseName` (defaults to the Application name; changing it changes the instance label and re-creates every resource), `valueFiles: [values.yaml, values-prod.yaml]` (relative to path), `values: |` as an inline string and `valuesObject:` as structured YAML, `parameters: [{name: image.tag, value: abc123, forceString: true}]`, `fileParameters`, `skipCrds`, `passCredentials`, `ignoreMissingValueFiles: true` for optional per-environment overrides, and `kubeVersion` / `apiVersions` overrides so `.Capabilities` resolves correctly when repo-server cannot reach the target cluster's discovery API. Use multiple sources to pull the chart from an OCI registry and values from your Git repo: a source with `ref: values` and `helm.valueFiles: [$values/envs/prod/values.yaml]`. Precedence: valueFiles < values/valuesObject < parameters. Know that parameters edited in the UI are written back into the Application spec, so unless they also live in Git the app-of-apps will revert them on its next sync.",
+   "minutes": 20,
+   "resource": {
+    "label": "Argo CD User Guide - Helm",
+    "url": "https://argo-cd.readthedocs.io/en/stable/user-guide/helm/"
+   }
+  },
+  {
+   "name": "Sync phases, waves, resource hooks and the sync engine",
+   "learn": "Argo orders a sync by phase (PreSync, Sync, PostSync, SyncFail, PostDelete), then wave (`argocd.argoproj.io/sync-wave: \"-1\"`, default 0, ascending), then kind (Namespace, CRDs, ServiceAccount, ConfigMap, Secret before workloads), then name, and waits for every resource in a wave to be Healthy before starting the next (with a delay set by ARGOCD_SYNC_WAVE_DELAY, default 2s), so a Job in wave 0 with no completion blocks the whole app. Hooks: `argocd.argoproj.io/hook: PreSync` plus `argocd.argoproj.io/hook-delete-policy: BeforeHookCreation|HookSucceeded|HookFailed`; a hook Job needs `generateName` or BeforeHookCreation to run again next sync. Use this to run the Dokeo DB migration as a PreSync Job with `backoffLimit: 1` so a failed migration fails the sync and leaves the old Deployment serving. Distinguish selfHeal (reverts live drift; debounce `--self-heal-timeout-seconds`, default 5s) from prune (deletes resources removed from Git) and the per-resource escape hatches `argocd.argoproj.io/sync-options: Prune=false` and `Replace=true` (for objects over the 256 KB last-applied annotation limit or with immutable fields).",
+   "minutes": 30,
+   "resource": {
+    "label": "Argo CD User Guide - Sync Phases and Waves",
+    "url": "https://argo-cd.readthedocs.io/en/stable/user-guide/sync-waves/"
+   }
+  },
+  {
+   "name": "Health assessment, diffing and ignoreDifferences",
+   "learn": "Health rolls up from resources: a Deployment is Healthy when updatedReplicas, replicas and availableReplicas agree and observedGeneration matches; a Job on completion; an Ingress once status.loadBalancer is populated; a PVC once Bound; custom resources default to Healthy unless a Lua check exists in argocd-cm under `resource.customizations.health.<group>_<kind>`. Write a Lua health check for a CRD such as cert-manager Certificate or ESO ExternalSecret that returns Progressing or Degraded so waves gate correctly. Diffing: Argo compares desired to live minus system-managed fields, so perpetual OutOfSync almost always comes from mutating admission (sidecar injection, defaulted resources), HPA-managed spec.replicas, cert-manager-injected caBundle, or API-server defaulting. Fix with `ignoreDifferences: [{group: apps, kind: Deployment, jsonPointers: [/spec/replicas]}]`, `jqPathExpressions` for list elements (`.spec.template.spec.containers[] | select(.name == \"istio-proxy\")`), or `managedFieldsManagers: [kube-controller-manager]`, and add `RespectIgnoreDifferences=true` so the sync stops overwriting what you ignore. Preview with `argocd app diff --local ./chart` and inspect with `argocd app manifests --source live|git`.",
+   "minutes": 30,
+   "resource": {
+    "label": "Argo CD User Guide - Diffing Customization",
+    "url": "https://argo-cd.readthedocs.io/en/stable/user-guide/diffing/"
+   }
+  },
+  {
+   "name": "Rollback: Git revert first, argocd app rollback second",
+   "learn": "The GitOps rollback is `git revert <sha> && git push` (or moving a tag), which keeps Git and cluster in agreement and preserves history; measure push-to-Healthy time with a webhook (seconds) versus polling (up to 180s plus sync duration). `argocd app rollback <app> <history-id>` redeploys a revision from status.history but refuses while syncPolicy.automated is set, so the emergency sequence is `argocd app set <app> --sync-policy none`, `argocd app rollback`, then fix Git and re-enable automated sync, and you must record that the cluster is temporarily ahead of Git. Pin `targetRevision` to a tag or SHA for prod and use HEAD only for dev; know the meanings of HEAD, branch, tag, SHA and SemVer ranges for chart sources. Know what no rollback undoes: PreSync migration Jobs (you need down-migrations), PVC contents, resources marked Prune=false, and Secrets rotated out of band. Drill it: break the readiness probe path, push, watch Degraded, revert, confirm Healthy, and write the timeline into the repo.",
+   "minutes": 25,
+   "resource": {
+    "label": "Argo CD CLI reference - argocd app rollback",
+    "url": "https://argo-cd.readthedocs.io/en/stable/user-guide/commands/argocd_app_rollback/"
+   }
+  },
+  {
+   "name": "App-of-apps and ApplicationSet",
+   "learn": "Bootstrap a cluster with a root Application whose `path: bootstrap/apps` contains other Application manifests (app-of-apps), so `kubectl apply -f root.yaml` is the only imperative step; know that child apps sync in parallel unless you put sync-wave annotations on the Applications themselves, and that deleting the root with the finalizer cascades everything beneath it. ApplicationSet replaces copy-pasted Applications: generators `list`, `clusters` (with `selector.matchLabels` on cluster Secrets), `git` `directories` (one app per envs/* folder) and `files` (a config.json per environment), `matrix`, `merge`, `pullRequest` (preview environments per PR) and `scmProvider`; `goTemplate: true` with `goTemplateOptions: [\"missingkey=error\"]`; template fields such as `{{.path.basename}}` and `{{.name}}`. While learning, set `syncPolicy.preserveResourcesOnDeletion: true` and `applicationsSync: create-update` so a bad template cannot delete prod, then turn on `strategy.type: RollingSync` to gate prod behind staging health.",
+   "minutes": 30,
+   "resource": {
+    "label": "Argo CD Operator Manual - ApplicationSet controller",
+    "url": "https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/"
+   }
+  },
+  {
+   "name": "Projects, RBAC and multi-tenant guardrails",
+   "learn": "An AppProject bounds what an Application may do: `sourceRepos: ['https://github.com/org/*']`, `destinations: [{server, namespace: 'team-a-*'}]`, `clusterResourceWhitelist` (empty means no cluster-scoped resources, which is why CreateNamespace=true fails silently in a tenant project), `namespaceResourceBlacklist: [ResourceQuota, LimitRange, NetworkPolicy]`, `sourceNamespaces` for Applications outside the argocd namespace, `syncWindows` (`kind: deny, schedule: '0 22 * * *', duration: 8h, applications: ['*-prod'], manualSync: true`) and `orphanedResources.warn: true`. Project roles: `roles: [{name: ci, policies: ['p, proj:team-a:ci, applications, sync, team-a/*, allow']}]` with `argocd proj role create-token team-a ci --expires-in 720h` for CI. Global RBAC in argocd-rbac-cm policy.csv: `g, org:team-a, role:team-a-dev`, `policy.default: role:readonly`, groups mapped from OIDC claims via Dex. Design for a customer: one project per team, humans get sync in dev, prod is automated-only with humans able to read, diff and rollback.",
+   "minutes": 25,
+   "resource": {
+    "label": "Argo CD User Guide - Projects",
+    "url": "https://argo-cd.readthedocs.io/en/stable/user-guide/projects/"
+   }
+  },
+  {
+   "name": "Secrets in a GitOps repository",
+   "learn": "Rule: nothing decryptable sits in Git. Compare the three patterns you will meet at customers. Sealed Secrets: `kubeseal --controller-namespace kube-system --scope namespace-wide < secret.yaml > sealed.yaml`, cluster-private key, re-seal on rotation, unrecoverable if the controller key is lost, so back it up. External Secrets Operator: a SecretStore or ClusterSecretStore pointing at AWS Secrets Manager or Vault plus an ExternalSecret with `refreshInterval` and `dataFrom`; the Secret is materialised in-cluster and Argo tracks only the ExternalSecret. SOPS with age or KMS via a Config Management Plugin or helm-secrets, where decryption happens in repo-server, which then holds the KMS credential. Argo redacts Secret data in the UI and in `argocd app diff` (shown as ++++++++), but repo-server logs and the rendered-manifest cache do not, so treat repo-server as a secret-bearing component. Argo's own credentials are Secrets labelled `argocd.argoproj.io/secret-type: repository` or `cluster`, and argocd-secret holds webhook and OIDC secrets.",
+   "minutes": 25,
+   "resource": {
+    "label": "Argo CD Operator Manual - Secret Management",
+    "url": "https://argo-cd.readthedocs.io/en/stable/operator-manual/secret-management/"
+   }
+  },
+  {
+   "name": "CI to CD handoff and environment promotion",
+   "learn": "Separate the app repo (code, Dockerfile, CI) from the config repo (chart values per environment, Application manifests) so a code change and a deploy are distinct commits with distinct reviewers. CI: build, push the image and capture its digest, then `yq -i '.image.tag = strenv(TAG)' envs/dev/values.yaml` and commit with [skip ci], or open a PR for staging and prod. Configure the Git webhook to `https://argocd.example.com/api/webhook` with the shared secret stored in argocd-secret under `webhook.github.secret`, which removes the three-minute polling latency. Alternative: Argo CD Image Updater watching the registry and writing back to Git. Promote dev to staging to prod through directories on one branch, never branch-per-environment (merges drift, hotfixes get lost). Make the deploy a test: `argocd app wait <app> --sync --health --timeout 600` as the CI gate, and `argocd app diff` or `argocd app sync --dry-run` in PR checks. Give CI a project-scoped token, never the admin password.",
+   "minutes": 30,
+   "resource": {
+    "label": "Argo CD User Guide - Automation from CI Pipelines",
+    "url": "https://argo-cd.readthedocs.io/en/stable/user-guide/ci_automation/"
+   }
+  },
+  {
+   "name": "Operating Argo CD: notifications, metrics, tuning, disaster recovery",
+   "learn": "Notifications: argocd-notifications-cm triggers (on-sync-failed, on-health-degraded, on-deployed) and templates to Slack or a webhook, subscribed per Application with the annotation `notifications.argoproj.io/subscribe.on-sync-failed.slack: deploys`. Metrics: scrape argocd-metrics:8082 and argocd-repo-server:8084; alert on `argocd_app_info{sync_status=\"OutOfSync\"}` persisting more than 15 minutes, `argocd_app_info{health_status=\"Degraded\"}`, the rate of `argocd_app_sync_total{phase=\"Failed\"}`, growth in `argocd_app_reconcile` p95, and `argocd_git_request_duration_seconds`. Tuning that bites on large charts: repo-server ARGOCD_EXEC_TIMEOUT (default 90s; `helm template` on umbrella charts can exceed it), `reposerver.parallelism.limit`, `controller.status.processors` and `controller.operation.processors`, `timeout.reconciliation`, and sharding the controller across clusters with ARGOCD_CONTROLLER_REPLICAS. Disaster recovery: workloads are already in Git; Argo's own state (projects, repo and cluster credentials, settings) is captured with `argocd admin export > backup.yaml` and restored with `argocd admin import`, so rebuild is install, import, apply root app. Upgrade one minor version at a time and read the version-specific upgrade notes first.",
+   "minutes": 25,
+   "resource": {
+    "label": "Argo CD Operator Manual - Metrics",
+    "url": "https://argo-cd.readthedocs.io/en/stable/operator-manual/metrics/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can author, from an empty directory in under 60 minutes, a Helm chart for Dokeo with Deployment, Service, Ingress, ConfigMap, HPA, ServiceAccount, checksum-triggered restarts, values.schema.json and NOTES.txt, and it passes `helm lint --strict`, kubeconform and helm-unittest with zero warnings.",
+  "You can install Argo CD on a kind cluster, register the repo, apply an Application with automated sync, prune and selfHeal, and show a values change pushed to main reaching Healthy in the cluster within three minutes with no kubectl apply.",
+  "You can break a deploy (bad image tag or probe path), watch it go Degraded, `git revert` and demonstrate recovery to Healthy, then repeat the recovery with `argocd app rollback` after disabling automated sync, and state exactly what Git and the cluster contain after each path.",
+  "You can diagnose a perpetually OutOfSync Application in under ten minutes with `argocd app diff` and `argocd app manifests --source live`, name the controller mutating the object, and fix it with the narrowest ignoreDifferences rule plus RespectIgnoreDifferences=true.",
+  "You can run a database migration as a PreSync hook Job with correct hook-delete-policy and backoffLimit, gated ahead of the Deployment by sync waves, and show that a failing migration fails the sync while the previous version keeps serving.",
+  "You can collapse three copy-pasted per-environment Applications into one ApplicationSet with a git directory generator, and explain what preserveResourcesOnDeletion and applicationsSync: create-update each protect against.",
+  "You can write an AppProject that lets a customer team sync only into their own namespaces from their own repos with a scoped, expiring CI token, and prove with `argocd app sync` under that role that cross-namespace and cluster-scoped resources are denied.",
+  "You can explain to a customer's platform lead in five minutes, without notes, why Argo's helm template model leaves `helm list` empty, what happens to Helm hooks and lookup, and which of their Helm runbooks must change."
+ ],
+ "failureModes": [
+  "The chart puts the helm.sh/chart version label inside Deployment spec.selector.matchLabels; a routine chart bump changes the selector, Argo reports 'field is immutable', the sync fails, and prod stays on the old version until someone applies Replace=true and takes an unplanned outage.",
+  "The app-of-apps root has prune: true; an engineer moves an Application file to a new directory in one PR, the root prunes the old Application first, the finalizer cascades and deletes the workload namespace including PVCs seconds before the new file is picked up.",
+  "A chart relies on lookup to reuse a previously generated admin password; repo-server has no cluster access so lookup renders empty on every sync, Argo writes a fresh random Secret, pods restart and sessions invalidate every three minutes, and selfHeal keeps the loop going until someone reads the Secret's history.",
+  "The HPA scales the Deployment to six replicas while the chart says replicas: 2 and selfHeal is on; Argo and the HPA fight, pods churn on every reconciliation, and p99 latency doubles during the customer's peak until /spec/replicas is added to ignoreDifferences.",
+  "Someone hot-fixes prod with argocd app rollback, which disables automated sync, and never reverts Git; three weeks later an unrelated commit through the app-of-apps re-enables sync and silently redeploys the broken revision at 2am.",
+  "An umbrella chart with eight subcharts takes 110 seconds to render; repo-server hits the 90-second ARGOCD_EXEC_TIMEOUT, every app sharing that repo-server flaps between Unknown and Synced, and on-call spends an hour chasing a phantom network problem.",
+  "CI promotes with `--set image.tag=1.10`, Helm coerces it to the float 1.1, the registry has no 1.1 tag, and because one pipeline template feeds all three environments, dev, staging and prod all ImagePullBackOff within the same minute."
+ ],
+ "interviewQuestions": [
+  "Walk me through everything that happens between a git push to the config repo and a pod running the new image. Name each Argo CD component involved, where the latency comes from, and what you would change to make it both faster and safer.",
+  "Argo CD renders Helm with helm template instead of helm install. What are the concrete consequences for hooks, lookup, release Secrets, .Release.IsUpgrade and CRDs, and how would you adapt a customer's existing chart that depends on each of those?",
+  "Design a GitOps repository layout for a customer with dev, staging and prod clusters, five teams, and a compliance rule that every prod change is reviewed by two people. Directories or branches? App-of-apps or ApplicationSet? Where do secrets live? How does a hotfix reach prod in ten minutes without breaking the rule?",
+  "Debug: an Application is permanently OutOfSync with selfHeal enabled, pods restart every three minutes, and the diff shows an annotation that keeps changing. Walk me through your investigation and the fix, including which fields you would ignore and the risk of ignoring them.",
+  "A deploy went Degraded at 3am. Compare git revert and argocd app rollback as recovery paths: what each does, which you run first and why, what state Git and the cluster are in afterwards, and what neither of them will undo.",
+  "You must run a schema migration before the new Deployment rolls, and the customer's DBA insists that a failed migration blocks the release. Show me the manifests: hook annotations, sync waves, delete policy, backoffLimit, and how health assessment gates the Deployment.",
+  "A customer's platform team says GitOps is too slow and wants CI to kubectl apply directly. Make the case for pull-based delivery in terms they care about (audit trail, credential exposure, drift, rollback), and tell me where you would concede."
+ ],
+ "proofOfWork": "A public repo `dokeo-gitops` split into `chart/` (the Dokeo Helm chart with values.schema.json, helm-unittest tests, a PreSync migration Job, and checksum-restart annotations) and `envs/{dev,staging,prod}/` consumed by a single ApplicationSet with a git directory generator, plus `bootstrap/root-app.yaml` so a fresh kind cluster is fully populated by one kubectl apply. GitHub Actions on the chart runs lint, kubeconform and unittest, then publishes the chart to oci://ghcr.io/<you>/charts with a cosign signature; a second workflow on the app repo bumps the dev image tag by digest with yq and commits. The README contains a recorded rollback drill with timestamps: push a broken readiness path, `argocd app get` showing Degraded, git revert, time to Healthy, then a second run using `argocd app rollback` with the exact commands to disable and re-enable automated sync. Include `docs/ARGO-FOR-HELM-USERS.md`, a one-page note written for a customer platform team explaining the helm template model, what changes for their runbooks, and the ignoreDifferences rules they will need for their HPA and sidecar injector."
+}

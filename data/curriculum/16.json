@@ -1,0 +1,229 @@
+{
+  "i": 16,
+  "topic": "EKS: cluster design, node groups, IRSA, ingress, cert-manager, Route 53",
+  "track": "C. Cloud and IaC",
+  "month": 3,
+  "hours": 10,
+  "why": "Most enterprise customers you will land at already run EKS, and the first week of an FDE engagement is usually 'get our thing running in their cluster': you inherit a VPC you did not size, a node group someone else tuned, an IAM boundary that forbids long-lived keys, and a security team that wants to know exactly how your pod got AWS credentials and who terminates TLS. If you cannot read a customer's Terraform for EKS, explain why their pods are stuck ContainerCreating on IP exhaustion, wire IRSA for a controller, get a real certificate on a real hostname and tell the platform lead what the cluster costs per month, you are a passenger on the engagement instead of the person driving it. This topic also produces the single most reused artefact in your career: a Terraform EKS landing zone you can stand up in 25 minutes and tear down cleanly.",
+  "prerequisites": [
+    "Terraform at depth (topic 12): remote state, modules, provider configuration, targeted plan/apply/destroy and how unknown values break provider blocks",
+    "AWS networking and compute (topic 13): VPC, public and private subnets, route tables, NAT gateway, security groups, ALB/NLB behaviour across AZs",
+    "IAM and cloud security (topic 15): roles vs users, trust policies, STS AssumeRole, the reasoning behind 'no long-lived keys'",
+    "Kubernetes core and production ops (topics 7 and 8): Ingress and IngressClass, Service types, probes, PodDisruptionBudget, StorageClass and PVC binding, RBAC",
+    "The Dokeo Helm chart from GitOps (topic 9), with a non-root image from topic 6 pushed to a registry the cluster can pull from",
+    "Networking fundamentals (topic 2): how DNS delegation, TTLs and negative caching work; what the ACME protocol proves and how TLS termination points differ",
+    "An AWS account with a billing alert already set, and a registered domain (or a subdomain you can delegate) whose NS records you control"
+  ],
+  "subtopics": [
+    {
+      "name": "Cluster anatomy: what AWS runs, what lands in your VPC, and the endpoint access modes",
+      "learn": "The control plane (API server, etcd, scheduler, controller manager) runs in an AWS-owned account across AZs; what appears in your VPC is 2-4 cross-account ENIs in the subnets you passed at creation, carrying the cluster security group (eks-cluster-sg-<name>-<id>), through which the control plane reaches kubelets for exec/logs/port-forward and webhooks. Understand the three endpoint modes and their consequences: public only (default) means nodes reach the API over the internet via your NAT gateway, so every kubelet heartbeat is billed NAT data processing; private only requires you to be inside the VPC or on a VPN/bastion to run kubectl; public+private with a restricted public_access_cidrs list is the usual production answer. Know that you pay $0.10 per cluster-hour (about $73 a month) for the control plane regardless of size, that a cluster takes 10-15 minutes to create and about 10 to delete, and that the platform version (eks.N) is AWS's own revision counter, distinct from the Kubernetes minor.",
+      "minutes": 30,
+      "resource": {
+        "label": "EKS User Guide: Cluster API server endpoint access",
+        "url": "https://docs.aws.amazon.com/eks/latest/userguide/cluster-endpoint.html"
+      }
+    },
+    {
+      "name": "VPC layout for EKS: subnet sizing, AZ spread, and the load balancer discovery tags",
+      "learn": "Lay out a VPC with public subnets (route to an internet gateway) for load balancers only and private subnets (route to NAT) for nodes, in at least two AZs, and size the private subnets for pods, not nodes: with the VPC CNI every pod consumes a VPC IP, so a /24 per AZ is exhausted by roughly 250 pods including the CNI's warm pool. Tag public subnets kubernetes.io/role/elb=1 and private subnets kubernetes.io/role/internal-elb=1, because the AWS Load Balancer Controller auto-discovers subnets by those tags and fails with 'couldn't auto-discover subnets' without them; the older kubernetes.io/cluster/<name>=shared tag is no longer required by current controller versions. Use one NAT gateway (single_nat_gateway = true in the community VPC module) for a lab or dev cluster and one per AZ for production, and be able to state the trade-off: about $33 a month plus $0.045/GB per gateway versus an AZ outage taking all egress down. The VPC must have DNS hostnames and DNS resolution enabled or nodes never register.",
+      "minutes": 30,
+      "resource": {
+        "label": "EKS User Guide: VPC and subnet requirements",
+        "url": "https://docs.aws.amazon.com/eks/latest/userguide/network-reqs.html"
+      }
+    },
+    {
+      "name": "VPC CNI internals: ENI and IP math, warm pools, prefix delegation, IP exhaustion",
+      "learn": "Compute max pods for any instance from the ENI and IP-per-ENI limits with the formula ENIs x (IPv4 per ENI - 1) + 2: t3.medium is 3 x (6 - 1) + 2 = 17, t3.large is 3 x (12 - 1) + 2 = 35, m5.large is 3 x (10 - 1) + 2 = 29, and system DaemonSets (aws-node, kube-proxy, ebs-csi-node, pod-identity-agent) eat four of those on every node. Know the ipamd knobs set as env on the aws-node DaemonSet (or via the add-on's configuration_values): WARM_ENI_TARGET (default 1, keeps a whole spare ENI's worth of IPs allocated), WARM_IP_TARGET and MINIMUM_IP_TARGET (tighter control for small subnets), and ENABLE_PREFIX_DELEGATION=true which assigns /28 prefixes so nitro instances reach 110 pods; prefix mode requires a new node group and kubelet --max-pods to be recomputed. Recognise IP exhaustion instantly: pods stuck ContainerCreating with 'failed to assign an IP address to container' in kubectl describe, nodes showing free CPU and memory, and ipamd logs at /var/log/aws-routed-eni/ipamd.log on the node. Know the escape hatch when the customer's VPC CIDR is full: custom networking (AWS_VPC_K8S_CNI_CUSTOM_NETWORK_CFG=true plus ENIConfig objects per AZ) puts pods in a secondary 100.64.0.0/16 CIDR.",
+      "minutes": 35,
+      "resource": {
+        "label": "EKS User Guide: Assign more IP addresses to nodes with prefixes (VPC CNI settings)",
+        "url": "https://docs.aws.amazon.com/eks/latest/userguide/cni-increase-ip-addresses.html"
+      }
+    },
+    {
+      "name": "Cluster authentication: access entries, the legacy aws-auth ConfigMap, and kubeconfig via get-token",
+      "learn": "Set authentication_mode to API (or API_AND_CONFIG_MAP while migrating) and grant humans and CI roles with access entries plus AWS-managed access policies (AmazonEKSClusterAdminPolicy, AmazonEKSAdminPolicy, AmazonEKSEditPolicy, AmazonEKSViewPolicy) scoped to cluster or namespaces, instead of hand-editing the aws-auth ConfigMap where a typo in mapRoles locks everyone out. Know that the IAM identity that created the cluster is not automatically admin any more unless the module's enable_cluster_creator_admin_permissions is set, and that managed node groups get an EC2_LINUX access entry for the node role created for you. Generate kubeconfig with aws eks update-kubeconfig --name <cluster> --region <r> --alias <name> and read what it wrote: an exec plugin running aws eks get-token --cluster-name <cluster>, producing a token valid about 15 minutes, signed with whatever AWS_PROFILE is active, which is why 'kubectl works for me but not in CI' is almost always a different IAM principal. Debug 'error: You must be logged in to the server (Unauthorized)' by turning on the authenticator control plane log and reading which ARN was presented.",
+      "minutes": 30,
+      "resource": {
+        "label": "EKS User Guide: Grant IAM users access to Kubernetes with EKS access entries",
+        "url": "https://docs.aws.amazon.com/eks/latest/userguide/access-entries.html"
+      }
+    },
+    {
+      "name": "Terraform layout: the community EKS module, two root modules, and the provider bootstrap trap",
+      "learn": "Use terraform-aws-modules/vpc and terraform-aws-modules/eks pinned to exact versions and read their variables before writing any resource by hand; in module v20 you set cluster_version, cluster_endpoint_public_access, cluster_addons, eks_managed_node_groups, access_entries and enable_irsa (v21 dropped the cluster_ prefix on many of these, so check the version you pin). Split into two root modules with two state files: infra/ (VPC, cluster, node groups, IAM roles for controllers, hosted zone) and platform/ (kubernetes and helm provider releases for the LB controller, cert-manager, external-dns, ingress-nginx and Dokeo). Understand why: the kubernetes and helm providers must be configured with host, cluster_ca_certificate and an exec block running aws eks get-token, and if those values come from a cluster resource in the same state, a plan that replaces the cluster produces unknown provider config and fails, and a destroy has to delete Helm releases through a provider whose endpoint is disappearing. Set create_cloudwatch_log_group and cluster_enabled_log_types deliberately, tag everything through the provider default_tags block with Project=eks-lab so Cost Explorer can find it later, and expect a cold apply to take 20-25 minutes end to end.",
+      "minutes": 45,
+      "resource": {
+        "label": "terraform-aws-modules/terraform-aws-eks (official module repository and examples)",
+        "url": "https://github.com/terraform-aws-modules/terraform-aws-eks"
+      }
+    },
+    {
+      "name": "Managed node groups: AMI family, capacity type, scaling, update_config and the PDB interaction",
+      "learn": "Define aws_eks_node_group (or the module's eks_managed_node_groups map) with ami_type AL2023_x86_64_STANDARD or BOTTLEROCKET_x86_64 (AL2 AMIs stopped being published in November 2025), instance_types as a list, capacity_type SPOT or ON_DEMAND, scaling_config min/max/desired, labels, and taint blocks; for Spot always give several instance types so Capacity Rebalancing has somewhere to go, and read the eks.amazonaws.com/capacityType node label to schedule accordingly. Know the node IAM role's minimum policies (AmazonEKSWorkerNodePolicy, AmazonEC2ContainerRegistryPullOnly) and why AmazonEKS_CNI_Policy should be moved off the node role onto the aws-node service account via IRSA or Pod Identity. Understand how a node group update works: EKS launches new instances from the new AMI or launch template version, cordons and drains old ones respecting PodDisruptionBudgets with max_unavailable or max_unavailable_percentage from update_config, and fails after roughly 15 minutes with PodEvictionFailure if a PDB cannot be satisfied, after which the only options are fixing the PDB or --force. Be able to place the other compute options on one slide: Fargate profiles (no DaemonSets, no EBS, per-pod pricing), Karpenter (NodePool and EC2NodeClass, bin-packing and consolidation, interruption handling via SQS) and EKS Auto Mode (Karpenter built in, AWS-managed Bottlerocket nodes with a 21-day max lifetime and an extra per-instance management fee).",
+      "minutes": 35,
+      "resource": {
+        "label": "EKS User Guide: Simplify node lifecycle with managed node groups",
+        "url": "https://docs.aws.amazon.com/eks/latest/userguide/managed-node-groups.html"
+      }
+    },
+    {
+      "name": "Launch templates: IMDSv2 hop limit, disk, and nodeadm NodeConfig user data",
+      "learn": "Attach a custom aws_launch_template to the node group when you need anything beyond defaults, and treat metadata_options as a security control: http_tokens = \"required\" forces IMDSv2 and http_put_response_hop_limit = 1 makes the node's instance-profile credentials unreachable from pods, because pod traffic to 169.254.169.254 crosses one extra hop through the veth. Know the default trap: managed node groups without a launch template already default the hop limit to 1 on AL2023, but any custom launch template defaults it to 2, silently re-exposing the node role to every container. Set block_device_mappings (device /dev/xvda, gp3, encrypted, 50-100 GB, because image layers and emptyDir share it) and remember the rules of the game: never put subnets or an IAM instance profile in the template, and on AL2023 pass extra kubelet settings not with bootstrap.sh --kubelet-extra-args but as a MIME multipart user data part of Content-Type application/node.eks.aws containing a NodeConfig with spec.kubelet.config.maxPods or spec.kubelet.flags. Understand that a template version change recycles every node in the group, so it is a rollout, not a config edit.",
+      "minutes": 30,
+      "resource": {
+        "label": "EKS User Guide: Customize managed nodes with launch templates",
+        "url": "https://docs.aws.amazon.com/eks/latest/userguide/launch-templates.html"
+      }
+    },
+    {
+      "name": "EKS add-ons: vpc-cni, coredns, kube-proxy, pod-identity-agent, ebs-csi as managed resources",
+      "learn": "Manage the cluster's system components as aws_eks_addon resources rather than raw manifests so AWS owns their upgrade path: query compatible versions with aws eks describe-addon-versions --addon-name vpc-cni --kubernetes-version 1.34, pin addon_version explicitly, and set resolve_conflicts_on_create = OVERWRITE (to adopt the self-managed copies EKS installs by default) and resolve_conflicts_on_update = PRESERVE (so your configuration_values survive). Pass CNI env such as ENABLE_PREFIX_DELEGATION through configuration_values as JSON, and give add-ons that call AWS (vpc-cni, aws-ebs-csi-driver) an identity through service_account_role_arn (IRSA) or a pod_identity_association block. Know the ordering constraint the module encodes as before_compute = true for vpc-cni: if nodes come up before the CNI config lands, the first pods get IPs under the old settings and you have a mixed node. Recognise the symptom of a version mismatch after a control plane upgrade: coredns or kube-proxy stuck with an addon status of DEGRADED and health issues listing an incompatible version.",
+      "minutes": 25,
+      "resource": {
+        "label": "EKS User Guide: Amazon EKS add-ons",
+        "url": "https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html"
+      }
+    },
+    {
+      "name": "IRSA mechanics: OIDC provider, projected tokens, the mutating webhook, and trust policy conditions",
+      "learn": "Trace one credential end to end: the cluster exposes an OIDC issuer (aws eks describe-cluster --query cluster.identity.oidc.issuer), you register it once as an aws_iam_openid_connect_provider with client_id_list [\"sts.amazonaws.com\"], and you annotate a ServiceAccount with eks.amazonaws.com/role-arn. The EKS-run pod-identity-webhook mutates new pods using that SA to add a projected service account token volume (audience sts.amazonaws.com, default expiry 86400s) mounted at /var/run/secrets/eks.amazonaws.com/serviceaccount/token, plus AWS_ROLE_ARN and AWS_WEB_IDENTITY_TOKEN_FILE env vars, and the SDK's default credential chain calls sts:AssumeRoleWithWebIdentity with that JWT. The role's trust policy must have Principal Federated = the provider ARN and StringEquals conditions on both <issuer-host>:sub = system:serviceaccount:<ns>:<sa> and <issuer-host>:aud = sts.amazonaws.com; leaving out aud or wildcarding sub to system:serviceaccount:* is the classic privilege-escalation finding. Debug in order: kubectl exec into the pod and run env | grep AWS_ (no vars means the webhook did not fire, usually because the pod predates the annotation and needs a restart), decode the token's sub and aud claims with cut -d. -f2 | base64 -d, then aws sts get-caller-identity; 'Not authorized to perform sts:AssumeRoleWithWebIdentity' is a trust policy mismatch, not a permissions policy problem. For private clusters set eks.amazonaws.com/sts-regional-endpoints: \"true\" so the SDK uses the STS VPC endpoint.",
+      "minutes": 40,
+      "resource": {
+        "label": "EKS User Guide: IAM roles for service accounts",
+        "url": "https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html"
+      }
+    },
+    {
+      "name": "EKS Pod Identity: the agent, associations, session tags, and when to prefer it over IRSA",
+      "learn": "Install the eks-pod-identity-agent add-on (a hostNetwork DaemonSet listening on 169.254.170.23) and create aws_eks_pod_identity_association resources binding cluster + namespace + service account to a role whose trust policy names Principal Service pods.eks.amazonaws.com with Actions sts:AssumeRole and sts:TagSession; no OIDC provider per cluster and the same role reusable across clusters, which is why platform teams prefer it for fleets. The agent injects AWS_CONTAINER_CREDENTIALS_FULL_URI and AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE, so the SDK fetches credentials from the node agent instead of calling STS itself, and every session carries tags (kubernetes-namespace, kubernetes-service-account, eks-cluster-name, kubernetes-pod-name) you can use in ABAC conditions such as aws:PrincipalTag/kubernetes-namespace. Know the limits that decide the choice: Pod Identity does not work on Fargate, Windows nodes or non-EKS clusters, cannot federate cross-account directly (chain a second AssumeRole), and needs a minimum SDK version; IRSA remains the answer for those and for tooling that wants a plain web identity token. Be ready to explain both to a customer security reviewer in two minutes with a diagram.",
+      "minutes": 25,
+      "resource": {
+        "label": "EKS User Guide: Learn how EKS Pod Identity grants pods access to AWS services",
+        "url": "https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html"
+      }
+    },
+    {
+      "name": "AWS Load Balancer Controller: install with IRSA, IngressClass alb, the annotations that matter",
+      "learn": "Install from the eks Helm repo with serviceAccount.create=false pointing at an IRSA-annotated SA whose role carries the controller's published iam_policy.json, and pass clusterName, vpcId and region explicitly because with the IMDS hop limit at 1 the controller cannot discover them. Write an Ingress with spec.ingressClassName: alb and be able to explain each annotation you set: alb.ingress.kubernetes.io/scheme internet-facing or internal, target-type ip (registers pod IPs directly, required for Fargate and avoids the extra kube-proxy hop of instance mode), listen-ports '[{\"HTTP\":80},{\"HTTPS\":443}]' with ssl-redirect '443', certificate-arn from ACM, healthcheck-path and success-codes, load-balancer-attributes idle_timeout.timeout_seconds=600 for long streaming responses, target-group-attributes deregistration_delay.timeout_seconds=30, and group.name to make several Ingresses share one ALB instead of paying for one each. Label the namespace elbv2.k8s.aws/pod-readiness-gate-inject=enabled so rollouts wait for target registration and you stop seeing 502s during deploys. For Services, use spec.loadBalancerClass service.k8s.aws/nlb with service.beta.kubernetes.io/aws-load-balancer-nlb-target-type ip and -scheme internet-facing to get an NLB instead of the legacy in-tree classic ELB.",
+      "minutes": 45,
+      "resource": {
+        "label": "AWS Load Balancer Controller docs: Ingress annotations",
+        "url": "https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/ingress/annotations/"
+      }
+    },
+    {
+      "name": "Ingress topology decision: ALB per IngressGroup with ACM versus NLB plus ingress-nginx with cert-manager",
+      "learn": "Be able to draw both production patterns and price them. Pattern A: the LB controller provisions an ALB per IngressGroup, TLS terminates at the ALB with an ACM certificate validated by a Route 53 CNAME, WAF attaches natively, and cert-manager is not needed for public TLS; each ALB costs about $16 a month plus LCUs and you get the ALB's 60-second default idle timeout on every streaming endpoint unless you raise it. Pattern B: one NLB (about $16 a month plus NLCUs) fronts ingress-nginx, TLS terminates inside the cluster with certificates cert-manager obtains, you keep nginx's rewrite, rate-limit and header features portable to non-AWS clusters, and client IP preservation requires either externalTrafficPolicy: Local with instance targets or proxy protocol (service.beta.kubernetes.io/aws-load-balancer-proxy-protocol: \"*\" plus use-proxy-protocol: \"true\" in the nginx ConfigMap). Know why this plan uses Pattern B for Dokeo (it exercises cert-manager and Route 53 and matches what you built on k3s in topic 7) and when you would still choose A for a customer: they already standardised on ACM, want WAF and Shield, or their security team forbids private keys inside the cluster. Mention that the LB controller now also implements Gateway API for customers moving off Ingress.",
+      "minutes": 30,
+      "resource": {
+        "label": "ingress-nginx docs: Installation guide (AWS NLB section)",
+        "url": "https://kubernetes.github.io/ingress-nginx/deploy/"
+      }
+    },
+    {
+      "name": "cert-manager with ACME DNS-01 on Route 53 through IRSA",
+      "learn": "Install the jetstack/cert-manager chart with crds.enabled=true and an eks.amazonaws.com/role-arn annotation on its service account, and give that role the exact policy the docs specify: route53:GetChange on arn:aws:route53:::change/*, route53:ChangeResourceRecordSets and route53:ListResourceRecordSets on arn:aws:route53:::hostedzone/<ID>, and route53:ListHostedZonesByName on *. Write a ClusterIssuer whose acme.server is the Let's Encrypt staging directory first (https://acme-staging-v02.api.letsencrypt.org/directory), with privateKeySecretRef for the account key and a dns01.route53 solver carrying region and hostedZoneID plus a selector.dnsZones list; ClusterIssuers may use ambient credentials (IRSA) by default whereas a namespaced Issuer needs the --issuer-ambient-credentials controller flag. Understand why DNS-01 and not HTTP-01: it works for wildcard certificates and for Ingresses that are internal or not yet reachable on port 80, and it does not depend on the load balancer being healthy. Use the ingress-shim annotation cert-manager.io/cluster-issuer on the Ingress with spec.tls[].secretName so the Certificate is created for you, then watch the Secret appear with tls.crt and tls.key; switch the issuer to production only after staging issues cleanly, because production enforces 50 certificates per registered domain per week and 5 duplicates per week.",
+      "minutes": 45,
+      "resource": {
+        "label": "cert-manager docs: ACME DNS-01 Route53 solver (IAM policy, IRSA, ambient credentials)",
+        "url": "https://cert-manager.io/docs/configuration/acme/dns01/route53/"
+      }
+    },
+    {
+      "name": "Debugging certificate issuance: the Certificate to Challenge chain, split-horizon DNS, rate limits",
+      "learn": "Walk the object chain the way cert-manager does: Certificate creates CertificateRequest, which creates Order, which creates one Challenge per identifier; kubectl get certificate,certificaterequest,order,challenge -A tells you which link is stuck and kubectl describe challenge shows the reason. The most common stall is 'Waiting for DNS-01 challenge propagation' when the TXT record is clearly in Route 53: cert-manager self-checks by resolving the record through the cluster's resolvers, and inside a VPC with a private hosted zone of the same name (split-horizon) the Route 53 Resolver answers from the private zone where the TXT does not exist, so it waits forever; fix with the controller flags --dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53 and --dns01-recursive-nameservers-only. Other causes you should be able to name from the event text: a missing route53:GetChange permission (the solver polls the change status), a CAA record on the domain that does not include letsencrypt.org, an account-level rate limit or 5 failed validations per hostname per hour, and a hostedZoneID pointing at the parent zone when the record lives in a delegated child. Know renewal behaviour: renewBefore defaults to a third of the certificate lifetime (30 days before a 90-day Let's Encrypt expiry), renewals reuse the private key only if rotationPolicy is Never, and cmctl status certificate and cmctl renew are the operator's tools.",
+      "minutes": 30,
+      "resource": {
+        "label": "cert-manager docs: Troubleshooting problems with ACME / Let's Encrypt certificates",
+        "url": "https://cert-manager.io/docs/troubleshooting/acme/"
+      }
+    },
+    {
+      "name": "Route 53 for the lab: a delegated subdomain zone, alias records, TTLs and negative caching",
+      "learn": "Create a dedicated aws_route53_zone for lab.<yourdomain> and delegate it by adding an NS record in the parent (at the registrar or the parent hosted zone) with the four name_servers Route 53 assigned; verify delegation with dig +trace dokeo.lab.<domain> and by querying one authoritative server directly with dig @ns-xxx.awsdns-xx.org. Point hostnames at the load balancer with an alias A record (aws_route53_record with an alias block carrying the load balancer's dns_name and its zone_id, which is the ELB hosted zone id, not yours) rather than a CNAME: aliases work at the zone apex, follow the load balancer's IP changes, honour evaluate_target_health and are free to query, while CNAME queries are billed. Understand negative caching so you stop confusing yourself: if you query a name before its record exists, resolvers cache the NXDOMAIN for the SOA minimum TTL (900 seconds by default on Route 53), so create the record first and test from an authoritative server, not your laptop's cache. Cost model: $0.50 per hosted zone per month and $0.40 per million standard queries.",
+      "minutes": 30,
+      "resource": {
+        "label": "Route 53 Developer Guide: Choosing between alias and non-alias records",
+        "url": "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resource-record-sets-choosing-alias-non-alias.html"
+      }
+    },
+    {
+      "name": "external-dns: records from Ingress hosts, TXT ownership, upsert-only versus sync",
+      "learn": "Run external-dns with --provider=aws, --source=ingress and --source=service, a --domain-filter=lab.<domain> so it can never touch other zones, --registry=txt with a unique --txt-owner-id per cluster and a --txt-prefix so the ownership TXT does not collide with a CNAME of the same name, on an IRSA role limited to route53:ChangeResourceRecordSets on the one hosted zone plus route53:ListHostedZones, ListResourceRecordSets and ListTagsForResource. It reads spec.rules[].host from Ingresses (and the external-dns.alpha.kubernetes.io/hostname annotation from Services) and writes alias A records to the ALB or NLB hostname. Understand the policy choice: upsert-only never deletes, so decommissioned hostnames linger but nothing you did not create can be removed; sync deletes records it owns when the Ingress goes, which is what makes teardown clean but is also how two clusters sharing an owner id flip-flop a record every reconcile. Be able to read its logs to prove a record change and to spot 'zone not found' from a bad domain filter or a policy denied on the change API.",
+      "minutes": 25,
+      "resource": {
+        "label": "external-dns docs: AWS tutorial (IAM policy, Route 53 setup, flags)",
+        "url": "https://kubernetes-sigs.github.io/external-dns/latest/docs/tutorials/aws/"
+      }
+    },
+    {
+      "name": "Storage for Dokeo's Postgres: EBS CSI, a gp3 default StorageClass, and the AZ affinity trap",
+      "learn": "Install aws-ebs-csi-driver as an add-on with its own IRSA or Pod Identity role carrying AmazonEBSCSIDriverPolicyV2, then create a StorageClass with provisioner ebs.csi.aws.com, parameters type gp3 and encrypted \"true\", volumeBindingMode WaitForFirstConsumer, allowVolumeExpansion true, mark it default with the storageclass.kubernetes.io/is-default-class annotation and remove that annotation from the legacy in-tree gp2 class. Understand why WaitForFirstConsumer is not optional: an EBS volume lives in one AZ, the PV gets a nodeAffinity on topology.ebs.csi.aws.com/zone, and if the only node in that AZ is replaced in another AZ (a common Spot or scale-to-zero outcome) the pod sits Pending with 'volume node affinity conflict' until a node appears in the right zone; production answers are one node group per AZ, a StatefulSet with zonal anti-affinity, or moving the database to RDS as in topic 14. Know the failure text when the driver has no permissions ('could not create volume in EC2: UnauthorizedOperation' on the PVC) and that reclaimPolicy Delete on a PVC is what lets your teardown remove the volume, whereas Retain leaves $0.08/GB-month orphans.",
+      "minutes": 25,
+      "resource": {
+        "label": "EKS User Guide: Use Kubernetes volume storage with Amazon EBS (CSI driver)",
+        "url": "https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html"
+      }
+    },
+    {
+      "name": "Day-2 operations: version lifecycle and extended support, the upgrade sequence, and nodes-not-joining triage",
+      "learn": "Know the lifecycle cold: each Kubernetes minor gets 14 months of standard support at $0.10 per cluster-hour, then 12 months of extended support at $0.60 per cluster-hour (about $438 a month, a 6x jump that finance notices), then a forced upgrade; aws eks describe-cluster-versions gives the dates. Upgrade in this order and one minor at a time: check aws eks list-insights for UPGRADE_READINESS findings and kubectl get --raw /metrics | grep apiserver_requested_deprecated_apis, update the control plane (aws eks update-cluster-version), update add-ons to the versions describe-addon-versions lists as compatible, then roll node groups (aws eks update-nodegroup-version) knowing kubelets may lag the API server by up to three minors but should not. Triage a node group stuck CREATE_FAILED or a node that never appears in kubectl get nodes with aws eks describe-nodegroup --query nodegroup.health.issues: NodeCreationFailure 'Instances failed to join the kubernetes cluster' means one of no route from the private subnet to NAT or the required VPC endpoints (ecr.api, ecr.dkr, s3, ec2, sts), a custom launch template security group that dropped the cluster SG, a node role missing AmazonEKSWorkerNodePolicy or its access entry, or VPC DNS hostnames disabled. Get onto the instance without SSH via aws ssm start-session (AmazonSSMManagedInstanceCore on the node role) and read journalctl -u kubelet and journalctl -u nodeadm-run.",
+      "minutes": 35,
+      "resource": {
+        "label": "EKS User Guide: Understand the Kubernetes version lifecycle on EKS",
+        "url": "https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html"
+      }
+    },
+    {
+      "name": "The cost model: itemise it before apply, measure it after, and put a budget alarm in front of it",
+      "learn": "Build the monthly estimate line by line for the lab and be able to reproduce it on a whiteboard: control plane $73; two t3.large on-demand about $120 (or roughly a third of that on Spot); one NAT gateway $33 plus $0.045/GB processed (image pulls and kubelet traffic on a public-only endpoint both count); one NLB or ALB about $16 plus capacity units; public IPv4 addresses at $0.005 per hour each for the NAT's EIP and the load balancer's per-AZ addresses, around $10; Route 53 zone $0.50; gp3 volumes $0.08/GB; CloudWatch Logs ingestion at $0.50/GB if you enable audit and api control plane logs. That lands near $250 a month, or about $0.35 an hour, so a full build-verify-teardown session costs a few dollars and leaving it running over a weekend costs $25. Run infracost breakdown --path infra/ before apply, then after 48 hours of running compare with aws ce get-cost-and-usage grouped by SERVICE and filtered on the Project tag (activate it as a cost allocation tag first; data lags about 24 hours). Put an aws_budgets_budget with an 80 percent forecast notification in the infra root so the alarm exists before the cluster does, and know the EKS Auto Mode management fee and the extended support surcharge as the two line items customers most often miss.",
+      "minutes": 25,
+      "resource": {
+        "label": "Amazon EKS pricing (control plane, extended support, Auto Mode fees)",
+        "url": "https://aws.amazon.com/eks/pricing/"
+      }
+    },
+    {
+      "name": "Teardown that actually finishes: ordering, controller-created orphans, and the sweep script",
+      "learn": "terraform destroy on an EKS stack hangs or fails with DependencyViolation on subnets and security groups because resources created by in-cluster controllers are not in state: ALBs and NLBs and their security groups from the LB controller, ENIs from the VPC CNI, EBS volumes from the CSI driver, and Route 53 records from external-dns or cert-manager. Script the order: kubectl delete ing --all -A and delete every Service of type LoadBalancer, then poll aws elbv2 describe-load-balancers until none carry the elbv2.k8s.aws/cluster tag; kubectl delete pvc --all -A and confirm aws ec2 describe-volumes --filters Name=tag-key,Values=kubernetes.io/created-for/pvc/name is empty; let external-dns (policy sync) remove records or delete everything but NS and SOA yourself, because a hosted zone with other records cannot be deleted; destroy the platform/ root (Helm releases) before infra/; then sweep for what is left with aws ec2 describe-network-interfaces --filters Name=vpc-id,Values=<vpc> Name=status,Values=available, security groups tagged elbv2.k8s.aws/cluster, the /aws/eks/<name>/cluster log group if it was not Terraform-managed, the OIDC provider, and the KMS key the module created (scheduled deletion has a 7-30 day window and bills about $1 a month until it is gone). Finish with a checklist that a reviewer can run: zero load balancers, zero volumes, zero ENIs, zero non-NS/SOA records, and a Cost Explorer daily total that drops to cents the next day.",
+      "minutes": 35,
+      "resource": {
+        "label": "EKS User Guide: Delete a cluster (prerequisite steps for load balancers and Ingress)",
+        "url": "https://docs.aws.amazon.com/eks/latest/userguide/delete-cluster.html"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can stand up VPC, EKS control plane, a managed node group, the five core add-ons and the IRSA roles for four controllers from two Terraform root modules with a cold apply under 25 minutes, and terraform plan is clean immediately afterwards.",
+    "You can compute the maximum pods for any EC2 instance type from its ENI and IP limits in under a minute, state how many pods a given private subnet can hold, and name the two CNI changes (prefix delegation, custom networking) that fix exhaustion and what each requires.",
+    "You can wire IRSA and Pod Identity for a controller with a least-privilege trust policy and prove it from inside a pod with aws sts get-caller-identity, then show the same call denied from an unannotated pod and from a pod trying to reach IMDS with the hop limit at 1.",
+    "You can get a valid Let's Encrypt certificate issued for a fresh hostname via DNS-01 on Route 53 within five minutes of applying the Ingress, and diagnose a stuck Challenge to its root cause (split-horizon DNS, IAM, CAA, rate limit) from kubectl describe output alone.",
+    "You can present the ALB-plus-ACM and NLB-plus-nginx-plus-cert-manager topologies with monthly cost, TLS termination point, client IP behaviour and streaming timeout implications, and recommend one for a stated customer constraint.",
+    "You can produce an itemised monthly estimate for a cluster before apply that lands within 15 percent of the Cost Explorer total after a 48-hour run, and explain the extended support and Auto Mode line items to a finance stakeholder.",
+    "You can tear the whole environment down with a scripted preflight so that AWS CLI queries for load balancers, EBS volumes, available ENIs, controller security groups and non-NS/SOA Route 53 records all return empty, and the next day's Cost Explorer total is under one dollar.",
+    "You can triage a node group that fails to join, or a cluster that returns Unauthorized, to one of the five standard causes in under ten minutes using describe-nodegroup health issues, SSM session, kubelet logs and the authenticator control plane log."
+  ],
+  "failureModes": [
+    "A customer's /24 private subnets were sized for nodes, not pods; the VPC CNI's default WARM_ENI_TARGET pre-allocated a spare ENI's worth of IPs per node, the subnet hit zero free addresses at 40 percent CPU utilisation, and every new pod sat ContainerCreating with 'failed to assign an IP address to container' while the dashboard showed a healthy cluster.",
+    "Someone added a custom launch template to set the root volume size, which silently reset the IMDS hop limit from 1 to 2; a pentest six months later showed any container could curl 169.254.169.254 and walk away with the node role's ECR and CNI permissions.",
+    "An IRSA trust policy was written with a StringLike on sub of system:serviceaccount:*:* to 'make it work', so every service account in the cluster could assume the S3 role; the fix required a rotation and an incident write-up because CloudTrail showed a dev namespace had actually used it.",
+    "terraform destroy ran for 20 minutes and failed on the VPC because the LB controller's ALB and security group and the CNI's ENIs were not in state; the engineer deleted the cluster manually, the ALB kept serving a dead target group and billing $16 a month for five months before FinOps found it.",
+    "The production Let's Encrypt issuer was used while iterating on the Ingress; after the fifth re-issue in a week the duplicate certificate limit tripped and the demo hostname had no certificate for the customer's Monday review because nobody had started with the staging directory.",
+    "Two clusters (blue and green) ran external-dns with --policy=sync and the same --txt-owner-id, so the A record for the API flipped between two load balancers every minute and users saw intermittent 503s that no single cluster's logs could explain.",
+    "A managed node group update to a new AMI stalled at one node for 15 minutes and failed with PodEvictionFailure because a single-replica Postgres had a PDB with minAvailable 1; the on-call ran it again with --force, which evicted the database mid-write and turned a routine patch into a data recovery.",
+    "A cluster quietly crossed into extended support and the control plane line jumped from $73 to $438 a month; the customer's finance team caught it before the platform team did, and the upgrade then had to be done under pressure across two minors with deprecated APIs still in use."
+  ],
+  "interviewQuestions": [
+    "A customer gives you a VPC with two /24 private subnets and asks you to run a 60-pod application on EKS with room to double. Walk me through the IP budget with real numbers, what breaks first, the two ways you would fix it and what each fix costs in terms of node group changes and cluster downtime.",
+    "Explain exactly what happens from the moment a pod annotated for IRSA calls s3:GetObject to the moment it gets a 200: every component, file, environment variable and STS call. Then tell me what changes under EKS Pod Identity, and give me two concrete situations where you would still choose IRSA.",
+    "cert-manager's Challenge has been 'pending' for 40 minutes; the TXT record is visible in the Route 53 console. Debug it out loud: what do you look at first, what are the four root causes you would rule out in order, and which one is specific to running inside a VPC with private hosted zones?",
+    "Design the ingress and TLS layer for a customer with twelve internal services and three public ones. Compare one ALB per Ingress, a shared ALB via IngressGroup, and an NLB in front of ingress-nginx on cost, blast radius, where private keys live and what happens to a 90-second streaming response on each. What do you recommend and what would change your mind?",
+    "A new managed node group is CREATE_FAILED with 'Instances failed to join the kubernetes cluster' and no nodes appear in kubectl. Give me your ordered diagnostic sequence with the exact commands, the five most likely causes, and how you would get onto an instance in a customer account where SSH is forbidden.",
+    "Your terraform destroy of an EKS environment has been sitting on the VPC for fifteen minutes. Explain why, list the categories of resources that are almost certainly orphaned, describe the teardown script you would have written to prevent this, and tell me how you would prove to the customer's FinOps team that nothing is still billing.",
+    "A customer's cluster enters extended support in three weeks and runs a stateful application with a PodDisruptionBudget. Plan the upgrade end to end: what you check first, the order of control plane, add-ons and node groups, how you handle the PDB, how you know the deprecated API check is clean, and what the cost of doing nothing is per month."
+  ],
+  "proofOfWork": "A public repository named eks-lab containing two Terraform root modules, infra/ (VPC with tagged subnets and one NAT, EKS with access entries, a Spot-plus-on-demand AL2023 managed node group behind a launch template with IMDSv2 hop limit 1 and a gp3 root volume, the five add-ons with pinned versions, IRSA roles for the LB controller, cert-manager, external-dns and the EBS CSI driver, a delegated Route 53 zone and an aws_budgets_budget) and platform/ (Helm releases for the LB controller, ingress-nginx behind an NLB, cert-manager with staging and production ClusterIssuers, external-dns, the gp3 default StorageClass, and the Dokeo chart from topic 9), driven by a Makefile with up, verify, cost and down targets. verify curls https://dokeo.lab.<domain>, asserts the chain via openssl s_client shows a Let's Encrypt production issuer, runs aws sts get-caller-identity from inside the cert-manager pod and shows the same call denied from an unannotated pod plus a timed-out curl to 169.254.169.254, and prints max pods per node next to the CNI's actual allocatable count. cost/ holds the Infracost breakdown produced before apply and the Cost Explorer CSV pulled after a 48-hour run, side by side with the variance explained line by line. down runs the ordered teardown (Ingresses and LoadBalancer Services, PVCs, Route 53 records, platform/ then infra/) followed by a sweep script whose AWS CLI queries for load balancers, EBS volumes, available ENIs, controller security groups, log groups and non-NS/SOA records must all return empty for the target to exit 0. A RUNBOOK.md contains five drills with the exact commands and expected output for IP exhaustion, an IRSA trust policy mismatch, a Challenge stuck on split-horizon DNS, a destroy hang on DependencyViolation and a node group that fails to join, and a one-page 'EKS landing zone review' written for a customer platform team stating endpoint mode, IP budget, identity model, TLS termination point, monthly cost and upgrade policy in the shape you would attach to a kickoff."
+}

@@ -1,0 +1,227 @@
+{
+ "i": 28,
+ "topic": "TypeScript and Node for FDEs",
+ "track": "E. Backend and Data",
+ "month": 4,
+ "hours": 8,
+ "why": "Customer platform teams, internal tools, agent tooling and nearly every vendor SDK (including the MCP reference SDK) are TypeScript-first, so a Python-first FDE who cannot read a tsconfig, diagnose an ESM import error or explain why a Node service stalls loses the platform team's trust in week one. The fastest way to build an integration or demo UI over a customer's API that survives their next backend deploy is a client whose types are generated from their OpenAPI document and whose boundaries are validated at runtime. This topic gets you to the point where you ship a small, tested Node service and a typed MCP client without asking the customer's frontend lead for help.",
+ "prerequisites": [
+  "Modern JavaScript fluency: closures, classes and prototypes, `this` binding, destructuring, Promises and async/await; you should be able to read an unfamiliar Node codebase before you type it",
+  "Topic 26 (FastAPI in production): you will consume its `/openapi.json`, so know how Pydantic models, `Optional`, and `response_model` map to schema `required`, `nullable` and `anyOf`",
+  "Topic 0 (Shell mastery): stdin/stdout/stderr separation, exit codes and pipes; the MCP stdio transport is exactly this contract",
+  "Topic 2 (Networking): HTTP keep-alive, idle timeouts, TLS and what an ALB does to a connection Node has already closed",
+  "JSON Schema basics: `type`, `required`, `properties`, `additionalProperties`, `anyOf`/`oneOf`, `$ref`; MCP tool schemas and OpenAPI are both JSON Schema dialects",
+  "Topic 5 (Docker internals): you will containerise the Node service and hit SIGTERM handling and `--max-old-space-size` when the pod OOMs"
+ ],
+ "subtopics": [
+  {
+   "name": "Event loop phases and what actually blocks it",
+   "learn": "Trace one tick: timers, pending callbacks, poll, check (`setImmediate`), close; the microtask queue drains between every macrotask and `process.nextTick` runs before promise microtasks, which is why a recursive `nextTick` starves I/O. Know the sync calls that freeze every concurrent request on the single thread: `JSON.parse` of a multi-MB body, `fs.readFileSync`, `crypto.pbkdf2Sync`, catastrophic regex backtracking, and a tight `for` over a large array. Measure with `perf_hooks.monitorEventLoopDelay()` p99 and `node --cpu-prof`; offload to `worker_threads` or a child process. The libuv threadpool (`UV_THREADPOOL_SIZE`, default 4) covers only fs, `dns.lookup`, zlib and crypto, so `dns.lookup` under load serialises behind slow file reads.",
+   "minutes": 25,
+   "resource": {
+    "label": "Node.js Learn - The Node.js Event Loop, Timers, and process.nextTick()",
+    "url": "https://nodejs.org/learn/asynchronous-work/event-loop-timers-and-nexttick"
+   }
+  },
+  {
+   "name": "A tsconfig that catches real bugs",
+   "learn": "Start from `strict: true` and add `noUncheckedIndexedAccess` (indexing returns `T | undefined`, which kills a whole class of customer-data crashes), `exactOptionalPropertyTypes`, `useUnknownInCatchVariables`, `noImplicitOverride`, `noFallthroughCasesInSwitch`. For a Node service choose `module: \"NodeNext\"` and `moduleResolution: \"NodeNext\"` (forces explicit `.js` extensions in relative imports), `target: \"ES2022\"`, `verbatimModuleSyntax` so type-only imports are `import type` and cannot leak into runtime, `isolatedModules` for esbuild/tsx compatibility, `sourceMap` plus `node --enable-source-maps` for readable production stack traces, and `declaration` + `declarationMap` only for libraries. Understand `skipLibCheck` as a speed trade you accept knowingly, and that `tsc --noEmit` is the CI type gate while emit is a separate concern.",
+   "minutes": 30,
+   "resource": {
+    "label": "TypeScript TSConfig Reference - strict (the strict-mode family of checks)",
+    "url": "https://www.typescriptlang.org/tsconfig/strict.html"
+   }
+  },
+  {
+   "name": "ESM vs CommonJS and the exports map",
+   "learn": "`\"type\": \"module\"` in package.json makes `.js` files ESM; `.mjs`/`.cjs` override per file. ESM has no `__dirname`, `__filename` or `require`: use `fileURLToPath(import.meta.url)` and `createRequire(import.meta.url)`. Diagnose `ERR_REQUIRE_ESM` (CJS requiring an ESM-only package; Node 22 lifts this for synchronous ESM graphs), `ERR_MODULE_NOT_FOUND` (missing `.js` extension or a deep import the package does not export), and `Cannot use import statement outside a module`. Read an `exports` map with `import`/`require`/`types`/`default` conditions and understand that `@modelcontextprotocol/sdk/client/index.js` resolves only because the SDK exports that subpath; use the `imports` field (`#internal/*`) for in-package aliases instead of tsconfig `paths`. Know the dual-package hazard: two copies of a module, two `instanceof` identities.",
+   "minutes": 30,
+   "resource": {
+    "label": "Node.js API - Modules: Packages (type, exports, imports, conditions)",
+    "url": "https://nodejs.org/api/packages.html"
+   }
+  },
+  {
+   "name": "Narrowing, discriminated unions and exhaustiveness",
+   "learn": "TypeScript is structural, so `unknown` (not `any`) is the type of anything crossing a boundary, and you narrow it with `typeof`, `in`, `instanceof`, equality and truthiness checks. Model MCP `content` items as a discriminated union on the `type` literal (`text` | `image` | `audio` | `resource_link` | `resource`) and `switch` on it with `default: assertNever(item)` returning `never`, so a new variant fails compilation instead of silently falling through. Write type predicates `(x): x is ToolResult` and assertion functions `asserts x is Config`; use `satisfies` to check a literal against a type without widening it and `as const` to keep literal types. Know where narrowing does not survive: inside callbacks, across `await`, and on `obj[dynamicKey]`.",
+   "minutes": 30,
+   "resource": {
+    "label": "TypeScript Handbook - Narrowing",
+    "url": "https://www.typescriptlang.org/docs/handbook/2/narrowing.html"
+   }
+  },
+  {
+   "name": "Generics, mapped and conditional types you will actually use",
+   "learn": "Generic functions with constraints (`<T extends { id: string }>`), default type parameters, and when inference from arguments beats an explicit type argument. Build the four tools you need daily: `keyof` and indexed access `T[K]`; mapped types `{ [K in keyof T]-?: ... }` with `readonly`/`?` modifiers and `as` key remapping; conditional types with `infer` (this is how `Awaited`, `ReturnType`, `Parameters` are defined) and their distribution over unions; template literal types for event and route names. Derive `ToolName = keyof Tools` and `ToolInput<N extends ToolName> = z.infer<Tools[N][\"input\"]>` so adding a tool is one line. Recognise a type that has become a liability: `tsc --extendedDiagnostics` instantiation counts and `--generateTrace` when the editor slows down.",
+   "minutes": 30,
+   "resource": {
+    "label": "TypeScript Handbook - Creating Types from Types",
+    "url": "https://www.typescriptlang.org/docs/handbook/2/types-from-types.html"
+   }
+  },
+  {
+   "name": "Runtime validation with Zod at every boundary",
+   "learn": "Types are erased at compile time, so every value from `JSON.parse`, `process.env`, HTTP bodies, stdin and tool results must be parsed, not cast. Use `z.object` with the default strip behaviour understood (unknown keys are silently dropped), `.strict()` when drift must be loud, `.passthrough()` when you forward opaque data; `z.discriminatedUnion(\"type\", [...])` for tagged payloads; `z.coerce.number()` for env vars; `.transform` to normalise at the edge. Prefer `.safeParse` returning `{ success, data | error }` in request paths so validation never throws; surface `error.issues[].path` and `message` as customer-readable text. `z.infer<typeof Schema>` is the single source of truth, never a hand-written interface next to the schema. Validate at boundaries only; interior code trusts its types.",
+   "minutes": 30,
+   "resource": {
+    "label": "Zod - Defining schemas (z.object strict/passthrough, discriminatedUnion, coerce, transform)",
+    "url": "https://zod.dev/api"
+   }
+  },
+  {
+   "name": "Generating TypeScript from FastAPI's OpenAPI document",
+   "learn": "FastAPI serves `/openapi.json`; set `generate_unique_id_function` so `operationId` becomes `{tag}-{name}` instead of `read_items_items__get`, because every generator turns operationId into a method name. Run `npx openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.d.ts` and read the output: a `paths` interface keyed by route and method with `parameters`, `requestBody` and `responses` by status code, and `components[\"schemas\"]` for Pydantic models. Know the mapping rules: `Optional[str]` with a default is optional and nullable, `str | None` without default is required and nullable, `Literal` becomes a union of literals, `dict` becomes `Record<string, unknown>`. Commit the generated file and add a CI step that regenerates and runs `git diff --exit-code` so backend drift fails the build.",
+   "minutes": 30,
+   "resource": {
+    "label": "FastAPI - Generate Clients (OpenAPI, operationId, client generation)",
+    "url": "https://fastapi.tiangolo.com/advanced/generate-clients/"
+   }
+  },
+  {
+   "name": "A typed HTTP client with openapi-fetch",
+   "learn": "`createClient<paths>({ baseUrl })` gives you `client.GET(\"/items/{id}\", { params: { path: { id } } })` where path, query, headers and body are all typed from the generated schema and a typo in a route is a compile error. The response is `{ data, error, response }` discriminated by status, so a 2xx `data` and 4xx `error` have different types and you cannot forget the failure branch. Add middleware with `onRequest` for `Authorization` and `X-Request-Id` headers and `onResponse` for retry-on-429 with `Retry-After`; pass `signal: AbortSignal.timeout(ms)` on every call. Understand why this beats heavyweight codegen (orval, openapi-generator) for an FDE: zero runtime schema, a few kB, and regeneration is one command. Wrap it in a domain module so callers never see raw paths.",
+   "minutes": 25,
+   "resource": {
+    "label": "openapi-fetch API reference - createClient, fetch options, middleware",
+    "url": "https://openapi-ts.dev/openapi-fetch/api"
+   }
+  },
+  {
+   "name": "Promises, cancellation and timeouts done right",
+   "learn": "`Promise.all` rejects on the first failure and leaves the rest running; `allSettled` for fan-out where partial results matter; `Promise.race` for timeouts leaks the loser, so use `AbortSignal.timeout(ms)` and `AbortSignal.any([userSignal, timeoutSignal])` and pass the signal into `fetch`, `setTimeout` from `timers/promises`, `events.once(emitter, \"x\", { signal })` and your own loops via `signal.throwIfAborted()`. Since Node 15 an unhandled rejection crashes the process (`--unhandled-rejections=strict|warn|none`), so a `.then` without `.catch` or an un-awaited async call in an event handler is a latent outage. Bound concurrency with a semaphore or `p-limit` instead of `Promise.all` over ten thousand items; consume async iterables with `for await`.",
+   "minutes": 30,
+   "resource": {
+    "label": "MDN - AbortController and AbortSignal",
+    "url": "https://developer.mozilla.org/en-US/docs/Web/API/AbortController"
+   }
+  },
+  {
+   "name": "Streams, backpressure and newline-delimited JSON",
+   "learn": "Node streams: `Readable`, `Writable`, `Transform`, `highWaterMark` (16 KiB in bytes, 16 items in `objectMode`), `write()` returning `false` and waiting for `drain`. Never chain `.pipe()` in production; use `pipeline()` from `stream/promises`, which propagates errors and destroys every stream on failure. `fetch().body` is a Web `ReadableStream`, not a Node stream; bridge with `Readable.fromWeb` and `Readable.toWeb`, decode with `TextDecoderStream`. For the MCP stdio transport, read `process.stdin` line by line with `readline.createInterface({ input })` and `for await (const line of rl)`, parse each line as one JSON-RPC message, and write responses with `process.stdout.write(JSON.stringify(msg) + \"\\n\")`; logs go to stderr because any stray byte on stdout corrupts the protocol stream.",
+   "minutes": 25,
+   "resource": {
+    "label": "Node.js API - Stream (pipeline, backpressure, Web Streams interop)",
+    "url": "https://nodejs.org/api/stream.html"
+   }
+  },
+  {
+   "name": "HTTP servers, keep-alive and graceful shutdown",
+   "learn": "`http.createServer` timeouts you must set consciously: `server.keepAliveTimeout` (default 5 s; must exceed the load balancer idle timeout, typically 60 s on an ALB, or the LB reuses a socket Node already closed and the customer sees 502s), `server.headersTimeout`, `server.requestTimeout`, `maxHeadersCount`. Graceful shutdown on `SIGTERM`: stop accepting with `server.close()`, call `server.closeIdleConnections()`, give in-flight requests a deadline, then `process.exit(0)`; the Kubernetes `terminationGracePeriodSeconds` must exceed that deadline and readiness must flip first. Global `fetch` is undici: configure an `Agent` with `connections`, `keepAliveTimeout`, `headersTimeout` and `bodyTimeout` rather than trusting defaults. Trust `X-Forwarded-For` only behind a proxy you control.",
+   "minutes": 25,
+   "resource": {
+    "label": "Node.js API - HTTP (server timeouts, close, closeIdleConnections)",
+    "url": "https://nodejs.org/api/http.html"
+   }
+  },
+  {
+   "name": "Errors: unknown catch, cause chains and system codes",
+   "learn": "With `useUnknownInCatchVariables`, `catch (e)` is `unknown`; narrow with `instanceof Error` and wrap anything else. Chain context with `new Error(msg, { cause: e })` and define `class ToolCallError extends Error` with a `code` and `toolName`, setting `this.name` so logs and `instanceof` work. Node system errors carry `code` (`ECONNRESET`, `ECONNREFUSED`, `ETIMEDOUT`, `ENOTFOUND`, `EPIPE`, `ERR_MODULE_NOT_FOUND`), so branch on `code`, never on message text. `process.on(\"uncaughtException\")` and `\"unhandledRejection\"` exist to log and exit, not to keep running in a corrupted state. Use a result type `{ ok: true, value } | { ok: false, error }` for expected failures (validation, not found) and throw only for bugs and infrastructure faults. `--enable-source-maps` and `Error.stackTraceLimit` for usable traces from `dist/`.",
+   "minutes": 25,
+   "resource": {
+    "label": "Node.js API - Errors (system error codes, cause, captureStackTrace)",
+    "url": "https://nodejs.org/api/errors.html"
+   }
+  },
+  {
+   "name": "MCP wire protocol: JSON-RPC, lifecycle and transports",
+   "learn": "Every MCP message is JSON-RPC 2.0: requests carry `jsonrpc`, `id`, `method`, `params`; responses carry `result` or `error` with `code` and `message`; notifications have no `id`. Lifecycle: client sends `initialize` with `protocolVersion`, `capabilities` and `clientInfo`; server replies with its `capabilities` (`tools`, `resources`, `prompts`, `logging`, each optionally with `listChanged`) and `serverInfo`; client sends `notifications/initialized`; only then may it call `tools/list`, `tools/call`, `resources/read`, `prompts/get`. stdio transport is one message per line on stdout with stderr free for logs. Streamable HTTP uses a single endpoint, POST for client messages, optional `text/event-stream` responses, `Mcp-Session-Id` for session affinity and `Last-Event-ID` for resumption. Standard error codes -32700 to -32603, server range -32000 to -32099; a tool result with `isError: true` is a tool-level failure, not a protocol error.",
+   "minutes": 30,
+   "resource": {
+    "label": "Model Context Protocol Specification - Lifecycle (2025-06-18)",
+    "url": "https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle"
+   }
+  },
+  {
+   "name": "Building the DefenderMate client on the TypeScript SDK",
+   "learn": "Import `Client` from `@modelcontextprotocol/sdk/client/index.js` and a transport: `StdioClientTransport({ command, args, env })` spawns the server as a child process; `StreamableHTTPClientTransport(new URL(endpoint), { requestInit: { headers } })` for a remote server. `await client.connect(transport)` performs the handshake; then `client.listTools()`, `client.callTool({ name, arguments })`, `client.listResources()`, `client.readResource({ uri })`, `client.getServerCapabilities()`. Pass per-request `RequestOptions` with `timeout` and `resetTimeoutOnProgress` for long tools; subscribe to `notifications/tools/list_changed` and re-list. Always `await client.close()` in `finally` so the child process does not orphan. Wrap all of this in a `DefenderMateClient` class exposing one typed method per tool so consumers never touch raw JSON-RPC.",
+   "minutes": 30,
+   "resource": {
+    "label": "Model Context Protocol - TypeScript SDK (GitHub)",
+    "url": "https://github.com/modelcontextprotocol/typescript-sdk"
+   }
+  },
+  {
+   "name": "Typing tool inputs and outputs end to end",
+   "learn": "MCP `inputSchema` and optional `outputSchema` are JSON Schema, so author one Zod schema per DefenderMate tool and emit JSON Schema with Zod 4's `z.toJSONSchema(schema)`; write a test that fetches `tools/list` from the running server and asserts each emitted schema deep-equals the server's `inputSchema`, which turns silent contract drift into a red test. Validate every `callTool` result: `content` as a discriminated union on `type`, `isError`, and `structuredContent` parsed with the tool's output schema. Implement `callTyped<N extends ToolName>(name: N, args: ToolInput<N>): Promise<ToolOutput<N>>` on top of the SDK so the compiler rejects a wrong argument shape and the runtime rejects a wrong response shape. Know the conversion edges: Zod `.optional()` vs `.nullable()`, `z.record`, `z.enum` to `enum`, and unrepresentable types like `z.date()` and transforms.",
+   "minutes": 30,
+   "resource": {
+    "label": "Zod - JSON Schema conversion (z.toJSONSchema)",
+    "url": "https://zod.dev/json-schema"
+   }
+  },
+  {
+   "name": "Testing with Vitest: transport mocks, fake timers, type tests",
+   "learn": "`vitest.config.ts` with `test.include`, `coverage.provider: \"v8\"` and thresholds; `describe`/`it`/`expect`, `vi.fn()`, `vi.spyOn`, and `vi.mock(\"module\", factory)` with its hoisting rules. Mock the transport, not the network: implement the SDK `Transport` interface with an in-memory fake that returns canned JSON-RPC responses so `Client` runs the real handshake against your fixtures. Use `vi.useFakeTimers()` and `await vi.advanceTimersByTimeAsync(ms)` to test exponential backoff and `AbortSignal.timeout` paths in milliseconds of wall time. Add type-level tests with `expectTypeOf<ToolInput<\"scan\">>().toEqualTypeOf<{ target: string }>()` and run `vitest --typecheck` so a regenerated schema that changes a type fails a test. A contract test in `globalSetup` starts the FastAPI server and hits it through the generated client; `--reporter=junit` for CI.",
+   "minutes": 30,
+   "resource": {
+    "label": "Vitest Guide - Mocking (vi.mock hoisting, spies, fake timers)",
+    "url": "https://vitest.dev/guide/mocking"
+   }
+  },
+  {
+   "name": "Dev loop, build and run: tsx, tsc, native type stripping",
+   "learn": "Development: `tsx --watch src/main.ts` (esbuild under the hood, no type checking, so keep `tsc --noEmit --watch` running beside it). Node 22.6+ runs `.ts` directly with `--experimental-strip-types`, and Node 23.6+ strips by default; only erasable syntax is allowed (no `enum`, `namespace`, parameter properties) unless you pass `--experimental-transform-types`, and the `erasableSyntaxOnly` tsconfig flag enforces this at compile time. Production: `tsc -p tsconfig.build.json` to `dist/` and `node --enable-source-maps dist/main.js`, or bundle with `esbuild src/main.ts --bundle --platform=node --format=esm --outfile=dist/main.js` (externalise native modules) to sidestep the `.js` extension problem and ship one file. For a CLI, `bin` in package.json plus `#!/usr/bin/env node`. Know `NODE_OPTIONS` and `--max-old-space-size` when a container OOMs at 2 GB while the heap default is lower.",
+   "minutes": 25,
+   "resource": {
+    "label": "Node.js API - Modules: TypeScript (type stripping, transform types)",
+    "url": "https://nodejs.org/api/typescript.html"
+   }
+  },
+  {
+   "name": "Dependency hygiene and npm supply chain",
+   "learn": "`npm ci` installs exactly the lockfile, deletes `node_modules` first and fails if `package.json` and lock disagree; `npm install` re-resolves and mutates the lock, so CI and Dockerfiles use `ci`. Commit `package-lock.json` (lockfile v3) and pin the runtime with `engines` plus `.nvmrc` or `.node-version`. `npm audit --omit=dev` for what ships; `overrides` to force a patched transitive version; `npm ls <pkg>` to find who pulls a dependency; `--ignore-scripts` to defuse install-time payloads in untrusted environments. Pin the MCP SDK to an exact version while the protocol is moving and upgrade deliberately with a changelog read. Verify publisher provenance with `npm view <pkg> dist.integrity` and prefer packages published with `--provenance`. pnpm's strict `node_modules` layout is the cheap way to kill phantom imports.",
+   "minutes": 20,
+   "resource": {
+    "label": "npm Docs - npm ci",
+    "url": "https://docs.npmjs.com/cli/v10/commands/npm-ci/"
+   }
+  },
+  {
+   "name": "Type-aware ESLint rules that prevent outages",
+   "learn": "Flat config `eslint.config.js` using `tseslint.config(...tseslint.configs.recommendedTypeChecked)` with `languageOptions.parserOptions.projectService: true` so rules can see types. The rules that pay for themselves on day one: `@typescript-eslint/no-floating-promises` (an un-awaited promise is a swallowed error and a future crash), `no-misused-promises` (an async function passed where a void callback is expected, e.g. `server.on(\"request\", async ...)` or an Express handler), `switch-exhaustiveness-check`, `no-unnecessary-condition`, `consistent-type-imports`, `no-unsafe-argument`. Run `eslint . --max-warnings 0` in CI and let Prettier own formatting only. Know how to introduce these on a legacy codebase: enable as `warn`, fix the hottest paths, flip to `error` per directory.",
+   "minutes": 20,
+   "resource": {
+    "label": "typescript-eslint - no-floating-promises rule",
+    "url": "https://typescript-eslint.io/rules/no-floating-promises/"
+   }
+  },
+  {
+   "name": "Config, structured logging and debugging a live Node process",
+   "learn": "Parse `process.env` once at boot with `z.object({ DEFENDERMATE_URL: z.string().url(), TIMEOUT_MS: z.coerce.number().default(30000), ... }).parse(process.env)` into a frozen typed `config`, so a missing variable fails fast with a list of every issue rather than `undefined` three calls deep. Log JSON lines to stdout with pino: `pino({ level, redact: [\"req.headers.authorization\", \"*.apiKey\"] })`, child loggers carrying `requestId` and `toolName`, `pino-pretty` only in development. Debug a running service with `node --inspect` and `chrome://inspect`, `--inspect-brk` for start-up bugs, `--cpu-prof` and `--heap-prof` for profiles written to cwd, `process.memoryUsage().heapUsed` trended over an hour for leaks, `NODE_DEBUG=http,net` when a connection mysteriously hangs.",
+   "minutes": 25,
+   "resource": {
+    "label": "Node.js Learn - Debugging Node.js",
+    "url": "https://nodejs.org/learn/getting-started/debugging"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take a customer's FastAPI `/openapi.json`, generate `paths` and `components` types with openapi-typescript, and produce an openapi-fetch client where a backend field rename fails `tsc` in CI instead of failing a demo.",
+  "You can write a `DefenderMateClient` that connects over stdio or Streamable HTTP, completes the `initialize` handshake, lists tools, calls a tool with Zod-validated arguments and results, and closes cleanly in `finally` without orphaning the child process.",
+  "You can diagnose `ERR_REQUIRE_ESM`, `ERR_MODULE_NOT_FOUND` and `Cannot use import statement outside a module` in under five minutes by reading `package.json` `type` and `exports` and the tsconfig `module` and `moduleResolution` settings.",
+  "You can prove a Node service is blocking its event loop with `monitorEventLoopDelay` or `--cpu-prof`, name the offending synchronous call, and move it to a worker thread or a stream with a measured before/after p99.",
+  "You can write a Vitest suite that mocks the MCP transport rather than the network, uses fake timers to test retry and backoff, asserts generated types with `expectTypeOf`, and enforces coverage thresholds in CI.",
+  "You can enable `strict`, `noUncheckedIndexedAccess` and `no-floating-promises` on an existing codebase and explain to the customer's team which category of production bug each newly surfaced error represents.",
+  "You can shut a Node HTTP server down on SIGTERM behind an ALB with zero 502s, with `keepAliveTimeout`, load balancer idle timeout, drain deadline and Kubernetes `terminationGracePeriodSeconds` correctly ordered and verified under load.",
+  "You can explain to a Python team, in their vocabulary, that Zod is Pydantic, `tsc --noEmit` is mypy, `npm ci` is a locked `pip install -r`, Vitest is pytest, and precisely where each analogy breaks."
+ ],
+ "failureModes": [
+  "The service passes every type check but crashes nightly with `ERR_UNHANDLED_REJECTION` because one `client.callTool()` inside an event handler was never awaited; `no-floating-promises` would have flagged it on the first commit.",
+  "An MCP server prints a `console.log` startup banner to stdout; the client's JSON-RPC parser hits `Starting DefenderMate...` as its first line, throws, and every tool call fails with an opaque parse error while the server process looks perfectly healthy.",
+  "The TypeScript client was generated from `/openapi.json` once in March; the backend made `tenant_id` required in June, the client kept sending `undefined`, and the resulting 422s were swallowed by a `catch (e) { console.error(e) }` for six weeks.",
+  "Behind an ALB with a 60 s idle timeout, `server.keepAliveTimeout` is left at Node's 5 s default, so the ALB reuses sockets Node has already closed and the customer sees intermittent 502s that never reproduce in a load test against the pod directly.",
+  "`JSON.parse` on a 40 MB tool result blocks the event loop for 800 ms, every concurrent SSE stream stalls, the liveness probe times out, and Kubernetes restarts the pod in the middle of the executive demo.",
+  "Results are validated with Zod's default strip mode, so the server's new `warnings` field is silently dropped and nobody notices for a month that the model is no longer being told when a scan returned degraded data.",
+  "CI runs `npm install` instead of `npm ci`, resolves a fresh transitive MCP SDK version with a protocol bump, and the handshake fails only in staging because every developer machine still has the old lockfile-resolved tree."
+ ],
+ "interviewQuestions": [
+  "Walk me through everything that happens between `node dist/main.js` and the first `tools/call` response of an MCP client: module resolution, the initialize handshake, transport framing, and where each class of failure would surface and how you would recognise it.",
+  "A customer's Node service handles 200 requests per second comfortably, then p99 jumps to three seconds whenever one specific report endpoint is hit, with nothing in the logs. How do you find the cause, what are the three most likely culprits, and what is the fix for each?",
+  "Design the type layer for a client that calls twelve MCP tools whose schemas are owned by another team. Where do types come from, where exactly do you validate at runtime, and what fails in CI on the day they change a schema without telling you?",
+  "Explain the difference between `Promise.race` against a timeout promise and `AbortSignal.timeout` passed into `fetch`. What leaks in the first approach, and how would you cancel a chain of three dependent async calls when the user closes the tab?",
+  "We have a mixed codebase with `require` in some files and `import` in others, and the build intermittently fails with `ERR_REQUIRE_ESM`. What are the realistic options, and what would you recommend for a team that publishes a library consumed by both CommonJS and ESM customers?",
+  "You are handed a TypeScript service with `strict: false` and roughly four hundred `any`s, and the customer wants it hardened in two weeks without pausing feature work. What sequence of compiler flags and lint rules do you introduce, in what order, and how do you keep the team from reverting them?",
+  "How would you drain a Node HTTP server in Kubernetes behind an ALB so a rolling deploy produces zero 502s? Name every timeout that has to be ordered, the order, and how you would verify it before telling the customer it is safe."
+ ],
+ "proofOfWork": "A public repository `defendermate-ts-client` containing: (1) `src/api/schema.d.ts` generated from DefenderMate's `/openapi.json` with a `npm run gen && git diff --exit-code` CI step that fails on drift; (2) a `DefenderMateClient` class wrapping the MCP TypeScript SDK with a generic `callTyped<N>()` whose argument and return types derive from per-tool Zod schemas, plus a test asserting that each `z.toJSONSchema` output deep-equals the server's `tools/list` `inputSchema`; (3) a Vitest suite at or above 85 percent coverage that mocks the transport, uses fake timers to verify exponential backoff on `-32000` errors and `AbortSignal.timeout` paths, and includes `expectTypeOf` type tests run under `vitest --typecheck`; (4) `docs/EVENT_LOOP.md` with a captured `--cpu-prof` profile showing a deliberately introduced `JSON.parse` stall, its fix via a worker thread, and before/after `monitorEventLoopDelay` p99 numbers; and (5) a Dockerfile plus a SIGTERM drain test proving zero failed requests during a rolling restart under k6, with `keepAliveTimeout`, drain deadline and `terminationGracePeriodSeconds` documented in one table. The README explains every design choice in terms a Python-first team can map to Pydantic, mypy, pip lockfiles and pytest."
+}

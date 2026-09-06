@@ -1,0 +1,228 @@
+{
+  "i": 21,
+  "topic": "Observability: OpenTelemetry, Prometheus, Grafana, logs, traces, metrics",
+  "track": "D. Reliability and Observability",
+  "month": 3,
+  "hours": 8.0,
+  "why": "When DefenderMate misclassifies a lead or a HubSpot write silently fails at a customer, the first question on the call is 'what happened to webhook 8813 at 14:02', and the FDE who can open one Grafana tab and walk from the latency spike to the exact trace to the log line holding the HubSpot 429 body owns that conversation; the one who says 'let me add some prints and redeploy' has already lost the week. FDEs inherit the customer's stack rather than choosing it, so you must speak Prometheus, OpenTelemetry and Grafana natively because that is what their platform team runs and what their security review will ask you to integrate with instead of replace. The SLOs you wrote in topic 20 are fiction until the metrics behind them exist, are labelled without cardinality bombs, and alert on burn rate, and that instrumentation is yours to ship, not the customer's.",
+  "prerequisites": [
+    "SRE fundamentals from 'SRE fundamentals: SLIs, SLOs, error budgets, toil, on-call' (topic 20): DefenderMate's SLIs and SLOs already written down, because every metric, bucket boundary and alert in this topic exists to measure one of them",
+    "Enough of 'FastAPI in production' (topic 26) to run DefenderMate locally as an API process plus a separate worker process consuming a queue, since the whole point is instrumenting a real webhook -> queue -> classifier -> HubSpot path, not a hello-world",
+    "Networking from topic 2: HTTP headers and how proxies treat unknown ones, HTTP/1.1 vs gRPC (HTTP/2) framing, ports; propagation is literally two headers and OTLP is gRPC on 4317 or HTTP on 4318",
+    "Docker from topic 5 and Kubernetes core from topic 7: docker compose for the local Collector/Tempo/Prometheus/Loki/Grafana stack, and a kind cluster for the DaemonSet, ServiceMonitor and Operator half",
+    "Python at depth: contextvars and how asyncio.create_task copies context, the logging module's LogRecord/Formatter/Handler chain, context managers and decorators, how gunicorn/uvicorn fork workers",
+    "Single-box troubleshooting from topic 3: what RSS, CFS throttling, file descriptors and run-queue length are, so the saturation panel is not decoration"
+  ],
+  "subtopics": [
+    {
+      "name": "Three signals, one question each, and where cardinality is allowed to live",
+      "learn": "Metrics are pre-aggregated numbers with a bounded label set and answer 'is something wrong and how much'; traces are the per-request causal tree and answer 'where in this request did the time or the error go'; logs are arbitrary events with unbounded context and answer 'what exactly happened here'. Internalise the cardinality rule: a Prometheus time series costs memory per unique label set and the OTel SDK keeps one aggregator per attribute set, so hubspot_contact_id or tenant email can never be a metric label but is fine as a span attribute or log field. Map the four golden signals (latency, traffic, errors, saturation) and RED (rate, errors, duration) onto DefenderMate: webhook receipt, classifier call and HubSpot write each get a span; classification outcome and HubSpot status class become counters; classifier latency becomes a histogram; the webhook payload id and HubSpot response body go to logs only. Write this allocation down before touching code; it is the design artifact a customer's SRE will review.",
+      "minutes": 20,
+      "resource": {
+        "label": "Google SRE Book: Monitoring Distributed Systems (four golden signals)",
+        "url": "https://sre.google/sre-book/monitoring-distributed-systems/"
+      }
+    },
+    {
+      "name": "The span data model: the fields you will actually set",
+      "learn": "A span carries a name, a SpanContext (16-byte trace_id, 8-byte span_id, trace_flags whose 01 bit means sampled, trace_state), a parent span id, a SpanKind, start and end timestamps, typed attributes (default cap 128 via OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT, values must be str/bool/int/float or homogeneous lists; dicts are dropped with a warning), timestamped events (record_exception writes an 'exception' event with exception.type, exception.message, exception.stacktrace), links to spans in other traces, and a Status of UNSET, OK or ERROR. Know the SpanKind contract cold: SERVER/CLIENT pairs are how backends build service graphs and compute network time; PRODUCER/CONSUMER is what the webhook -> queue -> worker hop must use; INTERNAL is for the classifier logic. Resource attributes (service.name, service.version, deployment.environment) describe the emitting process and are set once at provider creation. Span names must be low-cardinality templates ('POST /webhooks/{source}', 'classify_lead', 'hubspot.contacts.update'), never contain ids, because every backend groups and searches on them.",
+      "minutes": 25,
+      "resource": {
+        "label": "OpenTelemetry docs: Traces (spans, context, kinds, status)",
+        "url": "https://opentelemetry.io/docs/concepts/signals/traces/"
+      }
+    },
+    {
+      "name": "W3C traceparent, tracestate and baggage: the headers that make it one trace",
+      "learn": "traceparent is 'version-traceid-parentid-flags', e.g. '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'; the last byte's 01 bit is the sampled flag that lets downstream services honour the root's sampling decision. tracestate carries vendor key=value pairs and is opaque to you. baggage is a separate header carrying arbitrary key/values (tenant_id, webhook_source) across hops, and it is not copied onto spans automatically: if you want it queryable you write a SpanProcessor whose on_start copies chosen baggage entries into span attributes. Know what happens at the edge: a HubSpot webhook arrives with no traceparent so your SERVER span becomes the root, which is correct; a request arriving with a foreign traceparent makes you a child of someone else's trace, which is sometimes what you want (customer's API gateway) and sometimes a bug (a test harness reusing a fixed id). Default OTEL_PROPAGATORS=tracecontext,baggage; add b3multi only for Zipkin-era neighbours. A load balancer or WAF that strips unknown headers breaks propagation silently, so check the header actually arrives with a request dump before blaming the SDK.",
+      "minutes": 25,
+      "resource": {
+        "label": "W3C Recommendation: Trace Context",
+        "url": "https://www.w3.org/TR/trace-context/"
+      }
+    },
+    {
+      "name": "Python SDK bootstrap: providers, processors, exporters, env vars, shutdown",
+      "learn": "Install opentelemetry-sdk and opentelemetry-exporter-otlp-proto-grpc (or -proto-http). Wire Resource.create({'service.name': ..., 'service.version': ..., 'deployment.environment': ...}) into TracerProvider(resource=..., sampler=...), attach BatchSpanProcessor(OTLPSpanExporter(endpoint='http://otel-collector:4317', insecure=True)) and trace.set_tracer_provider(provider). Never use SimpleSpanProcessor outside tests: it exports synchronously inside the request path. Know BatchSpanProcessor's knobs and defaults: max_queue_size 2048, schedule_delay_millis 5000, max_export_batch_size 512, export_timeout_millis 30000; when the queue is full spans are dropped with a single warning you will not see. Prefer environment over code so the same image runs everywhere: OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES, OTEL_EXPORTER_OTLP_ENDPOINT (gRPC 4317; for HTTP 4318 the SDK appends /v1/traces), OTEL_EXPORTER_OTLP_PROTOCOL, OTEL_TRACES_SAMPLER, OTEL_LOG_LEVEL=debug when nothing arrives. Call provider.shutdown() (or provider.force_flush()) on process exit, in a FastAPI lifespan teardown and in the worker's SIGTERM handler, otherwise the final batch is lost and the last spans before a crash never appear. Metrics mirror this: MeterProvider with PeriodicExportingMetricReader(OTLPMetricExporter) and OTEL_METRIC_EXPORT_INTERVAL (60000 ms default).",
+      "minutes": 30,
+      "resource": {
+        "label": "OpenTelemetry docs: Python",
+        "url": "https://opentelemetry.io/docs/languages/python/"
+      }
+    },
+    {
+      "name": "Zero-code instrumentation: FastAPI, httpx, psycopg, redis under opentelemetry-instrument",
+      "learn": "Run 'opentelemetry-bootstrap -a install' to detect installed libraries and install the matching opentelemetry-instrumentation-* packages, then launch with 'opentelemetry-instrument uvicorn app:app'. Know what each instrumentor gives you: FastAPI/ASGI creates a SERVER span per request named by route template with http.request.method, http.route, http.response.status_code, url.scheme and server.address; httpx and requests create CLIENT spans and inject traceparent on every outgoing call, which is what makes the HubSpot API call a child of your worker span; psycopg adds db.system and a sanitised db.statement; redis adds db.operation and db.statement. Know the forking gotchas: gunicorn --preload or uvicorn --workers creates the exporter before fork and the export thread dies in the children, so instrument in gunicorn's post_fork hook or per-worker startup; uvicorn --reload spawns an uninstrumented child. Set OTEL_PYTHON_EXCLUDED_URLS='health,ready,metrics' (and the FastAPI-specific OTEL_PYTHON_FASTAPI_EXCLUDED_URLS) so probes and scrapes do not become 70 percent of your spans. When zero-code fights your process model, call FastAPIInstrumentor().instrument_app(app), HTTPXClientInstrumentor().instrument() and friends explicitly at startup instead.",
+      "minutes": 30,
+      "resource": {
+        "label": "OpenTelemetry docs: Python zero-code instrumentation",
+        "url": "https://opentelemetry.io/docs/zero-code/python/"
+      }
+    },
+    {
+      "name": "Manual spans and gen_ai semantic conventions around the classifier",
+      "learn": "Get a named tracer once per module: tracer = trace.get_tracer('defendermate.classifier', version). Wrap the LLM call with 'with tracer.start_as_current_span(\"classify_lead\", kind=SpanKind.INTERNAL) as span:' and set the gen_ai semantic-convention attributes so any backend understands it: gen_ai.system ('anthropic'), gen_ai.request.model, gen_ai.request.max_tokens, gen_ai.request.temperature, gen_ai.response.model, gen_ai.response.finish_reasons, gen_ai.usage.input_tokens, gen_ai.usage.output_tokens. Keep prompt and completion text off the span by default: it is PII and size; gate capture behind an explicit env flag and document it. Add your own namespaced attributes for what the business asks about: defendermate.classification (bounded enum), defendermate.confidence, defendermate.webhook.source. On failure call span.record_exception(exc), span.set_status(Status(StatusCode.ERROR, str(exc))) and re-raise; never swallow, and never set OK manually unless you have checked the result. Emit span.add_event('retry', {'attempt': n, 'backoff_ms': ms}) inside retry loops so the trace shows why 3 s became 20 s. Use span links when one classifier batch serves many webhooks. Verify in Tempo that the classifier span's duration matches the provider-side latency you see in the API response headers.",
+      "minutes": 30,
+      "resource": {
+        "label": "OpenTelemetry semantic conventions: Generative AI",
+        "url": "https://opentelemetry.io/docs/specs/semconv/gen-ai/"
+      }
+    },
+    {
+      "name": "Context across async boundaries: webhook -> queue -> worker without breaking the trace",
+      "learn": "The webhook handler must return 200 in milliseconds, so the classifier runs later in a worker and the trace breaks at the queue unless you carry context by hand. Producer side: carrier = {}; propagate.inject(carrier); store carrier next to the job (Redis Stream field, Kafka record header, Temporal header, a JSONB column). Consumer side: ctx = propagate.extract(carrier); with tracer.start_as_current_span('process_webhook', context=ctx, kind=SpanKind.CONSUMER). Decide parent versus link deliberately: a job processed once is a child span; a job retried many times or drained in batches gets a new trace per attempt with a Link back to the PRODUCER span, so one poison message cannot create a 10,000-span trace that no UI renders. Know Python's context rules: asyncio.create_task copies contextvars at creation so spans flow into tasks, but ThreadPoolExecutor and run_in_executor do not, so wrap with contextvars.copy_context().run or install opentelemetry-instrumentation-threading. A span must end in the same execution that started it; a span started in the request and ended in the worker is a bug that shows as spans with absurd durations. Prove the whole thing with a single trace id visible in the API log, the queue payload, the worker log and the HubSpot CLIENT span.",
+      "minutes": 30,
+      "resource": {
+        "label": "OpenTelemetry docs: Python manual instrumentation (context, propagation)",
+        "url": "https://opentelemetry.io/docs/languages/python/instrumentation/"
+      }
+    },
+    {
+      "name": "The Collector: receivers, processors, exporters, connectors, pipelines",
+      "learn": "The Collector config has receivers, processors, exporters, connectors, extensions and service.pipelines.{traces,metrics,logs} that wire them together; a component that is defined but not referenced in a pipeline does nothing, which is the first thing to check when nothing arrives. Production processor order: memory_limiter first (check_interval 1s, limit_mib, spike_limit_mib; it refuses data instead of letting the process OOM), then resourcedetection or k8sattributes, then attributes/transform for redaction (action: delete on http.request.header.authorization, hash on user.email), then batch last (send_batch_size, timeout). Exporters you will use: otlp to Tempo or Jaeger on 4317, prometheusremotewrite or prometheus (exposes a /metrics endpoint for scraping), loki or otlphttp for logs, and debug with verbosity: detailed while developing. Connectors join pipelines: spanmetrics turns spans into RED metrics, servicegraph builds the service map. Run 'otelcol validate --config=config.yaml' before every deploy. Know that tail_sampling, k8sattributes, transform and loki live in the contrib distribution, not core. Enable the health_check extension on 13133 for liveness and zpages on 55679 to inspect live pipelines.",
+      "minutes": 35,
+      "resource": {
+        "label": "OpenTelemetry docs: Collector configuration",
+        "url": "https://opentelemetry.io/docs/collector/configuration/"
+      }
+    },
+    {
+      "name": "Sampling: head, parent-based, tail, and the scaling constraint",
+      "learn": "Head sampling decides at the root: OTEL_TRACES_SAMPLER=parentbased_traceidratio with OTEL_TRACES_SAMPLER_ARG=0.1 keeps 10 percent of roots and every child honours the parent's flag, so traces stay complete; always_on for dev. Head sampling cannot 'keep all the errors' because the decision precedes the error. Tail sampling in the Collector's tail_sampling processor buffers each trace for decision_wait (10-30 s) then applies policies: status_code ERROR keep, latency threshold_ms above your SLO keep, string_attribute on tenant for a VIP customer keep, probabilistic 5 percent for the rest; compose them with and/composite policies. The cost: every span of a trace must reach the same Collector instance, so with more than one replica you put the loadbalancing exporter (routing_key: traceID) in a first tier in front of the samplers. Metrics derived from traces are wrong after sampling, so run the spanmetrics connector before tail_sampling or compute RED from the SDK instead. Be able to answer 'why is there no trace for my successful fast request' and 'why is the error trace missing' in one sentence each.",
+      "minutes": 25,
+      "resource": {
+        "label": "OpenTelemetry docs: Sampling",
+        "url": "https://opentelemetry.io/docs/concepts/sampling/"
+      }
+    },
+    {
+      "name": "Prometheus data model, metric types, naming and finding cardinality offenders",
+      "learn": "A time series is a metric name plus a label set; a sample is (timestamp, float64). Counter is monotonic and only ever read through rate() or increase(); Gauge is a point-in-time value read with avg_over_time or max_over_time; Histogram exposes cumulative _bucket series with an le label plus _sum and _count and aggregates correctly across instances; Summary computes quantiles client-side and cannot be aggregated, so avoid it. Naming: defendermate_classifier_requests_total, defendermate_hubspot_write_duration_seconds; base units (seconds, bytes), _total suffix for counters, no label value baked into the name. Label values must be bounded enumerations: outcome in {qualified, disqualified, error}, status_class in {2xx, 4xx, 5xx}; tenant is acceptable only while tenants number in the tens. Python client: Counter(...).labels(outcome='qualified').inc(), Histogram(..., buckets=[...]).observe(seconds); under gunicorn set PROMETHEUS_MULTIPROC_DIR because each worker holds its own registry and the parent must aggregate. Find offenders on a customer's server with topk(10, count by (__name__)({__name__=~'.+'})) and the /api/v1/status/tsdb endpoint's seriesCountByMetricName. Pick one path per service: prometheus_client scraped directly, or OTel Meter.create_counter/create_histogram exported through the Collector; never both for the same numbers.",
+      "minutes": 30,
+      "resource": {
+        "label": "Prometheus docs: Metric types",
+        "url": "https://prometheus.io/docs/concepts/metric_types/"
+      }
+    },
+    {
+      "name": "Scrape configuration, service discovery, relabeling and the /metrics contract",
+      "learn": "prometheus.yml scrape_configs: job_name, scrape_interval (15 s default; every rate() window and alert 'for' depends on it), scrape_timeout below the interval, static_configs for compose, kubernetes_sd_configs (role: pod or endpoints) for clusters, relabel_configs to keep only pods annotated prometheus.io/scrape=true and to rewrite the instance and job labels into something a human recognises. The exposition format is plain text with '# HELP' and '# TYPE' lines then samples; a /metrics endpoint that computes on demand and takes seconds will stall scrapes, so precompute in a background task. The synthetic 'up' metric is 1 when the scrape succeeded, and 'up == 0' is your first alert. With Prometheus Operator, ServiceMonitor and PodMonitor CRDs are selected by label; a missing 'release' label matching the Prometheus CR's serviceMonitorSelector is the single most common reason a customer's Prometheus ignores your service. Verify at /targets and /service-discovery, reload with SIGHUP or POST /-/reload (requires --web.enable-lifecycle).",
+      "minutes": 20,
+      "resource": {
+        "label": "Prometheus docs: Configuration (scrape_configs, relabel_configs)",
+        "url": "https://prometheus.io/docs/prometheus/latest/configuration/configuration/"
+      }
+    },
+    {
+      "name": "PromQL for RED: the six queries you paste into every dashboard",
+      "learn": "rate(x_total[5m]) is the per-second average over the window and the window must be at least four times scrape_interval or you get gaps; increase() gives the count in the window; irate() is for spike hunting only, never alerts. Aggregate with sum by (route, status_class) (rate(http_server_request_duration_seconds_count[5m])). Error ratio: sum(rate(x_total{status_class='5xx'}[5m])) / sum(rate(x_total[5m])). Latency: histogram_quantile(0.99, sum by (le) (rate(x_duration_seconds_bucket[5m]))) and the le label must survive the aggregation or the result is garbage. Saturation: queue depth gauges, process_resident_memory_bytes, container_cpu_cfs_throttled_periods_total, process_open_fds. Know why histogram_quantile returns NaN (no samples), why it can report a value above your largest finite bucket (+Inf interpolation) and why coarse buckets make p99 a lie. Recording rules with the level:metric:operations convention (job:http_requests:rate5m) for anything a dashboard or alert evaluates more than once a minute. Learn absent(), offset, topk(), label_replace() and the 'on'/'ignoring' vector-matching keywords because each one will save you an afternoon at a customer once.",
+      "minutes": 30,
+      "resource": {
+        "label": "Prometheus docs: Querying basics (PromQL)",
+        "url": "https://prometheus.io/docs/prometheus/latest/querying/basics/"
+      }
+    },
+    {
+      "name": "Histograms done right: bucket edges at SLO thresholds, exemplars, native histograms",
+      "learn": "The Python client's default buckets (.005 to 10 s) are wrong for an LLM call that takes 2-30 s; choose buckets that bracket your SLO thresholds, for example 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60 for classifier latency, because histogram_quantile interpolates linearly inside a bucket and the only exact measurement is 'fraction under a bucket edge' via x_bucket{le='5'} / x_count. Every extra bucket is one more series per label set: 12 buckets x 10 routes x 3 status classes is 360 series for one metric. Exemplars attach a trace_id to an observation (observe(value, {'trace_id': hex}) in the client, exposed only in the OpenMetrics format, stored by Prometheus with --enable-feature=exemplar-storage) so a Grafana latency panel shows dots that click through to the exact slow trace; this is the concrete link between metrics and traces. Know native histograms and OTel exponential histograms as the fix for bucket choice (bucket boundaries chosen automatically, aggregatable across differently configured services) and their current feature-flag status so you can tell a customer when to adopt them.",
+      "minutes": 25,
+      "resource": {
+        "label": "Prometheus docs: Histograms and summaries (best practices)",
+        "url": "https://prometheus.io/docs/practices/histograms/"
+      }
+    },
+    {
+      "name": "Structured logs that carry trace_id and span_id",
+      "learn": "The target is that every log line emitted while a request is in flight carries trace_id and span_id so a click on a span lands on exactly its lines. Two ways in Python: OTEL_PYTHON_LOG_CORRELATION=true with the logging instrumentation injects otelTraceID, otelSpanID and otelServiceName into every LogRecord; or in your own JSON formatter read trace.get_current_span().get_span_context() and format trace_id as a 32-character lowercase hex (format(ctx.trace_id, '032x')) because Tempo and Loki expect hex, not the integer. Emit exactly one JSON object per line on stdout; never multi-line tracebacks in production since each line becomes a separate log entry, put the traceback in an 'exc_info' field. Ship via OTLP logs (LoggerProvider + BatchLogRecordProcessor + LoggingHandler) or via stdout -> Collector filelog receiver -> Loki exporter; pick one and document it. Define the level contract: INFO for state transitions with ids (webhook received, classified, hubspot written), WARN for retried failures, ERROR only when a human should look, and never DEBUG in production by default. Redact secrets and PII in the formatter, not downstream, because the Collector already saw the raw line.",
+      "minutes": 25,
+      "resource": {
+        "label": "OpenTelemetry docs: Logs (data model and correlation)",
+        "url": "https://opentelemetry.io/docs/concepts/signals/logs/"
+      }
+    },
+    {
+      "name": "Loki: labels versus fields, and the LogQL you actually need",
+      "learn": "Loki indexes only labels (the stream selector) so keep them to service, namespace, pod and level; every unique label combination is a stream and a trace_id, request_id or tenant label creates millions of streams and stops ingestion, the cardinality failure in log form. Everything else stays in the line and is parsed at query time: {service='defendermate-worker'} | json | trace_id='4bf92f3577b34da6a3ce929d0e0e4736', line filters |= 'hubspot' and != 'health', label filters | level='error' | duration > 2s after parsing. Metric queries from logs: sum by (level) (rate({service='defendermate-api'} | json [5m])) and count_over_time for 'how many 429 bodies in the last hour'. Configure derived fields on the Loki datasource in Grafana (a regex or JSON field for trace_id, internal link with the Tempo datasourceUid) so a trace id in any log line becomes a clickable link. Know the operator knobs a customer's platform team will ask about: retention_period, chunk_target_size, per-tenant ingestion rate limits, and that 'too many outstanding requests' means your query fanned out over too many streams.",
+      "minutes": 20,
+      "resource": {
+        "label": "Grafana Loki documentation",
+        "url": "https://grafana.com/docs/loki/latest/"
+      }
+    },
+    {
+      "name": "Grafana: Tempo datasource, trace-to-logs, trace-to-metrics, TraceQL, one-tool navigation",
+      "learn": "Configure the Tempo datasource with tracesToLogsV2 (datasourceUid of Loki, tags mapping service.name -> service, spanStartTimeShift '-1m' and spanEndTimeShift '1m' so clock skew does not hide lines, filterByTraceID true), tracesToMetrics (queries using $__tags to jump to the RED panels for the selected span's service) and serviceMap (needs spanmetrics and servicegraph connectors in the Collector writing to Prometheus). Learn TraceQL because attribute search is how you find things without an id: { resource.service.name = 'defendermate-worker' && span.gen_ai.request.model =~ 'claude.*' && duration > 5s }, { status = error }, and structural queries like { span.http.route = '/webhooks/hubspot' } >> { span.db.system = 'postgresql' }. Practise the Explore split view until it is muscle memory: latency panel with exemplars on the left, click a dot, the trace opens on the right, click the HubSpot CLIENT span, its logs appear below; that is the demo you owe the customer and the screenshot the plan asks for. Know Tempo's limits: traces are retrievable by id immediately but searchable by attribute only after they are flushed to blocks, and max_duration and lookback settings bound what search returns.",
+      "minutes": 30,
+      "resource": {
+        "label": "Grafana docs: Tempo data source (trace to logs, trace to metrics, TraceQL)",
+        "url": "https://grafana.com/docs/grafana/latest/datasources/tempo/"
+      }
+    },
+    {
+      "name": "Dashboards and datasources as code: the RED dashboard you ship to every customer",
+      "learn": "Provision datasources with YAML in /etc/grafana/provisioning/datasources (apiVersion: 1; datasources: name, type, url, uid, isDefault, jsonData) and dashboards through a provider pointing at a folder of dashboard JSON with allowUiUpdates: false so the customer cannot drift them silently; give every dashboard a stable uid so links survive re-import. Build one RED dashboard from scratch: template variables $env and $service from label_values(up, job); rows for Rate, Errors (ratio panel with a red threshold at the SLO), Duration (p50/p95/p99 from histogram_quantile plus a heatmap panel over the _bucket series with exemplars enabled) and Saturation (queue depth, worker count, memory, CFS throttling); an annotations query from deployment events so every step change has a cause line. Use the HTTP API (POST /api/dashboards/db with overwrite: true, service-account token) from CI so the version-controlled JSON is the source of truth. Know the panel types that matter: time series, stat with thresholds, heatmap for histograms, state timeline for up/down, and the difference between instant and range queries in a table panel.",
+      "minutes": 25,
+      "resource": {
+        "label": "Grafana docs: Provisioning (datasources, dashboards, alerting)",
+        "url": "https://grafana.com/docs/grafana/latest/administration/provisioning/"
+      }
+    },
+    {
+      "name": "Alerting rules: symptom-based, multi-window burn rate, Alertmanager routing",
+      "learn": "A Prometheus alerting rule has alert, expr, for (pending -> firing; set to at least two scrape intervals), labels (severity: page or ticket, team) and annotations (summary, runbook_url) templated with {{ $labels.service }} and {{ $value }}. Alert on symptoms users feel (error ratio, latency SLO burn, up == 0, absent(heartbeat_metric)) rather than causes (CPU above 80 percent, restarts above 3), because the HubSpot 429 storm that loses leads has green CPU. Implement the SRE Workbook multi-window multi-burn-rate pair for the SLO from topic 20: a fast alert (1 h window at 14.4x burn with a 5 m confirmation window, for 2m) and a slow alert (6 h at 6x with 30 m confirmation), each requiring both windows to exceed the threshold. Alertmanager: a route tree by severity and team, group_by ['alertname', 'service'], group_wait 30s, group_interval 5m, repeat_interval 4h, inhibit_rules so a ClusterDown alert silences fifty pod-level alerts, receivers for Slack, PagerDuty and a generic webhook. Ship nothing to a customer until 'promtool check rules' and 'promtool test rules' with a unit-test file pass in CI, and until you have watched the alert fire and resolve against injected errors.",
+      "minutes": 25,
+      "resource": {
+        "label": "Prometheus docs: Alerting rules",
+        "url": "https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/"
+      }
+    },
+    {
+      "name": "Operating the pipeline: Collector self-telemetry, dropped data, backpressure, bisecting 'no traces'",
+      "learn": "The Collector exposes its own Prometheus metrics on :8888 (service.telemetry.metrics): otelcol_receiver_accepted_spans and otelcol_receiver_refused_spans, otelcol_processor_dropped_spans (memory_limiter and tail_sampling), otelcol_exporter_sent_spans and otelcol_exporter_send_failed_spans, otelcol_exporter_queue_size against otelcol_exporter_queue_capacity, plus the same families for metric points and log records. Alert when refused or send_failed is non-zero for five minutes: silent data loss is the failure mode of observability itself and it always happens during the incident you most need. Exporter knobs: sending_queue (enabled, num_consumers, queue_size), retry_on_failure (initial_interval, max_interval, max_elapsed_time after which data is dropped for good), timeout. Backend rate limiting (Tempo 429 on per-tenant ingestion limits, Grafana Cloud quotas) appears as send_failed; the fix is sampling or a limit increase, not a bigger queue. Bisect a 'no traces' ticket in a fixed order: OTEL_LOG_LEVEL=debug on the SDK, debug exporter in the Collector, receiver accepted versus refused, exporter sent versus failed, backend ingester logs, then the datasource's time range and tenant in Grafana.",
+      "minutes": 20,
+      "resource": {
+        "label": "OpenTelemetry docs: Collector internal telemetry",
+        "url": "https://opentelemetry.io/docs/collector/internal-telemetry/"
+      }
+    },
+    {
+      "name": "Deploying on Kubernetes: agent versus gateway, k8sattributes, Operator injection, kube-prometheus-stack",
+      "learn": "Two Collector topologies: agent (DaemonSet; pods send to the node-local Collector via OTEL_EXPORTER_OTLP_ENDPOINT built from status.hostIP through the downward API; the k8sattributes processor maps pod IP to k8s.pod.name, k8s.namespace.name, k8s.deployment.name and needs RBAC to list pods and replicasets) and gateway (a Deployment behind a Service; the one place for tail sampling, export credentials and egress control). Most customers run both: agents forward to the gateway. The OpenTelemetry Operator's Instrumentation CRD plus the annotation instrumentation.opentelemetry.io/inject-python: 'true' injects zero-code instrumentation into an existing Deployment via an init container and env vars, which is the no-code-change path you offer for a customer's legacy services. Install with the official Helm charts (opentelemetry-collector with mode: daemonset or deployment, opentelemetry-operator) and kube-prometheus-stack for Prometheus Operator, Alertmanager and Grafana; scrape the Collector's :8888 with a ServiceMonitor. Give the Collector real requests and limits and set memory_limiter limit_mib at roughly 80 percent of the container limit, because at a customer the Collector is often the first pod OOMKilled when traffic spikes, which erases the telemetry of the spike.",
+      "minutes": 20,
+      "resource": {
+        "label": "OpenTelemetry docs: Collector deployment patterns (agent, gateway)",
+        "url": "https://opentelemetry.io/docs/collector/deploy/"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can instrument a FastAPI webhook receiver, a queued worker that calls an LLM, and an outbound HubSpot client so that one trace_id links the SERVER span, the CONSUMER span, the classifier INTERNAL span with gen_ai.* attributes and the HTTP CLIENT span, and show the full tree in Grafana Tempo with span durations that reconcile to the provider's reported latency.",
+    "You can write an OpenTelemetry Collector config from memory with memory_limiter, k8sattributes or resourcedetection, attributes-based redaction, batch, tail_sampling and OTLP, Prometheus and Loki exporters, pass 'otelcol validate', and prove data flow using only the Collector's receiver and exporter counters on :8888.",
+    "You can produce the six PromQL queries of a RED dashboard (rate, error ratio, p50/p95/p99, saturation) for any service given only its metric names, and explain why each rate() window is at least four scrape intervals and why le must survive the aggregation in histogram_quantile.",
+    "You can choose histogram buckets for a 2-30 s LLM call so that the SLO threshold is a bucket edge, compute the fraction under threshold exactly with _bucket over _count, and attach exemplars so a latency dot clicks through to the exact slow trace.",
+    "You can configure parentbased_traceidratio head sampling plus a tail_sampling policy set that keeps all errors and slow traces and a fixed percentage of the rest, explain the loadbalancing-exporter requirement for more than one Collector replica, and tell a customer in one sentence why a fast successful request has no trace.",
+    "You can make every log line emitted during a request carry the 32-hex trace_id, ship logs to Loki with only service, namespace, pod and level as labels, and configure trace-to-logs and derived fields so a span click lands on exactly the lines for that span.",
+    "You can write the fast and slow multi-window burn-rate alert rules for a written SLO, route them through Alertmanager with grouping and an inhibition rule, pass 'promtool test rules' in CI, and demonstrate the alert firing and resolving against injected 429s.",
+    "You can bisect a 'no traces are arriving' report in under fifteen minutes by checking, in order, SDK debug log, Collector debug exporter, receiver accepted versus refused, exporter sent versus failed, backend ingester limits, and the Grafana datasource time range and tenant."
+  ],
+  "failureModes": [
+    "Someone puts hubspot_contact_id or the raw request path with ids on a Prometheus label; a week later the customer's shared Prometheus holds two million series, head memory triples, the pod OOMs while replaying the WAL on every restart, and the customer's entire monitoring goes dark, not just yours.",
+    "The BatchSpanProcessor is created before gunicorn forks, or the worker exits without provider.shutdown(): spans sit in a dead export thread or an unflushed queue, the trace ends at the webhook's 200, and you spend a day debugging propagation headers when the problem is process lifecycle.",
+    "The webhook handler enqueues the job without injecting traceparent into the Redis Stream fields or Kafka headers, so every worker span is a new root; 'one trace from webhook to HubSpot write' is actually three unlinked traces and nobody notices until a customer asks why a write took forty minutes and there is no single trace to show them.",
+    "Tail sampling runs on two Collector replicas behind a round-robin Service without the loadbalancing exporter; halves of the same trace land on different instances, the ERROR policy fires on one half only, and Tempo shows truncated traces with missing parents that look exactly like an instrumentation bug.",
+    "/health, /ready and /metrics are not in OTEL_PYTHON_EXCLUDED_URLS; with 10 s probes per pod and 15 s scrapes, seventy percent of all spans are probes, the sampling budget is spent on noise, and the customer's Grafana Cloud bill doubles in the first month of the pilot.",
+    "A prompt or the raw webhook payload containing names and emails is set as a span attribute 'for debugging' and shipped to a SaaS tracing backend; the customer's DPO finds it during SOC 2 evidence collection and the integration is paused pending legal review.",
+    "Alerts are written on causes (CPU above 80 percent, restarts above 3) instead of symptoms; the HubSpot write path returns 429 for six hours with green CPU and zero restarts, 1,400 leads are never written, and the customer learns about it from their sales team on Monday.",
+    "The Collector is deployed without memory_limiter and with default resources; the first real traffic burst makes it the first pod OOMKilled, every SDK queue fills and drops, and the incident that caused the burst has no telemetry for exactly the minutes you need to explain it."
+  ],
+  "interviewQuestions": [
+    "A customer says the trace for a failed request is missing in Tempo while successful ones are present. Walk through every place the decision to drop it could have been made, from SDK sampler to Collector to backend ingestion limits, and how you would confirm or rule out each in under ten minutes.",
+    "Design the telemetry for a webhook -> queue -> LLM classifier -> CRM write pipeline running across two services and a Redis queue. Which spans, which SpanKind on each, where exactly do you inject and extract context, which fields go on spans versus metric labels versus logs, and what do you refuse to record and why?",
+    "Here is a p99 latency panel showing 45 s while the largest finite bucket is 30 s and the customer insists no request took that long. Explain what histogram_quantile did, how you would fix the bucket layout for a 2-30 s LLM call, and how you would prove the real p99 today without waiting for new data.",
+    "A platform team reports Prometheus memory grew four-fold after your service shipped. Name the queries and endpoints you use to find the offending metric and label, then describe the code change and the Collector processor that make it impossible to recur.",
+    "Explain head versus tail sampling to a customer's CTO in two minutes, then to their SRE in detail: policies, decision_wait, the horizontal-scaling constraint, and how the spanmetrics connector must be positioned relative to the sampler.",
+    "Your SLO says 99.5 percent of HubSpot writes succeed within 5 s over 30 days. Write the SLI expression, the fast and slow burn-rate alert expressions with thresholds and 'for' durations, and argue why the pair beats a single error-ratio threshold on a pager.",
+    "The customer runs Datadog, not Grafana, and will not change. Which parts of your OpenTelemetry instrumentation carry over unchanged, what has to change, and how do you argue for OTel-native instrumentation without sounding like you are selling a migration?"
+  ],
+  "proofOfWork": "A public repository named defendermate-observability containing a docker-compose stack (otel-collector-contrib, Tempo, Prometheus with exemplar storage enabled, Loki, Alertmanager, Grafana with provisioned datasources and a RED dashboard) and a 'make demo' target that replays 200 synthetic HubSpot webhooks with 5 percent injected classifier exceptions and 5 percent HubSpot 429 responses, then prints the trace_id of one failed request. The README walks a reviewer in six clicks from the latency panel's exemplar dot to the trace to the log line holding the 429 body, with a screen recording of the same path. A 'make verify' target asserts, via the Collector's :8888 metrics and Tempo's API, that refused and send_failed counters are zero, that every worker CONSUMER span has a parent in the API service, that no span attribute matches an email or phone regex, and that 'promtool test rules' passes for the two burn-rate alerts. A one-page DECISIONS.md records why each span attribute and each metric label was chosen, with the series-count arithmetic for every label, so a customer's SRE can review the cardinality budget before the pilot goes live."
+}

@@ -1,0 +1,200 @@
+{
+ "i": 73,
+ "topic": "Resume defence: every line",
+ "track": "K. Interview Loop and Mocks",
+ "month": 8,
+ "hours": 4,
+ "why": "An FDE loop is a credibility audit disguised as a conversation: the interviewer picks one line off your resume, asks 'how did you measure that', and keeps pulling until either a real system appears or the claim collapses - because that is exactly what a customer's staff engineer will do to you in week two of a deployment. Every unfalsifiable number on your resume ('45% improvement in targeting accuracy') is a trap you set for yourself, and one collapsed claim contaminates every other number in the document. This session converts a marketing artifact into a defensible technical record: for each bullet, the mechanism, the measurement, the thing that broke, and the design you would not repeat.",
+ "prerequisites": [
+  "A current resume you actually send out, with every metric bullet in it - the Omnibound, RemoteState and FalconWise lines, verbatim.",
+  "Access to whatever produced your numbers: HubSpot/Smartlead/Instantly exports, Supabase or Postgres tables, n8n and Clay run histories, Slack threads, GA4 or Mixpanel views. If an account is gone, the screenshots and CSVs you kept.",
+  "Enough SQL and percentile literacy from the observability and SLO topics to state a metric as good events over valid events, over a named window, rather than as a bare percentage.",
+  "The STAR / narrative structure work from topic 72 (why FDE, why this company) so a defence answer has a shape and an ending, not just facts.",
+  "The technical-writing pass from topic 69 - specifically the numbers-that-survive-scrutiny discipline: baseline, method, sample size, percentile, confounders.",
+  "A peer or mock partner willing to be genuinely adversarial for 45 minutes, plus a recorder (audio is enough) and a transcription tool."
+ ],
+ "subtopics": [
+  {
+   "name": "Explode the resume into atomic, falsifiable claims",
+   "learn": "Put every bullet in a table with one row per distinct claim, not per bullet - 'cut deploy time 2 weeks to under 3 days and sustained 1.5%+ positive reply rates across 300+ mailboxes' is four claims (a before, an after, a rate, a fleet size). Tag each row with claim type: metric, mechanism, scope, or scale. Mark which ones you can produce evidence for in under five minutes, which need reconstruction, and which are vibes. Expect 20-40 rows off a two-page resume; the count itself tells you how much surface area you are defending.",
+   "minutes": 15,
+   "resource": {
+    "label": "Google Technical Writing One - audience and clear claims",
+    "url": "https://developers.google.com/tech-writing/one"
+   }
+  },
+  {
+   "name": "Number provenance: baseline, window, instrument, sample",
+   "learn": "For each metric row, write down five things or delete the number: the baseline value and how it was measured, the measurement window and whether before and after used the same length, the instrument (a HubSpot report, a Smartlead campaign export, a SQL query, a stopwatch, or your memory), the sample size, and who else could reproduce it. '48h to under 4 hours' must resolve to something like 'median time from signal event timestamp to first-touch send timestamp, over 412 accounts in Feb-Mar 2026, from a Supabase query joining signal_events to outreach_sends'. If it resolves to 'it felt faster', that is a mechanism claim wearing a metric costume - rewrite it as one.",
+   "minutes": 18,
+   "resource": {
+    "label": "Google SRE Book - Service Level Objectives",
+    "url": "https://sre.google/sre-book/service-level-objectives/"
+   }
+  },
+  {
+   "name": "Attribution isolation: what else changed at the same time",
+   "learn": "For every improvement claim, list everything else that moved during the same window - new domains warmed, a different ICP, a seasonality effect, a pricing change, a headcount change, a list source swap. The killer follow-up is 'reply rate went up, but you also changed the list and the copy in the same sprint - how do you know which one did it?' Have an answer that is either a real control (a holdout segment, a staggered rollout, an A/B with the same list), or an honest 'I could not isolate it; here is the directional evidence and here is what I would have held constant'. Never claim causation from a single before/after with three simultaneous changes.",
+   "minutes": 16,
+   "resource": {
+    "label": "Confounding - definition and control strategies",
+    "url": "https://en.wikipedia.org/wiki/Confounding"
+   }
+  },
+  {
+   "name": "Denominators, cohorts, and the metric that games itself",
+   "learn": "Write every rate as an explicit fraction with a named numerator and denominator, the way an SLI is defined as good events over valid events. '1.5%+ positive reply rate' is meaningless until you say positive replies over delivered (not sent), where positive means a human-labelled interested/meeting-booked and not an out-of-office, deduped by contact and not by email. Do the same for '18-39% SQL conversion' (of what population, qualified by whom, over what lag window) and '95%+ deliverability' (inbox placement from a seed test, or simply not-bounced). Then ask what the metric incentivises: a reply rate you can raise by shrinking the denominator is a number a senior interviewer will immediately probe.",
+   "minutes": 14,
+   "resource": {
+    "label": "Google SRE Workbook - Implementing SLOs",
+    "url": "https://sre.google/workbook/implementing-slos/"
+   }
+  },
+  {
+   "name": "Mechanism ladder for the enrichment agent bullet",
+   "learn": "Take '6+ hrs/batch manual research to sub-30-min automated pass, Python Playwright + asyncio over 100+ domains' and rehearse three depths. Level one: the pipeline stages. Level two: the concurrency model - asyncio.Semaphore bound, asyncio.gather vs as_completed, why you chose N workers, browser context reuse versus a fresh context per domain, per-request timeouts, retry with exponential backoff and jitter, and where the 30 minutes actually goes. Level three: what breaks - a hung page with no navigation timeout pinning an event-loop slot, memory growth from unclosed contexts, a blocking requests call inside a coroutine serialising the whole run, robots and rate-limit handling, and how you would prove the run was actually 30 minutes rather than 30 minutes for the domains that did not fail.",
+   "minutes": 18,
+   "resource": {
+    "label": "Python docs - asyncio tasks and coroutines",
+    "url": "https://docs.python.org/3/library/asyncio-task.html"
+   }
+  },
+  {
+   "name": "Mechanism ladder for the LLM pipeline and scoring rubric",
+   "learn": "For '7-stage LLM pipeline' and 'composite 0-100 score from firmographic + technographic + behavioral', be ready to state: the exact stage boundaries and why they are separate calls rather than one prompt, the model and why, how each stage's output is constrained (JSON schema, tool use, or free text plus a parser) and what happens when parsing fails, the token and cost per account, the latency budget, and the retry and idempotency behaviour on partial failure. For the score, give the actual weights, how they were chosen, whether they were ever validated against closed-won outcomes, what a 71 versus a 68 means operationally, and how you detected drift when the model version changed. 'The AI scores it' is a failing answer; the follow-up is always 'scores it how, and how do you know it is right?'",
+   "minutes": 18,
+   "resource": {
+    "label": "Claude platform documentation",
+    "url": "https://platform.claude.com/docs/en/home"
+   }
+  },
+  {
+   "name": "Infrastructure-scale claims: 300+ mailboxes, 150+ domains",
+   "learn": "Scale numbers invite 'walk me through how you operate that'. Be able to describe per-domain SPF, DKIM selector rotation and DMARC policy (p=none to quarantine, aggregate report handling), warmup ramp schedules and daily send caps per mailbox, how you detected a domain going bad (bounce class breakdown, spam-placement seed tests, reputation signals) and what your pull-the-domain threshold was. Know the difference between hard bounces, soft bounces, and blocks, and what your actual bounce rate was. Also be ready for the uncomfortable version of this question about deliverability practice and consent - answer it directly rather than dodging, because an FDE who cannot discuss the compliance edge of their own system is a liability in a customer's security review.",
+   "minutes": 16,
+   "resource": {
+    "label": "RFC 7489 - DMARC",
+    "url": "https://datatracker.ietf.org/doc/html/rfc7489"
+   }
+  },
+  {
+   "name": "Integration claims: webhooks, idempotency, and the CRM schema",
+   "learn": "'Webhook schema designed with Product and Engineering for clean CRM ingestion' and 'real-time CRM sync eliminated 15h/week' both cash out as an integration design question. Be able to name: the event payload shape and its version field, how you guaranteed at-least-once delivery did not create duplicate contacts (idempotency key, upsert on a natural key, dedupe window), retry and backoff on 429 and 5xx, how you handled HubSpot rate limits and partial batch failures, signature verification on the receiving endpoint, and what your dead-letter path was. Then state the failure you actually hit - a replayed webhook, a race between two sources writing the same contact, a schema change that silently dropped a field - and what the alert was.",
+   "minutes": 16,
+   "resource": {
+    "label": "Stripe docs - webhooks, retries and idempotency",
+    "url": "https://docs.stripe.com/webhooks"
+   }
+  },
+  {
+   "name": "The 'what broke' file: one real failure per bullet",
+   "learn": "Every bullet needs an attached incident, written in postmortem shape: impact in business terms and duration, how it was detected and the detection gap (how long between breakage and anyone noticing), the triggering condition separated from the root cause, the fix, and the guardrail added afterwards. A bullet with no failure attached reads as either trivial or unowned. Aim for variety across the set: a data-quality failure, a rate-limit or quota failure, a silent-wrong-output failure (the pipeline ran clean and produced garbage), and a human-process failure. Keep each to eight sentences you can say out loud in 90 seconds.",
+   "minutes": 16,
+   "resource": {
+    "label": "Google SRE Book - Postmortem Culture",
+    "url": "https://sre.google/sre-book/postmortem-culture/"
+   }
+  },
+  {
+   "name": "Narrating the debug, not just the fix",
+   "learn": "Interviewers score how you found the problem far more than what the problem was. For each incident, reconstruct the actual sequence: the first symptom and where you saw it, your first two hypotheses and how you cheaply falsified them, the specific tool that gave you the decisive signal (a log line, a diff of two runs, bisecting a batch, printing the payload that failed schema validation, timing each stage), and the moment you realised your model of the system was wrong. Practise saying 'my first hypothesis was wrong, and here is what the evidence was that killed it' - that sentence is worth more than a clean story where you guessed right immediately.",
+   "minutes": 14,
+   "resource": {
+    "label": "MIT Missing Semester - Debugging and Profiling",
+    "url": "https://missing.csail.mit.edu/2020/debugging-profiling/"
+   }
+  },
+  {
+   "name": "'What I'd do differently' as a decision record, not a humblebrag",
+   "learn": "For each bullet, write a three-line ADR-shaped regret: the decision you made, the constraint that made it reasonable at the time, and the specific alternative you would now choose plus the cost you would accept for it. Good examples: 'I put scoring weights in the prompt instead of a config table, so every reweighting was an untracked prompt edit - I would move weights into version-controlled config and log the score components per account'. Bad examples: 'I would have documented more' or 'I would have moved faster'. The tell for a senior candidate is that the regret is architectural and has a named tradeoff; the tell for a junior one is that the regret is about effort.",
+   "minutes": 14,
+   "resource": {
+    "label": "Architecture Decision Records",
+    "url": "https://adr.github.io/"
+   }
+  },
+  {
+   "name": "Scope honesty: I versus we, and what you did not build",
+   "learn": "For each bullet, write the honest ownership split: what you designed, what you implemented, what existed before you, who else touched it, and what you would not be able to rebuild alone. Then rehearse volunteering it - 'I owned the enrichment and scoring path end to end; the HubSpot object model was already there and our RevOps lead owned the routing rules'. Interviewers at Palantir-style loops probe scope deliberately and reward the candidate who draws the line themselves, because overstated ownership in a resume predicts overstated commitments to a customer. Also prepare the deflation answer for anything a small team did: naming your collaborators makes the claim more credible, not less.",
+   "minutes": 14,
+   "resource": {
+    "label": "Amazon Leadership Principles - Ownership and Dive Deep",
+    "url": "https://www.aboutamazon.com/about-us/leadership-principles"
+   }
+  },
+  {
+   "name": "Three depths per bullet: 45 seconds, 3 minutes, whiteboard",
+   "learn": "Write and time three versions of each story. The 45-second version is claim plus mechanism plus outcome, no names, no chronology - this is the answer to 'tell me about this line'. The 3-minute version adds the constraint, the option you rejected, the failure and the fix. The whiteboard version is the architecture you would draw if asked to go deep: boxes, data flow direction, where state lives, where the failure was. Practise stopping cleanly at the end of the short version and letting the interviewer pull - candidates who dump the 10-minute version on a 45-second question read as unable to calibrate to a customer's exec.",
+   "minutes": 15,
+   "resource": {
+    "label": "Google Technical Writing Two - structure and summarising",
+    "url": "https://developers.google.com/tech-writing/two"
+   }
+  },
+  {
+   "name": "Rewrite pass: cut or repair every undefendable line",
+   "learn": "Go back through the claim table and act on it. Delete any number you could not source - a resume with six defensible numbers beats one with fourteen where two collapse. Repair the rest into claim + mechanism + measurement form: '45% improvement in targeting accuracy' becomes something like 'raised ICP match rate from 52% to 75% on manual review of 200 sampled accounts by adding technographic filters from BuiltWith and a title-mapping stage'. Replace unqualified superlatives and ranges you cannot explain ('18-39%' invites 'why the spread?' - either explain the segments or state one number). Keep a diff of the old and new resume; the deletions are the most useful output of this session.",
+   "minutes": 15,
+   "resource": {
+    "label": "Federal Plain Language Guidelines",
+    "url": "https://digital.gov/guides/plain-language"
+   }
+  },
+  {
+   "name": "Evidence pack, redaction, and what you may legally show",
+   "learn": "Assemble a folder mapping each surviving claim to an artifact you could actually screen-share: a public repo commit, a redacted dashboard screenshot, a query with the output row count, an anonymised architecture diagram. Then run the confidentiality pass - strip customer names, ARR figures, prospect PII, hostnames, API keys, and any inbox or domain list; replace with categories ('a $12M-ARR IT services firm selling into US/EU enterprise'). Check your employment agreement before showing anything derived from internal data. Rotate, do not blur, any credential that appears. An FDE who leaks a former employer's data in an interview has answered a question nobody asked.",
+   "minutes": 14,
+   "resource": {
+    "label": "GitHub Docs - repositories and visibility",
+    "url": "https://docs.github.com/en/repositories"
+   }
+  },
+  {
+   "name": "Cross-artifact consistency audit",
+   "learn": "Line up resume, LinkedIn, portfolio site, GitHub README and any recorded talk side by side and diff them for: employment dates and month boundaries, job titles, metric values, the name of each system, and headcount or scope claims. Fix the numbers that disagree - a recruiter who sees 40% on LinkedIn and 45% on the resume will not ask, they will just discount. Standardise terminology the way a style guide does: pick one name per system and use it everywhere ('signal layer', not 'signal layer' here and 'scoring engine' there), and define each coined term in one sentence you can deliver on demand, because 'what do you mean by agent?' is a real question and a vague answer is expensive.",
+   "minutes": 12,
+   "resource": {
+    "label": "Google developer documentation style guide - word list",
+    "url": "https://developers.google.com/style/word-list"
+   }
+  },
+  {
+   "name": "Adversarial drill, recording, and grading",
+   "learn": "Run the whole set under pressure. Solo pass first: shuffle the bullets, hit record, give the 45-second version cold, then have your partner or a script fire the three hardest follow-ups per bullet ('how did you measure that', 'what else changed', 'what broke', 'what would you do differently', 'what part did you not build'). Transcribe and grade each answer on four axes: was there a number with a denominator, was there a mechanism at config-key level, was there a named failure, did you stop on time. Log every question you could not answer as a gap ticket and close it by finding the evidence or cutting the claim. Finish with a live peer mock so a human sees the flinch you cannot hear in your own recording.",
+   "minutes": 18,
+   "resource": {
+    "label": "Exponent - practice interviews",
+    "url": "https://www.tryexponent.com/practice"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can state, for any metric on your resume, the numerator, the denominator, the measurement window, the instrument that produced it and the sample size, without hedging and without looking anything up.",
+  "You can name what else changed during each improvement window and say explicitly whether you isolated the cause, including saying 'I could not isolate it' when that is the truth.",
+  "You can go three levels deep on every technical bullet - stages, then concurrency/retry/schema mechanics with real config values, then the failure conditions - and stop where your knowledge actually ends.",
+  "You can attach one real production failure to every bullet, told in postmortem shape with impact, detection gap, trigger versus root cause, fix and guardrail, in under 90 seconds.",
+  "You can give a 'what I'd do differently' for each bullet that names an architectural alternative and the tradeoff you would accept, not an effort or documentation regret.",
+  "You can draw the ownership boundary on each project unprompted, naming what you did not build and who owned it, without shrinking the claim.",
+  "You have a rewritten resume with every unsourceable number deleted or repaired into claim + mechanism + measurement form, and a diff showing exactly what you cut.",
+  "You can survive a 45-minute adversarial teardown with a recorded transcript in which every follow-up you failed has a corresponding closed gap ticket."
+ ],
+ "failureModes": [
+  "A rate is quoted with a silently favourable denominator - positive replies over delivered rather than over sent - and when the interviewer recomputes it over sent, the number drops by a third and every other figure on the page becomes suspect.",
+  "The before-number was never measured; it was estimated after the fact to make the after-number look good, and the candidate cannot say who timed the 'two weeks' or where the '6+ hours per batch' came from.",
+  "An improvement is claimed from a window in which the list source, the copy and the sending infrastructure all changed together, so the causal story collapses on the first 'how do you know it was the pipeline?'",
+  "The candidate describes an LLM scoring system entirely at the level of 'the model evaluates fit' and cannot state a weight, a schema, a parse-failure path or a single validation against closed-won outcomes - which reads as having operated a tool rather than built a system.",
+  "A throughput claim covers only the successful subset: the automated pass finished in 30 minutes for the 60 domains that did not time out, and the failures were silently dropped rather than retried or reported, so the real end-to-end coverage was never measured.",
+  "Ownership is stated in the first person for work a four-person team did, the interviewer asks one implementation detail that only the actual builder would know, and the ambiguity retroactively taints the honest bullets too.",
+  "Confidential material leaks in the enthusiasm to prove a claim - a screenshot with customer names, a prospect list, or a live API key visible in a terminal recording - which ends the loop regardless of how good the answer was."
+ ],
+ "interviewQuestions": [
+  "You say you cut lead qualification from 48 hours to under 4. Define both numbers precisely for me: what event starts the clock, what event stops it, is that a median or a mean, and over how many accounts?",
+  "Walk me through the enrichment agent. Now go one level down: how many concurrent workers, what bounded them, what happened when a page hung, and how did you verify the run actually completed for every domain rather than just the ones that succeeded?",
+  "Your scoring model outputs a composite 0-100. How were the weights chosen, and how would you know today whether the score has any relationship to accounts that actually closed?",
+  "During the window where reply rate improved, you also changed the target list and the copy. Design me the experiment you would run now to separate those effects, given you only get one production sending fleet.",
+  "Tell me about a time this system produced confidently wrong output that nobody noticed for a while. How was it eventually detected, and what did you add so it would be caught in an hour instead of a week?",
+  "Pick the bullet on your resume you are least proud of technically and tell me why - then tell me what you would build instead today and what that would cost you.",
+  "A customer's data engineer reviews your integration and says the webhook consumer can double-write contacts on retry. Is he right? Walk me through your idempotency story and what you would change if he is."
+ ],
+ "proofOfWork": "Beyond the per-bullet defence notes, publish a redacted 'metrics provenance' repository that reconstructs two of your headline numbers from raw evidence to claim. For each one, include the actual query or script that computes it against a synthetic or anonymised dataset with the same schema as production (signal_events, accounts, outreach_sends, replies), a README stating the numerator, denominator, window, sample size and instrument, a section listing every confounder present in the original window and what you would have held constant, and a sensitivity table showing how the number moves under three defensible alternative definitions - for example reply rate over sent versus delivered versus deduped-by-contact, so a reader sees the honest range rather than the flattering endpoint. Commit alongside it a diff of your resume before and after this session, with a short note per deleted line explaining what evidence was missing, and a 20-minute recording of a peer grilling you on the surviving bullets, with a timestamped list of every question you could not answer and a follow-up commit that closes each gap by either producing the evidence or cutting the claim. The artifact people will remember is the sensitivity table: it demonstrates that you understand your own numbers well enough to attack them before anyone else does."
+}

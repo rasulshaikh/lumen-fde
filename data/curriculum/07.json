@@ -1,0 +1,227 @@
+{
+  "i": 7,
+  "topic": "Kubernetes core: Pod, Deployment, Service, Ingress, ConfigMap, Secret, namespaces",
+  "track": "B. Containers and Kubernetes",
+  "month": 1,
+  "hours": 12.0,
+  "why": "An FDE almost never gets a cluster; they get a namespace, an IngressClass name, a registry pull secret and a platform team that will say 'the cluster is fine, it is your app' the first time a customer sees a 503. Being able to draw exactly how a request travels DNS -> load balancer -> ingress controller -> EndpointSlice -> Pod, and exactly how a config value or credential reaches a process, is what lets you fix the deploy on the bridge call instead of filing a ticket with the platform team and losing a week of the engagement. It is also the vocabulary every customer architecture review is conducted in: if you cannot say 'the Service has no ready endpoints because the readiness probe hits your database', you cannot lead the conversation.",
+  "prerequisites": [
+    "Docker internals from Topic 5: namespaces, cgroups, image layers, exit codes 137 vs 143, SIGTERM to PID 1. A Pod is a shared network namespace plus a pause process; nothing here makes sense without that.",
+    "Production images from Topic 6: a non-root, digest-pinned image of Dokeo pushed to a registry (GHCR or Docker Hub) that you can pull from a fresh machine with credentials.",
+    "Networking from Topic 2: DNAT and conntrack, reading iptables -t nat, /etc/resolv.conf search and ndots, the TLS handshake and SNI, what a reverse proxy does with the Host header, and HTTP status semantics for 404/502/503/504.",
+    "Linux internals from Topic 1: systemd units and journalctl -u (k3s is one unit), /proc/<pid>/environ, tmpfs, file modes, and how a process reads config at start versus on SIGHUP.",
+    "Shell from Topic 0: jq, yq, Go templates, reading and writing YAML by hand without an IDE, and sed -n '/Events/,$p' style extraction.",
+    "A Hetzner CX22-class VM (2 vCPU, 4 GB, public IPv4) with a DNS A record you control pointing at it, and the Hetzner Cloud Firewall allowing 22, 80, 443 and 6443 from your IP. The deliverable needs a real public IP for HTTP-01."
+  ],
+  "subtopics": [
+    {
+      "name": "Control plane anatomy and the reconcile loop",
+      "learn": "Name every component and what it owns: kube-apiserver (the only process that talks to etcd; every request passes authn -> authz -> mutating admission -> validation -> validating admission -> persist), etcd (source of truth; watch streams keyed by resourceVersion), kube-scheduler (finds Pending pods with no spec.nodeName and binds them), kube-controller-manager (Deployment, ReplicaSet, EndpointSlice, Namespace, ServiceAccount, garbage-collector controllers in one binary), kubelet (watches pods bound to its node and drives the CRI, containerd on k3s), kube-proxy (programs Service VIPs), CoreDNS. Internalise the controller pattern: level-triggered reconcile of spec against observed state via list/watch, no controller ever talks to another directly, everything flows through the API server. Prove the chain with kubectl get events -A --sort-by=.lastTimestamp -w in one terminal while you apply a Deployment in another: ScalingReplicaSet -> SuccessfulCreate -> Scheduled -> Pulling -> Created -> Started, each Event stamped with the component that emitted it. Check health with kubectl get --raw /readyz?verbose.",
+      "minutes": 35,
+      "resource": {
+        "label": "Kubernetes docs: Kubernetes Components",
+        "url": "https://kubernetes.io/docs/concepts/overview/components/"
+      }
+    },
+    {
+      "name": "k3s anatomy: what you actually installed on the Hetzner box",
+      "learn": "k3s is upstream Kubernetes packaged as one binary and one systemd unit: apiserver, scheduler, controller-manager, kubelet and kube-proxy in a single process, sqlite by default (embedded etcd with --cluster-init), bundled containerd, flannel VXLAN as the CNI, and addons shipped as manifests in /var/lib/rancher/k3s/server/manifests: CoreDNS, Traefik (IngressClass traefik), ServiceLB (klipper-lb, which implements type: LoadBalancer with a DaemonSet of hostPort pods on every node, so on one node a LoadBalancer Service simply gets the node's public IP on 80/443), local-path-provisioner and metrics-server. Install with curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644, read the kubeconfig from /etc/rancher/k3s/k3s.yaml and copy it to your laptop with the server field pointed at the public IP (6443 must be open), know the --disable=traefik,servicelb flags for when you want to bring your own, /etc/rancher/k3s/registries.yaml for private registry mirrors and auth, and journalctl -u k3s -f as your control-plane log. Understand what is missing versus EKS: no cloud controller creating real load balancers, no IAM integration, one node means no scheduling, and Traefik instead of the ingress-nginx or ALB controller a customer probably runs.",
+      "minutes": 30,
+      "resource": {
+        "label": "k3s docs: Quick-Start Guide",
+        "url": "https://docs.k3s.io/quick-start"
+      }
+    },
+    {
+      "name": "The object model: metadata, spec, status, ownership, finalizers",
+      "learn": "Every object is apiVersion + kind + metadata + spec + status. Know what metadata carries and why each field matters operationally: uid (immutable identity; a deleted-and-recreated object with the same name is a different object), resourceVersion (etcd revision used for optimistic concurrency; a stale PUT returns 409 Conflict, which is how kubectl edit and controllers avoid lost updates), generation versus status.observedGeneration (has the controller seen my change yet), ownerReferences (garbage collection: deleting a Deployment cascades to its ReplicaSets and Pods unless --cascade=orphan), finalizers (the reason objects hang in Terminating), deletionTimestamp. Discover schema without leaving the terminal: kubectl api-resources (short names, NAMESPACED column, API group), kubectl api-versions, kubectl explain deployment.spec.strategy.rollingUpdate and kubectl explain pod.spec --recursive, kubectl get deploy x -o yaml --show-managed-fields to see which manager owns which field. Understand that status is written only by controllers, and that the apiserver defaults unset spec fields, so a round-tripped -o yaml never equals the manifest you wrote; kubectl neat or yq del is how you get a clean copy.",
+      "minutes": 40,
+      "resource": {
+        "label": "Kubernetes docs: Working with Kubernetes Objects",
+        "url": "https://kubernetes.io/docs/concepts/overview/working-with-objects/"
+      }
+    },
+    {
+      "name": "Labels, selectors and annotations as the wiring layer",
+      "learn": "Labels are indexed key/value identity that selectors match on; annotations are unindexed metadata that tools read (kubectl.kubernetes.io/last-applied-configuration, deployment.kubernetes.io/revision, cert-manager.io/cluster-issuer, kubectl.kubernetes.io/restartedAt). Master both selector grammars: equality (matchLabels; kubectl get pods -l app=dokeo,tier!=canary) and set-based (matchExpressions with In, NotIn, Exists, DoesNotExist; -l 'env in (prod,staging)'). Adopt the recommended app.kubernetes.io/name, instance, version, component, part-of and managed-by labels from day one because Helm, ArgoCD, Grafana dashboards and cost tools key off them. Know which selectors are immutable after creation (Deployment.spec.selector, ReplicaSet, Job) and which are not (Service.spec.selector), and the debugging trick that follows: kubectl label pod dokeo-7d9f-abcde app- removes the pod from every Service and lets the ReplicaSet replace it while you keep the broken instance alive for kubectl exec and kubectl debug.",
+      "minutes": 30,
+      "resource": {
+        "label": "Kubernetes docs: Labels and Selectors",
+        "url": "https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/"
+      }
+    },
+    {
+      "name": "Namespaces: what they scope, what they do not, quotas and limits",
+      "learn": "Namespaces scope names and RBAC for namespaced kinds; kubectl api-resources --namespaced=false lists what they do not scope (Node, PersistentVolume, ClusterRole, IngressClass, StorageClass, Namespace itself, most CRDs' cluster-wide config). Know the built-ins (default, kube-system, kube-public, kube-node-lease) and that a namespace is not a network boundary: any pod can reach svc.otherns.svc.cluster.local until a NetworkPolicy says otherwise (Topic 8). Know the hard cross-namespace rules you will hit: a Pod cannot mount a ConfigMap or Secret from another namespace, an Ingress cannot route to a Service in another namespace (hence ExternalName workarounds), a RoleBinding can reference a ServiceAccount in another namespace. Attach a ResourceQuota (requests.cpu, requests.memory, limits.memory, count/pods, count/services.loadbalancers) and a LimitRange (default request and limit injected into every container that omits them); once a CPU or memory quota exists, any Pod without requests is rejected at admission with 'must specify requests.cpu', which is the single most common reason a customer's new namespace refuses your manifests. Set your working namespace with kubectl config set-context --current --namespace=dokeo, and unstick a Terminating namespace by reading kubectl get ns x -o jsonpath='{.status.conditions}' for the resources whose finalizers are blocking it.",
+      "minutes": 35,
+      "resource": {
+        "label": "Kubernetes docs: Namespaces",
+        "url": "https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/"
+      }
+    },
+    {
+      "name": "Pod anatomy, phases, container states and the shutdown sequence",
+      "learn": "A Pod is one or more containers sharing a network namespace (one IP, localhost between containers, port collisions are real), an IPC namespace, optionally a PID namespace (shareProcessNamespace: true), held open by the pause container; volumes are pod-scoped and mounted per container. Know the spec fields you will set daily: containers[].ports (documentation only, not a firewall), env and envFrom, resources.requests and limits (requests drive scheduling and the QoS class Guaranteed / Burstable / BestEffort; a Pending pod whose Events say 'Insufficient cpu' is a requests problem), restartPolicy, terminationGracePeriodSeconds (default 30), lifecycle.preStop, securityContext.runAsNonRoot, serviceAccountName, nodeSelector. Distinguish Pod phase (Pending, Running, Succeeded, Failed, Unknown) from container state (Waiting with reason ContainerCreating, ImagePullBackOff, CrashLoopBackOff or CreateContainerConfigError; Running; Terminated with exitCode and reason OOMKilled, Error, Completed). Memorise the shutdown sequence because rollouts depend on it: pod gets deletionTimestamp and is removed from EndpointSlices concurrently, preStop runs, SIGTERM to PID 1, grace period counts down, SIGKILL; a preStop of sleep 5 exists purely to let kube-proxy and the ingress controller observe the endpoint removal before the process stops accepting. Read state fast with kubectl get pod x -o jsonpath='{.status.containerStatuses[*].lastState}' and kubectl describe pod x | sed -n '/Events/,$p'.",
+      "minutes": 55,
+      "resource": {
+        "label": "Kubernetes docs: Pod Lifecycle",
+        "url": "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"
+      }
+    },
+    {
+      "name": "Init containers, native sidecars and ephemeral debug containers",
+      "learn": "initContainers run to completion in order before app containers start and share the pod's volumes and network: use them for one-shot schema migrations per rollout, for waiting on dependencies (until nc -z postgres 5432; do sleep 2; done), and for rendering config into an emptyDir. Since Kubernetes 1.29 an init container with restartPolicy: Always is a native sidecar: started before the app containers, kept running beside them, terminated after them, which fixes the classic Job-never-completes and log-shipper-dies-before-final-flush problems that plagued sidecars declared as ordinary containers. Ephemeral containers via kubectl debug -it pod/dokeo-xyz --image=nicolaka/netshoot --target=app attach a shell to a distroless pod without restarting it (--target shares the PID namespace so ps, ss -tlnp and strace -p see the app process); kubectl debug pod/x --copy-to=x-debug --set-image='*=ubuntu' clones a crashing pod with a different image so you can inspect the filesystem; kubectl debug node/<node> -it --image=busybox gives a host shell with the node root at /host. Know that ephemeral containers cannot be removed or restarted and never appear in the manifest you applied.",
+      "minutes": 35,
+      "resource": {
+        "label": "Kubernetes docs: Init Containers",
+        "url": "https://kubernetes.io/docs/concepts/workloads/pods/init-containers/"
+      }
+    },
+    {
+      "name": "Images: pull policy, tags versus digests, private registries",
+      "learn": "imagePullPolicy defaults to Always when the tag is :latest or omitted and IfNotPresent otherwise; that is why a customer who re-pushes :v1 sees stale code on nodes that cached it, and why production manifests pin image@sha256:... and treat the tag as documentation. Decode pull failures from kubectl describe pod: ErrImagePull then ImagePullBackOff (backoff grows to 5 minutes) with the registry's message: 'manifest unknown' (wrong tag), 'unauthorized' (missing or wrong imagePullSecrets), 'x509: certificate signed by unknown authority' (private CA not trusted by containerd on the node), 'toomanyrequests' (Docker Hub anonymous limit, common at customers where every node egresses through one NAT IP). Create credentials with kubectl create secret docker-registry regcred --docker-server=ghcr.io --docker-username --docker-password, reference them in spec.imagePullSecrets or patch them onto the namespace's default ServiceAccount so every pod inherits them; on k3s you can instead configure /etc/rancher/k3s/registries.yaml for node-level mirrors and auth and restart k3s. Confirm what actually ran with kubectl get pod x -o jsonpath='{.status.containerStatuses[0].imageID}' and compare to the digest in your CI log.",
+      "minutes": 30,
+      "resource": {
+        "label": "Kubernetes docs: Images",
+        "url": "https://kubernetes.io/docs/concepts/containers/images/"
+      }
+    },
+    {
+      "name": "Deployment and ReplicaSet: rollouts, hashes, rollback, immutable selector",
+      "learn": "A Deployment owns ReplicaSets; every distinct pod template gets its own ReplicaSet labelled pod-template-hash, and a rollout is the Deployment controller scaling the new RS up and the old one down within strategy.rollingUpdate.maxSurge and maxUnavailable (defaults 25% and 25%, absolute or percent; maxUnavailable: 0 with maxSurge: 1 is the zero-capacity-loss setting for small replica counts). minReadySeconds delays counting a pod as available so a fast-crashing container does not pass the gate, progressDeadlineSeconds (600) flips the Progressing condition to False so kubectl rollout status exits non-zero in CI, revisionHistoryLimit keeps old ReplicaSets for kubectl rollout undo --to-revision=N. Drive it end to end: kubectl set image deploy/dokeo app=ghcr.io/you/dokeo@sha256:..., kubectl rollout status, history, pause, resume, undo, and kubectl rollout restart (which only patches kubectl.kubernetes.io/restartedAt into the template). Understand why spec.selector is immutable and must be a subset of template labels, why changing any template label triggers a rollout even if the selector is untouched, why two Deployments with overlapping selectors in one namespace fight over pods, and when strategy: Recreate is the only correct choice (single-writer volume, schema-incompatible releases). Watch kubectl get rs -w during a rollout and narrate every number.",
+      "minutes": 55,
+      "resource": {
+        "label": "Kubernetes docs: Deployments",
+        "url": "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/"
+      }
+    },
+    {
+      "name": "Probes and how readiness gates the EndpointSlice",
+      "learn": "Three probes, three jobs: startupProbe holds the other two off until a slow app boots (failureThreshold x periodSeconds is your boot budget), readinessProbe controls whether the pod's IP is present in the EndpointSlice (fail means removed from the Service, no restart), livenessProbe makes the kubelet kill and restart the container (repeated failure shows as CrashLoopBackOff). Handlers are httpGet (path, port, httpHeaders, scheme), tcpSocket, exec and grpc; tune initialDelaySeconds, periodSeconds, timeoutSeconds (default 1 second, the silent killer under load), successThreshold and failureThreshold. Production rule: readiness may check a dependency only if you consciously want that dependency's outage to remove you from rotation; liveness must never touch a dependency and should be a cheap in-process check, otherwise a database blip becomes a restart storm. Watch the mechanism: make one pod's readiness fail (kubectl exec into it and move the health file, or pause the app) and observe the IP disappear from kubectl get endpointslices -l kubernetes.io/service-name=dokeo -o yaml within one period, while kubectl get pods shows READY 0/1 and the Pod stays Running. Topic 8 tunes these for HPA and real workloads; here you need the mechanics cold.",
+      "minutes": 30,
+      "resource": {
+        "label": "Kubernetes docs: Liveness, Readiness, and Startup Probes",
+        "url": "https://kubernetes.io/docs/concepts/workloads/pods/probes/"
+      }
+    },
+    {
+      "name": "Service: types, the port triple, EndpointSlices, headless",
+      "learn": "A Service is a stable virtual IP and DNS name in front of a label selector; the EndpointSlice controller watches Pods that match spec.selector and writes the Ready ones' IPs and ports into EndpointSlices labelled kubernetes.io/service-name, which kube-proxy and the ingress controller consume. Get the port triple right every time: port (what clients hit on the ClusterIP), targetPort (the container's listening port, as a number or as a named containerPort so the image can change ports without touching the Service), nodePort (30000-32767, only for NodePort and LoadBalancer). Types: ClusterIP (default, in-cluster only), NodePort (opens the port on every node's IPs), LoadBalancer (asks the cloud controller or k3s ServiceLB for an external address and still allocates a NodePort underneath), ExternalName (returns a CNAME, no proxying, no selector). Headless (clusterIP: None) skips the VIP and returns pod IPs directly in DNS, used by StatefulSets and client-side balancing for gRPC. Know externalTrafficPolicy: Local to preserve client source IP at the cost of only routing to nodes that have a local pod, sessionAffinity: ClientIP, and a selector-less Service with a hand-written EndpointSlice to give an external database an in-cluster name. The first debugging move is always kubectl get endpointslices -l kubernetes.io/service-name=x: empty means selector mismatch or nothing is Ready.",
+      "minutes": 50,
+      "resource": {
+        "label": "Kubernetes docs: Service",
+        "url": "https://kubernetes.io/docs/concepts/services-networking/service/"
+      }
+    },
+    {
+      "name": "Virtual IPs: how kube-proxy makes a ClusterIP exist",
+      "learn": "The ClusterIP is configured on no interface anywhere; kube-proxy on every node watches Services and EndpointSlices and programs the kernel to DNAT traffic for VIP:port to one Ready endpoint. In iptables mode read the actual chain on the k3s node: PREROUTING and OUTPUT jump to KUBE-SERVICES, which matches -d <clusterIP> --dport <port> and jumps to KUBE-SVC-<hash>, which holds one -m statistic --mode random --probability rule per endpoint, each jumping to a KUBE-SEP-<hash> that does the DNAT --to-destination podIP:targetPort, with KUBE-MARK-MASQ for hairpin and off-cluster sources; find yours with sudo iptables -t nat -S | grep -A3 'dokeo'. Draw the consequences: ping to a ClusterIP fails because there is no rule for ICMP; balancing is per new connection via conntrack, so a long-lived gRPC or HTTP/2 connection pins to one pod forever and never rebalances after scale-out; a removed endpoint's established connections are not drained by kube-proxy, only by the pod's own shutdown. Know the variants you will meet at customers: ipvs mode (hash tables, needed past a few thousand Services), nftables mode, and CNIs like Cilium that replace kube-proxy entirely with eBPF so none of these chains exist and your iptables grep returns nothing. On k3s kube-proxy runs inside the k3s process, so there is no kube-proxy DaemonSet or ConfigMap in kube-system to inspect.",
+      "minutes": 35,
+      "resource": {
+        "label": "Kubernetes docs: Virtual IPs and Service Proxies",
+        "url": "https://kubernetes.io/docs/reference/networking/virtual-ips/"
+      }
+    },
+    {
+      "name": "Cluster DNS: CoreDNS, search paths and the ndots:5 tax",
+      "learn": "CoreDNS answers <svc>.<ns>.svc.cluster.local A/AAAA records for ClusterIP Services, per-pod A records for headless Services (and <pod>.<svc>.<ns>.svc.cluster.local for StatefulSets), and SRV records for named ports (_http._tcp.dokeo.dokeo.svc.cluster.local). The kubelet writes each pod's /etc/resolv.conf as nameserver <cluster DNS IP>, search <ns>.svc.cluster.local svc.cluster.local cluster.local, options ndots:5, which means any name with fewer than five dots (api.stripe.com has two) is tried against every search suffix first: five queries, four NXDOMAINs, then the real answer, on every lookup unless the client caches. Fix hot paths with a trailing dot (api.stripe.com.) or spec.dnsConfig.options ndots: 2. Know dnsPolicy: ClusterFirst (default), ClusterFirstWithHostNet (for hostNetwork pods that still want cluster names), Default (inherit the node's resolver, so cluster names stop working), None (bring your own dnsConfig). Debug from inside: kubectl run -it --rm dns --image=busybox:1.36 --restart=Never -- nslookup dokeo.dokeo.svc.cluster.local, cat /etc/resolv.conf from an app pod, read the Corefile in kubectl -n kube-system get cm coredns -o yaml, and temporarily add the log plugin to see every query CoreDNS receives when a customer swears 'DNS is fine'.",
+      "minutes": 35,
+      "resource": {
+        "label": "Kubernetes docs: DNS for Services and Pods",
+        "url": "https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/"
+      }
+    },
+    {
+      "name": "The Ingress resource: class, hosts, pathType, TLS block",
+      "learn": "Ingress is a portable L7 routing spec that does nothing until a controller implements it. Fields you must get right: spec.ingressClassName (must name an existing IngressClass; omit it and you depend on an ingressclass.kubernetes.io/is-default-class annotation that many customer clusters do not set, so the Ingress silently gets no ADDRESS), rules[].host (exact or a single leading wildcard *.example.com, matched against the Host header and SNI), http.paths[] with pathType Exact, Prefix (element-wise on / boundaries: /api matches /api/x but not /apix) or ImplementationSpecific, backend.service.name plus port.number or port.name, defaultBackend for anything unmatched, and tls[] with hosts and secretName naming a kubernetes.io/tls Secret in the same namespace. Everything else (timeouts, body size, redirects, rewrites, sticky sessions, rate limits, CORS) is controller-specific annotation soup, which is exactly why Gateway API (GatewayClass, Gateway, HTTPRoute) exists as the typed successor; read the Gateway API concept page once so you recognise it when a customer runs it. Verify wiring with kubectl describe ingress dokeo: the Backends column shows resolved pod IP:port or '<error: endpoints not found>', and Events show the controller's sync result. Confirm the Ingress is actually claimed by checking ADDRESS in kubectl get ingress.",
+      "minutes": 45,
+      "resource": {
+        "label": "Kubernetes docs: Ingress",
+        "url": "https://kubernetes.io/docs/concepts/services-networking/ingress/"
+      }
+    },
+    {
+      "name": "The ingress controller and the full request path, hop by hop",
+      "learn": "The controller is just a Deployment (Traefik on k3s; ingress-nginx, the AWS Load Balancer Controller or Istio at most customers) running a reverse proxy that watches Ingress, IngressClass, Service and EndpointSlice objects and rewrites its own routing table; it is exposed by a Service of type LoadBalancer (k3s ServiceLB binds hostPort 80 and 443 on each node) or by hostNetwork. Draw the hop sequence and be able to name the component at each: client resolves DNS -> node public IP -> klipper-lb hostPort -> DNAT into the Traefik pod -> Traefik matches Host and path -> Traefik connects directly to a Ready pod IP taken from the EndpointSlice (controllers bypass the ClusterIP, so kube-proxy is not in this data path) -> container port -> response. Map status codes to layers so triage is mechanical: 404 from the controller means no rule matched (wrong host, wrong ingressClassName, pathType mismatch); 503 means the rule matched but the Service has no Ready endpoints; 502 or 504 means an endpoint refused, reset or timed out (wrong targetPort, app crash, slow upstream). On k3s read Traefik's view with kubectl -n kube-system logs deploy/traefik --tail=100, and enable its dashboard through a HelmChartConfig in /var/lib/rancher/k3s/server/manifests when you need to see the routers and services it built. Isolate layers with kubectl port-forward svc/dokeo 8080:80 (tests Service and Pod without Ingress) and curl -H 'Host: dokeo.example.com' http://<nodeIP>/ (tests Ingress without DNS or TLS).",
+      "minutes": 45,
+      "resource": {
+        "label": "Traefik docs: Kubernetes Ingress provider",
+        "url": "https://doc.traefik.io/traefik/providers/kubernetes-ingress/"
+      }
+    },
+    {
+      "name": "TLS with cert-manager: ACME HTTP-01 from Issuer to Secret",
+      "learn": "Install cert-manager (Helm with crds.enabled=true or the release manifest), then create a ClusterIssuer of type ACME with server https://acme-staging-v02.api.letsencrypt.org/directory first, an email, privateKeySecretRef, and solvers[].http01.ingress with ingressClassName: traefik. Annotate the Ingress with cert-manager.io/cluster-issuer: letsencrypt-staging and set spec.tls[].secretName; the ingress-shim controller creates a Certificate, which creates a CertificateRequest -> Order -> Challenge; the HTTP-01 solver runs a temporary pod and temporary Ingress for /.well-known/acme-challenge/<token>, Let's Encrypt fetches it over plain port 80, and on success a kubernetes.io/tls Secret with tls.crt and tls.key is written and the ingress controller reloads. Debug strictly in order: kubectl describe certificate, certificaterequest, order, challenge; the Challenge's status.reason quotes the ACME error verbatim (DNS not pointing at this IP yet, port 80 blocked by the Hetzner firewall, a controller-level HTTP-to-HTTPS redirect swallowing the challenge path, propagation check failing because the node cannot resolve its own public name). Only switch the server to acme-v02.api.letsencrypt.org after staging succeeds: production rate limits (5 duplicate certificates per week per exact name set) will lock you out mid-debugging. Confirm with openssl s_client -connect dokeo.example.com:443 -servername dokeo.example.com < /dev/null | openssl x509 -noout -dates -issuer and know that renewal starts at two-thirds of the 90-day lifetime.",
+      "minutes": 45,
+      "resource": {
+        "label": "cert-manager docs: Securing Ingress Resources",
+        "url": "https://cert-manager.io/docs/usage/ingress/"
+      }
+    },
+    {
+      "name": "ConfigMap: three injection paths, three update semantics",
+      "learn": "A ConfigMap holds up to 1 MiB across data (string values) and binaryData (base64); keys must be valid filenames and, if used as env vars, valid identifiers. The three ways in have different update behaviour and you must be able to predict each: env valueFrom.configMapKeyRef and envFrom.configMapRef are read once at container start and never change until the pod restarts; a volume mounting the whole ConfigMap is updated in place by the kubelet on its sync period (roughly a minute plus cache TTL) using an atomic symlink swap of a ..data directory, so inotify-based reloaders and processes that re-read on SIGHUP pick it up; a volume mount with subPath is a bind mount of one file and is never updated, the most common 'the app ignores my config' ticket. Set optional: true when the map may not exist yet, immutable: true for maps you never mutate (the kubelet stops watching them, lower API load, and any change forces a new name). Roll pods on change deliberately: put a hash of the ConfigMap into the pod template as an annotation (Helm's checksum/config idiom) or use kustomize configMapGenerator, which suffixes the name with a hash so the Deployment template changes. Author declaratively: kubectl create configmap dokeo-config --from-file=config.yaml --from-literal=LOG_LEVEL=info --dry-run=client -o yaml > cm.yaml. Test all three paths on Dokeo and record which one saw the edit without a restart.",
+      "minutes": 40,
+      "resource": {
+        "label": "Kubernetes docs: ConfigMaps",
+        "url": "https://kubernetes.io/docs/concepts/configuration/configmap/"
+      }
+    },
+    {
+      "name": "Secret: why it is not secret, types, mounts, rotation",
+      "learn": "A Secret is a ConfigMap with a type and base64 encoding, and base64 is not encryption: anyone with get on secrets in the namespace reads it with kubectl get secret x -o jsonpath='{.data.password}' | base64 -d, and by default it sits unencrypted in etcd (sqlite on k3s) unless EncryptionConfiguration is enabled (k3s: --secrets-encryption). Types you will create: Opaque (generic), kubernetes.io/tls (tls.crt and tls.key, consumed by Ingress and written by cert-manager), kubernetes.io/dockerconfigjson (imagePullSecrets), kubernetes.io/basic-auth. Write stringData in manifests for readability; the apiserver merges it into data. Consume via env (secretKeyRef; the value is hidden in kubectl describe pod but visible in /proc/<pid>/environ, crash dumps, and any child process) or via a volume (tmpfs, defaultMode 0644 by default, so set 0400 and a matching runAsUser; projected volumes let one directory combine several Secrets and ConfigMaps). Never commit a Secret manifest: generate it with kubectl create secret generic --from-literal --dry-run=client -o yaml at apply time, or point at an external source (External Secrets Operator or the Secrets Store CSI driver syncing from Vault or AWS Secrets Manager), which is what a customer's security team will require. Rotation reality: env-injected secrets need kubectl rollout restart; volume-mounted ones update like ConfigMaps unless subPath is used; TLS Secrets rewritten by cert-manager are picked up by the ingress controller without a restart.",
+      "minutes": 40,
+      "resource": {
+        "label": "Kubernetes docs: Secrets",
+        "url": "https://kubernetes.io/docs/concepts/configuration/secret/"
+      }
+    },
+    {
+      "name": "kubectl fluency and declarative apply: diff, jsonpath, events, server-side apply",
+      "learn": "Work declaratively: kubectl apply -f dir/ computes a three-way merge between your manifest, the kubectl.kubernetes.io/last-applied-configuration annotation and the live object, so a field you delete from the file is actually removed; kubectl create and replace do not do this, and kubectl edit mutates live state that silently drifts from git. Always preview with kubectl diff -f (exit code 1 means there are changes, usable as a CI gate); learn --server-side and --field-manager so managedFields records ownership and conflicts surface as errors instead of overwrites when two tools touch one object; use -k for a kustomization with namespace, images and configMapGenerator. Output surgery: -o jsonpath='{.items[*].metadata.name}', -o custom-columns=NAME:.metadata.name,IP:.status.podIP,NODE:.spec.nodeName, -o yaml | yq, --sort-by=.metadata.creationTimestamp, --field-selector status.phase!=Running, and kubectl get events --field-selector involvedObject.name=dokeo-xyz --sort-by=.lastTimestamp. Daily verbs: logs -f --previous --all-containers --since=10m, exec -it -- sh, port-forward, cp, top pod, rollout, scale, label, annotate, and kubectl -v=8 to see the raw REST calls so you can reproduce the same thing with a client library or curl against the API. Build a kubeconfig with two contexts (laptop -> k3s, laptop -> kind) and switch with kubectl config use-context so you stop nuking the wrong cluster.",
+      "minutes": 40,
+      "resource": {
+        "label": "Kubernetes docs: kubectl Quick Reference",
+        "url": "https://kubernetes.io/docs/reference/kubectl/quick-reference/"
+      }
+    },
+    {
+      "name": "The unreachable-service runbook, bottom-up",
+      "learn": "Run the official Debug Services procedure until it is reflex, then write your own one-page version with exact commands. Does the Pod answer on its own IP (kubectl run -it --rm dbg --image=nicolaka/netshoot -- curl -sv http://<podIP>:<containerPort>/healthz)? Does the Service exist with the right port and targetPort (kubectl get svc -o wide; kubectl describe svc x shows Endpoints)? Are there endpoints (kubectl get endpointslices -l kubernetes.io/service-name=x -o yaml); if none, do the pod labels exactly match the selector (kubectl get pods -l app=dokeo --show-labels) and are they Ready? Does DNS resolve from a pod (nslookup x.ns.svc.cluster.local)? Does the VIP work from a pod, then from the node (curl http://<clusterIP>:<port>)? Are the kube-proxy rules present (sudo iptables-save | grep -c KUBE-SVC; grep for the Service's ClusterIP)? Then move up the stack: kubectl describe ingress for backend resolution, controller logs for the actual upstream and status it saw, and tcpdump -i any port <targetPort> inside the app pod via kubectl debug --target to prove whether packets arrive at all. Practise by breaking Dokeo five ways (wrong targetPort, selector typo, missing ingressClassName, readiness failing, wrong Secret key) and timing yourself to root cause using only these commands.",
+      "minutes": 35,
+      "resource": {
+        "label": "Kubernetes docs: Debug Services",
+        "url": "https://kubernetes.io/docs/tasks/debug/debug-application/debug-service/"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can draw from memory, in under five minutes on a whiteboard, the graph Ingress -> Service -> EndpointSlice -> Pod <- ReplicaSet <- Deployment with ConfigMap and Secret edges, and annotate each edge with the component that reads it (ingress controller, EndpointSlice controller, kube-proxy, kubelet, CoreDNS, Deployment controller).",
+    "You can take curl -v https://dokeo.example.com returning 404, 502 or 503, name the layer and the three most likely causes within two minutes, then confirm the root cause with kubectl get ingress, get endpointslices and describe pod in under ten.",
+    "You can roll out a new digest-pinned image of Dokeo under a continuous curl or hey load with zero failed requests, explain the pod-template-hash of every ReplicaSet in kubectl get rs, state what maxSurge, maxUnavailable, minReadySeconds and the preStop sleep each contributed, then roll back with kubectl rollout undo and prove the old digest is running.",
+    "You can take a Pod stuck in Pending, ImagePullBackOff, CrashLoopBackOff or CreateContainerConfigError to Running and state the root cause from kubectl describe Events and containerStatuses alone, without opening the application logs first.",
+    "You can inject the same ConfigMap key three ways (env, whole-map volume, subPath volume), predict in writing which running containers will observe an edit without restart, verify the prediction, and force a rollout on config change using a checksum annotation or a kustomize generated name.",
+    "You can obtain a Let's Encrypt certificate via cert-manager HTTP-01 on k3s, explain the Certificate -> CertificateRequest -> Order -> Challenge chain, and diagnose a failed Challenge from kubectl describe challenge to a specific network or DNS cause.",
+    "You can explain why ping to a ClusterIP fails and then show, on the node, the iptables KUBE-SVC and KUBE-SEP rules (or their ipvs equivalent) that implement a specific Service, and explain why a long-lived gRPC connection never rebalances.",
+    "You can write Deployment, Service, Ingress, ConfigMap, Secret, Namespace, ResourceQuota and LimitRange manifests for Dokeo from a blank file with no copy-paste, kubectl diff them before applying, and have the whole stack Ready and serving TLS on a fresh k3s node in under 30 minutes."
+  ],
+  "failureModes": [
+    "A ConfigMap is mounted with subPath so the customer's config edits never reach the running process; the team concludes the app ignores configuration and hand-edits the container, and the fix (drop subPath, or roll pods via a checksum annotation) is discovered weeks later.",
+    "Two Deployments in one namespace share the label app: api; the second ReplicaSet adopts the first one's pods, both controllers fight to reach their replica counts, and the platform team sees a rollout that never converges and pods being killed with no obvious owner.",
+    "The readiness probe calls an endpoint that queries the database; a 20-second database failover marks every pod NotReady, the Service has zero endpoints, and a transient dependency blip becomes a full outage, made worse by a liveness probe that also hits the database and triggers a restart storm.",
+    "targetPort is set to the Service port (80) instead of the container port (8080); endpoints exist and describe looks healthy, but the ingress controller returns 502 for every request to the new pods only, so the rollout looks fine in kubectl and broken to users.",
+    "A database password is rotated in the Secret but the app still uses the old one because it was injected as an env var; nobody runs kubectl rollout restart, the old credential is revoked on schedule, and the customer's first symptom is connection-refused at 3am.",
+    "An Ingress is applied without ingressClassName on a cluster that runs both the customer's ingress-nginx and k3s Traefik; neither controller claims it, kubectl get ingress shows an empty ADDRESS, and the deploy is 'done' while the URL returns nothing.",
+    "cert-manager's HTTP-01 challenge fails because a controller-level HTTPS redirect (or a Hetzner firewall rule blocking port 80) swallows /.well-known/acme-challenge, and repeated retries against the production ACME endpoint exhaust the duplicate-certificate rate limit so the real fix cannot be validated for a week."
+  ],
+  "interviewQuestions": [
+    "Walk me through, component by component, everything that happens between kubectl apply -f deployment.yaml and the first HTTP 200 through an Ingress: which controllers act, in what order, what they write, and what you would check if the process stalled at each stage.",
+    "A customer reports 503s for about 30 seconds after every deploy and says the platform is fine. What do you look at first, what are the three most likely causes, and what changes to the Deployment and Pod spec would you make to eliminate them?",
+    "How does a ClusterIP work when no network interface has that address? Explain kube-proxy in iptables mode, why ICMP to a ClusterIP fails, what changes with IPVS, and what disappears entirely when the cluster runs Cilium with kube-proxy replacement.",
+    "Design the config and secrets story for a service that must pick up feature-flag changes without a redeploy but rotate database credentials with zero downtime. What do you mount how, what are the update semantics of each path, and where does it break?",
+    "A Pod is in CrashLoopBackOff, kubectl logs is empty and kubectl logs --previous prints nothing. Describe your next five commands and what each exit code (1, 127, 137, 139, 143) would tell you.",
+    "A security lead says 'Kubernetes Secrets are base64, so they are plaintext; we will not use them.' What is accurate in that statement, what would you tell them about etcd encryption at rest, RBAC exposure and env versus volume injection, and what would you actually deploy on their cluster?",
+    "Explain what happens when a pod in namespace dokeo resolves the name postgres, and then api.stripe.com: how many DNS queries does CoreDNS see for each, why, and how would you fix the second case for a latency-sensitive path? When would you choose a headless Service instead?"
+  ],
+  "proofOfWork": "A repository plus a 15-minute recorded screencast titled 'Dokeo cluster autopsy'. The repo contains the full hand-written manifests for Dokeo on k3s (Namespace with ResourceQuota and LimitRange, Deployment with preStop and all three probes, Service with named targetPort, Ingress with ingressClassName and TLS via cert-manager, ConfigMap injected three ways, Secret generated at apply time) and a Makefile with break-1 through break-5 targets that inject a specific fault (wrong targetPort, selector typo, missing ingressClassName, subPath ConfigMap, readiness probe pointed at the database) and fix-N targets that revert it. In the screencast you run each break target, then diagnose it live using only kubectl and node-level commands while narrating the object model on a hand-drawn diagram, timing each diagnosis. A one-page RUNBOOK.md maps each symptom (404, 502, 503, Pending, CrashLoopBackOff, ImagePullBackOff, empty ADDRESS) to the first three commands and the most likely causes, and the README links the live https URL with a valid Let's Encrypt certificate."
+}

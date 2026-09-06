@@ -1,0 +1,227 @@
+{
+ "i": 10,
+ "topic": "Kubernetes security: Pod Security, RBAC, secrets, image policy, runtime",
+ "track": "B. Containers and Kubernetes",
+ "month": 2,
+ "hours": 6.0,
+ "why": "An FDE deploying into a customer's cluster is, from the customer's security team's point of view, a new attack surface arriving with a Helm chart — and the review that gates your go-live is a person asking why your pod wants hostPath, cluster-admin, and a long-lived secret in an env var. Being able to ship a workload that passes `restricted` Pod Security, a namespace-scoped Role, a default-deny NetworkPolicy, and a signed image on the first pass turns a three-week security review into a one-hour call. When the customer's own cluster is the thing that is broken — an over-permissive ServiceAccount, an unencrypted etcd, a pod reading the node's IMDS credentials — you are the person in the room who can name the finding, show the exploit, and hand over the fix.",
+ "prerequisites": [
+  "Kubernetes core objects from 'Kubernetes core' (topic 7): Pod, Deployment, Service, ServiceAccount, ConfigMap, Secret, namespaces, and reading a full `kubectl get -o yaml`",
+  "Production ops from 'Kubernetes production ops' (topic 8): you have already written a NetworkPolicy and a basic Role/RoleBinding and debugged a CrashLoopBackOff",
+  "Linux namespaces, cgroups, and capabilities from 'Docker internals' (topic 5) — specifically what CAP_SYS_ADMIN, PID namespace sharing, and a bind mount of /proc actually grant",
+  "Image supply chain from topic 6: multi-stage builds, non-root USER, distroless bases, SBOM generation, and what a cosign signature is",
+  "Comfort with TLS, x509 client certs, and JWT structure from 'Networking' (topic 2) — the API server authenticates you with one of these on every request",
+  "A working local cluster you can wreck: kind or minikube with at least 4 GB and the ability to run a privileged pod"
+ ],
+ "subtopics": [
+  {
+   "name": "The cluster threat model: what an attacker gets from one RCE",
+   "learn": "Write out the actual kill chain rather than a list of CVEs: app RCE inside a container -> read the projected ServiceAccount token at /var/run/secrets/kubernetes.io/serviceaccount/token -> query the API server -> list Secrets or create a privileged pod -> mount the host filesystem -> read every kubelet credential on the node -> lateral to other tenants. Map each hop to the control that breaks it (PSA restricted, namespaced RBAC, NetworkPolicy egress, IMDSv2 hop limit, node isolation). Be able to state, for any customer cluster, which of those hops is currently unguarded and what the blast radius is.",
+   "minutes": 15,
+   "resource": {
+    "label": "MITRE ATT&CK: Containers matrix — tactics and techniques targeting Kubernetes",
+    "url": "https://attack.mitre.org/matrices/enterprise/containers/"
+   }
+  },
+  {
+   "name": "How the API server decides who you are",
+   "learn": "Know the authentication chain: client x509 certs (CN becomes the username, O becomes groups — and there is no revocation, which is why cert-based human access is a liability), bootstrap tokens, ServiceAccount JWTs, OIDC id_tokens (`--oidc-issuer-url`, `--oidc-username-claim`, `--oidc-groups-claim`), and webhook token authn. Understand that Kubernetes has no User object — usernames come from the authenticator, so you cannot 'delete a user', you revoke the credential or the binding. Read your own identity with `kubectl auth whoami` and decode a SA token with a JWT decoder to see `iss`, `aud`, `exp`, and the `kubernetes.io` claims binding it to a specific pod and node.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kubernetes docs: Authenticating",
+    "url": "https://kubernetes.io/docs/reference/access-authn-authz/authentication/"
+   }
+  },
+  {
+   "name": "RBAC mechanics: verbs, resources, subresources, aggregation",
+   "learn": "Internalise that RBAC is purely additive (no deny rules), that Role/RoleBinding are namespaced while ClusterRole/ClusterRoleBinding are cluster-wide, and that a RoleBinding referencing a ClusterRole grants that ClusterRole's rules *only within the binding's namespace* — the single most useful pattern for tenant isolation. Know the verb set (get, list, watch, create, update, patch, delete, deletecollection, plus non-standard ones like `use` on PSPs and `impersonate`), that `list` and `watch` return full object bodies so `list secrets` equals `read every secret`, and that subresources are separate rule entries: `pods/exec`, `pods/portforward`, `pods/log`, `pods/attach`, `deployments/scale`, `*/status`. Understand `resourceNames` scoping and its limitation (it cannot restrict `list`/`watch`), `nonResourceURLs` for /healthz and /metrics, and ClusterRole aggregation via `aggregationRule.clusterRoleSelectors`.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs: Using RBAC Authorization",
+    "url": "https://kubernetes.io/docs/reference/access-authn-authz/rbac/"
+   }
+  },
+  {
+   "name": "RBAC privilege-escalation paths you must be able to name",
+   "learn": "Learn the escalation primitives an auditor will ask you about: `create pods` in any namespace is effectively 'run as any ServiceAccount in that namespace' (mount its token) and often 'root on the node' (hostPath /); `escalate` on ClusterRoles bypasses the built-in privilege-escalation prevention; `bind` lets you grant permissions you do not hold; `impersonate` on users/groups/serviceaccounts is a full identity swap (`kubectl --as`, `--as-group`); `create serviceaccounts/token` mints tokens for other SAs; `get/list secrets` harvests credentials; `patch nodes` or `update pods/status` can subvert scheduling; `create` on `certificatesigningrequests/approval` mints client certs. Also know that write access to a validating/mutating webhook config, a CRD, or a controller's SA is equivalent to cluster-admin by proxy.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kubernetes docs: RBAC Good Practices",
+    "url": "https://kubernetes.io/docs/concepts/security/rbac-good-practices/"
+   }
+  },
+  {
+   "name": "Auditing effective permissions in a cluster you did not build",
+   "learn": "Be fast at answering 'what can this identity do?'. Use `kubectl auth can-i --list --as=system:serviceaccount:ns:name` for a full matrix, `kubectl auth can-i create pods --as=... -n ns` for a single check, and `--as-group` for group-derived access. Grep for the dangerous bindings: every ClusterRoleBinding to `cluster-admin`, any subject of `system:masters` (which bypasses RBAC entirely and is unauditable in RBAC terms), any rule with `resources: ['*']` and `verbs: ['*']`, and any binding to the `system:anonymous` user or `system:unauthenticated` group. Install `kubectl-who-can` to answer the inverse query ('who can create pods in kube-system'). Produce this inventory as a table — it is the first page of the hardening report you hand a client.",
+   "minutes": 15,
+   "resource": {
+    "label": "kubectl-who-can (aquasecurity)",
+    "url": "https://github.com/aquasecurity/kubectl-who-can"
+   }
+  },
+  {
+   "name": "ServiceAccounts, projected tokens, and turning off automount",
+   "learn": "Understand that since 1.24 Secret-based SA tokens are no longer auto-created and pods get a *bound, audience-scoped, time-limited* token via the TokenRequest API, projected by the kubelet and rotated at ~80% of its lifetime — so a stolen token expires, unlike a legacy `kubernetes.io/service-account-token` Secret. Set `automountServiceAccountToken: false` on the ServiceAccount (defaults for everything using it) or on the PodSpec (per-pod override) for any workload that never calls the API server, which is most of them. Know how to mint a short-lived token deliberately with `kubectl create token <sa> --duration=10m --audience=...`, and why binding a token to a non-default audience stops it being replayed against the API server.",
+   "minutes": 15,
+   "resource": {
+    "label": "Kubernetes docs: Service Accounts",
+    "url": "https://kubernetes.io/docs/concepts/security/service-accounts/"
+   }
+  },
+  {
+   "name": "Pod Security Standards: privileged, baseline, restricted",
+   "learn": "Learn the three profiles as concrete field lists, not vibes. `baseline` blocks hostNetwork/hostPID/hostIPC, hostPath volumes, privileged, host ports, adding capabilities beyond a small set, and unconfined seccomp/AppArmor/SELinux overrides. `restricted` adds: `allowPrivilegeEscalation: false`, `runAsNonRoot: true`, `capabilities.drop: ['ALL']` (only NET_BIND_SERVICE may be added back), `seccompProfile.type: RuntimeDefault` or Localhost, and volume-type restrictions to a safe list (configMap, secret, emptyDir, projected, downwardAPI, PVC, ephemeral). Be able to look at any PodSpec and say, without running it, which profile it violates and on which exact field.",
+   "minutes": 15,
+   "resource": {
+    "label": "Kubernetes docs: Pod Security Standards",
+    "url": "https://kubernetes.io/docs/concepts/security/pod-security-standards/"
+   }
+  },
+  {
+   "name": "Pod Security Admission: rolling it out without breaking the customer",
+   "learn": "PSA is a built-in admission controller driven by three namespace labels per mode: `pod-security.kubernetes.io/{enforce,audit,warn}` plus optional `-version` pins (`v1.30` rather than `latest`, so a cluster upgrade cannot silently tighten policy). Know the rollout order that does not cause an outage: label with `warn` and `audit` first, watch the API server warnings and audit annotations for a full deploy cycle, fix workloads, then set `enforce`. Know the hard limits: enforce is checked only on pod create/update, so *existing* pods and higher-level controllers keep running while Deployments silently fail to create ReplicaSet pods — you must check `kubectl get events` / ReplicaSet conditions, not just `kubectl get deploy`. Know cluster-wide defaults via the AdmissionConfiguration `PodSecurity` plugin with `exemptions.usernames/runtimeClasses/namespaces` for kube-system and CNI DaemonSets.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs: Pod Security Admission",
+    "url": "https://kubernetes.io/docs/concepts/security/pod-security-admission/"
+   }
+  },
+  {
+   "name": "securityContext: the fields that actually change the kernel",
+   "learn": "Write the securityContext block from memory and know what each field does at the syscall level. Pod-level: `runAsUser`/`runAsGroup`/`fsGroup` (and `fsGroupChangePolicy: OnRootMismatch` to avoid a 20-minute chown on a large PVC), `supplementalGroups`, `seccompProfile`, `seLinuxOptions`. Container-level: `allowPrivilegeEscalation: false` (sets PR_SET_NO_NEW_PRIVS, killing setuid binaries and file capabilities), `capabilities: {drop: ['ALL'], add: ['NET_BIND_SERVICE']}`, `readOnlyRootFilesystem: true` paired with emptyDir mounts for /tmp and any cache dir, `privileged: false`. Know that `runAsNonRoot: true` fails the pod at *runtime* with CreateContainerConfigError if the image's USER is numeric-unset, which is why you also pin `runAsUser`.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kubernetes docs: Configure a Security Context for a Pod or Container",
+    "url": "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/"
+   }
+  },
+  {
+   "name": "Container escape primitives: what a dangerous PodSpec really grants",
+   "learn": "Be able to demo, not just describe, each escape: `hostPath: /` + chroot = full node filesystem including /var/lib/kubelet/pods and every mounted Secret on that node; `hostPID: true` + `nsenter -t 1 -m -u -i -n -p` = a root shell in the host's namespaces; `privileged: true` = all capabilities plus unmasked /dev and the ability to mount the host block device; a mounted `/var/run/docker.sock` or containerd socket = create any container on the node; CAP_SYS_ADMIN alone is enough via cgroup release_agent or /proc writes on older kernels; hostNetwork bypasses every NetworkPolicy and exposes localhost-bound node services. Run each one in your kind cluster once so the client demo is muscle memory.",
+   "minutes": 20,
+   "resource": {
+    "label": "EKS Best Practices Guide: Pod Security",
+    "url": "https://aws.github.io/aws-eks-best-practices/security/docs/pods/"
+   }
+  },
+  {
+   "name": "Secrets: base64 is not encryption",
+   "learn": "Know that a Secret is a plain object in etcd, base64-encoded only, readable by anyone with `get secrets` in that namespace, by anything that can read etcd, and by any pod on the node whose kubelet mounted it. Enable encryption at rest with an `EncryptionConfiguration` file passed via `--encryption-provider-config`: understand provider ordering (the first provider encrypts, all listed providers can decrypt), why `identity` first means plaintext, and why you must run `kubectl get secrets -A -o json | kubectl replace -f -` to rewrite existing objects after enabling it. Prefer a KMS v2 provider (envelope encryption with a remote KEK, DEK caching, key-rotation without re-encrypting everything) over `aescbc`, and verify by reading the raw etcd value with `etcdctl get /registry/secrets/...`.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kubernetes docs: Encrypting Confidential Data at Rest",
+    "url": "https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/"
+   }
+  },
+  {
+   "name": "Secret delivery patterns and their trade-offs",
+   "learn": "Know four patterns and when each is the right recommendation. External Secrets Operator: syncs from Vault/AWS Secrets Manager/GCP SM into a native Secret — easy, but the plaintext still lands in etcd. Secrets Store CSI Driver: mounts secrets as a tmpfs volume, optionally without creating a Secret object at all, with rotation via `--enable-secret-rotation`. Sealed Secrets: asymmetric encryption so the ciphertext is safe in Git, but the controller's private key becomes a crown jewel and disaster recovery depends on backing it up. SOPS + age/KMS: file-level encryption that works with any GitOps tool. Independently, always prefer mounting secrets as files over `env` — env vars leak into crash dumps, `/proc/<pid>/environ`, child processes, and every debug endpoint that prints the environment.",
+   "minutes": 15,
+   "resource": {
+    "label": "External Secrets Operator docs: Overview — SecretStore/ExternalSecret sync model",
+    "url": "https://external-secrets.io/latest/introduction/overview/"
+   }
+  },
+  {
+   "name": "NetworkPolicy as blast-radius containment",
+   "learn": "Understand that policies are additive allow-lists and a pod is unrestricted until *some* policy selects it, so the first thing you install in a tenant namespace is a default-deny for both directions (`podSelector: {}` with `policyTypes: [Ingress, Egress]`). Then know the gotchas that break clusters: an egress default-deny kills DNS unless you explicitly allow UDP/TCP 53 to the kube-dns pods (namespaceSelector on kube-system + podSelector k8s-app=kube-dns); `namespaceSelector` and `podSelector` in the *same* `from` element are an AND while separate list elements are an OR; `ipBlock` cannot select pods and is the tool for blocking the cloud metadata IP 169.254.169.254; policies do not apply to hostNetwork pods; and the API is a no-op unless the CNI enforces it (Calico/Cilium yes, plain kubenet no). Know that a client asking for L7 or FQDN egress rules needs CiliumNetworkPolicy or a service mesh, not core NetworkPolicy.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs: Network Policies",
+    "url": "https://kubernetes.io/docs/concepts/services-networking/network-policies/"
+   }
+  },
+  {
+   "name": "The cloud identity boundary: IMDS, IRSA, and node roles",
+   "learn": "The most common real-world cluster-to-cloud escape is a pod curling `http://169.254.169.254/latest/meta-data/iam/security-credentials/` and getting the *node's* IAM role, which usually has ECR pull, EBS, and sometimes far more. Fix it two ways and know both: enforce IMDSv2 with `HttpTokens: required` and `HttpPutResponseHopLimit: 1` so containers (one hop away) cannot reach it at all, and/or block 169.254.169.254 via NetworkPolicy egress `ipBlock.except`. Then give workloads their own identity: IRSA (an OIDC provider on the cluster, an IAM role trust policy on `system:serviceaccount:ns:sa`, and the `eks.amazonaws.com/role-arn` annotation) or EKS Pod Identity. Be able to explain to a client why the node role must be the minimum needed to join and pull, never the app's role.",
+   "minutes": 20,
+   "resource": {
+    "label": "EKS Best Practices Guide: Identity and Access Management",
+    "url": "https://aws.github.io/aws-eks-best-practices/security/docs/iam/"
+   }
+  },
+  {
+   "name": "Image provenance: registry allow-lists, digests, and signature verification",
+   "learn": "Enforce that only images from approved registries run, that tags are resolved to immutable digests (`image: registry/app@sha256:...` — a mutable `:latest` means the thing you scanned is not the thing that runs), and that `imagePullPolicy` is understood (`Always` on a mutable tag is a supply-chain hole *and* a pull-rate-limit outage; `IfNotPresent` on a digest is correct). Then add cryptographic verification: sign with `cosign sign --key ...` or keyless OIDC, attach an SBOM/attestation, and enforce at admission with sigstore policy-controller or a Kyverno `verifyImages` rule that also mutates the tag to the verified digest. Know that the legacy built-in `ImagePolicyWebhook` admission plugin exists but that policy engines are what customers actually run.",
+   "minutes": 20,
+   "resource": {
+    "label": "sigstore/cosign — container signing and verification",
+    "url": "https://github.com/sigstore/cosign"
+   }
+  },
+  {
+   "name": "Policy engines: Kyverno, Gatekeeper, and built-in CEL policies",
+   "learn": "Know the three options and pick correctly for a customer. ValidatingAdmissionPolicy (GA, built-in, CEL expressions, no external webhook so no availability risk) handles most 'reject this field' rules and should be the default answer for simple constraints. Kyverno writes policies as Kubernetes YAML and can validate, *mutate* (inject securityContext defaults, sidecars, imagePullSecrets), generate (auto-create a default-deny NetworkPolicy per new namespace), and verify image signatures — usually the fastest path to a working policy set. Gatekeeper uses OPA/Rego with ConstraintTemplates and audits existing resources against constraints. Critically: understand `failurePolicy: Fail` vs `Ignore`, `namespaceSelector`/`objectSelector` exemptions for kube-system, webhook timeouts, and that a Fail-closed webhook whose pods are down will brick the entire cluster's ability to create pods — including the webhook's own pods.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kyverno documentation",
+    "url": "https://kyverno.io/docs/introduction/"
+   }
+  },
+  {
+   "name": "Runtime detection and the audit log",
+   "learn": "Admission stops bad specs; runtime tooling catches bad behaviour from a spec that looked fine. Learn Falco's model (eBPF or kernel-module syscall capture, rules matching on syscall + container metadata + k8s labels) and the handful of default rules that actually matter — `Terminal shell in container`, `Write below etc`, `Contact K8S API Server From Container`, `Read sensitive file untrusted` — and how to tune out the noise that makes teams disable it. Separately, configure the API server audit log with a Policy that records `RequestResponse` for secrets and RBAC objects, `Metadata` for everything else, and `None` for the read-only noise; know the audit stages (RequestReceived, ResponseStarted, ResponseComplete, Panic) and that PSA writes its `audit` violations as annotations on these events. Know that without an audit log you cannot answer 'what did the attacker do' after an incident.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kubernetes docs: Auditing — audit policy, levels, and stages",
+    "url": "https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/"
+   }
+  },
+  {
+   "name": "Sandboxing and node-level hardening",
+   "learn": "Know the layers beneath the pod. `seccompProfile: RuntimeDefault` blocks roughly 40+ dangerous syscalls at near-zero cost and should be on every workload; a Localhost profile is for when you have measured the syscall set. AppArmor via `securityContext.appArmorProfile` and RuntimeClass with gVisor or Kata gives you a real kernel boundary for untrusted or customer-supplied code. User namespaces (`hostUsers: false`) remap in-container root to an unprivileged host UID so a container escape lands as nobody. On the node itself: the kubelet must run with `--authorization-mode=Webhook` and `--anonymous-auth=false` (the read-only port 10255 and an open 10250 are classic findings), and Node authorization plus the NodeRestriction admission plugin must be on so a compromised kubelet cannot read Secrets for pods it does not run.",
+   "minutes": 15,
+   "resource": {
+    "label": "Kubernetes docs: Restrict a Container's Syscalls with seccomp",
+    "url": "https://kubernetes.io/docs/tutorials/security/seccomp/"
+   }
+  },
+  {
+   "name": "Continuous assessment: CIS benchmarks and in-cluster scanning",
+   "learn": "Run `kube-bench` against the CIS Kubernetes Benchmark as a Job and read the output critically — many control-plane checks are Not Applicable on managed clusters (EKS/GKE), and telling a client that 40 findings are 'informational because AWS owns the control plane' is exactly the kind of judgement they are paying for. Add `trivy-operator` for continuous VulnerabilityReports, ConfigAuditReports, and RbacAssessmentReports as CRDs you can query with kubectl, and know that image CVE counts must be triaged by reachability and fix availability, not shipped raw. Use `kubescape` for NSA/CISA and MITRE ATT&CK framework mappings when a customer asks for a named framework. Turn the union of these into a prioritised list, not a 300-row dump.",
+   "minutes": 15,
+   "resource": {
+    "label": "kube-bench (CIS Kubernetes Benchmark checks)",
+    "url": "https://github.com/aquasecurity/kube-bench"
+   }
+  },
+  {
+   "name": "Kubernetes Goat: exploit, then map every finding to a control",
+   "learn": "Work the Goat scenarios end to end — sensitive keys in code, DIND exploitation, SSRF, container escape to the host, docker.sock exposure, kubectl in a container, hidden-in-layers secrets, RBAC least-privilege misconfiguration, KubeAudit, Falco, Kyverno, Gatekeeper, cloud metadata SSRF, hostPath mount escape. For each one write three lines: the exploit command you ran, the single manifest field or RBAC rule that made it possible, and the exact control that closes it (PSA profile, securityContext field, NetworkPolicy, admission policy, or IMDS setting). That three-column table is the hardening checklist deliverable and the script for explaining findings to a non-security stakeholder.",
+   "minutes": 15,
+   "resource": {
+    "label": "Kubernetes Goat scenarios documentation",
+    "url": "https://madhuakula.com/kubernetes-goat/docs/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take an arbitrary Deployment manifest and, without a cluster, list every field that violates the `restricted` Pod Security Standard and rewrite it so it admits — including the emptyDir mounts needed to make `readOnlyRootFilesystem: true` work.",
+  "You can roll Pod Security Admission onto a live namespace using warn/audit first, collect the violations from API server warnings and ReplicaSet events, and cut over to `enforce` with a version-pinned label and a documented exemption list.",
+  "You can audit an unfamiliar cluster's RBAC in under 30 minutes and produce a table of every subject with cluster-admin, every wildcard rule, every SA with `get/list secrets` or `create pods` outside its own namespace, and every binding to `system:unauthenticated`, using `kubectl auth can-i --list --as` and kubectl-who-can.",
+  "You can demonstrate a container escape in your own kind cluster three different ways (hostPath, hostPID + nsenter, privileged) and then show the exact PSA/securityContext change that blocks each.",
+  "You can prove a Secret is stored unencrypted in etcd, enable a KMS v2 EncryptionConfiguration, re-encrypt existing objects, and show the ciphertext in the same raw etcd read.",
+  "You can write a default-deny NetworkPolicy pair for a tenant namespace that still allows DNS, intra-namespace traffic, and egress to one external CIDR, while blocking 169.254.169.254 — and explain why hostNetwork pods bypass it.",
+  "You can enforce signed-image-only deployment with a Kyverno verifyImages policy or sigstore policy-controller, show a rejected unsigned image, and explain the failurePolicy blast radius if the webhook goes down.",
+  "You can complete every Kubernetes Goat scenario and explain each finding to a non-security stakeholder in two sentences: what an attacker gets, and the one-line manifest change that stops it."
+ ],
+ "failureModes": [
+  "A team labels namespaces with `enforce: restricted` in one PR; existing pods keep running so dashboards stay green, but every subsequent Deployment rollout silently fails at the ReplicaSet level and nobody notices until an unrelated deploy needs to scale during an incident.",
+  "A default-deny egress NetworkPolicy ships without a DNS allow rule, so every service resolves nothing, connection errors look like a database outage, and the team spends two hours on the wrong system before someone checks the CNI.",
+  "A validating webhook with `failurePolicy: Fail` and no kube-system exemption is deployed, its own pods get evicted during a node rotation, and the cluster can no longer admit any pod — including the webhook's replacement — requiring manual webhook-config deletion via a break-glass credential.",
+  "An application pod with no IAM role of its own quietly uses the node instance role via IMDS to read an S3 bucket; it works fine for a year, and the finding only surfaces in an audit after the same path is used to reach a bucket the workload was never meant to see.",
+  "Secrets are injected as env vars, the app's unhandled-exception handler ships the full environment to an error-tracking SaaS, and a production database password ends up in a third-party system with a different retention policy and access list.",
+  "A Helm chart from an internal platform team ships `automountServiceAccountToken: true` with a ClusterRoleBinding to cluster-admin 'temporarily for the migration', and it is still there eighteen months later on every install of that chart.",
+  "Falco is installed, generates 4,000 alerts a day from a noisy CI namespace, gets muted in Slack within a week, and is therefore silent on the night an actual `Terminal shell in container` fires."
+ ],
+ "interviewQuestions": [
+  "A customer's security team says your workload cannot ship because it needs to write to disk and bind port 80. Walk me through exactly how you make it pass a `restricted` Pod Security Standard without asking for an exemption.",
+  "An attacker gets RCE in a pod running as non-root with the default ServiceAccount. Walk me through, hop by hop, everything they can reach in a default-configured EKS cluster, and tell me which single control cuts the most of it.",
+  "Design the RBAC model for a multi-tenant platform where each customer team can fully manage their own namespace but must never read another tenant's Secrets or run privileged pods. Which objects do you create, and where does namespace-level RBAC stop being sufficient?",
+  "Deployments in one namespace stopped creating pods after a policy change, but `kubectl get deploy` shows no error and there are no pod events. How do you debug this, and what are the three most likely causes?",
+  "A client asks whether Kubernetes Secrets are 'encrypted'. Answer them precisely, then describe what you would actually implement and how you would prove to their auditor that it works.",
+  "Compare enforcing 'no privileged containers' with ValidatingAdmissionPolicy, Kyverno, and Gatekeeper. Which do you recommend for a 400-node regulated-industry cluster, and what is the failure mode of your choice?",
+  "You are told a workload must reach one external SaaS endpoint but the cluster has default-deny egress and a CNI with no FQDN support. What options do you present, and what is the operational cost of each?"
+ ],
+ "proofOfWork": "Build a public repo called `k8s-hardening-kit` that turns the Kubernetes Goat run into a reusable client artifact. It contains: (1) a findings table with one row per Goat scenario — exploit command, the specific manifest field or RBAC rule that enabled it, the control that closes it, and a severity with a one-line business impact statement a non-engineer can read; (2) a `policies/` directory with the actual working controls, applied to a kind cluster in CI — a namespace-labelling script for PSA warn/audit/enforce, a default-deny plus DNS-allow NetworkPolicy pair, a Kyverno policy set (require restricted securityContext, block hostPath and hostNetwork, require digest-pinned images from an allow-listed registry, verifyImages against a cosign key, auto-generate a default-deny NetworkPolicy on namespace creation), an EncryptionConfiguration with a KMS provider, and a namespaced Role/RoleBinding template for a tenant; (3) a `verify/` directory with a script that deploys a deliberately-vulnerable pod and asserts each policy *rejects* it, so the repo proves its own controls work rather than just asserting them; and (4) a two-page `CHECKLIST.md` written for a customer platform lead, ordered by blast-radius reduction per hour of work, with an explicit 'what we are consciously not doing and why' section. Wire the whole thing into a GitHub Actions workflow that spins up kind, applies the policies, runs the negative tests and kube-bench, and fails the build if any control regresses."
+}

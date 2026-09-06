@@ -1,0 +1,211 @@
+{
+ "i": 62,
+ "topic": "Threat modelling and secrets lifecycle",
+ "track": "I. Security and Compliance",
+ "month": 7,
+ "hours": 6.0,
+ "why": "An FDE is the person sitting across from the customer's security architect in week two of a deployment, and the two artifacts that unblock or kill the project are a credible threat model and a credible answer to 'how do you rotate that credential without taking us down'. Nobody buys 'we take security seriously' - they buy a data-flow diagram with named trust boundaries, a STRIDE table where every threat has a mitigation and an owner, and a rotation runbook that has actually been rehearsed against a live system. Secrets are also the single most common way an on-site deployment breaks after handover: the credential expires, the rotation job flips the password at 03:00, and the service that cached it at import time goes down while you are on a plane.",
+ "prerequisites": [
+  "Application security: OWASP Top 10 hands-on (topic 61) - you need to know what an IDOR, an SSRF and a broken-auth bug actually look like before you can predict them on a diagram.",
+  "Auth and identity (topic 27): OIDC authorization code + PKCE, JWT validation with issuer/audience/algorithms, JWKS, and what a refresh token rotation window is - half of secrets work is really identity work.",
+  "Data modelling for multi-tenant systems (topic 30): tenant_id propagation, Postgres row-level security, PII classification and audit tables, because tenant isolation is the threat every enterprise reviewer asks about first.",
+  "Linux and containers (Month 1-2): file permissions and umask, process environment via /proc/<pid>/environ, container image layers, and how a Kubernetes pod gets its filesystem and service account token.",
+  "Production Python and FastAPI (topics 25-26): dependency injection, connection pooling with SQLAlchemy (pool_recycle, pool_pre_ping), and retry with backoff - rotation correctness lives inside these mechanics.",
+  "Basic Terraform and CI (Month 3-4): remote state, plan output in pull requests, GitHub Actions job permissions - the two places secrets leak that nobody diagrams."
+ ],
+ "subtopics": [
+  {
+   "name": "Frame the system: DFD, assets, trust boundaries",
+   "learn": "Draw DefenderMate as a level-1 data flow diagram with exactly four element types - external entity, process, data store, data flow - and then draw the trust boundaries as lines that cross flows, not as boxes around components. A boundary is any place where the authority of the caller changes: browser to BFF, BFF to API, API to Postgres, API to model provider, Temporal worker to tenant object storage, operator laptop to production. Name the assets in the customer's language (tenant documents, classification decisions, audit log, model API key, signing key) and record who is allowed to see each. Finish by writing the three sentences a reviewer actually reads: what the system does, what it must never do, and what you are explicitly assuming about the environment it runs in.",
+   "minutes": 25,
+   "resource": {
+    "label": "OWASP Community - Threat Modeling",
+    "url": "https://owasp.org/www-community/Threat_Modeling"
+   }
+  },
+  {
+   "name": "STRIDE per element and per interaction",
+   "learn": "Apply STRIDE (Spoofing, Tampering, Repudiation, Information disclosure, Denial of service, Elevation of privilege) mechanically: external entities get S and R; processes get all six; data stores get T, I, D and R; data flows get T, I and D. Do it per interaction - 'analyst browser -> BFF /api/classify' - not per box, because the interesting threats live on the arrows. Produce a table with columns id, element, STRIDE category, threat in one sentence, existing control, gap, severity, owner, status; a threat with no control and no owner is not a finding, it is a wish. Force yourself to write at least one threat per category per boundary crossing, then delete the ones that are genuinely not applicable and say why - the deletions are what proves you did the pass.",
+   "minutes": 25,
+   "resource": {
+    "label": "Microsoft Learn - Threat Modeling Tool overview",
+    "url": "https://learn.microsoft.com/en-us/azure/security/develop/threat-modeling-tool"
+   }
+  },
+  {
+   "name": "Threat modelling the AI surface",
+   "learn": "Add the threats classic STRIDE tables miss because the model is a confused deputy with a customer's credentials. Cover indirect prompt injection through retrieved documents and tool output (the attacker writes the payload into a PDF you ingest, not into the chat box), excessive agency (a tool that can DELETE when the task only needs SELECT), insecure output handling (model output rendered as HTML, or passed to a shell, a SQL string or an HTTP client, giving XSS and SSRF), system-prompt and tool-schema extraction, and cross-tenant leakage through a shared vector index or a shared prompt cache. For each, name the control layer: allow-listed tools with per-tool scopes, output treated as untrusted input, retrieval filtered by tenant_id before the model sees anything, egress allow-list on the agent's network namespace, and human confirmation gates on irreversible actions.",
+   "minutes": 25,
+   "resource": {
+    "label": "OWASP Top 10 Risks and Mitigations for LLM and GenAI Apps (2025 list)",
+    "url": "https://genai.owasp.org/llm-top-10/"
+   }
+  },
+  {
+   "name": "Multi-tenant and authorization threats",
+   "learn": "Enumerate the isolation failures that actually happen: a query path that forgets SET LOCAL app.tenant_id so RLS silently passes, a table where RLS is enabled but not FORCED so the owner role bypasses it, an object storage prefix that is per-tenant by convention only, a background worker or admin endpoint running as a superuser role, and IDs that are sequential integers so enumeration is trivial. Write the negative tests as threats: 'analyst of tenant A can read /api/conversations/<uuid of tenant B>' with expected 404, not 403, because 403 confirms existence. Distinguish authentication (who), authorization (what), and tenancy (whose) - most real bugs are the third one, and they are invisible in a diagram unless you draw the data store per tenant.",
+   "minutes": 20,
+   "resource": {
+    "label": "OWASP Cheat Sheet Series - Authorization",
+    "url": "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html"
+   }
+  },
+  {
+   "name": "Ranking risk without theatre",
+   "learn": "Score with CVSS v3.1 base metrics (AV, AC, PR, UI, S, C, I, A) when you need a number a customer's GRC team can reconcile with their vulnerability register, and understand why DREAD fell out of favour - two engineers score the same threat differently and the total is not comparable across systems. For threats with no CVE, use a two-axis likelihood x impact grid with written definitions of each level, and record the reasoning sentence, since the sentence is what survives the argument. Know that the scope metric (S:C) is what turns a container escape or an RLS bypass from High into Critical, and be able to defend a downgrade with a compensating control (network isolation, short credential TTL, monitored audit log).",
+   "minutes": 20,
+   "resource": {
+    "label": "FIRST - CVSS v3.1 specification document",
+    "url": "https://www.first.org/cvss/v3.1/specification-document"
+   }
+  },
+  {
+   "name": "From threats to controls, assumptions and accepted risk",
+   "learn": "Every row ends in one of four dispositions - mitigate, transfer, avoid, accept - and 'accept' requires a named human, a written justification and an expiry date, or it is just an open bug with better formatting. Map mitigations to real MITRE ATT&CK techniques where it helps a security team place your work in their language (T1552 credentials in files, T1078 valid accounts, T1195 supply chain). Write the assumptions section as testable claims: 'the cluster is not shared with untrusted tenants', 'egress is restricted to an allow-list', 'the customer's IdP enforces MFA for analysts'; when an assumption is later false, that is a change request, not a surprise. Keep an explicit out-of-scope list so the reviewer stops asking about the things you deliberately did not model.",
+   "minutes": 20,
+   "resource": {
+    "label": "MITRE ATT&CK - Enterprise Mitigations (controls mapped to techniques)",
+    "url": "https://attack.mitre.org/mitigations/enterprise/"
+   }
+  },
+  {
+   "name": "Keep the threat model alive in code review",
+   "learn": "A threat model written once for the security review is stale within a sprint. Store the model in the repo next to the code - a diagram source file plus the threat table as YAML or a pytm script that renders the DFD and the report from Python objects - so a pull request can change it and a reviewer can diff it. Add a CI check or a CODEOWNERS rule that fires when a new external dependency, network egress, data store or tool definition appears, and a review trigger list: new trust boundary, new PII field, new third-party API, new admin path. Track threats as issues with the same lifecycle as bugs, so 'we have a threat model' becomes a number: open threats by severity, mean age, count with no owner.",
+   "minutes": 20,
+   "resource": {
+    "label": "OWASP pytm - Pythonic threat modelling framework (official repository)",
+    "url": "https://github.com/OWASP/pytm"
+   }
+  },
+  {
+   "name": "Inventory every secret and rank it by blast radius",
+   "learn": "You cannot rotate what you have not listed. Build a table of every credential in the system with: name, type (password, API key, signing key, encryption key, certificate, OAuth client secret, service account token), where it is stored, which workloads read it, what it can do if stolen, how long it lives, how it is rotated today, and how long a rotation takes. Include the ones people forget - the model provider API key, the webhook HMAC shared with the customer, the Postgres superuser used by migrations, the container registry pull secret, the TLS private key, the backup encryption key, and the SSH key on the bastion. Sort by blast radius times exposure, not by alphabetical order, and mark each as long-lived, short-lived, or dynamic; the goal state is that almost nothing in the top rows is long-lived.",
+   "minutes": 20,
+   "resource": {
+    "label": "OWASP Cheat Sheet Series - Secrets Management",
+    "url": "https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html"
+   }
+  },
+  {
+   "name": "Detect leaked secrets in code, history and logs",
+   "learn": "Run gitleaks (detect --redact over full history, protect --staged in a pre-commit hook) and trufflehog with verification enabled so you get 'this key is live' rather than 'this looks like entropy'; tune the allow-list so developers do not learn to ignore the tool. Understand what rewriting history does and does not achieve: git filter-repo or BFG removes the blob from your branch, but forks, clones, CI caches, and the provider's unreferenced-object storage may still serve it, so the only real remediation is revocation. Turn on provider-side push protection and secret scanning so the next one is blocked at push time. Extend the same thinking to runtime: scrub Authorization headers and api_key fields from structured logs, from error-reporting payloads, and from LLM traces, and add a test that asserts a known canary string never appears in log output.",
+   "minutes": 25,
+   "resource": {
+    "label": "gitleaks (official repository)",
+    "url": "https://github.com/gitleaks/gitleaks"
+   }
+  },
+  {
+   "name": "Storage: KV v2, versioning, and encryption at rest",
+   "learn": "Use a versioned KV store rather than a flat one: Vault kv-v2 gives you check-and-set writes (-cas=N) to prevent lost updates during concurrent rotation, version history for rollback, soft delete versus destroy, max_versions, and delete_version_after. Know the difference between deleting a version and destroying it, and why a rotation runbook must destroy the old value only after the overlap window closes. Understand the storage security model beneath it - Vault's barrier and seal/unseal, auto-unseal backed by a cloud KMS, and for Kubernetes Secrets the fact that base64 is encoding not encryption, so etcd needs an EncryptionConfiguration with a kms provider before you can claim encryption at rest. Read-path least privilege matters as much as encryption: a policy that grants read on secret/data/* is the same as no vault at all.",
+   "minutes": 20,
+   "resource": {
+    "label": "HashiCorp Vault docs - KV secrets engine v2",
+    "url": "https://developer.hashicorp.com/vault/docs/secrets/kv/kv-v2"
+   }
+  },
+  {
+   "name": "Getting a secret into the process without leaking it",
+   "learn": "Compare the three delivery shapes and their leak surfaces. Environment variables are readable at /proc/<pid>/environ by any process of the same uid, are inherited by every child process, show up in docker inspect, in crash dumps and core files, and are routinely captured wholesale by error-reporting SDKs. Files (tmpfs mount, mode 0400, owned by the app uid) are better, can be re-read on change, and are what most secret injectors use. A direct API fetch at startup with in-memory caching is best but demands you handle refresh. Whichever you pick, load secrets through one accessor function - never a module-level constant evaluated at import - so a rotation can invalidate the cache, and make __repr__ of any config object redact the value so a stack trace does not print it.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs - Secrets",
+    "url": "https://kubernetes.io/docs/concepts/configuration/secret/"
+   }
+  },
+  {
+   "name": "Workload identity: deleting the bootstrap secret",
+   "learn": "The recursive problem in secrets management is the credential that fetches credentials. Solve it with platform-issued identity: Vault's Kubernetes auth method validates a projected ServiceAccount token via the TokenReview API and binds a role to bound_service_account_names and bound_service_account_namespaces; JWT/OIDC auth trusts your CI provider's issuer with bound_claims on repository and ref. On clouds, the same pattern is an OIDC identity provider plus a role trust policy with a condition on sub and aud (IRSA on EKS, workload identity federation on GCP), which is how a GitHub Actions job deploys with zero stored access keys. Set automountServiceAccountToken: false where it is not needed, scope projected tokens with an explicit audience and short expirationSeconds, and be ready to explain to a customer why this is strictly better than a sealed long-lived key.",
+   "minutes": 25,
+   "resource": {
+    "label": "HashiCorp Vault docs - Kubernetes auth method",
+    "url": "https://developer.hashicorp.com/vault/docs/auth/kubernetes"
+   }
+  },
+  {
+   "name": "Dynamic secrets and lease mechanics",
+   "learn": "Configure the database secrets engine so the application never holds a static Postgres password: Vault holds a rotated root credential (vault write -f database/rotate-root/<config>), and each workload calls vault read database/creds/<role> to get a unique username and password with a lease. Learn the lease lifecycle properly - default_lease_ttl and max_lease_ttl, vault lease renew, vault lease revoke -prefix database/creds/<role> to kill every credential a compromised service ever received, and the revocation_statements that drop the role in Postgres (including REASSIGN OWNED / DROP OWNED, which is the usual reason revocation fails). Understand the operational cost you are trading for: credential churn shows up in pg_stat_activity and in connection-pool behaviour, so pool lifetime must be shorter than lease TTL or you will hold connections authenticated by a revoked user.",
+   "minutes": 25,
+   "resource": {
+    "label": "HashiCorp Vault docs - Database secrets engine",
+    "url": "https://developer.hashicorp.com/vault/docs/secrets/databases"
+   }
+  },
+  {
+   "name": "Zero-downtime rotation mechanics",
+   "learn": "Rotation is a two-valid-credentials problem, never a swap. Internalise the AWS Secrets Manager four-step model - createSecret, setSecret, testSecret, finishSecret - and the staging labels AWSCURRENT, AWSPENDING and AWSPREVIOUS, which exist precisely so a reader mid-rotation still resolves something valid. Prefer the alternating-users strategy (two database users, rotate the idle one, then flip the label) over single-user rotation, because a single user's password change breaks new connections while existing pooled ones keep working, producing a slow-burn partial outage. On the client side you need: a refresh path (file watch, TTL cache, or SIGHUP), a retry that re-reads the secret on an auth error instead of backing off blindly, connection pool settings (pool_recycle shorter than the overlap window, pool_pre_ping) and an overlap window longer than your longest connection lifetime plus deploy time. Rehearse the whole thing under load and measure error count, not vibes.",
+   "minutes": 30,
+   "resource": {
+    "label": "AWS Secrets Manager User Guide - Rotate secrets",
+    "url": "https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotating-secrets.html"
+   }
+  },
+  {
+   "name": "Rotating verification keys: JWKS and webhook HMACs",
+   "learn": "Signing keys are the rotation case that breaks other people's systems, because verifiers cache. Publish a JWKS with a kid on every key, add the new key to the document and let it propagate for at least the Cache-Control max-age of the jwks_uri before you sign anything with it, then sign with the new kid, then keep the old public key until the longest-lived token issued under it has expired plus clock skew. Verifiers must select by kid, refresh the JWKS on an unknown kid with a rate limit, and never accept alg from the token. For shared HMAC webhook secrets the same overlap applies: accept a signature that matches either the current or previous secret during the window, compare with a constant-time function (hmac.compare_digest), and include a timestamp in the signed payload with a replay window. Announce the cutover dates to the customer in writing before you touch anything.",
+   "minutes": 20,
+   "resource": {
+    "label": "RFC 7517 - JSON Web Key (JWK)",
+    "url": "https://www.rfc-editor.org/info/rfc7517/"
+   }
+  },
+  {
+   "name": "Encryption keys, envelope encryption and re-wrapping",
+   "learn": "Distinguish rotating a key from re-encrypting data. With envelope encryption, a KMS-held key encryption key wraps per-object data keys, so rotating the KEK is cheap and instant while the ciphertext is untouched - you only re-wrap the data keys. Know what AWS KMS automatic key rotation actually does (new backing material, old material retained so old ciphertext still decrypts, key id unchanged) and why that is not the same as removing the compromised material. With Vault transit, rotate with vault write -f transit/keys/<name>/rotate, then re-encrypt existing ciphertext with transit/rewrap/<name> (which never exposes plaintext), and raise min_decryption_version only once the rewrap job has finished, or you will make old rows permanently unreadable. Estimate and schedule the rewrap cost before promising a date, and always test decrypt-after-rotate on a restored backup.",
+   "minutes": 20,
+   "resource": {
+    "label": "AWS KMS Developer Guide - concepts (envelope encryption, key rotation)",
+    "url": "https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html"
+   }
+  },
+  {
+   "name": "Secrets in CI, IaC and container builds",
+   "learn": "Three places secrets escape that never appear on a DFD. Terraform writes provider credentials, database passwords and generated keys into state in plaintext even when the variable is marked sensitive = true, so the backend must be encrypted, access-restricted and never committed - and plan output posted to a pull request comment is a public disclosure channel. CI runners need short-lived OIDC-federated identity rather than stored keys, job-level least-privilege permissions, and masked outputs, and you must assume any secret available to a workflow is available to a pull request from a fork unless the trigger says otherwise. Container builds must use build-time secret mounts (RUN --mount=type=secret) rather than ARG or ENV, since anything in a build argument or layer is visible via docker history and to anyone who pulls the image.",
+   "minutes": 15,
+   "resource": {
+    "label": "Terraform docs - sensitive data in state",
+    "url": "https://developer.hashicorp.com/terraform/language/manage-sensitive-data"
+   }
+  },
+  {
+   "name": "Leak response, audit evidence, and the runbook",
+   "learn": "Write the runbook so a stressed engineer at 02:00 can execute it: revoke first, rotate second, investigate third - in that order, because a valid stolen credential is an ongoing incident and forensic curiosity is not. For each secret in the inventory, the runbook needs the exact commands, the expected duration, the blast radius of doing it, the rollback, and the verification step (a probe that proves the new credential works and the old one no longer does). Enable and read audit devices - Vault audit logs hash secret values with an HMAC so you can search for 'was this specific credential ever read, by whom, from which IP' without the log itself becoming the leak - and pair them with cloud trail events for GetSecretValue. Close the loop with a written timeline, the scope of what the credential could reach, and one systemic fix per incident.",
+   "minutes": 25,
+   "resource": {
+    "label": "HashiCorp Vault docs - Audit devices",
+    "url": "https://developer.hashicorp.com/vault/docs/audit"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can produce a level-1 DFD of DefenderMate with numbered trust boundaries and a STRIDE-per-interaction table in under 90 minutes, where every row carries an existing control, a gap, a severity with a written justification, an owner and a status.",
+  "You can list every secret in a running system from a repo scan plus an infrastructure scan, and state for each one its blast radius, its current TTL, who reads it, and how many minutes a rotation takes.",
+  "You can rotate a live Postgres credential used by a running service under continuous load and show a request log with zero 5xx and zero authentication errors across the cutover.",
+  "You can stand up Vault Kubernetes auth so that no static credential exists in any manifest, image or file, and demonstrate that deleting the pod's projected token immediately stops it from fetching secrets.",
+  "You can revoke every dynamic credential ever issued to one compromised workload with a single command and then prove from the audit log which credentials existed, when they were read, and by which client IP.",
+  "You can rotate a JWT signing key without invalidating a single live session, and explain the ordering (publish, propagate, sign, retire) with the specific cache TTLs that make it safe.",
+  "You can defend a risk acceptance to a customer's security reviewer with a CVSS v3.1 vector, a compensating control, a named owner and an expiry date, rather than asking them to trust you.",
+  "You can find a secret committed to git history, and correctly explain why history rewriting is not remediation and revocation is."
+ ],
+ "failureModes": [
+  "The application reads the database password once into a module-level constant at import time, so the 03:00 rotation job succeeds, the secrets manager shows the new value, and every pod keeps using the old credential until the next deploy - at which point everything fails at once, hours after the change that caused it.",
+  "Single-user rotation runs behind a connection pool: existing connections keep working while every new connection fails, so error rate creeps from 0 to a few percent over an hour and gets blamed on the network instead of the rotation.",
+  "The rotation function lives in a private subnet with no VPC endpoint or NAT for the secrets service, so setSecret updates the database but finishSecret times out, leaving AWSPENDING valid and AWSCURRENT stale - the secret is now rotated in the database and not in the store.",
+  "A signing key is rotated and the old public key removed the same minute, so every token issued in the previous hour fails verification and every user in the customer's org is logged out simultaneously during their business day.",
+  "Secret scanning is enabled on new commits only, while the real leaked cloud key has been in git history since 2021 and in four forks - the scanner reports clean and the key is still live.",
+  "The workload authenticates to Vault with a long-lived token stored as a Kubernetes Secret, so the entire secrets programme has replaced many medium-value credentials with one master credential and nobody rotates it.",
+  "The threat model is a PDF produced for the security review and never touched again; three sprints later the system has a shared vector index, an agent with a write-capable tool and a new third-party API, none of which appear on the diagram the customer is auditing against.",
+  "Terraform plan output containing a generated password is posted as a pull request comment by CI, or the state file lands in a bucket readable by the whole engineering org, disclosing credentials that were never in any code file."
+ ],
+ "interviewQuestions": [
+  "Walk me through threat modelling a multi-tenant RAG application deployed inside our VPC. Where are the trust boundaries, and which STRIDE category worries you most given the model can call tools?",
+  "Design zero-downtime rotation for a Postgres credential used by 40 pods sitting behind pgbouncer. What are the two-credential mechanics, what is your overlap window based on, and what specifically breaks if you get it wrong?",
+  "We cannot use your secrets manager - we run our own Vault and our own PKI. How do you integrate without shipping us a bootstrap secret, and what do you need from our platform team?",
+  "A live AWS access key for a customer environment was committed to a public repository eight months ago. Talk me through your first thirty minutes, and tell me why rewriting git history is not the fix.",
+  "How would you rotate a JWT signing key when three third parties verify our tokens offline against a cached JWKS document, one of whom refreshes daily? What is the sequence and what is the minimum retention for the old key?",
+  "Our security team says no secrets may be passed as environment variables. Is that a meaningful control or cargo cult? Argue both sides and tell me what you would actually implement.",
+  "After we enabled automatic rotation, one service's error rate went from zero to three percent and stayed there. You have logs, metrics and shell access. How do you diagnose it?",
+  "You have one week on site and the customer wants a threat model. What do you produce, who do you interview, and how do you stop it becoming a document nobody updates?"
+ ],
+ "proofOfWork": "Build a rotation game-day harness as a small repository: docker-compose brings up Vault (dev mode with the database and transit secrets engines enabled), Postgres, a FastAPI service that reads its database credential through a refreshable accessor, and a load generator holding steady traffic through a connection pool. A single make rotate-drill target then executes three rotations back to back - the database password using the alternating-users pattern, the JWT signing key with a kid overlap and a JWKS cache TTL, and a transit encryption key with a rewrap pass over existing rows - while recording request count, error count by class, p99 latency and the exact second of each cutover. The harness emits a one-page markdown report with the before/after graphs, the Vault audit log lines proving the old credentials were revoked and never read afterwards, and a verification probe showing the retired credential now fails. Ship a second, deliberately broken branch that reproduces the module-level-global caching failure so the report can show the same drill producing a visible outage, which is the artifact that makes a customer's platform team believe the runbook."
+}

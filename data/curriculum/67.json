@@ -1,0 +1,209 @@
+{
+ "i": 67,
+ "topic": "Engagement documents: site survey, PRD-lite, SOW, ADRs, design docs, runbooks",
+ "track": "J. FDE Craft and Communication",
+ "month": 8,
+ "hours": 8,
+ "why": "An FDE is the only person in the room who sits between a sponsor who wants an outcome, a platform team that owns the environment, and an on-call engineer who will be woken up by whatever you deploy, and the artifact that keeps those three aligned is writing, not code. Every expensive delivery failure - the six-week slip on an IAM role nobody was assigned, the security veto three days before go-live, the 3am incident where the customer cannot restart your service - is traceable to a document that was never written or was written for the wrong reader. Producing a site survey, a PRD-lite, a SOW section set, ADRs, a design doc and runbooks that a customer's lead accepts without rewriting is the difference between a contractor who ships code and a forward-deployed engineer who ships a working system the customer can own.",
+ "prerequisites": [
+  "Discovery (topic 66): stakeholder mapping, the questions that surface the real problem, and a set of discovery notes you can trace every requirement back to.",
+  "SRE fundamentals (topic 20) and incident response (topic 23): SLIs, SLOs, error budgets, severity ladders and escalation, because runbooks and go-live criteria are written in that vocabulary.",
+  "Observability (topic 21): what a dashboard, an alert rule and a trace actually look like, so a runbook can point at real signals instead of describing them.",
+  "Enough of the deployment stack to describe an architecture accurately: Kubernetes core and production ops (topics 7 and 8), Terraform (topic 12), AWS networking and IAM (topics 13 and 15).",
+  "Threat modelling and secrets lifecycle (topic 62) plus compliance basics (topic 64): data classification, trust boundaries, and what a customer security review asks for.",
+  "Git at depth (topic 4) and comfort with Markdown, PR review and CI, since the whole pack is docs-as-code in the customer's repository."
+ ],
+ "subtopics": [
+  {
+   "name": "Map the pack: six documents, six readers, one index",
+   "learn": "Before writing anything, fix the stack: the site survey answers 'what actually exists and what will block us', the PRD-lite answers 'what are we building, for whom, and how will we know it worked', the SOW answers 'what are we on the hook for, by when, and who signs it off', ADRs answer 'why this and not that', the design doc answers 'how it works and how it fails', and the runbook answers 'what does the on-call engineer do at 3am'. Each has a different reader - platform lead, product sponsor, procurement, customer architect, on-call - and a different failure mode when missing. Use the Diataxis split (tutorial, how-to, reference, explanation) to stop mixing modes inside one file, because a runbook that explains architecture is a runbook nobody follows. Ship a one-page index listing every document with its owner, reviewer, status and last-verified date.",
+   "minutes": 25,
+   "resource": {
+    "label": "Diataxis - a systematic framework for technical documentation",
+    "url": "https://diataxis.fr/"
+   }
+  },
+  {
+   "name": "Site survey I: environment, access and the deploy path",
+   "learn": "Inventory the target the way an installer would, with a value, a source and evidence for every line: cloud accounts and regions, VPC CIDRs and whether they collide with yours, subnet and NAT layout, egress rules (allowlist, TLS-intercepting forward proxy, or no egress at all), Kubernetes distribution and version, CNI, ingress controller and any admission policies already enforced, container registry and whether images must be mirrored internally, identity provider and SSO/SCIM, bastion or VPN access and how many days a laptop grant takes, secrets manager, CI system, and who is allowed to merge to the deploying branch. Then draw the deploy path end to end - repo, build, scan, sign, registry, environment promotion, approval gate - and name the human who approves each gate. Anything you were told rather than verified gets marked as unverified until you have run the command yourself.",
+   "minutes": 35,
+   "resource": {
+    "label": "AWS Well-Architected Framework",
+    "url": "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html"
+   }
+  },
+  {
+   "name": "Site survey II: data, security and compliance reality",
+   "learn": "Capture the facts that decide whether the architecture is even permissible: data classification for every input and output (public, internal, PII, PHI, regulated), residency and cross-border rules, retention and deletion obligations, whether prompts and completions may leave the tenant boundary or call a third-party model API at all, encryption requirements (KMS or customer-managed keys at rest, mTLS in transit), audit log retention, and the control framework in force (SOC 2, ISO 27001, HIPAA with a BAA, FedRAMP). Get the security review process in writing: who runs it, which artifacts they expect (architecture and data flow diagrams, a questionnaire such as ASVS or SIG, pen test evidence, SBOM), and the lead time in weeks. The highest-value line in this section is 'PII in scope: yes or no, and here is the field-level list', because it changes retrieval design, logging, eval datasets and where the model can run.",
+   "minutes": 30,
+   "resource": {
+    "label": "NIST SP 800-122 - Guide to Protecting the Confidentiality of Personally Identifiable Information (PII)",
+    "url": "https://csrc.nist.gov/pubs/sp/800/122/final"
+   }
+  },
+  {
+   "name": "Site survey III: constraints, blockers and the RAID register",
+   "learn": "Convert findings into a decision-ready register rather than prose, using four buckets: risks (probability, impact, mitigation, owner), assumptions (what you are betting on and what it costs if false), issues (blocking now, with owner and needed-by date) and dependencies (what the customer must provide and when). Every row names a human, not a team, and carries a date. Learn to recognise the constraints that historically kill delivery: no outbound internet, no cluster admin, a change freeze covering your go-live quarter, one overloaded DBA, procurement lead time on a GPU quota increase, or a policy that blocks the model provider entirely. State each item's schedule impact in days, because 'we are blocked on IAM' moves nobody while 'this pushes go-live past the November freeze' moves everyone.",
+   "minutes": 25,
+   "resource": {
+    "label": "Microsoft Azure Well-Architected Framework",
+    "url": "https://learn.microsoft.com/en-us/azure/well-architected/"
+   }
+  },
+  {
+   "name": "PRD-lite: one page that fixes problem, scope and success",
+   "learn": "Write one page, not ten, with fixed sections: problem with a baseline number, the two or three user journeys expressed as the job to be done, in-scope list, an explicit non-goals list, success metrics with their measurement definition and an instrumentation owner, and an assumptions block. Force every metric to be computable: not 'faster triage' but 'median minutes from ticket creation to first correct routing decision, computed from created_at and routed_at in the ticketing system, baseline 42 minutes over the last 90 days'. Write the non-goals section first when scope is contested - it is the section that saves the engagement. Trace every claim back to a named stakeholder from your discovery notes so the sponsor can see whose words these are.",
+   "minutes": 35,
+   "resource": {
+    "label": "Google Technical Writing One",
+    "url": "https://developers.google.com/tech-writing/one"
+   }
+  },
+  {
+   "name": "Requirements language and testable acceptance criteria",
+   "learn": "Adopt RFC 2119 keywords - MUST, MUST NOT, SHOULD, MAY - and use them deliberately, because an ambiguous 'should' in a SOW is where disputes live. Rewrite every soft requirement as an observable condition: 'the system MUST return a routing decision for 95 percent of tickets within 3 seconds, measured as p95 at the API gateway over a rolling 24 hours' beats 'responses should be fast'. Attach a verification method to each requirement - an automated test id, a load-test scenario, an eval run, or a named manual check - so acceptance becomes a script rather than an argument. Ban seamless, robust, scalable, real-time and AI-powered from requirement text, and treat any requirement you cannot write a failing test for as a discovery gap to take back to the sponsor before signing.",
+   "minutes": 25,
+   "resource": {
+    "label": "RFC 2119 - Key words for use in RFCs to indicate requirement levels",
+    "url": "https://www.rfc-editor.org/info/rfc2119/"
+   }
+  },
+  {
+   "name": "SOW anatomy: deliverables, obligations, assumptions, exclusions, change control",
+   "learn": "Learn each section and the specific failure it defends against: deliverables (which artifacts are handed over, in what format, to which repository), milestones with dates and acceptance or payment triggers, customer obligations (access, environments, data, named SMEs, decision turnaround) each with a needed-by date, assumptions listed explicitly so that a broken one triggers a change request instead of unpaid work, exclusions and out-of-scope, acceptance criteria with a named signer per deliverable, a change control procedure (who raises, how it is priced, who approves, what happens to the timeline), and post-go-live support terms with an expiry date. Understand where risk sits in fixed-fee versus time-and-materials, and why fixed-fee plus vague assumptions is the standard way delivery teams go negative. Practise writing the exclusion list: it is short, blunt, and the most re-read part of the document.",
+   "minutes": 35,
+   "resource": {
+    "label": "FAR 37.602 - Performance work statement: required scope, results, measurable standards and constraints",
+    "url": "https://www.acquisition.gov/far/37.602"
+   }
+  },
+  {
+   "name": "ADRs: what counts as a decision and the canonical shape",
+   "learn": "An ADR records one architecturally significant decision - expensive to reverse, spanning components or teams, or one the customer will question later. Learn the shape: an ordinal title (0007-postgres-pgvector-for-retrieval), status (proposed, accepted, superseded by 0012, deprecated), date, context stating the forces and the customer-specific constraints, the decision in the active voice ('We will...'), consequences split into what improves, what gets worse and what you now have to live with, and alternatives considered with a concrete reason each was rejected. The value is concentrated in Context and Consequences; a record with no rejected alternatives is a preference, not a decision. Keep it to a page that a reviewer can read in ten minutes.",
+   "minutes": 25,
+   "resource": {
+    "label": "Architectural Decision Records - adr.github.io",
+    "url": "https://adr.github.io/"
+   }
+  },
+  {
+   "name": "Running an ADR log: template, numbering, supersession, review",
+   "learn": "Keep the log in the customer's repo at docs/adr/ as numbered Markdown, pick one template (MADR is the common default) and never edit an accepted ADR - supersede it with a new record that links back, so the history of why the design moved stays readable. Wire ADR review into the pull request that implements the decision so the two cannot diverge, and use a lightweight tool or a template file plus a PR checklist rather than a bespoke process. Learn the practical triggers for writing one: you are about to choose a datastore, a queue, an auth model, a tenancy model, a model provider or a deployment target, or you have just spent an hour of a meeting arguing. Expect five to fifteen ADRs across a typical engagement, and expect the customer to reuse them long after you leave.",
+   "minutes": 30,
+   "resource": {
+    "label": "joelparkerhenderson/architecture-decision-record - templates and examples",
+    "url": "https://github.com/architecture-decision-record/architecture-decision-record"
+   }
+  },
+  {
+   "name": "Design doc: Google-style structure and the review it exists for",
+   "learn": "The design doc exists to surface disagreement early and cheaply, not to describe finished code. Structure it as context and scope, goals and explicit non-goals, the design itself (data model, APIs, request flow, storage, tenancy, failure behaviour), alternatives considered, cross-cutting concerns (security, privacy, observability, cost, operations), then estimate and rollout. Write it before you build, circulate it with a fixed review window and named reviewers including the customer's architect and security lead, resolve comments in the document rather than in DMs, and mark it as a point-in-time artifact that stops being maintained once shipped - after that the code and the runbook are the living truth. Length is a signal: three to ten pages is right, twenty means the scope is wrong.",
+   "minutes": 35,
+   "resource": {
+    "label": "Design Docs at Google",
+    "url": "https://www.industrialempathy.com/posts/design-docs-at-google/"
+   }
+  },
+  {
+   "name": "Diagrams that survive an architecture review: C4 and diagrams-as-code",
+   "learn": "Use the C4 levels deliberately - System Context (who and which systems, the one diagram a sponsor understands), Container (deployable units, datastores, protocols and ports), Component only where a container is genuinely complex - and never ship a diagram that mixes levels. Add the two diagrams security reviewers ask for by name: a data flow diagram with trust boundaries drawn, and a network or deployment diagram showing VPCs, subnets, ingress, egress and where credentials are issued. Keep diagrams as code (Mermaid or Structurizr) beside the document so they are reviewable in a pull request and regenerable, and label every arrow with the protocol and the direction of initiation, since 'who calls whom' is what determines firewall rules and service accounts.",
+   "minutes": 25,
+   "resource": {
+    "label": "The C4 model for visualising software architecture",
+    "url": "https://c4model.com/"
+   }
+  },
+  {
+   "name": "The design doc sections FDEs skip: failure modes, capacity, rollback, cost",
+   "learn": "Add the sections that make an operations team accept the design. Failure modes: for each dependency, what happens when it is slow, down or returns garbage, plus the specific timeout, retry policy with jitter and cap, circuit breaker and degraded mode you chose. Capacity: expected and peak request rate, payload sizes, token volume and concurrency, with the arithmetic that sizes replicas, connection pools and rate limits. Rollback: not 'redeploy the previous image' but a plan that covers schema migrations (expand then contract), in-flight work, feature flags and data written by the new version. Cost: unit economics per request and per tenant including model tokens, so an invoice never surprises the sponsor. Security: the authn and authz model, secret handling, and the blast radius of each compromised component.",
+   "minutes": 30,
+   "resource": {
+    "label": "Google SRE Book - Addressing Cascading Failures (timeouts, retries, degraded modes, capacity)",
+    "url": "https://sre.google/sre-book/addressing-cascading-failures/"
+   }
+  },
+  {
+   "name": "Runbooks that work at 3am: structure and the first five minutes",
+   "learn": "Write for a stranger under stress. Every procedure carries a trigger (the exact alert name or observed symptom), a severity, prerequisites including which access is needed and how to get it, a decision tree of copy-pasteable commands that include the cluster, namespace and account context, the expected output at each step so the reader knows whether it worked, an explicit 'if this fails, escalate to X via Y' path, and a rollback. Lead with a triage block - is it up, is it degraded, is data at risk, do we need to communicate - and put the stop-the-bleeding action before diagnosis. Include the boring things that are always missing: how to authenticate, dashboard URLs, exact service and container names, how to safely restart, how to pause or drain consumers, and how to verify recovery. The only acceptable test is watching someone else execute it.",
+   "minutes": 30,
+   "resource": {
+    "label": "PagerDuty Incident Response - During an Incident (triage, roles and the first actions)",
+    "url": "https://response.pagerduty.com/during/during_an_incident/"
+   }
+  },
+  {
+   "name": "Wiring alerts to runbooks and SLO context",
+   "learn": "A runbook nobody can find during an incident does not exist, so attach it to the alert itself: Prometheus alerting rules carry annotations, and every rule should ship with summary, description and a runbook_url pointing at the exact section, with any alert lacking one failing review. Learn what makes an alert page-worthy - symptom-based, tied to an SLI a user feels, and actionable - so the runbook covers a small number of real conditions instead of every metric on a dashboard. Put SLO context inside each procedure: how much error budget this burn consumes and the threshold at which you stop rolling forward and start rolling back. Cross-reference the customer's severity ladder and communication templates rather than inventing your own, so their process is the one being followed.",
+   "minutes": 25,
+   "resource": {
+    "label": "Prometheus - alerting best practices",
+    "url": "https://prometheus.io/docs/practices/alerting/"
+   }
+  },
+  {
+   "name": "Handover pack: on-call, escalation, and proving they can run it",
+   "learn": "The engagement ends when the customer can operate the system without you. Assemble the service catalogue entry (what it is, who owns it, upstream and downstream dependencies), an escalation matrix with names, hours and channels including your post-go-live support window and its expiry date, access requirements per role, a maintenance calendar (certificate expiry, key rotation, dependency upgrades, model deprecation dates), the backup and restore procedure with the date of the last successful tested restore, and a DR or game-day record. Then prove it: run a live exercise where the customer's on-call engineer executes the top procedures from the documents alone while you stay silent, and log every hesitation as a documentation defect to fix before sign-off.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google SRE Book - Being On-Call",
+    "url": "https://sre.google/sre-book/being-on-call/"
+   }
+  },
+  {
+   "name": "Docs as code: repo layout, templates, review and freshness gates",
+   "learn": "Put the pack in the customer's repository, not your laptop or a drive folder they lose access to. Standardise the layout (docs/adr/, docs/design/, docs/runbooks/, docs/engagement/ for survey, PRD and SOW summary), ship templates as files so a new document starts pre-structured, and require documentation changes in the same pull request as the behaviour change with the right reviewers attached. Add mechanical gates in CI: a Markdown linter, a prose linter with a banned-words list, a link checker, and a small script that fails the build when a runbook has no verified-on date within N days or an ADR has sat in proposed status past a threshold. Publish through MkDocs or the customer's existing docs site so the pack is searchable rather than a pile of files nobody opens.",
+   "minutes": 25,
+   "resource": {
+    "label": "Write the Docs - Docs as Code",
+    "url": "https://www.writethedocs.org/guide/docs-as-code/"
+   }
+  },
+  {
+   "name": "Go-live readiness review and written sign-off",
+   "learn": "Before traffic moves, run a readiness review as a checklist backed by evidence rather than opinion: SLOs defined and instrumented, dashboards and alerts live and proven by firing one deliberately, runbooks executed by someone other than the author, a backup restored at least once, rollback demonstrated in a lower environment, security review closed with every exception written down and accepted by a named owner, capacity headroom calculated, cost ceiling and budget alerts configured, on-call rota populated, and each SOW acceptance criterion mapped one-to-one to evidence. Produce a single readiness page marking each line green, amber or red with an owner for every amber, and obtain an explicit written sign-off. Practise saying 'we are not ready, and here is the specific reason' - holding that line in front of a sponsor is exactly what a delivery lead is assessing.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google SRE Book - table of contents",
+    "url": "https://sre.google/sre-book/table-of-contents/"
+   }
+  },
+  {
+   "name": "Sanitising and publishing a pack in the open",
+   "learn": "Learn to strip a real engagement pack into something publishable without gutting it. Replace the customer with a plausible pseudonymous profile; scrub personal names, internal hostnames, CIDR ranges, account ids, ARNs, ticket links, dashboard URLs, screenshots of internal tools and any pricing; and check git history, file metadata and diagram source as well as the rendered text, since redaction failures usually live in commit history. Replace real figures with rounded or ratio-preserving numbers and state that you did so. Keep the structure and the reasoning - the parts that demonstrate judgement - and add a short preamble explaining what was changed and why. Apply one style guide across the whole pack so it reads in a single voice rather than as six documents by six authors.",
+   "minutes": 20,
+   "resource": {
+    "label": "Microsoft Writing Style Guide",
+    "url": "https://learn.microsoft.com/en-us/style-guide/welcome/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can complete a site survey of an unfamiliar customer environment in under two working days and hand back a blockers table where every row has a named human, a needed-by date and a schedule impact stated in days.",
+  "You can turn a vague sponsor request into a one-page PRD-lite whose success metric names the exact fields and source system it is computed from, and whose non-goals list has at least three concrete entries.",
+  "You can draft the SOW section set - deliverables, customer obligations, assumptions, exclusions, acceptance, change control - and explain for any single line which delivery failure it exists to prevent.",
+  "You can write an ADR in under thirty minutes that a customer architect accepts, with at least two rejected alternatives carrying specific rejection reasons and a consequences section that honestly lists what got worse.",
+  "You can produce a design doc with correctly levelled C4 diagrams, per-dependency failure modes with chosen timeouts and retry policy, capacity arithmetic, and a rollback plan that survives a schema migration.",
+  "You can hand a runbook to an engineer who has never seen the system and watch them resolve a simulated incident without asking you a question, then close each stall point as a logged documentation defect.",
+  "You can attach a runbook_url annotation to every page-worthy alert and demonstrate the alert firing and the link resolving to the correct procedure section.",
+  "You can chair a go-live readiness review that ends in a signed one-page verdict, and defend a 'not ready' call to a sponsor using evidence rather than opinion."
+ ],
+ "failureModes": [
+  "An unwritten assumption - the customer will provision the IAM role and VPN access in week one - slips six weeks, and because it never appeared in the SOW's assumptions or dependencies the team burns budget idle with no change order to point at.",
+  "The site survey misses a TLS-intercepting egress proxy and an internal-only mirror registry, so the first deploy dies on certificate validation and image pulls and week one goes to networking instead of the product.",
+  "The design doc is written after the code, so the customer's security architect vetoes the outbound model API call at the pre-go-live review and the entire retrieval path is redesigned in the final sprint.",
+  "No ADRs exist, so four months later a new CTO asks why Temporal rather than Celery, nobody can reconstruct the constraints that drove it, and the decision is relitigated in meetings that cost more than the record would have.",
+  "The runbook is a wiki page of screenshots from a UI that has since changed, with commands missing cluster and namespace context, so the on-call engineer restarts the wrong deployment at 3am and extends the incident by hours.",
+  "Success metrics were agreed on a slide but never instrumented, so at renewal there is no baseline and no measured delta and the engagement is judged on sentiment rather than evidence.",
+  "Scope creep is accepted verbally in a standup and never raised as a change request, so a fixed-fee engagement silently goes negative while the team is congratulated for being accommodating."
+ ],
+ "interviewQuestions": [
+  "You land on a new customer deployment on Monday morning. What do you write in week one, in what order, who reviews each document, and who has to sign which one?",
+  "Walk me through the site survey you would run before deploying an LLM application inside a regulated customer's VPC. Give me the ten questions whose answers would change your architecture, and say how each one changes it.",
+  "Mid-engagement the sponsor asks for a feature that adds about two weeks. It is a fixed-fee SOW. What do you do in the next hour, and which documents change?",
+  "Write me the ADR for choosing between pgvector in the customer's existing Postgres and a dedicated vector database. What goes in Context, what goes in Consequences, and what would make you supersede it later?",
+  "Your design doc's rollback plan says 'redeploy the previous image', but the release ran a destructive migration. How should that section have been written, and what else in the doc does that change?",
+  "How do you write a runbook that a customer's on-call engineer who has never met you can execute at 3am, and what do you deliberately leave out of it?",
+  "Six months after handover, how would you know whether the documentation you left behind is actually being used and is still true?"
+ ],
+ "proofOfWork": "Run and publish a cold-start audit of your own engagement pack. Recruit an engineer who has never seen the system, give them nothing but the repository containing the design doc, ADRs and runbooks, and ask them to do three timed tasks on a live sandbox deployment while you stay silent and screen-record: perform a fresh deploy from scratch, resolve two simulated incidents triggered by real alerts (one dependency failure, one bad release requiring rollback with a migration in play), and answer three architecture questions the design doc should already cover. Log every stall as a numbered documentation defect with a timestamp, the exact sentence or missing step that caused it, and the severity, then ship a v2 of the pack that closes every defect and publish the before-and-after diff alongside the defect log and the timings. Add a small CI job in the same repository that enforces the freshness rules you learned - Markdown and prose linting, a link checker, a failure when a runbook lacks a verified-on date inside the window, and a failure when an alert rule has no runbook_url annotation - so the artifact proves not only that you can write the pack but that you can keep it true after you leave."
+}

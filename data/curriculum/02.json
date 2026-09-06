@@ -1,0 +1,218 @@
+{
+  "i": 2,
+  "topic": "Networking: TCP/IP, DNS, TLS, HTTP/2, load balancers, firewalls",
+  "track": "A. Linux, Networking, Shell",
+  "month": 1,
+  "hours": 10,
+  "why": "An FDE ships into networks the customer owns: corporate forward proxies, TLS-intercepting appliances, private DNS, egress allowlists, and load balancers someone else configured years ago. The first week of almost every deployment produces a ticket that is really a network problem in disguise (the webhook never arrives, the cert chain is incomplete, a 60-second idle timeout kills a long model call) and the engagement stalls until someone can isolate the layer with dig, curl -v, ss and tcpdump and explain the evidence to the client's network team in their own vocabulary. That person has to be you, because you are the only engineer in the room who owns both the application and the delivery.",
+  "prerequisites": [
+    "Shell fluency from 'Shell mastery and scripting' (topic 0): pipes, sudo, reading man pages, running multi-flag commands without hesitation",
+    "Linux internals from topic 1: systemd units, journalctl, /proc, and the capabilities model (tcpdump needs root or CAP_NET_RAW)",
+    "A Linux VPS you control with a public IPv4 and a domain whose DNS records you can edit (the Hetzner box from topic 1)",
+    "Python 3: bytes versus str, context managers, exceptions, and a first exposure to asyncio (async def / await)",
+    "Having written at least one HTTP endpoint (Flask/FastAPI) and called at least one third-party API with requests or httpx",
+    "Comfort reading hex and binary: you know what a byte, a port and an IPv4 address are and can convert 0x01BB to 443"
+  ],
+  "subtopics": [
+    {
+      "name": "Latency, bandwidth and the hop-by-hop request trace",
+      "learn": "Know the four latency components (propagation, transmission, processing, queuing) and why round trips, not bandwidth, dominate small API calls: Mumbai to us-east-1 is roughly 200 ms RTT, so a TLS 1.2 connection burns about three RTTs before the first byte. Be able to draw the canonical trace for https://api.example.com from memory: stub resolver, recursive resolver, root/TLD/authoritative, TCP three-way handshake, TLS handshake, HTTP request, load balancer, backend, with an RTT count on every arrow. Measure it with curl -s -o /dev/null -w '%{time_namelookup} %{time_connect} %{time_appconnect} %{time_starttransfer} %{time_total}\\n' https://... and attribute each delta to a layer; this one-liner is the first thing you run on any 'it is slow' ticket.",
+      "minutes": 20,
+      "resource": {
+        "label": "High Performance Browser Networking, ch. 1: Primer on Latency and Bandwidth",
+        "url": "https://hpbn.co/primer-on-latency-and-bandwidth/"
+      }
+    },
+    {
+      "name": "Host-side name resolution: the path before any packet leaves",
+      "learn": "Trace the resolver path on a Linux host: the hosts: line in /etc/nsswitch.conf (files, dns, myhostname, resolve), /etc/hosts, and /etc/resolv.conf with nameserver, search, and options ndots:5 timeout:2 attempts:2. Recognise the systemd-resolved stub at 127.0.0.53, which makes resolv.conf lie about the real upstream (resolvectl status shows it). Understand that getaddrinfo(3) returns AAAA and A and that ndots plus the search list in Kubernetes turns one lookup into five (the .svc.cluster.local suffix chain), and that getent ahosts host exercises the libc path the application uses while dig bypasses it entirely. 'dig works but the app fails' is therefore a real, diagnosable state, not a mystery; Go and Java may also ship their own resolvers that ignore parts of this chain.",
+      "minutes": 30,
+      "resource": {
+        "label": "man7: resolv.conf(5)",
+        "url": "https://man7.org/linux/man-pages/man5/resolv.conf.5.html"
+      }
+    },
+    {
+      "name": "Recursive DNS with dig: delegation, record types, TTLs, failure codes",
+      "learn": "Run dig +trace example.com and name each delegation (root, .com, authoritative), then dig @1.1.1.1 example.com A +noall +answer +comments and read status (NOERROR, NXDOMAIN, SERVFAIL, REFUSED), flags (qr rd ra aa) and the TTL column counting down on cached answers. Know the record types you will actually touch and their rules: A/AAAA, CNAME (cannot sit at the zone apex or alongside other records), NS, SOA (its minimum field sets the negative-cache TTL per RFC 2308), MX, TXT (SPF, DKIM, DMARC, domain verification), SRV, CAA. Understand the 512-byte UDP limit, EDNS0 buffer size, the TC bit forcing a TCP retry, and that a resolver's cached NXDOMAIN outlives your fix by up to the SOA minimum. Always check propagation from more than one public resolver (1.1.1.1, 8.8.8.8, the customer's) rather than trusting your laptop's view.",
+      "minutes": 40,
+      "resource": {
+        "label": "BIND 9 documentation: manual pages (dig, delv, nslookup)",
+        "url": "https://bind9.readthedocs.io/en/latest/manpages.html"
+      }
+    },
+    {
+      "name": "IP routing, NAT and MTU from the host's point of view",
+      "learn": "Use ip -br addr, ip route and ip route get 8.8.8.8 to state exactly which interface and gateway a packet leaves through, and ip neigh to see the ARP/NDP cache that must resolve before the first frame moves. Know the RFC 1918 ranges, source NAT at a home router or cloud NAT gateway, why the server sees the NAT's address, and why an inbound webhook to a private IP is impossible without a public endpoint or a tunnel. Know MTU 1500 and the roughly 1460-byte MSS after headers, overlays (VXLAN, WireGuard, VPNs) that shrink it, PMTUD's dependence on ICMP type 3 code 4 not being filtered, net.ipv4.tcp_mtu_probing as the workaround, and the black-hole symptom: small requests succeed while large POST bodies hang with retransmissions. Read mtr -T -P 443 host and traceroute -T output and know that * * * at a middle hop usually means ICMP rate limiting, not a fault.",
+      "minutes": 35,
+      "resource": {
+        "label": "man7: ip-route(8)",
+        "url": "https://man7.org/linux/man-pages/man8/ip-route.8.html"
+      }
+    },
+    {
+      "name": "TCP handshake, socket states, and what 'refused' versus 'timeout' proves",
+      "learn": "Draw the three-way handshake with initial sequence numbers and the SYN options (MSS, SACK-permitted, window scale, timestamps) exactly as tcpdump prints them: Flags [S], [S.], [.], [P.], [F.], [R]. Walk the state machine (LISTEN, SYN-SENT, SYN-RECEIVED, ESTABLISHED, FIN-WAIT-1/2, CLOSE-WAIT, LAST-ACK, TIME-WAIT) and map each to ss -tan state <name>; a pile of CLOSE-WAIT means your application never called close(), and TIME-WAIT (60 s) on the active closer plus the ephemeral range in net.ipv4.ip_local_port_range is how outbound port exhaustion happens. Understand the accept backlog (listen(backlog), net.core.somaxconn, tcp_max_syn_backlog) and SYN cookies. Discriminate at the packet level: an RST in reply to a SYN is 'connection refused' (host reachable, no listener or a REJECT rule); no reply at all with SYN retransmits at 1, 2, 4, 8 seconds is 'timeout' (a DROP rule, routing, or a dead host).",
+      "minutes": 45,
+      "resource": {
+        "label": "High Performance Browser Networking, ch. 2: Building Blocks of TCP",
+        "url": "https://hpbn.co/building-blocks-of-tcp/"
+      }
+    },
+    {
+      "name": "Flow control, congestion control, retransmission and keepalive, read from ss -ti",
+      "learn": "Separate rwnd (the receiver's advertised, scaled window) from cwnd (the sender's congestion window, starting at 10 segments), and know slow start, congestion avoidance, fast retransmit on three duplicate ACKs, SACK, and RTO (200 ms minimum on Linux) with exponential backoff. Read ss -ti fields (rto, rtt:avg/var, cwnd, ssthresh, bytes_retrans, retrans:cur/total, unacked, lastsnd, lastrcv, delivery_rate) and decide whether a slow transfer is network loss (retrans climbing), receiver-bound (small rwnd, application not reading) or sender-idle (large lastsnd, unacked 0: the application is the bottleneck). Know the Nagle plus delayed-ACK interaction and when TCP_NODELAY matters (small request/response, token streaming), and the keepalive knobs TCP_KEEPIDLE / TCP_KEEPINTVL / TCP_KEEPCNT (default 7200 s idle, useless against a NAT or LB that drops idle mappings after 5 minutes). Check sysctl net.ipv4.tcp_congestion_control and know the difference between cubic and bbr.",
+      "minutes": 40,
+      "resource": {
+        "label": "man7: tcp(7) socket options and /proc/sys/net/ipv4 tunables",
+        "url": "https://man7.org/linux/man-pages/man7/tcp.7.html"
+      }
+    },
+    {
+      "name": "UDP: datagrams, where they are the right tool, and how they fail",
+      "learn": "UDP gives you a port and a checksum and nothing else: no handshake, no ordering, no retransmission, no congestion control, and a firewall or NAT tracks only a short-lived mapping. Know why DNS, QUIC/HTTP-3, syslog, StatsD and WireGuard chose it, and that a UDP protocol must define its own request/response matching and stay under roughly 1200 bytes to avoid fragmentation. In Python use socket.SOCK_DGRAM with recvfrom/sendto, and know that a missing listener yields ICMP port-unreachable that the sender may or may not surface as an error. Solve Protohackers problem 4 (Unusual Database Program) to feel the difference from the TCP problems.",
+      "minutes": 15,
+      "resource": {
+        "label": "High Performance Browser Networking, ch. 3: Building Blocks of UDP",
+        "url": "https://hpbn.co/building-blocks-of-udp/"
+      }
+    },
+    {
+      "name": "TLS 1.3 handshake message by message",
+      "learn": "Name each message and what it carries: ClientHello (supported_versions, server_name SNI, ALPN list such as h2,http/1.1, key_share, cipher suites like TLS_AES_128_GCM_SHA256, signature_algorithms), ServerHello (chosen key_share), then the encrypted EncryptedExtensions, Certificate, CertificateVerify and Finished; one RTT to application data versus two in TLS 1.2, and PSK resumption giving 0-RTT with replay risk. Understand that SNI is plaintext and is what lets one IP serve many certificates (and what corporate firewalls filter on), and that ALPN is where HTTP/2 is negotiated. Run openssl s_client -connect host:443 -servername host -alpn h2 -tls1_3 -msg and identify each message in the output, then repeat with -tls1_2 and count the extra round trip; note the 'Verify return code' line, which is your fastest certificate check.",
+      "minutes": 40,
+      "resource": {
+        "label": "RFC 8446 (TLS 1.3), section 2: Protocol Overview",
+        "url": "https://datatracker.ietf.org/doc/html/rfc8446#section-2"
+      }
+    },
+    {
+      "name": "Certificates, chains, trust stores and ACME",
+      "learn": "Read a certificate with openssl x509 -in cert.pem -noout -text and check the fields clients actually validate: Subject Alternative Names (CN is ignored), notBefore/notAfter, issuer, and EKU serverAuth. Understand chain building leaf to intermediate to root, that the server must send the intermediate (serve fullchain.pem, not cert.pem), and that browsers hide a missing intermediate by fetching it via AIA while Python ssl, Java and Go do not, producing 'unable to get local issuer certificate' or CERTIFICATE_VERIFY_FAILED. Know where trust lives: /etc/ssl/certs plus update-ca-certificates on Debian, Python certifi versus SSL_CERT_FILE / REQUESTS_CA_BUNDLE, Node NODE_EXTRA_CA_CERTS, and that slim or scratch images may ship no CA bundle at all. Know ACME HTTP-01 (port 80 must reach the box) versus DNS-01 (works behind firewalls, needs DNS API access), the 90-day expiry, and verify chains offline with openssl verify -CAfile chain.pem cert.pem and online with openssl s_client -showcerts. Use badssl.com to deliberately trigger expired, wrong-host, self-signed and incomplete-chain failures and memorise each error string.",
+      "minutes": 40,
+      "resource": {
+        "label": "Let's Encrypt: How It Works (ACME, challenges, chains)",
+        "url": "https://letsencrypt.org/how-it-works/"
+      }
+    },
+    {
+      "name": "Enterprise TLS: mTLS, forward proxies, interception, and where termination happens",
+      "learn": "Understand the three shapes an FDE meets on customer sites. (a) An explicit forward proxy: HTTPS_PROXY / NO_PROXY environment variables, the HTTP CONNECT host:443 tunnel, and clients that ignore the env (Java wants -Dhttps.proxyHost, some SDKs need explicit proxy config). (b) A TLS-intercepting appliance (Zscaler, Netskope, Palo Alto) that re-signs every certificate with a private CA, so your container fails only inside their network until that CA is added to the trust store; verify=False is never the fix. (c) Mutual TLS, where the server sends CertificateRequest and the client presents a certificate; test with openssl s_client -cert client.pem -key client.key and be able to state the operational cost (issuing, rotating, revoking per-tenant client certs). Know where TLS terminates in each topology (at the LB with plaintext to the backend and X-Forwarded-Proto set, re-encrypted to the backend, or L4 passthrough with SNI-based routing and the backend holding the certificate) and what each means for observability and for who owns certificate renewal.",
+      "minutes": 30,
+      "resource": {
+        "label": "OpenSSL docs: openssl-s_client(1) (-servername, -alpn, -cert/-key, -proxy, -showcerts)",
+        "url": "https://docs.openssl.org/master/man1/openssl-s_client/"
+      }
+    },
+    {
+      "name": "HTTP/1.1 on the wire, read through curl -v",
+      "learn": "Know the request line, mandatory Host, Content-Length versus Transfer-Encoding: chunked (and why a message carrying both is a request-smuggling vector), Connection: keep-alive versus close, the six-connections-per-origin browser limit, and the head-of-line blocking HTTP/2 was built to remove. Know the status semantics that bite operationally: 301/308 preserve the method, 302/303 turn POST into GET, 307 preserves; 401 versus 403; 429 with Retry-After; 502/503/504 are emitted by proxies, not your app. Read curl -v line by line: * lines are connection and TLS chatter (resolved IP, ALPN chosen, certificate subject/issuer/expiry), > is the request, < is the response. Use --resolve host:443:IP to bypass DNS, -H and --data-binary @file for exact payloads, -k only to isolate a TLS fault, --http1.1 to force a version, --trace-ascii - for raw bytes, -w with timing variables, and --connect-timeout / --max-time to make failures deterministic instead of hanging.",
+      "minutes": 40,
+      "resource": {
+        "label": "curl manual page (all options, with the -w variable list)",
+        "url": "https://curl.se/docs/manpage.html"
+      }
+    },
+    {
+      "name": "HTTP/2 framing, multiplexing, the LB downgrade problem, and where HTTP/3 fits",
+      "learn": "One TCP connection carries many streams; know the frame types (HEADERS, DATA, SETTINGS, WINDOW_UPDATE, RST_STREAM, GOAWAY, PING), HPACK header compression, and per-stream plus per-connection flow control (SETTINGS_INITIAL_WINDOW_SIZE, SETTINGS_MAX_CONCURRENT_STREAMS, typically 100 to 128). Negotiation happens via ALPN h2 or cleartext h2c (needed for gRPC without TLS). Understand that head-of-line blocking moves down to TCP, that gRPC requires h2 end to end, and that most L7 load balancers (ALB, default nginx proxy_pass) speak h2 to the client but HTTP/1.1 to the backend unless explicitly configured for grpc or h2 upstreams, so 'we use HTTP/2' often ends at the edge. Inspect with curl --http2 -v (watch for ALPN: server accepted h2) and nghttp -nv https://host. Know HTTP/3 as HTTP over QUIC over UDP 443, advertised with Alt-Svc, immune to TCP HOL blocking but blocked by enterprise firewalls that drop UDP 443 and falling back to h2. Know the 2023 Rapid Reset attack (CVE-2023-44487) as the reason your LB now rate-limits RST_STREAM.",
+      "minutes": 40,
+      "resource": {
+        "label": "High Performance Browser Networking, ch. 12: HTTP/2",
+        "url": "https://hpbn.co/http2/"
+      }
+    },
+    {
+      "name": "L4 versus L7 load balancing and preserving the real client IP",
+      "learn": "L4 balancers (NLB, IPVS, HAProxy in tcp mode) forward TCP flows: fast, protocol-agnostic, TLS passthrough possible, but the backend sees either the true client IP (if preserved) or the balancer's IP. L7 balancers (ALB, nginx, Envoy) terminate TLS and HTTP and can route on host, path or header, retry, and rewrite. Two mechanisms carry the client IP: X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Port (or RFC 7239 Forwarded) at L7, and PROXY protocol v1/v2 at L4, which prepends a header the backend must parse (nginx: listen 443 ssl proxy_protocol) or every request becomes a 400 with binary garbage in the access log. Trust only the hop you control: nginx set_real_ip_from <LB CIDR>; real_ip_header X-Forwarded-For; real_ip_recursive on; and never take the leftmost XFF entry for rate limiting or allowlisting because the client wrote it. Know round-robin, least-connections and consistent hashing (cache locality), and treat sticky sessions as a design smell to be justified.",
+      "minutes": 40,
+      "resource": {
+        "label": "nginx docs: ngx_http_realip_module (set_real_ip_from, real_ip_header, real_ip_recursive)",
+        "url": "https://nginx.org/en/docs/http/ngx_http_realip_module.html"
+      }
+    },
+    {
+      "name": "Health checks, idle timeouts, draining, and what 502/503/504 mean at the edge",
+      "learn": "A health check is a contract (path, interval, timeout, healthy and unhealthy thresholds, expected codes); a deep check that touches the database turns a DB blip into a full outage while a shallow one hides broken dependencies, so choose deliberately and return 503 during shutdown so the balancer drains you. Know the idle-timeout race: the LB (ALB default 60 s) reuses a keep-alive connection to a backend whose own keepalive timeout is shorter (gunicorn --keep-alive defaults to 2 s, uvicorn --timeout-keep-alive to 5 s); the backend closed first, the LB writes a request into a dead socket, the client gets a 502 and nothing appears in application logs. The fix is backend keepalive strictly longer than the LB idle timeout. Know that a non-streaming request longer than the idle timeout returns 504 while the backend still finishes (and still bills the tokens). Understand deregistration delay / connection draining, and the vocabulary: 502 bad upstream response, 503 no healthy targets or overload, 504 upstream timed out. Configure proxy_read_timeout, proxy_next_upstream, proxy_buffering off for SSE, and keepalive N inside an nginx upstream block as the software equivalents.",
+      "minutes": 35,
+      "resource": {
+        "label": "AWS docs: Health checks for Application Load Balancer target groups",
+        "url": "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/target-group-health-checks.html"
+      }
+    },
+    {
+      "name": "Host firewalls: netfilter hooks, conntrack, nftables, and the Docker bypass",
+      "learn": "Know the five netfilter hooks (prerouting, input, forward, output, postrouting) and the filter/nat/mangle tables so you can predict where a rule must live; inspect with nft list ruleset or iptables -L -n -v --line-numbers and iptables -t nat -L -n. Understand stateful filtering: ct state established,related accept is why return traffic needs no rule, conntrack -L shows the table, and hitting nf_conntrack_max logs 'nf_conntrack: table full, dropping packet', which presents as intermittent new-connection timeouts while existing flows stay healthy. Know DROP versus REJECT (reject with tcp reset) and why REJECT gives the far side an immediate, debuggable 'connection refused' instead of a two-minute hang. Know that Docker inserts its own FORWARD and DOCKER chains and that -p 5432:5432 is reachable from the internet regardless of ufw unless you add rules to DOCKER-USER; prove it from outside with nc -vz host 5432. Write a minimal default-deny ruleset for your VPS (lo, ct established, ssh from your IP, 80/443, ICMP) and apply it with a scheduled rollback (at now + 10 min) so a mistake cannot lock you out.",
+      "minutes": 40,
+      "resource": {
+        "label": "nftables wiki: Quick reference, nftables in 10 minutes",
+        "url": "https://wiki.nftables.org/wiki-nftables/index.php/Quick_reference-nftables_in_10_minutes"
+      }
+    },
+    {
+      "name": "Cloud firewalls: security groups versus NACLs, and the egress rules that eat webhooks",
+      "learn": "Security groups are stateful allow-lists attached to network interfaces: return traffic is implied, rules can reference other security groups, and there is no deny. NACLs are stateless, ordered, subnet-level, and need explicit ephemeral-port return rules (1024 to 65535) or everything half-works. Outbound is open by default in a security group but locked down at regulated customers, so your webhook sender or model API call fails silently on egress; ask for the egress allowlist (destination CIDRs or FQDNs and ports) before deploy day. Know the layered pattern: LB SG allows 443 from 0.0.0.0/0, app SG allows 8000 only from the LB SG, DB SG allows 5432 only from the app SG, and test each hop with nc -vz from inside the VPC. Know VPC Flow Logs and Reachability Analyzer as the cloud analogue of tcpdump when you cannot get a shell on the box.",
+      "minutes": 25,
+      "resource": {
+        "label": "AWS VPC User Guide: Control traffic to your AWS resources using security groups",
+        "url": "https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-groups.html"
+      }
+    },
+    {
+      "name": "Packet-level debugging: ss, tcpdump, nc, and a layer-isolation routine",
+      "learn": "Internalise the routine, in order, each step producing one line of evidence: dig +short host (DNS), nc -vz -w 3 host 443 (TCP), openssl s_client -connect host:443 -servername host (TLS), curl -v --resolve host:443:IP https://host/path (HTTP), then application logs. Know ss -tulpn for listeners (bound to 127.0.0.1 or 0.0.0.0 is the classic container mistake), ss -tanp state established '( dport = :443 )', ss -ti for per-flow TCP statistics, and lsof -i :8000. Capture with sudo tcpdump -nn -i any -s0 -w /tmp/case.pcap 'host 1.2.3.4 and port 443' using BPF capture filters (host, net, port, tcp[tcpflags] & tcp-syn != 0), read back with tcpdump -nn -r case.pcap -A or in Wireshark (tcp.analysis.retransmission, tcp.flags.reset==1, Follow TCP Stream), and know that -i any drops Ethernet headers and that for a container you capture from the host with nsenter -t <pid> -n tcpdump. Prove negatives: an empty capture on the receiver during a claimed send is evidence the packet never arrived, which moves the conversation to the sender or the path.",
+      "minutes": 40,
+      "resource": {
+        "label": "tcpdump.org: pcap-filter(7) capture filter syntax",
+        "url": "https://www.tcpdump.org/manpages/pcap-filter.7.html"
+      }
+    },
+    {
+      "name": "Webhook failure post-mortem: classification, retries, signatures, idempotency",
+      "learn": "Classify the symptom first because each class has a different owner: never arrived, arrived and rejected (4xx from signature, TLS or auth), arrived late, arrived more than once. Know typical sender behaviour: HTTPS only with publicly trusted CAs (a private CA means permanent failure), a 5 to 30 s timeout, exponential retries for 24 to 72 hours, and therefore that a receiver must return 2xx well under the timeout by enqueueing and processing asynchronously. Verify HMAC signatures over the raw body (never over re-serialised JSON) with a timestamp tolerance, and deduplicate on the delivery or event id with an idempotency store because retries plus partitions guarantee duplicates. Build the post-mortem from evidence: the sender's delivery log (status, response body, latency), the receiver's access log, tcpdump on the receiver, dig from a public resolver, openssl s_client -showcerts against the receiver; then write timeline, root cause, contributing factors, and the single change that prevents recurrence, in language a client PM can forward.",
+      "minutes": 35,
+      "resource": {
+        "label": "GitHub Docs: Best practices for using webhooks (respond fast, verify, handle redelivery)",
+        "url": "https://docs.github.com/en/webhooks/using-webhooks/best-practices-for-using-webhooks"
+      }
+    },
+    {
+      "name": "TCP servers in Python for Protohackers: framing, partial reads, half-close, concurrency",
+      "learn": "Understand that recv(n) returns any number of bytes up to n and b'' on EOF, so every protocol needs explicit framing: newline-delimited (Prime Time: readline(), one JSON object per line, reject malformed input and keep serving), fixed-length binary (Means to an End: 9-byte messages via struct.unpack('!cii') and readexactly(9)), or length-prefixed. Use asyncio.start_server(handler, '0.0.0.0', port) with StreamReader/StreamWriter, await writer.drain() for backpressure, writer.close() then await writer.wait_closed(), and handle IncompleteReadError, ConnectionResetError and BrokenPipeError per client without taking the server down. Know SO_REUSEADDR so restarts do not fail on TIME-WAIT sockets, the listen backlog, and half-close semantics (shutdown(SHUT_WR)) that Smoke Test requires: echo until EOF, flush, then close. Deploy on your VPS, open the port with the firewall ruleset you just wrote, pass Protohackers 0, 1 and 2 against the official checker, and tcpdump your own traffic to see your framing on the wire.",
+      "minutes": 50,
+      "resource": {
+        "label": "Python docs: asyncio Streams (start_server, StreamReader, StreamWriter)",
+        "url": "https://docs.python.org/3/library/asyncio-stream.html"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can narrate, unprompted and without notes, every step from a URL to the first byte (stub resolver, recursive and authoritative DNS, TCP three-way handshake, TLS 1.3 one-RTT handshake with SNI and ALPN, HTTP/2 stream, load balancer to backend) and name the tool whose output proves each step happened.",
+    "You can take a failing HTTPS call and, in under ten minutes, classify it as DNS, TCP connect, TLS, HTTP or application using dig, nc -vz, openssl s_client and curl -v, quoting the specific output line that proves the classification.",
+    "You can read ss -ti output for a slow connection and state whether it is limited by loss (retrans), the receiver (rwnd), congestion control (cwnd) or the application (lastsnd high, unacked 0).",
+    "You can capture a webhook attempt with tcpdump -nn -i any -w, open it in Wireshark, and prove whether packets arrived, were reset, or never reached the host, then hand the pcap and a two-sentence conclusion to a client network team.",
+    "You can explain what an ALB does to a request (TLS termination, X-Forwarded-* headers, h2 to HTTP/1.1 downgrade, 60 s idle timeout) and predict the two configurations that produce 502s with no application log entry.",
+    "You can write a default-deny nftables ruleset or a set of security groups from a written requirement and explain why return traffic works without an explicit rule, and why a NACL needs the ephemeral range.",
+    "You can diagnose a certificate error from openssl s_client -showcerts output (missing intermediate, expired, SAN mismatch, private CA) and state the exact fix and on which side it belongs.",
+    "You can implement a newline-delimited and a fixed-length binary TCP protocol server in Python asyncio that survives partial reads, slow clients and abrupt disconnects, passing Protohackers 0, 1 and 2."
+  ],
+  "failureModes": [
+    "Backend keepalive shorter than the load balancer idle timeout (gunicorn keep-alive 2 s behind an ALB at 60 s): the backend closes an idle connection, the LB reuses it, and customers see intermittent 502s that appear in no application log, so the team blames the network for a week.",
+    "A certificate renewal deploys cert.pem instead of fullchain.pem; browsers still work because they fetch the missing intermediate via AIA, but the webhook sender's Python or Java client fails with 'unable to get local issuer certificate' and deliveries silently stop until the retry window expires.",
+    "A 90-second non-streaming model call is cut at 60 s by the ALB idle timeout: the backend finishes, logs a 200 and bills the tokens while the client receives a 504 and retries, doubling cost and creating duplicate side effects.",
+    "The NAT gateway or Kubernetes node hits nf_conntrack_max under a traffic spike; dmesg shows 'nf_conntrack: table full, dropping packet', new connections time out while established ones are fine, and it gets misdiagnosed as a flaky upstream API.",
+    "A DNS record is created after the first failed lookup, so the customer's resolver holds NXDOMAIN for the SOA negative-cache TTL; you cannot reproduce it from your laptop on a different resolver and 'DNS is fixed' is true everywhere except where it matters.",
+    "The customer's TLS-intercepting proxy re-signs every certificate with a private CA; your container image lacks it, requests fails with CERTIFICATE_VERIFY_FAILED only inside their network, and someone ships verify=False to make the demo work.",
+    "A WireGuard or VXLAN overlay lowers the path MTU and ICMP fragmentation-needed is filtered: health checks and small requests pass, but any JSON payload over roughly 1400 bytes hangs forever with retransmissions visible only in tcpdump."
+  ],
+  "interviewQuestions": [
+    "Walk me through everything that happens between a customer typing https://app.example.com and the first byte rendering. At each step, name the tool you would use to prove it happened and one way it fails in a corporate network.",
+    "A customer says our webhooks stopped arriving on Tuesday; nothing changed on their side and nothing changed on ours. Without access to their network, how do you isolate this, what exactly do you ask them to run, and what do you run yourself?",
+    "Design the ingress path for a multi-tenant API that serves streaming LLM responses lasting up to five minutes on AWS: which load balancer, which timeouts, HTTP/2 or not, where TLS terminates, and how you preserve the client IP for per-tenant rate limiting without trusting a spoofable header.",
+    "Explain the TLS 1.3 handshake versus TLS 1.2, and what SNI and ALPN are each for. Then: the customer's security team mandates mTLS for the webhook receiver. What changes on each side, and what is the operational cost over twelve months?",
+    "You see intermittent 502s at the load balancer with no corresponding error in application logs. Give me the three most likely causes and the specific evidence (command and output line) that confirms or rules out each.",
+    "Here is ss -ti output for a slow connection showing rto, rtt, cwnd, retrans, unacked and lastsnd. Tell me whether the bottleneck is the network, the sender or the receiver, and what you would change.",
+    "A security group allows inbound 443 from 0.0.0.0/0 and the subnet's NACL allows inbound 443 only; nothing works. Why, and what is the minimal fix? Follow-up: which of these is stateful, and what does that imply for connection tracking under load?"
+  ],
+  "proofOfWork": "A public repository, network-postmortem-kit, containing a reproducible fault lab and its diagnoses. Two Docker Compose stacks: a sender that fires HMAC-signed webhooks with realistic retries and timeouts, and a receiver behind nginx with TLS. A break.sh script injects one of six faults on demand: a missing intermediate certificate, an NXDOMAIN via a poisoned resolver, a DROP versus a REJECT firewall rule, a keepalive/idle-timeout mismatch, an MTU clamp on the receiver interface, and a wrong ALPN/h2c expectation. For each fault the repo holds the pcap you captured, the single tcpdump, ss, curl -v or openssl line that proves the cause, and a three-sentence client-facing explanation. It closes with a one-page sequence diagram of a real HTTPS request to your own VPS, annotated with the actual frame numbers from your capture next to every arrow. A reviewer should be able to run make fault=3, watch the webhook fail, and reproduce your diagnosis from your instructions alone."
+}

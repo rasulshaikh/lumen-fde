@@ -1,0 +1,218 @@
+{
+ "i": 11,
+ "topic": "Serving models on Kubernetes and GPUs",
+ "track": "B. Containers and Kubernetes",
+ "month": 2,
+ "hours": 10.0,
+ "why": "A large share of FDE engagements at Anthropic, Palantir and Databricks-style shops end with a customer saying 'we cannot send this data to an API, run it on our GPUs.' The FDE is then the person who has to turn a bare g6e node or an on-prem A100 box into a working, measured OpenAI-compatible endpoint on the customer's Kubernetes, and who has to defend, with numbers, why it costs what it costs and how many users it can hold before p95 latency falls over. Nobody on the customer side knows the driver/CUDA/device-plugin stack, so if you cannot debug 'Insufficient nvidia.com/gpu' or a CUDA OOM at 11pm the whole pilot slips; if you cannot size KV cache you will either buy four H100s for a 7B model or promise 50 users to a card that holds 20.",
+ "prerequisites": [
+  "Kubernetes core from Topic 7: you can write a Deployment, Service and Ingress from memory, read kubectl describe pod Events, and know what an extended resource and a taint are.",
+  "Kubernetes production ops from Topic 8: startup vs readiness vs liveness probes, requests vs limits and QoS classes, HPA mechanics, PVC access modes, and kubectl debug / ephemeral containers.",
+  "Docker internals from Topic 5: what a runtime hook is, how /dev nodes and host libraries get bind-mounted into a container, what /dev/shm is and why the default 64 MB matters.",
+  "Networking from Topic 2: HTTP keep-alive, SSE streaming, proxy read timeouts and idle timeouts on L7 load balancers (ALB 60 s default, nginx 60 s default) since token streams are long-lived responses.",
+  "Troubleshooting habits from Topic 3: reading dmesg, exit codes, and top/nvidia-smi side by side; comfortable computing bytes from parameter counts (7B x 2 bytes = 14 GB).",
+  "Accounts and budget: a Hugging Face account with Llama gated-model access approved (takes hours, request it on day one), an HF token, and roughly USD 25-40 of GPU-hours on RunPod or a cloud account with a non-zero G/VT On-Demand vCPU quota (new AWS accounts default to 0 and the quota request takes a day or two)."
+ ],
+ "subtopics": [
+  {
+   "name": "The GPU stack from silicon to Pod: driver, CUDA, toolkit, device plugin",
+   "learn": "Draw the four layers and who owns each: the kernel module (nvidia.ko) plus libcuda.so live on the node and are the 'driver'; the CUDA toolkit/runtime (libcudart, cuBLAS) lives inside the image; the NVIDIA Container Toolkit is an OCI runtime hook that bind-mounts /dev/nvidia*, libcuda.so and nvidia-smi into the container at create time; the k8s-device-plugin DaemonSet talks to kubelet's device plugin gRPC socket to advertise nvidia.com/gpu as an extended resource and, on allocation, sets NVIDIA_VISIBLE_DEVICES for the container. Be able to state which layer produced each of these: 'CUDA driver version is insufficient for CUDA runtime version' (image CUDA newer than node driver), 'Insufficient nvidia.com/gpu' (device plugin or scheduling), 'Failed to initialize NVML: Unknown Error' (toolkit/cgroup device access).",
+   "minutes": 30,
+   "resource": {
+    "label": "Kubernetes docs: Schedule GPUs (device plugins, node labels, NFD)",
+    "url": "https://kubernetes.io/docs/tasks/manage-gpus/scheduling-gpus/"
+   }
+  },
+  {
+   "name": "Driver and CUDA compatibility: read nvidia-smi before you pull an image",
+   "learn": "The 'CUDA Version' in the top-right of nvidia-smi is the maximum CUDA runtime the installed driver supports, not what is installed; a driver is backward compatible with older runtimes, and forward compatibility (running a newer runtime on an older driver via the cuda-compat package) exists only for datacenter GPUs. Check the image with python -c 'import torch; print(torch.version.cuda, torch.cuda.is_available())' and compare to the node. Know the practical failure: a vLLM wheel built against CUDA 12.8 on a node with a 535 driver fails at import, and the fix is either upgrading the node driver (GPU Operator can do it) or pulling an image built for an older CUDA. Understand why a kernel upgrade on the node can silently break a DKMS-built driver until reboot plus rebuild.",
+   "minutes": 25,
+   "resource": {
+    "label": "NVIDIA docs: CUDA Compatibility",
+    "url": "https://docs.nvidia.com/deploy/cuda-compatibility/latest/"
+   }
+  },
+  {
+   "name": "NVIDIA Container Toolkit on a raw node: nvidia-ctk runtime configure",
+   "learn": "On a bare GPU VM (RunPod secure-cloud or a g5 instance) install nvidia-container-toolkit, run sudo nvidia-ctk runtime configure --runtime=containerd (or --runtime=docker), restart the engine and verify /etc/containerd/config.toml gained the nvidia runtime under plugins.'io.containerd.grpc.v1.cri'.containerd.runtimes. Prove it with docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi. Understand the two env vars the hook reads: NVIDIA_VISIBLE_DEVICES (all, none, 0,1, or GPU-UUID) and NVIDIA_DRIVER_CAPABILITIES (compute,utility is the minimum for CUDA plus nvidia-smi). In Kubernetes, know when you need a RuntimeClass named nvidia (toolkit installed but not set as default runtime) and what the symptom is when you forget it: the pod runs, nvidia.com/gpu is allocated, but the container sees no /dev/nvidia0.",
+   "minutes": 30,
+   "resource": {
+    "label": "NVIDIA Container Toolkit: Installing the NVIDIA Container Toolkit",
+    "url": "https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html"
+   }
+  },
+  {
+   "name": "GPU Operator: what the Helm chart deploys and when to turn pieces off",
+   "learn": "helm install gpu-operator nvidia/gpu-operator -n gpu-operator --create-namespace deploys, via a ClusterPolicy CR, a driver DaemonSet, the container-toolkit DaemonSet, the device plugin, DCGM exporter, GPU Feature Discovery (GFD), Node Feature Discovery, MIG manager and a validator pod per node. Learn the two most common overrides: --set driver.enabled=false when the node image already ships drivers (EKS accelerated AMI, GKE, RunPod), and --set toolkit.enabled=false when the toolkit is baked in. Verify with kubectl get pods -n gpu-operator (every nvidia-operator-validator must be Completed) and kubectl get node <n> -o jsonpath='{.status.allocatable.nvidia\\.com/gpu}'. Know what breaks when the driver DaemonSet is enabled on a node that already has a driver: the container driver fails to load and every GPU pod on that node goes Pending.",
+   "minutes": 35,
+   "resource": {
+    "label": "NVIDIA GPU Operator: Installing the NVIDIA GPU Operator",
+    "url": "https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/getting-started.html"
+   }
+  },
+  {
+   "name": "Scheduling onto GPUs: extended resources, taints, GFD labels",
+   "learn": "nvidia.com/gpu is requested under resources.limits only (requests, if given, must equal limits), is an integer, cannot be overcommitted, and is not shared between containers in a pod. Taint GPU nodes (nvidia.com/gpu=present:NoSchedule) so CPU workloads never land on a USD 4/hour node, and add the matching toleration to the vLLM pod. Pin GPU type with a nodeSelector on the GFD labels nvidia.com/gpu.product (e.g. NVIDIA-A10G, NVIDIA-L40S) or nvidia.com/gpu.memory, and read them with kubectl get nodes -L nvidia.com/gpu.product,nvidia.com/gpu.count. When a pod sits Pending with '0/3 nodes are available: 3 Insufficient nvidia.com/gpu', walk the checklist: is the device plugin pod Running on the target node, does Allocatable show the GPU, is another pod already holding it, does the pod tolerate the taint.",
+   "minutes": 30,
+   "resource": {
+    "label": "Kubernetes docs: Taints and Tolerations",
+    "url": "https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/"
+   }
+  },
+  {
+   "name": "Managed GPU node groups and scale-from-zero: EKS accelerated AMI, Karpenter",
+   "learn": "Know the cloud GPU menu you will actually be offered: g5 (A10G 24 GB), g6 (L4 24 GB), g6e (L40S 48 GB), p4d (8x A100 40 GB), p5 (8x H100 80 GB); the EKS accelerated AL2023 AMI ships driver and toolkit so you disable them in the operator. Write a Karpenter NodePool whose requirements select karpenter.k8s.aws/instance-gpu-name In [l40s] and karpenter.k8s.aws/instance-gpu-count In [1], carries the nvidia.com/gpu taint, and has a long consolidateAfter so a 5-minute lull does not delete a node that took 4 minutes to boot. Understand the cold-start chain when scaling from zero: instance launch (2-3 min) plus 10-15 GB image pull plus weight load, so the first user waits 5-8 minutes; mitigate with a warm minimum of one replica and a pre-pull DaemonSet. Check the account's 'Running On-Demand G and VT instances' quota before the customer call; it is often 0.",
+   "minutes": 30,
+   "resource": {
+    "label": "Karpenter docs: NodePools",
+    "url": "https://karpenter.sh/docs/concepts/nodepools/"
+   }
+  },
+  {
+   "name": "vLLM in a container: the vllm serve flags an operator must own",
+   "learn": "Use the official vllm/vllm-openai image and know the flags that change capacity or safety: --model and --served-model-name (what clients put in 'model'), --dtype auto (bf16 on Ampere+), --max-model-len (caps context and therefore per-request KV; do not leave it at the model's 128k default on a 24 GB card), --gpu-memory-utilization (fraction reserved for weights plus KV, default 0.9), --max-num-seqs (hard cap on sequences in one batch, i.e. concurrency), --tensor-parallel-size, --enable-prefix-caching, --kv-cache-dtype fp8, --quantization, --api-key, --port 8000, --download-dir, --trust-remote-code. Know --enforce-eager is for debugging only (disables CUDA graphs, costs throughput). Understand why tensor parallel needs a big /dev/shm and IPC (NCCL uses shared memory) and how that maps to an emptyDir medium Memory in Kubernetes instead of Docker's --ipc=host.",
+   "minutes": 35,
+   "resource": {
+    "label": "vLLM docs: Engine Arguments",
+    "url": "https://docs.vllm.ai/en/latest/configuration/engine_args/"
+   }
+  },
+  {
+   "name": "Model weights: getting 16 GB into the cluster without downloading on every restart",
+   "learn": "An 8B bf16 checkpoint is roughly 16 GB in safetensors shards; pulling that from the Hub on every pod start turns a 30-second restart into a 5-10 minute outage and can hit rate limits. Compare the four patterns and pick per customer: a PVC pre-filled by a Job running hf download <repo> --local-dir /models (ReadWriteMany or one pod per PV), a hostPath cache on dedicated GPU nodes, an object-store mount (S3 Mountpoint or GCS FUSE), and baking weights into the image (avoid: 16 GB layers, slow pulls, registry limits). Set HF_HOME or --download-dir to the mount, HF_TOKEN from a Secret for gated Llama models, and HF_HUB_OFFLINE=1 in air-gapped sites so vLLM never tries the network. For corporate proxies, know that allowlisting huggingface.co alone is not enough because files are served from cdn-lfs and xethub hostnames.",
+   "minutes": 30,
+   "resource": {
+    "label": "Hugging Face Hub docs: Downloading models (CLI, proxies, allowlist hosts)",
+    "url": "https://huggingface.co/docs/hub/en/models-downloading"
+   }
+  },
+  {
+   "name": "The Deployment manifest: GPU limits, /dev/shm, probes, memory, update strategy",
+   "learn": "Write the vLLM Deployment from scratch and justify every field: resources.limits nvidia.com/gpu: 1 plus a memory request at least the size of the weights (vLLM stages tensors through host RAM while loading; too low and you get OOMKilled during startup, exit 137); an emptyDir with medium: Memory and sizeLimit mounted at /dev/shm; a startupProbe on GET /health with periodSeconds 10 and failureThreshold high enough to cover download plus load (60 = 10 minutes) so the liveness probe never kills a still-loading engine; readinessProbe and livenessProbe on /health with timeoutSeconds 5; terminationGracePeriodSeconds at least as long as your longest generation so in-flight streams finish. Set strategy to Recreate or rollingUpdate with maxSurge 0 when you own exactly one GPU, because the default 25% surge schedules a second pod that can never get a GPU and the rollout hangs forever. Know that zero-downtime rollouts cost an N+1 GPU.",
+   "minutes": 40,
+   "resource": {
+    "label": "vLLM docs: Deployment - Using Kubernetes",
+    "url": "https://docs.vllm.ai/en/latest/deployment/k8s/"
+   }
+  },
+  {
+   "name": "Exposing it: Service, Ingress or Gateway, API key, and streaming timeouts",
+   "learn": "Front the pod with a ClusterIP Service and your Ingress or HTTPRoute from Topics 7 and 8, then exercise the OpenAI-compatible surface: GET /v1/models, POST /v1/chat/completions with stream: true, GET /health, GET /metrics. Streaming responses are long-lived SSE, so raise the proxy read timeout (nginx.ingress.kubernetes.io/proxy-read-timeout: '600') and disable response buffering (proxy-buffering: 'off'); an ALB with the default 60 s idle timeout will cut off any generation longer than a minute with no error in vLLM's logs. Decide where auth lives: --api-key on vLLM is a single shared secret, so put real per-tenant auth on the gateway and keep the vLLM Service unreachable from outside the namespace with a NetworkPolicy. Verify from a laptop with the openai Python client pointed at base_url and from inside the cluster to separate ingress latency from model latency.",
+   "minutes": 35,
+   "resource": {
+    "label": "vLLM docs: Online Serving (OpenAI-compatible server and endpoints)",
+    "url": "https://docs.vllm.ai/en/latest/serving/online_serving/"
+   }
+  },
+  {
+   "name": "Inference-aware routing: why round-robin is the wrong load balancer for LLM replicas",
+   "learn": "A Service spreads requests round-robin and knows nothing about which replica has 40 sequences queued or which one already holds the KV cache for this conversation's prefix. Understand what the Gateway API Inference Extension adds: an InferencePool pointing at the vLLM pods, an endpoint picker (Envoy ext_proc) that reads each replica's queue depth and kv_cache_usage from /metrics and routes to the least-loaded or prefix-affine one, and per-model criticality. Know when it matters (two or more replicas, mixed long and short prompts) and what the cheap substitute is with plain ingress (consistent-hash on a session header for prefix locality, accepting hot spots). Be able to explain to a customer's platform team why their existing LB health check on /health does not protect them from one saturated replica.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes Gateway API Inference Extension: Introduction",
+    "url": "https://gateway-api-inference-extension.sigs.k8s.io/"
+   }
+  },
+  {
+   "name": "Metrics: vLLM /metrics, DCGM exporter, and the six panels that predict an outage",
+   "learn": "Scrape vLLM's Prometheus endpoint (PodMonitor on port 8000, path /metrics) and know the names: vllm:num_requests_running, vllm:num_requests_waiting (queue; the earliest saturation signal), vllm:kv_cache_usage_perc, vllm:num_preemptions_total (any growth means KV cache is too small for the load), vllm:time_to_first_token_seconds, vllm:inter_token_latency_seconds (or time_per_output_token_seconds), vllm:e2e_request_latency_seconds, vllm:prompt_tokens_total and vllm:generation_tokens_total for cost accounting. From the GPU Operator's DCGM exporter use DCGM_FI_DEV_FB_USED, DCGM_FI_DEV_GPU_UTIL, DCGM_FI_PROF_SM_ACTIVE, DCGM_FI_DEV_GPU_TEMP, DCGM_FI_DEV_POWER_USAGE and DCGM_FI_DEV_XID_ERRORS. Understand why GPU_UTIL at 100% does not mean saturated (it means a kernel was resident, not that SMs were busy) and why waiting-queue depth plus TTFT p95 is the pair you alert on.",
+   "minutes": 35,
+   "resource": {
+    "label": "vLLM docs: Design - Metrics",
+    "url": "https://docs.vllm.ai/en/latest/design/metrics/"
+   }
+  },
+  {
+   "name": "Capacity math: weights plus KV cache decides how many concurrent users fit",
+   "learn": "Do the arithmetic from config.json, not from vibes. Weights = params x bytes per param (Llama-3.1-8B bf16 = 16 GB). KV bytes per token = 2 (K and V) x num_hidden_layers x num_key_value_heads x head_dim x bytes per element; for Llama-3.1-8B that is 2 x 32 x 8 x 128 x 2 = 131,072 bytes, i.e. 128 KiB per token thanks to GQA. KV budget = GPU memory x gpu-memory-utilization minus weights minus roughly 1-2 GB of activations and CUDA graphs. On a 24 GB A10G that leaves about 4-5 GB, roughly 35k tokens, so 50 users each holding a 2k-token conversation (100k tokens, 12.8 GB) do not fit at bf16; on a 48 GB L40S they do with headroom. Confirm against the two lines vLLM logs at startup, 'GPU KV cache size: N tokens' and 'Maximum concurrency for X tokens per request: Y', and against kv_cache_usage_perc under load. Levers: lower --max-model-len, --kv-cache-dtype fp8, weight quantization (deferred to Topic 56), or a bigger card. Distinguish 50 named users from 50 in-flight sequences: with think time, 50 users is often 10-20 concurrent requests.",
+   "minutes": 40,
+   "resource": {
+    "label": "vLLM docs: Conserving Memory",
+    "url": "https://docs.vllm.ai/en/latest/configuration/conserving_memory/"
+   }
+  },
+  {
+   "name": "Throughput vs latency knobs: max-num-seqs, max-num-batched-tokens, chunked prefill, preemption",
+   "learn": "Continuous batching means every decode step advances all running sequences by one token; more sequences in the batch raise aggregate tokens per second and raise per-user inter-token latency, while TTFT is governed by prefill work and queue time. Chunked prefill (default in V1) slices long prompts and mixes them with decode steps; --max-num-batched-tokens is the budget per step, where a smaller value protects ITL and a larger one improves TTFT and throughput. When KV blocks run out the scheduler preempts a sequence and recomputes it later, which shows up as num_preemptions_total climbing and e2e latency p99 spiking; the fix is more KV (memory, shorter max-model-len) or a lower --max-num-seqs, never a bigger batch. Write down the SLO you will size against before benchmarking: for a chat UI, TTFT p95 under 1 s and ITL p95 under 50 ms (about 20 tokens per second per user) is a defensible default.",
+   "minutes": 30,
+   "resource": {
+    "label": "vLLM docs: Optimization and Tuning",
+    "url": "https://docs.vllm.ai/en/latest/configuration/optimization/"
+   }
+  },
+  {
+   "name": "Benchmark it properly: vllm bench serve, closed vs open loop, reading the table",
+   "learn": "Run the load generator from a pod inside the cluster so ingress is out of the picture: vllm bench serve --backend openai-chat --base-url http://vllm:8000 --model <served-name> --dataset-name random --random-input-len 1024 --random-output-len 256 --num-prompts 500 --max-concurrency N (closed loop, N users hammering) and separately --request-rate R (open loop, Poisson arrivals). Sweep N over 1, 8, 16, 32, 50, 64 and record request throughput, output token throughput, and mean, median and p99 TTFT, TPOT and ITL; the knee where p99 TTFT jumps while throughput flattens is your capacity. Warm up first (CUDA graphs, prefix cache), run each point twice, and use --save-result so the JSON lands in the repo. Also try --dataset-name sharegpt for realistic length distributions and note how much the answer changes versus fixed random lengths.",
+   "minutes": 40,
+   "resource": {
+    "label": "vLLM docs: Benchmark CLI (vllm bench serve)",
+    "url": "https://docs.vllm.ai/en/latest/benchmarking/cli/"
+   }
+  },
+  {
+   "name": "Sharing and splitting GPUs: time-slicing vs MIG vs tensor parallel",
+   "learn": "Time-slicing (device plugin ConfigMap with sharing.timeSlicing.resources[].replicas: N) makes one card advertise N nvidia.com/gpu units with no memory isolation: one tenant's CUDA OOM kills the others, so it is for dev clusters, never for a customer's shared production card. MIG on A100 and H100 (nvidia-smi mig -cgi, operator mig.strategy single or mixed, profiles like 1g.10gb through 7g.80gb) gives hard memory and compute partitions and shows up as nvidia.com/mig-1g.10gb resources; A10G, L4 and L40S do not support MIG. Tensor parallel (--tensor-parallel-size 2) goes the other way and splits one model across GPUs in the same pod (must divide the attention head count; NVLink versus PCIe changes the result a lot), and multi-node uses pipeline parallel with LeaderWorkerSet. For 50 users on one 8B model the answer is one GPU, one model, no sharing; know how to say that.",
+   "minutes": 30,
+   "resource": {
+    "label": "NVIDIA GPU Operator: Time-Slicing GPUs in Kubernetes",
+    "url": "https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/gpu-sharing.html"
+   }
+  },
+  {
+   "name": "Autoscaling GPU replicas: HPA cannot see the queue, KEDA plus Prometheus can",
+   "learn": "CPU-based HPA is useless here because a saturated vLLM pod shows low CPU. Scale on vllm:num_requests_waiting or vllm:kv_cache_usage_perc via a KEDA ScaledObject with a prometheus trigger (serverAddress, query such as sum(vllm:num_requests_waiting{app='vllm'}), threshold like '5'), or via HPA plus prometheus-adapter. Set stabilization and cooldown windows in minutes, not seconds, because a scale-up takes 4-8 minutes (node, image, weights) and a flapping scaler will thrash. Keep minReplicaCount at 1 unless the customer accepts multi-minute cold starts, add a PodDisruptionBudget so node upgrades do not take the only replica, and pre-pull the image with a DaemonSet on GPU nodes. Understand that scaling out also multiplies cost linearly with no discount, so present it next to the capacity plan.",
+   "minutes": 30,
+   "resource": {
+    "label": "KEDA docs: Prometheus scaler",
+    "url": "https://keda.sh/docs/2.20/scalers/prometheus/"
+   }
+  },
+  {
+   "name": "Debugging the GPU node: nvidia-smi, Xid errors, stuck Pending pods, CUDA OOM, NCCL",
+   "learn": "Build the triage sequence you can run in five minutes. Pod Pending: describe it, then check device plugin and validator pods on the target node and node Allocatable. CrashLoopBackOff with torch.OutOfMemoryError or 'No available memory for the cache blocks': lower --gpu-memory-utilization or --max-model-len, or check nvidia-smi for a zombie process from a previous pod still holding memory. 'NCCL error' or hangs with tensor parallel: /dev/shm too small or IPC missing, set NCCL_DEBUG=INFO. Slow or wrong: VLLM_LOGGING_LEVEL=DEBUG and confirm the attention backend and dtype in the startup log. Hardware: kubectl exec nvidia-smi -q -d MEMORY,ECC and dmesg | grep -i xid on the node; Xid 79 (fallen off the bus) and Xid 48 (double-bit ECC) mean cordon, drain and replace the node, not restart the pod; Xid 31 and 43 usually point at the application. Know what a 'Failed to initialize NVML' after a driver upgrade means for every pod on the node.",
+   "minutes": 35,
+   "resource": {
+    "label": "vLLM docs: Troubleshooting",
+    "url": "https://docs.vllm.ai/en/latest/usage/troubleshooting/"
+   }
+  },
+  {
+   "name": "Cost and the capacity plan: from USD per GPU-hour to USD per million tokens",
+   "learn": "Turn the benchmark into the two numbers a customer buys on. Take output tokens per second at the highest concurrency that still meets the SLO, then USD per 1M output tokens = hourly GPU price / (tok/s x 3600 / 1e6); an L40S at about USD 1.8-2.0 per hour producing 1,500 tok/s is roughly USD 0.35 per million tokens at full utilization, and 5x that at 20% utilization, which is the honest number for a 50-user internal tool. Put the plan in one table: model and dtype, GPU type, replicas (N+1 if zero-downtime deploys are required), max in-flight sequences, expected named users given think time, SLO targets, KV headroom, monthly cost at expected and at peak utilization, and the same workload priced on a hosted API for comparison. State the quota, lead time and spot-interruption assumptions explicitly, because those, not tok/s, are what usually slips the pilot.",
+   "minutes": 25,
+   "resource": {
+    "label": "AWS EC2 instance types (accelerated computing: G5, G6, G6e, P4, P5 specs)",
+    "url": "https://aws.amazon.com/ec2/instance-types/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take a fresh Ubuntu GPU VM with nothing but the driver installed and, in under 20 minutes, have containerd running GPU containers via nvidia-ctk and a single-node cluster reporting nvidia.com/gpu: 1 in Allocatable.",
+  "You can write a vLLM Deployment, Service and Ingress from memory with correct GPU limit, memory request, /dev/shm emptyDir, startup/readiness/liveness probes and Recreate strategy, and explain each field to a customer's platform engineer without looking anything up.",
+  "You can compute, from a model's config.json and a GPU's memory, the KV cache budget and maximum concurrent 2k-token conversations within 15% of what vLLM prints at startup, and show your working on a whiteboard in under five minutes.",
+  "You can run a vllm bench serve concurrency sweep, produce a table of throughput and p50/p99 TTFT and ITL per concurrency level, identify the knee, and state the supported concurrency at a given SLO.",
+  "You can triage a GPU pod stuck Pending or CrashLooping to one of: driver/toolkit mismatch, device plugin absent, taint, held GPU, CUDA OOM, shm/NCCL, or hardware Xid, using kubectl describe, nvidia-smi and dmesg, in under ten minutes.",
+  "You can configure a Prometheus scrape of vLLM and DCGM metrics and name the two signals you alert on for impending saturation, with the PromQL for each.",
+  "You can explain and demonstrate why a streaming completion longer than 60 seconds dies behind a default ALB or nginx ingress, and fix it with the exact annotation or attribute.",
+  "You can present a one-page capacity and cost plan for 50 users that a CFO and a platform lead both accept, including USD per million tokens at expected utilization and the hosted-API comparison."
+ ],
+ "failureModes": [
+  "The customer's platform team upgrades the node kernel during a patch window; the DKMS driver no longer loads, nvidia-smi says 'NVML: Driver/library version mismatch', the device plugin reports 0 GPUs, and the vLLM pod sits Pending with 'Insufficient nvidia.com/gpu' until someone reboots and rebuilds the module.",
+  "A rolling update of the vLLM Deployment with default maxSurge schedules a second pod on a cluster with one GPU; the new pod is Pending forever, the old one keeps serving the previous model, and the release 'succeeded' in ArgoCD because the Deployment never reported failure.",
+  "--max-model-len was left at the model's 131k default on a 24 GB card; vLLM reserved almost nothing for KV cache, num_preemptions_total climbed under 12 concurrent users, and p99 latency went from 2 s to 40 s while GPU utilization looked fine on the dashboard.",
+  "Long RAG answers were truncated mid-stream at exactly 60 seconds in production but not in staging; the difference was an AWS ALB with the default idle timeout in front of production, and vLLM logged nothing because the client, not the server, was disconnected.",
+  "The liveness probe used the same 30-second initial delay as a web service; on a cold node the 16 GB weight load took four minutes, kubelet killed the container at 30 seconds every time, and the pod CrashLooped for an hour before anyone read the events.",
+  "Time-slicing was enabled to 'share' one A10G between the dev and staging vLLM instances; a staging load test drove CUDA OOM, which also killed the dev replica mid-demo, and nobody could explain to the customer why two isolated namespaces went down together.",
+  "The pilot was sized at 50 users against a benchmark run with 128-token prompts and 128-token outputs; real prompts averaged 3k tokens of pasted documents, TTFT p95 was 9 seconds on day one, and the fix required a bigger GPU that had a two-week quota lead time."
+ ],
+ "interviewQuestions": [
+  "A customer hands you an EKS cluster with one g6e.xlarge node and asks for an OpenAI-compatible endpoint for Llama-3.1-8B for 50 internal users by Friday. Walk me through everything from node to first token: what has to be installed, every field in the manifest you would write, how you would expose it, and how you would know it is actually ready for 50 people.",
+  "Show me how you would compute the maximum number of concurrent 2,000-token conversations a 48 GB L40S can hold for an 8B GQA model at bf16, then tell me what changes if the customer insists on 32k context. Which two flags would you touch first and what does each cost?",
+  "A vLLM pod is stuck Pending with 'Insufficient nvidia.com/gpu' on a node where nvidia-smi on the host shows the card. Give me your ordered diagnostic sequence, the commands, and the three most likely root causes with how you would tell them apart.",
+  "GPU utilization is 95% on the DCGM dashboard, but users complain the model is slow and p99 TTFT is 8 seconds. Explain why the utilization number is misleading, which vLLM metrics you would look at instead, and what the likely configuration fix is.",
+  "Design the autoscaling for this service. Why is CPU-based HPA wrong, what metric would you scale on, what threshold and cooldown, and how do you handle a 6-minute scale-up latency when a marketing team launches an internal announcement that triples traffic at 9 am?",
+  "The security team asks you to run three teams' models on one shared A100 with strong isolation, and the platform team suggests time-slicing. Compare time-slicing, MIG and separate nodes on isolation, utilization and operational risk, and tell me what you would recommend and how you would demonstrate the isolation property.",
+  "Streaming responses die at exactly one minute in production only. Debug it out loud: where in the path could a 60-second limit live, how do you prove which hop it is without customer downtime, and what is the fix at each candidate layer?"
+ ],
+ "proofOfWork": "A public repository named vllm-on-k8s containing a Kustomize or Helm deployment of vLLM (Deployment with GPU limit, shm emptyDir, staged probes, Recreate strategy, Secret-fed HF_TOKEN, PVC weight cache with a fill Job, Service, Ingress with streaming timeouts, PodMonitor, KEDA ScaledObject) that a reviewer can apply to any cluster with an NVIDIA GPU Operator; a capacity.py script that reads a Hugging Face config.json plus GPU memory, dtype, max-model-len and gpu-memory-utilization and prints KV bytes per token, KV budget, max in-flight sequences at a given conversation length, and USD per million output tokens from a supplied hourly price, with a test asserting its prediction is within 15% of the 'GPU KV cache size' line captured from a real vLLM startup log checked into the repo; a bench/ directory with the raw --save-result JSON from a vllm bench serve sweep at concurrency 1, 8, 16, 32, 50 and 64 on one GPU type, a script that renders them into a markdown table and a throughput-versus-p99-TTFT plot with the knee marked; and a runbook.md with five incident drills (Pending after kernel upgrade, CUDA OOM, stuck rollout, 60-second stream cutoff, Xid 79) each with the exact commands and the expected output that confirms the diagnosis. The plan deliverable's benchmark table and capacity plan link to this repo as their evidence."
+}

@@ -1,0 +1,200 @@
+{
+ "i": 80,
+ "topic": "Public proof: three case studies and repos",
+ "track": "L. Portfolio, Positioning, Pipeline",
+ "month": 2,
+ "hours": 12,
+ "why": "An FDE is hired on evidence that you have shipped something real inside somebody else's constraints, and almost nobody in the loop will read your code — they will read one page and decide whether to spend an hour on you. More importantly, the artifact you are building here is the same artifact the job produces weekly: the architecture write-up a customer's principal engineer reviews, the post-incident narrative their VP forwards to their CISO, the handover doc that decides whether your work survives after you leave the account. Writing three of them about DefenderMate, Kaupex and Dokeo is not marketing overhead, it is a rehearsal of the deliverable, and the recruiter screen, the referral DM and the 'tell me about something you built' round all get their raw material from the same three pages.",
+ "prerequisites": [
+  "Deep working knowledge of the three systems themselves plus commit access to their repos and read access to whatever metrics, logs or invoices still exist — you cannot reconstruct a p95 or a monthly bill from memory, and unverifiable numbers are worse than no numbers.",
+  "Git at depth from topic 4: `git log --stat`, `git bisect` and `git reflog` to reconstruct the real timeline of what broke, and enough comfort with history rewriting (`git filter-repo`, force-push, fork/clone semantics) to publish a repo whose history is clean.",
+  "Docker and Compose from topics 5 and 6, because 'clone and run in one command' is the difference between a repo a stranger evaluates and a repo a stranger closes; each case study repo needs a working `docker compose up` path with seeded data.",
+  "SLI and SLO vocabulary from topic 20 and the golden signals from topic 21, so the numbers in each case study are stated as measurable claims (p95 of X over window W, measured at point P) rather than adjectives like 'fast' and 'scalable'.",
+  "A publishing surface you control: rasul.in deployed from a repo you can edit (Next.js on Vercel), an image/asset path that survives, and a GitHub profile whose public repo list is the second thing a hiring manager clicks.",
+  "A written answer, before you start, to what each client or employer permits you to disclose — check contracts and NDAs for Kaupex and any client-owned parts of DefenderMate and Dokeo, and get an explicit yes in writing for anything you are unsure about."
+ ],
+ "subtopics": [
+  {
+   "name": "Pick the reader and write the one-screen thesis",
+   "learn": "Name exactly one reader per case study — an FDE hiring manager with 90 seconds who is asking 'has this person delivered under real constraints, and can they explain it' — and write a four-line thesis block that appears above the fold: the problem in the customer's or user's words, the constraint that made it hard, what you built, and one measured result. Every later section either supports that thesis or gets cut. Distinguish the four documentation modes so you do not accidentally write a tutorial: a case study is explanation (why this shape, what it cost), not a how-to, and never a feature tour. Write the thesis for all three projects before drafting any of them, because the three theses must differ — if DefenderMate and Dokeo both come out as 'built a full-stack app with an LLM in it', you have not found the actual story of either.",
+   "minutes": 30,
+   "resource": {
+    "label": "Diataxis - a systematic framework for technical documentation",
+    "url": "https://diataxis.fr/"
+   }
+  },
+  {
+   "name": "Fix the section template and the order, once",
+   "learn": "Lock a single template used identically by all three pages so a reader who has seen one can skim the next two: Context (who, scale, constraint), Architecture (one diagram plus a five-sentence walk of the primary flow), Key decisions (three, each with the rejected alternative and its cost), What broke (one real incident with timeline, detection, root cause, fix), What I would change (three, ranked, with the trigger that would force each), Numbers (with the measurement method), Run it yourself (the one command). Write in the second-person-free active voice the Google style guide prescribes: present tense, short sentences, no 'we simply', no 'obviously', expand every acronym on first use including your own product names. Cap each page at roughly 1,200-1,600 words and enforce it — length is the most common reason a hiring manager stops reading.",
+   "minutes": 40,
+   "resource": {
+    "label": "Google developer documentation style guide - Highlights",
+    "url": "https://developers.google.com/style/highlights"
+   }
+  },
+  {
+   "name": "What you are legally allowed to publish, and the license on each repo",
+   "learn": "Before writing a line, classify every artifact: your own code, client-owned code, employer-owned code, third-party code, and customer data. Anything client- or employer-owned needs written permission or must be abstracted (describe the architecture and the problem shape, publish a reimplementation or a redacted subset, never paste their source). Anonymise the customer if the contract requires it ('a mid-market MSP with 40 analysts') and check that the anonymisation actually holds once your architecture diagram and their public case studies are read together. Put an explicit `LICENSE` file in every public repo — a repo with no license is legally all-rights-reserved and signals carelessness — and choose deliberately: MIT or Apache-2.0 for something you want reused (Apache-2.0 if you care about an explicit patent grant), and if you are publishing a reference implementation rather than a product, say so in the README. Add a `NOTICE`/attribution section for any vendored third-party code and confirm its license permits redistribution.",
+   "minutes": 30,
+   "resource": {
+    "label": "Choose a License - Appendix: license comparison table (permissions, conditions, limitations, patent grant)",
+    "url": "https://choosealicense.com/appendix/"
+   }
+  },
+  {
+   "name": "Scrub secrets and customer data out of code and history",
+   "learn": "Assume the repos contain credentials until proven otherwise. Run a full-history scan (`gitleaks detect --source . --log-opts='--all'`, plus `trufflehog git file://.`) and treat every hit as live: rotate first, then scrub, because a rewritten history does not un-leak a key that was pushed. Purge with `git filter-repo --invert-paths --path .env` or `--replace-text` rather than `filter-branch`, understand that this rewrites every commit SHA so the remote must be force-pushed and any fork/PR references still hold the old blobs, and remember GitHub keeps unreachable objects visible until garbage collection — for anything sensitive the safe move is a fresh repo seeded from a clean tree. Replace real config with `.env.example` holding placeholder values plus a `README` line per variable, add a `.gitignore` that covers `.env*`, `*.pem`, `*.tfstate` and local dumps, enable GitHub secret scanning and push protection on each repo, and scrub screenshots too: real tenant names, customer emails, internal hostnames and API keys leak through PNGs more often than through code.",
+   "minutes": 55,
+   "resource": {
+    "label": "gitleaks - secret scanning for git repos (official repository)",
+    "url": "https://github.com/gitleaks/gitleaks"
+   }
+  },
+  {
+   "name": "Repo hygiene: the 60 seconds a stranger actually spends",
+   "learn": "Optimise for the strict order in which GitHub is read: repo description and topics, README top third, file tree, last commit date, then maybe one file. Give each repo a one-line description that names the problem not the stack, 5-8 topics, and a README whose first screen is the thesis block, the architecture diagram, and the run command — badges and a table of contents belong below that, if at all. Make the file tree legible: no `test2/`, no `old/`, no committed `node_modules` or build output, a top-level `docs/` with the ADRs and runbooks, and `CONTRIBUTING.md` only if you would genuinely accept a PR. Link the case study page from the README and the README from the case study page, so whichever entry point the reader hits, the other is one click away. Pin the three repos on your GitHub profile and write a profile README that is three lines and three links, not a skills wall.",
+   "minutes": 50,
+   "resource": {
+    "label": "GitHub Docs - Repositories",
+    "url": "https://docs.github.com/en/repositories"
+   }
+  },
+  {
+   "name": "Make each repo run in one command on a machine that is not yours",
+   "learn": "A case study that cannot be executed is a claim; a repo that boots is proof. Ship a `docker compose up` path per project with everything it needs: pinned image tags (never `latest`), a `depends_on` with `condition: service_healthy` plus real `healthcheck` blocks so the app does not race Postgres, a named volume for data, and a seed step that loads deterministic synthetic fixtures — invented tenants, invented alerts, invented documents — so nothing real ever ships. Stub external dependencies behind an interface: a fake LLM provider that returns canned classifications when `LLM_PROVIDER=fake`, a webhook generator script instead of a live integration. Then verify honestly: clone into a fresh directory on a machine with nothing warm (or a clean container), time it, and write the real number in the README ('first run pulls ~800 MB and takes about 3 minutes'). Add a `make demo` target that boots the stack, seeds it, fires traffic, and prints the URL to open.",
+   "minutes": 55,
+   "resource": {
+    "label": "Docker Docs - Control startup and shutdown order in Compose (healthcheck, depends_on service_healthy)",
+    "url": "https://docs.docker.com/compose/how-tos/startup-order/"
+   }
+  },
+  {
+   "name": "One architecture diagram per project, at the container level",
+   "learn": "Draw at the C4 container level — deployable units and data stores, not classes and not a wall of cloud vendor icons — and hold yourself to a hard limit of roughly 12 boxes. Include a legend (solid arrow = synchronous call, dashed = asynchronous/event, cylinder = persistent store), label every arrow with the protocol and the payload ('HTTPS webhook, alert JSON', 'NOTIFY/LISTEN, job id'), and mark the trust boundary so a reader can see what is exposed to the internet, what is tenant-scoped, and where credentials live. Draw the system as it actually is, including the ugly parts — the cron that exists because the queue was added late, the shared database two services both write to — because a diagram that is too clean is the single fastest way to fail the follow-up question. Number the primary flow 1..n and make the five-sentence walk in the case study follow those numbers exactly.",
+   "minutes": 45,
+   "resource": {
+    "label": "C4 model - software architecture diagrams",
+    "url": "https://c4model.com/"
+   }
+  },
+  {
+   "name": "Diagrams as code so they do not rot",
+   "learn": "Commit the diagram source next to the code as Mermaid (`docs/architecture.md` with a ```mermaid flowchart or sequenceDiagram block) so it renders natively in the GitHub README and in your site's markdown pipeline, and can be diffed in a PR when the architecture changes. Learn enough syntax to be fast: `flowchart LR` with `subgraph` for trust boundaries, `-->` versus `-.->` for sync versus async, `[( )]` for datastores, and `sequenceDiagram` with `participant`, `activate` and `Note over` for the one flow worth showing step by step (Kaupex's compile-approve-publish chain is the obvious candidate). Export a PNG or SVG for the case study page and for slides, but treat the exported file as a build artifact, never the source of truth. Add the diagram to the repo's PR checklist so it is updated in the same commit as the change it describes.",
+   "minutes": 30,
+   "resource": {
+    "label": "Mermaid - Flowchart syntax (subgraph, arrow types, node shapes)",
+    "url": "https://mermaid.js.org/syntax/flowchart.html"
+   }
+  },
+  {
+   "name": "Numbers: measure them again, and state how you measured",
+   "learn": "Every quantitative claim needs a metric, a window, a measurement point and a method, in that order — 'p95 end-to-end classification latency 42 s over 30 days, measured from webhook receipt to row committed, from the Prometheus histogram in the ingestion service' beats 'fast classification' by an order of magnitude in an interview. Re-derive each number from an artifact you still have (Grafana, a Postgres query, a cloud bill, a k6 run) and if you cannot, either re-run the measurement against the Compose stack or delete the claim. Distinguish load-test numbers from production numbers and label them as such. Prefer before/after pairs with the change named ('adding the partial index on `(tenant_id, status)` took the dashboard query from 1.8 s to 90 ms at 2M rows') and include at least one honest cost figure per project (monthly infrastructure spend, or cost per 1,000 classifications) — cost is the number FDE interviewers probe hardest and portfolios almost never contain.",
+   "minutes": 45,
+   "resource": {
+    "label": "Google SRE Book - Service Level Objectives",
+    "url": "https://sre.google/sre-book/service-level-objectives/"
+   }
+  },
+  {
+   "name": "The 'what broke' section: one real incident, told blamelessly",
+   "learn": "Pick the single most instructive real failure per project and write it as a compressed postmortem: trigger, detection (what alerted, or the honest 'a user told me'), timeline with timestamps, the impact in user terms, the root cause traced past the proximate error to the contributing conditions, the mitigation, and the durable fix with a link to the commit or config change. Use the SRE postmortem discipline — blameless language, 'the deploy pipeline allowed X' rather than 'I forgot X', and separate the fix that stopped the bleeding from the fix that made the class of failure impossible. Include the uncomfortable part: how long detection took and why. This section is the highest-signal thing on the page, because every FDE interviewer is trying to establish whether you operate systems or only build them, and a candidate who volunteers a specific outage with a real time-to-detect reads as someone who has been on call.",
+   "minutes": 55,
+   "resource": {
+    "label": "Google SRE Book - Postmortem Culture: Learning from Failure",
+    "url": "https://sre.google/sre-book/postmortem-culture/"
+   }
+  },
+  {
+   "name": "The 'what I would change' section as ADRs, not regrets",
+   "learn": "Convert hindsight into decisions with costs. For each project write three ranked changes in the ADR shape — context, decision, alternatives considered, consequences — and add the trigger that would force it ('move classification from an in-process worker to a durable queue when sustained ingest exceeds ~50 events/s or when a redeploy starts dropping in-flight work'). Backfill 3-5 ADRs per repo under `docs/adr/NNNN-title.md` for the decisions you actually made, marking superseded ones rather than deleting them; a reader who sees ADR 0003 superseded by 0007 learns more about your judgement than any prose. Ban regret language: not 'I should have used Postgres', but 'SQLite was correct until concurrent writers appeared; the migration cost was one afternoon and the trigger was the second worker'. Interviewers use this section to test whether you understand the cost of the alternative you are recommending.",
+   "minutes": 45,
+   "resource": {
+    "label": "Architecture decision record (ADR) - templates and examples",
+    "url": "https://github.com/architecture-decision-record/architecture-decision-record"
+   }
+  },
+  {
+   "name": "Draft the DefenderMate case study: multi-tenant, webhook-driven, LLM in the loop",
+   "learn": "Write the full page for DefenderMate with the tenant story as the spine: alerts arrive by webhook, an LLM classifies them, a Next.js dashboard and a weekly digest deliver the value — so the interesting engineering is isolation, asynchrony and trust, not the UI. Be explicit about the tenancy model you chose (shared schema with `tenant_id` on every row, or schema-per-tenant, or database-per-tenant), where isolation is actually enforced (row-level security, a repository layer that refuses an unscoped query, tenant taken from the verified token and never from the request body), and what the noisy-neighbour story is. Cover webhook hardening concretely: HMAC signature verification with a per-tenant secret and a constant-time compare, replay protection via a timestamp window plus a delivery-id dedupe table, fast 2xx acknowledgement with processing deferred, and bounded retries. State the freshness SLI for classification and the fallback when the model provider returns 429 or times out. Name the prompt-injection surface — attacker-controlled alert text reaching a model whose output drives a UI — and what you did or would do about it.",
+   "minutes": 60,
+   "resource": {
+    "label": "Microsoft Learn - Architecting multitenant solutions on Azure",
+    "url": "https://learn.microsoft.com/en-us/azure/architecture/guide/multitenant/overview"
+   }
+  },
+  {
+   "name": "Draft the Kaupex case study: the compile-approve-publish pipeline",
+   "learn": "Write Kaupex around its hardest property: a multi-step chain (task compile, human approval, publish) running on a single Hetzner VPS with Postgres, where every step can fail, be retried, or wait days for a human. Make the durability story explicit — where state lives between steps, what happens if the box reboots mid-publish, whether a retried publish is idempotent and what the idempotency key is, how the human approval is represented (a row and a signal, not an in-memory promise) — and describe the compensation path when publish half-succeeds, which is a saga whether or not you called it one. Cover the single-box realities honestly: backups (pgbackrest to object storage, and the restore you actually tested), the RPO/RTO you can defend, systemd units and resource limits for the worker, and what a single machine costs per month versus the managed alternative. Close with the ADR for when this must become a real durable execution engine and what that migration looks like — that trigger-and-migration answer is exactly the shape of an FDE design conversation.",
+   "minutes": 60,
+   "resource": {
+    "label": "Temporal Docs - Understanding Temporal: durable execution, retries and long-running workflows",
+    "url": "https://docs.temporal.io/evaluate/understanding-temporal"
+   }
+  },
+  {
+   "name": "Draft the Dokeo case study: packaging and deployment as the product",
+   "learn": "Write Dokeo as the delivery-engineering story, because that is what an FDE is hired to do: a Python application turned into something a stranger can deploy. Cover the image (multi-stage build, `uv sync --frozen`, non-root UID, read-only root filesystem, dropped capabilities, the size before and after), the Kubernetes surface (Deployment with all three probes and a `preStop` for graceful drain, Service with a named `targetPort`, Ingress with TLS via cert-manager, ConfigMap and Secret separation, requests and limits derived from measurement rather than guessed), and the Helm chart with `values.schema.json` so a customer cannot mis-configure it silently. Include the migration-on-deploy story (a pre-upgrade Job that fails the release rather than serving a half-migrated schema) and the rollback story with a concrete `helm rollback` or Argo sync. Add the environment matrix — what changes between k3s, EKS and Cloud Run — since 'runs in the customer's cluster, whatever it is' is the whole pitch.",
+   "minutes": 60,
+   "resource": {
+    "label": "Kubernetes Documentation - Concepts",
+    "url": "https://kubernetes.io/docs/concepts/"
+   }
+  },
+  {
+   "name": "Screenshots, terminal casts and a 90-second demo per project",
+   "learn": "Produce visual proof that loads fast and cannot be faked-looking: two or three screenshots per project taken at a consistent viewport with seeded synthetic data, cropped to the thing being claimed, annotated with a single arrow or box, exported as WebP or optimised PNG under ~200 KB each and served with explicit width and height so the page does not shift. For anything CLI-shaped — `make demo`, the restore drill, the Helm install — record an asciinema cast rather than a video: it is a few kilobytes, the text is selectable and searchable, and it embeds anywhere. Add one 90-second screen recording per project with a scripted narration (10 s problem, 20 s architecture, 45 s the flow working end to end, 15 s the number), rehearsed once so there is no dead air, and host it where it will still exist in a year. Check every asset for leaked tenant names, emails and hostnames before publishing, and write real `alt` text for each image.",
+   "minutes": 40,
+   "resource": {
+    "label": "asciinema - terminal session recorder (official repository)",
+    "url": "https://github.com/asciinema/asciinema"
+   }
+  },
+  {
+   "name": "Publish on rasul.in: routes, metadata, performance, accessibility",
+   "learn": "Ship the three pages as real routes (`/work/defendermate`, `/work/kaupex`, `/work/dokeo`) plus an index at `/work` that shows all three theses so a reader can choose. Content lives in markdown/MDX in the repo, not in a CMS you will stop paying for. Set per-page metadata deliberately: a `<title>` that reads well in a browser tab and a search result, a 150-160 character description that is the thesis, canonical URL, and Open Graph plus Twitter card tags with a 1200x630 image — the OG card is what actually renders when someone drops your link in a hiring Slack, and a missing one costs you the click. Hold the page to a real budget: no client-side data fetching for static prose, images lazy-loaded below the fold, fonts subset and preloaded, and a Lighthouse pass on mobile before you call it done. Accessibility is not optional on a page whose job is to be read: one `h1`, ordered heading levels, AA contrast, visible focus rings, alt text on every diagram, and no information conveyed by colour alone.",
+   "minutes": 50,
+   "resource": {
+    "label": "Next.js Docs - generateMetadata: titles, descriptions, canonical URLs and Open Graph tags",
+    "url": "https://nextjs.org/docs/app/api-reference/functions/generate-metadata"
+   }
+  },
+  {
+   "name": "Discoverability, the comprehension test, and the maintenance rule",
+   "learn": "Close the loop so the pages get read and stay true. Make them findable: descriptive URLs, a sitemap and `robots.txt`, internal links from the site index and each repo README, and outbound links from your GitHub profile — but do not chase SEO, the traffic that matters arrives from a link you sent. Then run a comprehension test, which is the only real quality gate: give each page to three people (one senior engineer, one non-engineer, one recruiter), time them for 90 seconds, then ask what the system does, what was hard, and what you would change; anything two of three cannot answer is a rewrite, not a defence. Ask one engineer to try the one-command run on a clean machine and log every step where they had to think. Finally set a maintenance rule you will actually keep: the diagram and the numbers are updated in the same PR as the change they describe, dead links are checked quarterly, and every page carries a visible 'last verified' date — a stale portfolio reads as a stale engineer.",
+   "minutes": 40,
+   "resource": {
+    "label": "Google Search Central - Search documentation",
+    "url": "https://developers.google.com/search/docs"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can hand any of the three case study pages to a senior engineer who has 90 seconds and have them correctly state what the system does, what the hard constraint was, and what broke — verified with three readers, not assumed.",
+  "You can point a stranger at each repo and have them go from `git clone` to a working, seeded local stack with one documented command, on a machine that has never run your code, in the time your README claims.",
+  "You can defend every number on every page by naming the metric, the window, the measurement point and the artifact it came from, and you have deleted every claim that failed that test.",
+  "You can tell one real incident per project with timestamps, the actual time to detect, a root cause traced past the proximate error, and the difference between the mitigation and the durable fix, without blaming a person.",
+  "You can produce a container-level architecture diagram for each system from its committed Mermaid source, walk the numbered primary flow in five sentences, and point at the trust boundary and the part you are least happy with.",
+  "You can state, for each project, three ranked changes you would make with the concrete trigger that would force each one and the cost of the alternative you rejected, in ADR form and in speech.",
+  "You can prove the repos are safe to be public: a clean full-history secret scan, rotated credentials, `.env.example` with documented variables, a deliberate LICENSE, and screenshots and casts with no real customer data in them.",
+  "You can send one link in a referral DM or an application that answers 'has this person delivered under real constraints' without a call, and you have at least one instance of someone responding to that link specifically."
+ ],
+ "failureModes": [
+  "A credential is scrubbed from the working tree but not from history, or scrubbed from history but never rotated, and the key is still live in a customer's Slack integration or LLM provider account weeks after the repo goes public.",
+  "The public repo abstracts a client system so thinly that the architecture diagram plus the client's own public marketing identifies them, breaching an NDA that nobody re-read before publishing.",
+  "The page claims a latency or throughput number that came from a laptop benchmark in a good mood; an interviewer asks how it was measured and at what percentile, the answer collapses, and every other claim on the page becomes suspect.",
+  "`docker compose up` works only on the author's machine because an image is unpinned, a healthcheck is missing so the app races Postgres, or a required environment variable is undocumented — the reviewer hits an unhandled stack trace in the first two minutes and never returns.",
+  "The architecture diagram shows the intended design rather than the deployed one, omitting the cron job and the shared database, so the first follow-up question exposes that the author is describing a system they did not actually operate.",
+  "A screenshot taken from a live environment ships with real tenant names, an internal hostname and a session token visible in a URL bar, and it is served from a CDN long after the image is swapped.",
+  "The case studies are published once and never touched; the architecture changes, the links rot, the numbers refer to an instance size that no longer exists, and a reader in month six is evaluating a version of the system that stopped being true."
+ ],
+ "interviewQuestions": [
+  "Walk me through the DefenderMate architecture at the container level, then tell me exactly where tenant isolation is enforced. If I compromise one tenant's API token, what can I reach, and what stops an unscoped query from ever leaving your data layer?",
+  "Kaupex has a compile step, a human approval that might take three days, and a publish step. The box reboots after publish has partially succeeded. Walk me through what state exists, what a retry does, and how you know the retry is safe.",
+  "Pick the worst outage you had in any of these three systems. Give me the timeline: what triggered it, how you found out, how long detection took, what you did in the first ten minutes, and what you changed so that class of failure cannot recur.",
+  "Your case study says classification p95 is under a minute. How is that measured, from which point to which point, over what window, and what happens to that number when the model provider starts returning 429s for twenty minutes?",
+  "A customer wants Dokeo running in their own cluster, and their security team forbids the managed pieces you rely on. Take me through the chart and the image: what changes, what you lose, and how you keep one codebase across their environment and yours.",
+  "You listed 'move classification to a durable queue' as something you would change. Why did you not do it originally, what specifically would force the change, and what does the migration look like while the system stays up?",
+  "If I gave you two weeks on any one of these three systems with the goal of handing it to a customer's own engineers to operate, what would you build, what would you write, and how would you know at the end that the handover actually worked?"
+ ],
+ "proofOfWork": "A public `case-studies` repository that is the operating system behind the three live pages, so a reader can see not just the output but the standard it was held to. It contains: (1) `TEMPLATE.md`, the locked section order with word budgets and the rules for each section, plus `STYLE.md` with the voice rules and the ban list; (2) `claims.md`, one row per quantitative statement across all three pages with the metric, window, measurement point, source artifact (Grafana panel, SQL query, k6 run, cloud invoice) and the date it was last re-verified, including the claims you deleted and why; (3) `docs/adr/` with the backfilled architecture decision records for all three systems, superseded records kept and marked; (4) `diagrams/` with the committed Mermaid sources and exported SVGs, and a note in each repo's PR checklist requiring the diagram to change in the same commit as the architecture; (5) `incidents/` with the three long-form postmortems the case study sections were compressed from, blameless, with real timestamps and time-to-detect; (6) `review/comprehension-test.md`, the 90-second test results from three readers per page (senior engineer, non-engineer, recruiter) with their verbatim answers to 'what does it do, what was hard, what would they change', the rewrites each failure triggered, and a clean-machine run log from one engineer who tried `make demo` cold, with every step where they had to think; and (7) `security/publication-checklist.md`, the pre-publish gate you ran for each repo — full-history gitleaks output, rotation log, `.env.example` coverage, license decision, screenshot and cast scrub — signed off with a date, so the whole thing doubles as a reusable process another engineer could run on their own portfolio."
+}

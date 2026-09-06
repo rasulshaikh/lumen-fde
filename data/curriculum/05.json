@@ -1,0 +1,209 @@
+{
+  "i": 5,
+  "topic": "Docker internals: namespaces, cgroups, layers, networking",
+  "track": "B. Containers and Kubernetes",
+  "month": 1,
+  "hours": 8.0,
+  "why": "FDEs ship into environments they do not control: a customer's hardened VM, an air-gapped Docker host, a security team that treats every container as root-on-the-node until proven otherwise. When the image 'works on my machine' but the customer's container exits 137 every few hours, cannot reach their on-prem Postgres after the VPN comes up, or is 3 GB because a secret was deleted in a later layer, the FDE is the person on the bridge call. Being able to explain from the kernel up what the customer is actually running, and to debug it with host tools when the container has no shell, is what earns the right to deploy into their production.",
+  "prerequisites": [
+    "Linux process model from Topic 1 (Linux internals): fork/exec, what PID 1 is, SIGTERM vs SIGKILL, /proc, mount(2) and chroot; namespaces only make sense if you know what they are isolating.",
+    "Networking from Topic 2: CIDR notation, reading a routing table, what NAT and DNAT are, how /etc/resolv.conf and /etc/hosts drive resolution; you will read iptables rules and debug the 127.0.0.11 resolver.",
+    "Shell fluency from Topic 0: pipes, Go-template --format strings, jq, and comfortable reading ss, ip, tcpdump and dmesg output.",
+    "Troubleshooting habits from Topic 3: reading OOM-killer lines in dmesg, strace -f, knowing the difference between exit code 137 and 143.",
+    "A real Linux host with root (VM, Multipass, Lima or a cloud instance). Docker Desktop hides the Linux VM; most hands-on steps here need /sys/fs/cgroup, /var/lib/docker and iptables on the actual host.",
+    "Have written at least one Dockerfile and run docker compose up once. This topic assumes CLI familiarity and goes underneath it."
+  ],
+  "subtopics": [
+    {
+      "name": "A container is a process: clone() flags and the eight namespaces",
+      "learn": "Know the namespace types (mnt, pid, net, uts, ipc, user, cgroup, time) and precisely what each isolates. Understand that docker run bottoms out in runc calling clone(2)/unshare(2) with CLONE_NEWPID, CLONE_NEWNET, CLONE_NEWNS and friends, then execve() on the entrypoint. List a running container's namespaces with ls -l /proc/$(docker inspect -f '{{.State.Pid}}' c)/ns and lsns -p <pid>, and show the same process in host ps -ef under a different PID than it sees inside. Be able to state what is NOT isolated: the kernel and its modules, the clock unless a time namespace is used, sysctl values that are not namespaced, and the hardware.",
+      "minutes": 25,
+      "resource": {
+        "label": "man7: namespaces(7)",
+        "url": "https://man7.org/linux/man-pages/man7/namespaces.7.html"
+      }
+    },
+    {
+      "name": "Build a container by hand: unshare, pivot_root, nsenter",
+      "learn": "Reproduce the core of docker run with no Docker involved: export a rootfs with docker export or debootstrap, then unshare --mount --uts --ipc --net --pid --fork --mount-proc, mount --make-rprivate / so mounts do not leak to the host, pivot_root into the rootfs (know why Docker uses pivot_root rather than chroot: chroot is escapable with CAP_SYS_CHROOT), mount a fresh /proc, set the hostname. Then use nsenter -t <pid> -n -m -p to enter a running container's namespaces selectively; this is how you run host tools (ip, ss, tcpdump, strace) against a distroless container that has no shell. Understand what --fork does for PID namespaces and why the first process inside becomes PID 1.",
+      "minutes": 35,
+      "resource": {
+        "label": "man7: unshare(1)",
+        "url": "https://man7.org/linux/man-pages/man1/unshare.1.html"
+      }
+    },
+    {
+      "name": "PID 1 semantics: signals, zombies, --init and stop timeouts",
+      "learn": "Inside a PID namespace the entrypoint is PID 1 and inherits init duties: it must reap orphaned children with waitpid, and the kernel installs no default SIGTERM handler for PID 1, so a naive process silently ignores docker stop. Know the stop sequence: SIGTERM (or the STOPSIGNAL instruction) then wait --stop-timeout / -t seconds (default 10) then SIGKILL, yielding exit 137; a clean SIGTERM exit is 143. Know why shell-form CMD python app.py wraps in /bin/sh -c so the signal hits sh and never reaches Python, when to use exec form, and when docker run --init (tini) is needed to reap zombies from a forking app. Verify with docker inspect -f '{{.State.ExitCode}}', docker top, and ps -o pid,ppid,stat inside the container looking for Z state.",
+      "minutes": 25,
+      "resource": {
+        "label": "man7: pid_namespaces(7)",
+        "url": "https://man7.org/linux/man-pages/man7/pid_namespaces.7.html"
+      }
+    },
+    {
+      "name": "cgroups v2: the unified hierarchy and its controllers",
+      "learn": "On a cgroup v2 host find a container's cgroup under /sys/fs/cgroup/system.slice/docker-<id>.scope (systemd driver) or /sys/fs/cgroup/docker/<id> (cgroupfs driver), and confirm which driver is in use with docker info | grep -i cgroup. Read the files that matter: memory.max, memory.high, memory.current, memory.events (the oom_kill counter), cpu.max (quota and period, e.g. 200000 100000 means two CPUs), cpu.weight, cpu.stat (nr_throttled), pids.max, io.max. Understand that cgroups limit and account but do not isolate: free, nproc and /proc/meminfo inside a container still show host totals, which is why the JVM, Go and Node need container-aware sizing. Confirm membership from inside with cat /proc/self/cgroup and from outside with docker inspect -f '{{.HostConfig.CgroupParent}}'.",
+      "minutes": 40,
+      "resource": {
+        "label": "Linux kernel docs: Control Group v2",
+        "url": "https://docs.kernel.org/admin-guide/cgroup-v2.html"
+      }
+    },
+    {
+      "name": "Docker resource flags and the OOM-kill path",
+      "learn": "Map each flag to its cgroup file: --memory to memory.max, --memory-reservation to memory.high (soft), --memory-swap (set equal to --memory to disable swap entirely), --cpus 1.5 to cpu.max, --cpu-shares to cpu.weight, --pids-limit to pids.max, --cpuset-cpus to cpuset.cpus. Trace an OOM end to end: the kernel picks the largest-RSS process in the cgroup (not necessarily PID 1, so a worker can die while PID 1 keeps running), docker inspect -f '{{.State.OOMKilled}}' flips to true, the exit code is 137, and dmesg -T | grep -i 'killed process' on the host names the victim. Know that --oom-kill-disable is a trap that turns OOM into a livelock, that CPU limits throttle rather than kill, and how to observe both live with docker stats --no-stream and cpu.stat.",
+      "minutes": 25,
+      "resource": {
+        "label": "Docker docs: Resource constraints",
+        "url": "https://docs.docker.com/engine/containers/resource_constraints/"
+      }
+    },
+    {
+      "name": "Capabilities, seccomp, no-new-privileges: what --privileged really grants",
+      "learn": "Know Docker's default capability set (CHOWN, DAC_OVERRIDE, FOWNER, FSETID, KILL, SETGID, SETUID, SETPCAP, NET_BIND_SERVICE, NET_RAW, SYS_CHROOT, MKNOD, AUDIT_WRITE, SETFCAP) and that SYS_ADMIN, SYS_PTRACE and NET_ADMIN are dropped. Apply --cap-drop ALL --cap-add NET_BIND_SERVICE and verify with capsh --print or grep Cap /proc/1/status decoded via capsh --decode. Understand that --privileged means all capabilities plus every /dev device plus seccomp and AppArmor disabled plus writable /sys, which is root on the host in practice. Know the default seccomp profile blocks roughly 40 syscalls (mount, reboot, keyctl, ptrace on older kernels) and that --security-opt seccomp=unconfined is what people reach for when strace fails in a container. Establish a baseline of --security-opt no-new-privileges, --read-only with --tmpfs /tmp, and a non-root --user; know how userns-remap changes what uid 0 inside maps to on the host.",
+      "minutes": 35,
+      "resource": {
+        "label": "Docker docs: Engine security",
+        "url": "https://docs.docker.com/engine/security/"
+      }
+    },
+    {
+      "name": "OCI image anatomy: manifest, config, content-addressed layers",
+      "learn": "Pull an image apart: docker manifest inspect nginx:latest shows an image index with one manifest per platform; each manifest lists a config blob and an ordered list of layer blobs, all addressed by sha256 digest. Know the difference between the compressed layer digest (in the manifest, what the registry stores and what docker pull downloads) and the uncompressed diffID (in the config's rootfs.diff_ids, what docker inspect -f '{{.RootFS.Layers}}' prints). Understand that docker history shows one row per config history entry, including zero-byte rows for ENV, CMD, LABEL and WORKDIR that produce no filesystem layer. Pin by digest with image@sha256:... for reproducibility and know that a tag is a mutable pointer, so latest tells you nothing about what is running on the customer's host.",
+      "minutes": 25,
+      "resource": {
+        "label": "OCI Image Format Specification (GitHub)",
+        "url": "https://github.com/opencontainers/image-spec"
+      }
+    },
+    {
+      "name": "OverlayFS: lowerdir, upperdir, copy-up and whiteouts",
+      "learn": "Read docker inspect -f '{{json .GraphDriver.Data}}' to find LowerDir (colon-separated, one path per layer, deepest image layer last), UpperDir (the container's writable layer), WorkDir and MergedDir, then cat the same file at each level under /var/lib/docker/overlay2/ to see which layer wins. Understand copy-up: the first write to a file that lives in a lower layer copies the entire file into upperdir, so appending one byte to a 2 GB file copies 2 GB; deletions create whiteout entries (character device 0:0) or opaque directories (xattr trusted.overlay.opaque=y). Explain from this why RUN rm -rf /var/lib/apt/lists in a later layer does not shrink the image and why apt-get update && apt-get install && rm -rf must be one RUN. Know the kernel's 128 lower-layer limit and read docker system df -v to see shared versus unique layer bytes.",
+      "minutes": 30,
+      "resource": {
+        "label": "Linux kernel docs: Overlay Filesystem",
+        "url": "https://docs.kernel.org/filesystems/overlayfs.html"
+      }
+    },
+    {
+      "name": "Layer cache rules and BuildKit cache mounts",
+      "learn": "State the cache-hit rule per instruction: a step is reused only if its parent matched and the instruction is byte-identical; RUN is keyed on the command string alone (so RUN apt-get update never re-runs by itself and can pin you to a stale package index), COPY and ADD are keyed on a checksum of file contents and mode. One miss invalidates every step after it, hence the ordering: copy lockfiles, install dependencies, then copy source. Use RUN --mount=type=cache,target=/root/.cache/pip for a package cache that persists across builds without landing in the image, --mount=type=secret,id=npmrc so credentials never enter a layer, and COPY --link where it applies. Know --no-cache, --cache-from type=registry,ref=... and --cache-to type=registry,mode=max for CI runners with empty local caches, that a missing .dockerignore (stray .git, node_modules, .env) busts COPY on every build, and read --progress=plain output to see CACHED per step.",
+      "minutes": 35,
+      "resource": {
+        "label": "Docker docs: Build cache",
+        "url": "https://docs.docker.com/build/cache/"
+      }
+    },
+    {
+      "name": "Multi-stage builds through the layer lens",
+      "learn": "Understand that each FROM ... AS name starts an independent layer chain with its own cache and only the final stage's layers ship; COPY --from=build /app/dist /app produces one layer regardless of how many steps built it. Use docker build --target build to stop at an intermediate stage for a debug image, and know that BuildKit builds independent stages in parallel and skips stages the target does not depend on. Measure the effect with docker image ls and docker history when moving from python:3.12 (roughly 1 GB) to python:3.12-slim to a distroless runtime, and know the alpine trade-offs (musl DNS resolver behaviour, glibc wheels that will not install). Non-root USER, SBOM generation, scanning and signing are covered in Topic 6; here the goal is knowing exactly which bytes end up in the shipped image and why.",
+      "minutes": 25,
+      "resource": {
+        "label": "Docker docs: Multi-stage builds",
+        "url": "https://docs.docker.com/build/building/multi-stage/"
+      }
+    },
+    {
+      "name": "Writable layer vs volumes vs bind mounts vs tmpfs",
+      "learn": "Know where writes go and what survives: the writable layer dies with docker rm and counts toward the Containers line in docker system df; named volumes live at /var/lib/docker/volumes/<name>/_data, survive rm, and die on docker volume prune or compose down -v; bind mounts are a host path where uid and gid are raw numbers, so a host uid 1000 file is owned by whichever container user happens to be uid 1000; tmpfs is RAM and vanishes on stop. Understand that the VOLUME Dockerfile instruction creates anonymous volumes that accumulate silently, the --mount versus -v syntax, :ro, :z and :Z on SELinux hosts, and that a bind mount over a directory hides whatever the image had there (the empty node_modules problem). Prove persistence by running postgres with -v pgdata:/var/lib/postgresql/data, writing a row, docker rm -f, recreating, and reading the row back.",
+      "minutes": 25,
+      "resource": {
+        "label": "Docker docs: Volumes",
+        "url": "https://docs.docker.com/engine/storage/volumes/"
+      }
+    },
+    {
+      "name": "Network namespaces, veth pairs and the docker0 bridge by hand",
+      "learn": "Rebuild Docker's bridge networking with iproute2: ip netns add c1, ip link add veth0 type veth peer name veth1, ip link set veth1 netns c1, ip link set veth0 master docker0, assign 172.17.0.x/16 inside, set the default route via 172.17.0.1, add a MASQUERADE rule, and ping 1.1.1.1 from inside the netns. Then compare with a real container: nsenter -t $(docker inspect -f '{{.State.Pid}}' c1) -n ip addr (most containers lack ip), and on the host use bridge link show plus ethtool -S vethX | grep peer_ifindex to map which veth belongs to which container. Know that net.ipv4.ip_forward=1 and the br_netfilter module are required for outbound traffic and port publishing, that Docker sets them for you at daemon start, and therefore that a CIS hardening script resetting sysctls breaks every container's networking while docker ps still looks healthy.",
+      "minutes": 40,
+      "resource": {
+        "label": "man7: ip-netns(8)",
+        "url": "https://man7.org/linux/man-pages/man8/ip-netns.8.html"
+      }
+    },
+    {
+      "name": "Bridge driver, user-defined networks and the embedded DNS at 127.0.0.11",
+      "learn": "Know why the default bridge network has no name resolution between containers (only the legacy --link) while user-defined bridges do: Docker writes nameserver 127.0.0.11 into the container's /etc/resolv.conf and its embedded DNS answers container names, --network-alias entries and Compose service names, forwarding everything else to the host's resolvers or the --dns you set. Read docker network inspect <net> for the IPAM subnet, gateway and the Containers map; know com.docker.network.bridge.enable_icc=false and --internal networks for egress-free tiers. Understand the classic client-site failure: Docker's default pool 172.17.0.0/16 and Compose's 172.18.0.0/16 onward collide with the customer's VPN or on-prem CIDR, so packets to their database are routed to the bridge; fix with default-address-pools in /etc/docker/daemon.json or ipam.config.subnet per network. Know that an MTU mismatch on VPN or overlay hosts (com.docker.network.driver.mtu) makes small requests succeed and large responses hang.",
+      "minutes": 35,
+      "resource": {
+        "label": "Docker docs: Bridge network driver",
+        "url": "https://docs.docker.com/engine/network/drivers/bridge/"
+      }
+    },
+    {
+      "name": "Port publishing: DNAT, the DOCKER and DOCKER-USER chains, docker-proxy",
+      "learn": "Trace -p 8080:80 to the rules it creates: iptables -t nat -S DOCKER shows a DNAT to <container-ip>:80, iptables -S DOCKER shows the ACCEPT in the filter table, and a MASQUERADE rule handles return traffic. Know that Docker's chains are evaluated before the host's own INPUT/FORWARD rules, which is why ufw deny 8080 does nothing for a published port; put your rules in the DOCKER-USER chain instead, or bind to loopback with -p 127.0.0.1:8080:80 so the service is only reachable through a reverse proxy. Understand that docker-proxy (the userland proxy) is the process ss -ltnp shows listening on the host port, not your app, and handles localhost and IPv6 edge cases. Know that --network host skips all of this (no NAT, no isolation, host port collisions), -P publishes every EXPOSEd port on an ephemeral host port, docker port <c> prints the mapping, and that the nftables backend or iptables: false in daemon.json changes what you will see.",
+      "minutes": 35,
+      "resource": {
+        "label": "Docker docs: Packet filtering and firewalls",
+        "url": "https://docs.docker.com/engine/network/packet-filtering-firewalls/"
+      }
+    },
+    {
+      "name": "Bridge network debugging playbook with netshoot",
+      "learn": "Run a fixed sequence when 'the container cannot reach X': (1) docker network inspect for both endpoints, same network and subnet? (2) inside the netns via nsenter -n or docker run --rm -it --network container:<c> nicolaka/netshoot: ss -ltnp to see whether the app is bound to 0.0.0.0 or only 127.0.0.1 (the number one cause of connection refused on a published port), ip route, dig @127.0.0.11 <service>, curl -v; (3) on the host: iptables -t nat -S DOCKER, sysctl net.ipv4.ip_forward, lsmod | grep br_netfilter, tcpdump -ni docker0 port 5432 to see whether packets arrive and whether replies leave; (4) MTU with ping -M do -s 1400; (5) subnet overlap by comparing ip route on the host with the customer's CIDRs. Know the healthcheck trap: curl localhost inside the container succeeds while the published port fails because the process listens on loopback only. Practise on a stack you deliberately break four ways: loopback bind, wrong network, overlapping subnet, ip_forward=0.",
+      "minutes": 40,
+      "resource": {
+        "label": "nicolaka/netshoot: network troubleshooting container (GitHub)",
+        "url": "https://github.com/nicolaka/netshoot"
+      }
+    },
+    {
+      "name": "Healthchecks, restart policies and Compose dependency ordering",
+      "learn": "Write HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 CMD curl -f http://localhost:8000/health || exit 1 (or the Compose healthcheck block, knowing CMD versus CMD-SHELL test forms) and read .State.Health.Status and .State.Health.Log from docker inspect. Know that plain Docker never restarts an unhealthy container: health only gates depends_on with condition: service_healthy in Compose and routing in Swarm, while restart policies (no, on-failure[:n], always, unless-stopped) react to exit codes, not health. Understand that depends_on without a condition orders start, not readiness, so the Postgres race still happens; use pg_isready -U <user> as the database healthcheck and give the app a start_period long enough for migrations. Know that failures during start_period do not count toward retries, and that a healthcheck which calls an external dependency makes your service flap whenever that dependency does.",
+      "minutes": 30,
+      "resource": {
+        "label": "Compose file reference: services (healthcheck, depends_on)",
+        "url": "https://docs.docker.com/reference/compose-file/services/"
+      }
+    },
+    {
+      "name": "The runtime stack: dockerd, containerd, shim, runc and the OCI bundle",
+      "learn": "Draw the process tree: dockerd talks to containerd over gRPC, containerd starts one containerd-shim-runc-v2 per container, the shim invokes runc which creates the namespaces and cgroups then exits, and the shim keeps holding stdio and the exit status. Confirm with pstree -p $(pgrep -x containerd) and ctr -n moby containers ls. Generate an OCI runtime bundle with runc spec and read config.json to see how namespaces, the cgroupsPath, mounts, capabilities and the seccomp profile appear as fields; this is exactly what the Kubernetes CRI hands to containerd in Topic 7. Know that live-restore: true in daemon.json keeps containers running across a dockerd restart or upgrade and that its absence is why a routine apt upgrade docker-ce takes a customer's whole single-node stack down.",
+      "minutes": 20,
+      "resource": {
+        "label": "OCI Runtime Specification (GitHub)",
+        "url": "https://github.com/opencontainers/runtime-spec"
+      }
+    },
+    {
+      "name": "Logging drivers, disk hygiene and the full /var/lib/docker failure",
+      "learn": "Know that the default json-file driver writes every stdout and stderr line to /var/lib/docker/containers/<id>/<id>-json.log with no rotation unless log-opts max-size and max-file are set in daemon.json or via --log-opt; this is the single most common way a customer's single-node Docker host fills its disk and takes Postgres down with it. Know that docker logs only works with json-file, local and journald drivers, that local is the better default (compressed, rotated), the --since, --until and --tail flags, and that an app writing logs to a file inside the container hides them from all of this and from any log shipper. Use docker system df -v to attribute disk across images, container writable layers, volumes and build cache, and be able to say exactly what docker system prune -a --volumes will destroy before running it on a customer machine.",
+      "minutes": 20,
+      "resource": {
+        "label": "Docker docs: Configure logging drivers",
+        "url": "https://docs.docker.com/engine/logging/configure/"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can explain to a non-engineer what a container is in under two minutes using only 'a process', 'namespaces', 'cgroups' and 'a tar of files', then prove it by showing the container's process in host ps with a different PID than it sees inside.",
+    "You can build a working isolated shell with unshare, pivot_root, a cgroup v2 memory limit and a veth pair to a bridge, with no Docker binary on the machine, in under 15 minutes from memory.",
+    "You can draw an image's layer stack from docker history and docker inspect, predict which steps print CACHED before rebuilding, and reorder a Dockerfile so a source-only change rebuilds in under 10 seconds.",
+    "You can explain why an image grew after a RUN rm step by naming the whiteout mechanism, and cut a 1.2 GB image by more than half using single-RUN cleanup, a slim base and a multi-stage build.",
+    "You can triage a container exiting 137 to either OOM (State.OOMKilled, dmesg) or a stop-timeout kill (signal handling, shell-form CMD) within five minutes and fix the root cause with the right flag or Dockerfile change.",
+    "You can debug a published port returning connection refused from the host, distinguishing loopback bind, missing DNAT rule, ip_forward=0, host firewall and subnet overlap using ss, iptables -t nat -S, nsenter and tcpdump.",
+    "You can write a Compose stack where the app waits on a real Postgres readiness healthcheck, logs rotate, memory is capped, and the app runs as non-root with capabilities dropped, and prove each property with a specific docker inspect field.",
+    "You can read a DOCKER-USER chain and state which container ports are reachable from which source CIDRs, and write the rules that restrict a database container to the app container only."
+  ],
+  "failureModes": [
+    "A JVM or Node service is OOM-killed (exit 137) under a 2 GB --memory limit because the runtime sized its heap from the host's 64 GB visible in /proc/meminfo; the fix is -XX:MaxRAMPercentage or --max-old-space-size, not a bigger limit.",
+    "docker stop on the customer's app always takes the full 10 seconds and returns 137 because the entrypoint is sh -c 'python app.py', so SIGTERM stops the shell and never reaches Python; in-flight writes are killed mid-transaction on every deploy.",
+    "A single-node Docker host stops scheduling containers and Postgres crashes with 'No space left on device' because json-file logs for a chatty service grew to 200 GB with no max-size configured.",
+    "After the client VPN connects, the container can no longer reach the client's on-prem SQL Server at 172.18.4.20 because Compose created a 172.18.0.0/16 network and the host now routes that CIDR to the bridge.",
+    "A published port that works in dev returns connection refused at the customer site because the app binds to 127.0.0.1 when HOST is unset, and DNAT delivers packets to the container's eth0 where nothing is listening.",
+    "A nightly docker system prune -a --volumes cron deletes the customer's Postgres data because the image's VOLUME instruction created an anonymous volume instead of the named volume everyone assumed Compose had declared.",
+    "A CIS benchmark hardening script sets net.ipv4.ip_forward=0 on the customer host; containers start and docker ps looks healthy but nothing has outbound connectivity, and two hours go to DNS theories before anyone checks sysctl."
+  ],
+  "interviewQuestions": [
+    "A customer CTO says 'containers are lightweight VMs, so our tenants are isolated from each other on the node.' Correct them precisely: what is shared, what is isolated, and what would you change in the run configuration before agreeing to run their untrusted plugin code in a container?",
+    "Walk me through everything that happens from docker run -p 8080:80 nginx to the first HTTP response arriving at a browser on the host. Name the processes, syscalls, filesystem mounts and iptables rules involved, in order.",
+    "This Dockerfile takes nine minutes to rebuild after a one-line code change: it copies the whole repo, then runs pip install, then sets CMD. Draw the layer stack, tell me exactly which layers are invalidated and why, then rewrite it so the rebuild takes under ten seconds and the final image is under 200 MB.",
+    "A container in the customer's environment exits with code 137 every few hours. Give me your diagnostic sequence, the two distinct root causes that produce 137, and how you would tell them apart from the host in under five minutes.",
+    "The app container can curl the Postgres container by service name in Compose on your laptop, but on the customer's VM it intermittently fails with 'could not translate host name'. What is 127.0.0.11, how does it forward queries, and what would you check on the host?",
+    "Two services must talk to each other over Docker networking on one host; the security team requires that neither is reachable from the host's public interface and that the database is reachable from nothing except the app. Design the networks, port bindings and DOCKER-USER rules, and show how you would prove the properties with iptables and ss.",
+    "You deleted a 400 MB dataset in a later RUN step and the image got larger. Explain what overlayfs did on disk, and how you would fix it both with and without a multi-stage build."
+  ],
+  "proofOfWork": "A public repo named container-from-scratch containing three things. First, a roughly 150-line bash or Python script that, on a stock Ubuntu VM with no Docker installed, downloads an alpine rootfs, creates mount, pid, net, uts and ipc namespaces via unshare, pivot_roots into the rootfs, places the process in a cgroup v2 leaf with memory.max=64M and pids.max=50, wires a veth pair to a hand-made bridge with a MASQUERADE rule so wget works from inside, and drops to a shell; the README walks each step next to the equivalent docker run flag and shows the process in host ps. Second, a broken-network-lab directory with one Compose stack and four deliberately broken variants (loopback bind, wrong network, overlapping subnet, ip_forward=0) plus a debug.md with the exact commands and output that pinpoint each fault. Third, an asciinema recording of a Dockerfile rebuild after a code-only change, first at several minutes and then at under ten seconds after reordering and adding a pip cache mount, with the --progress=plain output annotated to show which steps hit CACHED. The CTO one-pager from the plan deliverable links to this repo as its evidence."
+}

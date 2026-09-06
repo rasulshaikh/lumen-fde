@@ -1,0 +1,210 @@
+{
+ "i": 75,
+ "topic": "Decomposition drills (ten)",
+ "track": "K. Interview Loop and Mocks",
+ "month": 9,
+ "hours": 10,
+ "why": "The decomposition round maps one-to-one onto day one of a real deployment: a customer says a single sentence like 'we want AI to reduce claim denials' and you have to return a plan someone can staff, budget, sequence and kill. FDE loops use this round specifically to catch the engineer who starts drawing architecture ninety seconds in, because that engineer builds the wrong thing confidently and burns a quarter of a customer's patience doing it. Ten timed reps is what converts the framework from something you can describe into something you can execute while a stranger interrupts you, halves your timeline, and takes away production data access.",
+ "prerequisites": [
+  "Discovery technique from topic 66 - separating the stated ask from the real problem, and knowing who the decision owner is.",
+  "The engagement document set from topic 67: site survey, PRD-lite, SOW and ADR shapes, so the drill write-up has somewhere real to land.",
+  "System design vocabulary from topics 42 and 43 - queues, caching, retrieval, batching - so decomposition can name components without hand-waving.",
+  "Evals-as-infrastructure from topic 53: what an eval set costs to build, who labels it, and what an acceptance threshold looks like.",
+  "SLO and error-budget literacy from topic 20, so 'production ready' means numbers rather than vibes.",
+  "Compliance ground truth from topic 64 (SOC 2, GDPR, HIPAA) and domain context from topic 71 (fintech ops, healthcare intake, procurement, logistics).",
+  "At least one delivered engagement of your own - the Lumen FDE deployment - to mine for reference-class durations."
+ ],
+ "subtopics": [
+  {
+   "name": "Read the round: what the 30 minutes actually scores",
+   "learn": "Treat this as a rubric, not a conversation. Interviewers mark five things roughly independently: did you constrain the problem before proposing anything, is the breakdown collectively exhaustive with no orphaned work, does every piece carry a number and a confidence, is the order risk-first, and did you re-plan correctly when they injected a constraint. Write those five lines on a card and keep it visible for all ten drills - you are graded against the same card every time. Learn the dominant anti-signal explicitly: boxes and arrows inside the first two minutes reads as 'will build the wrong thing fast', and nothing in the remaining 28 minutes fully recovers it.",
+   "minutes": 20,
+   "resource": {
+    "label": "Exponent - Forward Deployed Engineer interview guide",
+    "url": "https://www.tryexponent.com/blog/forward-deployed-engineer-interview-the-definitive-2026-guide-fde"
+   }
+  },
+  {
+   "name": "The five-minute clarification protocol",
+   "learn": "Build a fixed question set you can run cold and finish inside five of the thirty minutes, grouped so you never wander: (a) who is the user and what do they do today, step by step, without your system; (b) what decision or action changes if this works, and who makes it; (c) what does success look like numerically, by when; (d) what data exists, where does it live, who approves access; (e) what is out of scope, what is politically untouchable, what has already been tried and failed; (f) hard constraints - on-prem vs cloud, PII, latency, budget, how many people you get. Practise a three-question compression for terse interviewers: current manual process, the decision it feeds, the metric that must move. Every question must be one whose answer changes your plan; if you cannot name the branch it opens, cut it.",
+   "minutes": 30,
+   "resource": {
+    "label": "system-design-primer - outline use cases, constraints and assumptions",
+    "url": "https://github.com/donnemartin/system-design-primer"
+   }
+  },
+  {
+   "name": "From 'we want AI' to a falsifiable outcome metric with a baseline",
+   "learn": "Convert the ask into one sentence shaped as: move <metric> from <baseline> to <target> for <population> by <date>, measured by <instrument>. Force a baseline out of the interviewer even as a rough estimate - a plan with no baseline cannot be judged, and 'we don't measure that today' is itself workstream one. Separate the model metric (extraction F1, precision@k, recall at a fixed alert volume) from the business metric (analyst minutes per case, denial rate, on-time delivery) and state the transfer function you are assuming between them, because that unstated assumption is where these engagements actually die. Always name the non-ML baseline you would ship first - a SQL rule, a sorted work queue, a regex - and what it would plausibly score.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google - Introduction to Machine Learning Problem Framing",
+    "url": "https://developers.google.com/machine-learning/problem-framing"
+   }
+  },
+  {
+   "name": "Data reality check before any architecture",
+   "learn": "Interrogate the data on six axes and say them as a table: system of record, grain (one row equals what, exactly), volume and growth, freshness and arrival latency, quality (null rates, duplicates, late-arriving corrections, free text vs coded fields), and access path (CDC, nightly extract, read replica, vendor API with a rate limit - and who signs off). Ask for one real example row and the row count; those two answers move a plan more than any architecture choice. Name the classic traps out loud so the interviewer knows you have hit them: no join key between the two systems, no history because the source table is mutated in place, labels that only exist post-hoc, and a 'warehouse' that turns out to be a folder of CSV drops.",
+   "minutes": 25,
+   "resource": {
+    "label": "Microsoft Learn - Team Data Science Process overview",
+    "url": "https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ai/plan"
+   }
+  },
+  {
+   "name": "MECE workstreams and the 100% rule",
+   "learn": "Decompose into five to seven workstreams that are mutually exclusive and collectively exhaustive, and enforce the work-breakdown 100% rule: children sum to the parent, no more and no less. The default deployment spine is access and environment, data ingestion and contracts, core logic or model, workflow and interface integration, evaluation and monitoring, rollout and handoff - plus one explicitly named customer-side stream holding everything you cannot do yourself. Test each node twice: can it be assigned to a single owner, and does it produce something a human can look at? A node with no demoable output is a task, not a workstream. Then state the excluded set out loud - what you are deliberately not doing is scored as hard as what you are.",
+   "minutes": 25,
+   "resource": {
+    "label": "Work breakdown structure - the 100% rule",
+    "url": "https://en.wikipedia.org/wiki/Work_breakdown_structure"
+   }
+  },
+  {
+   "name": "Environment and access: the customer-side critical path",
+   "learn": "The estimate that kills FDE plans is not model quality, it is getting a network route and a credential. Enumerate it every drill: VPC peering or PrivateLink or VPN, SSO/OIDC integration, an identity with the right role (IRSA, workload identity, a service account someone must approve), egress rules and proxy allow-lists, whether outbound calls to a hosted model API are permitted at all, security review and vendor onboarding, and a DPA or BAA. Size these in calendar weeks, not engineering days, and attach a named customer-side owner to each. State the parallel mitigation: synthetic or sampled data in your own environment so code gets written while approvals are pending.",
+   "minutes": 25,
+   "resource": {
+    "label": "AWS Well-Architected Framework",
+    "url": "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html"
+   }
+  },
+  {
+   "name": "Thin vertical slice first: the walking skeleton",
+   "learn": "Sequence so the first deliverable crosses every layer end to end for one narrow case - one source, one entity type, one user, one endpoint or screen, deployed where it will actually live - instead of completing any layer. The slice's job is to falsify integration assumptions, not to be accurate: can you read the source at the required grain, run inside their network, write back into the system of record, and get a human to look at the output. Say what it proves and what it deliberately does not. The anti-pattern to name: three weeks of pipeline work before anyone sees a result, discovered in week four to have been joined on a key that is not unique.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google Cloud - MLOps: continuous delivery and automation pipelines",
+    "url": "https://docs.cloud.google.com/architecture/mlops-continuous-delivery-and-automation-pipelines-in-machine-learning"
+   }
+  },
+  {
+   "name": "Sizing: appetite, reference classes, three-point estimates",
+   "learn": "Every workstream gets a number with its method attached. Prefer fixed-time-variable-scope appetite ('two weeks, and here is what fits in it') over open-ended estimates; use reference-class forecasting where you have history ('the last three ingestion integrations took 6, 9 and 4 days'); use three-point estimates (expected roughly (O + 4M + P) / 6) only where you can actually defend the pessimistic case. Quote ranges with a confidence level, never bare single numbers, and state the multiplier you apply for a first-time customer environment and say why. Keep a rabbit-hole list and a circuit breaker: work that blows past its appetite gets cut, not extended.",
+   "minutes": 25,
+   "resource": {
+    "label": "Shape Up, Chapter 3: Set Boundaries - appetite as fixed time, variable scope",
+    "url": "https://basecamp.com/shapeup/1.2-chapter-03"
+   }
+  },
+  {
+   "name": "Dependency graph, critical path, and parallelism you can actually buy",
+   "learn": "Draw the workstreams as a DAG with every edge labelled by what actually blocks - data access, a schema decision, a customer sign-off - then trace the longest path and say it out loud, because that path, not the sum of the work, is the delivery date. Separate hard technical dependencies from convenient ordering; most edges in a first-draft plan are the latter and can be cut with a mock, a stub, or a contract agreed up front. Then answer the question the interviewer is about to ask: what does a second engineer buy you? If the critical path is a three-week security review, the honest answer is 'nothing', and saying so is a strong senior signal.",
+   "minutes": 25,
+   "resource": {
+    "label": "Critical path method",
+    "url": "https://en.wikipedia.org/wiki/Critical_path_method"
+   }
+  },
+  {
+   "name": "Risk-first ordering: spikes, kill criteria, pre-mortem",
+   "learn": "List the assumptions the plan rests on, tag each with impact-if-wrong and cost-to-check, and schedule the cheapest checks on the highest-impact assumptions into week one as timeboxed spikes with a written exit question. Attach kill criteria to the engagement itself - 'if extraction F1 on 200 held-out documents is under 0.85 by week four, we stop and recommend the rules-based path' - because volunteering the conditions under which you would tell a customer to stop is the most senior move available in this round. Run a two-minute pre-mortem before presenting: assume it is six months later and this failed, name the three likeliest causes, and fold one mitigation for each into the sequence.",
+   "minutes": 25,
+   "resource": {
+    "label": "NIST AI Risk Management Framework",
+    "url": "https://www.nist.gov/itl/ai-risk-management-framework"
+   }
+  },
+  {
+   "name": "Success criteria, acceptance tests, and the pilot-to-production exit",
+   "learn": "Define done at three levels and never conflate them. Demo: a scripted path that works on chosen data. Pilot: a numeric threshold on a held-out set plus an operational bar - p95 latency, uptime, human-review rate, cost per case. Production handoff: runbook, an on-call owner, alerts on the SLIs, a defined process for prompt or model updates, and a named person at the customer who owns it after you leave. Write acceptance criteria as testable statements naming the population and the measurement window, and say who does the measuring and where the number is visible. A pilot whose numbers only you can produce gets re-litigated in every steering meeting.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google SRE Book - The Evolving SRE Engagement Model (PRR)",
+    "url": "https://sre.google/sre-book/evolving-sre-engagement-model/"
+   }
+  },
+  {
+   "name": "Delivery mechanics: the 30-minute clock and the artifacts you leave on the board",
+   "learn": "Fix a time budget and rehearse against a visible timer: 5 minutes clarify, 3 restate and get explicit agreement, 8 decompose, 5 size and sequence, 5 risks and cut list, 4 held back for their curveball. Produce exactly three artifacts - a one-line problem statement, a workstream table with owner, size and confidence, and a phase timeline with a named milestone per phase - plus at most one system-context sketch at a single level of abstraction. Narrate your reasoning continuously and check in twice ('does that split match how your team is organised?'). Announce the restate step explicitly; getting agreement on the problem before proposing a solution is the exact behaviour being tested.",
+   "minutes": 20,
+   "resource": {
+    "label": "C4 model - one level of abstraction per diagram",
+    "url": "https://c4model.com/"
+   }
+  },
+  {
+   "name": "The write-up template and a 10-point self-scoring rubric",
+   "learn": "Standardise a two-page template you fill in within ten minutes of every drill: prompt verbatim, questions asked with the answers you were given or invented, restated problem, assumption register, workstream table (name, owner, size range, confidence), dependency DAG, phase plan with milestones, risks with mitigations and kill criteria, what you would cut at half the time, and what you got wrong. Append a 10-point rubric - clarified before proposing, baseline stated, MECE with an exclusion list, access path sized in weeks, thin slice first, critical path named, ranges with confidence, kill criteria present, cut list present, time budget held - and score yourself out of 10 in the same file. The score trend across ten drills is the deliverable; no single write-up is.",
+   "minutes": 20,
+   "resource": {
+    "label": "Architecture Decision Records - context / decision / consequences",
+    "url": "https://adr.github.io/"
+   }
+  },
+  {
+   "name": "Drills 1-3: regulated data, where compliance is on the critical path",
+   "learn": "Three timed drills, each written up immediately: (1) a health payer wants to cut avoidable 30-day readmissions using claims plus an EHR feed; (2) a bank wants to cut false positives in AML transaction-monitoring alerts without missing true hits; (3) a state agency wants faster benefits eligibility decisions from scanned documents. For each, force the specific gates into the plan as sized calendar dependencies: BAA and minimum-necessary access, de-identified vs identified data, explainability for an adverse decision, immutable audit logging, data residency, and whether regulation requires a human decision-maker in the loop regardless of model quality. Notice where phase one is correctly not a model at all, but a labelled dataset plus a measurement of the current human baseline.",
+   "minutes": 85,
+   "resource": {
+    "label": "HHS - HIPAA for Professionals",
+    "url": "https://www.hhs.gov/hipaa/for-professionals/index.html"
+   }
+  },
+  {
+   "name": "Drills 4-6: physical operations and telemetry",
+   "learn": "Three drills where the constraint is the physical world: (4) predictive maintenance across a fleet of industrial machines with intermittent sensor uplink; (5) daily route planning for 200 vehicles with delivery time windows and driver-hours rules; (6) a manufacturer wants one inventory view across three ERPs after an acquisition. Practise identifying when the problem is optimisation or entity resolution rather than ML - for (5), say 'capacitated VRP with time windows, a solver not a model' - and decompose around edge and offline constraints, clock skew, duplicate and missing telemetry, backfill of late data, and the fact that a dispatcher will override any answer that cannot explain itself. Size the change-management workstream; in ops deployments it is usually larger than the engineering one.",
+   "minutes": 85,
+   "resource": {
+    "label": "Google OR-Tools - Vehicle Routing Problem with Time Windows",
+    "url": "https://developers.google.com/optimization/routing/vrptw"
+   }
+  },
+  {
+   "name": "Drills 7-8: LLM-shaped scopes where the customer has picked the technology",
+   "learn": "Two drills: (7) 'deflect 40% of support tickets with an AI assistant' over a stale help centre plus a five-year Zendesk archive; (8) extract 30 fields from 12 contract templates into their CLM. Decompose to the eval set first - how many labelled examples, sampled from where, labelled by whom, at what per-field acceptance threshold - then corpus and retrieval quality, then the human-in-the-loop and escalation path, then a stated cost and p95 latency budget per request, then the ticket-taxonomy work nobody volunteers for. Name the metric trap out loud: deflection measured as 'no follow-up ticket' scores abandoned, angry users as successes, so define the counter-metric (CSAT on deflected sessions, escalation rate) in the same breath.",
+   "minutes": 55,
+   "resource": {
+    "label": "Hamel Husain - Your AI Product Needs Evals",
+    "url": "https://hamel.dev/blog/posts/evals/"
+   }
+  },
+  {
+   "name": "Drills 9-10: adversarial and under-specified scopes, plus the mid-drill curveball",
+   "learn": "Two drills that are wrong as asked: (9) 'migrate this 12-year-old undocumented Java monolith off the mainframe in six months' - practise strangler-fig decomposition, seam identification, and proposing a read-only shadow phase that runs both systems and diffs outputs before any cutover; (10) an executive asks for a real-time dashboard when the actual problem is that two departments disagree on the definition of an active customer - practise redirecting to the definition and the decision owner without telling the sponsor they were wrong. In both, have someone inject a curveball at minute 18 (timeline halved, production data access revoked, a competitor already failed at this) and re-sequence out loud, naming what you drop and which risk you are now knowingly accepting.",
+   "minutes": 55,
+   "resource": {
+    "label": "Martin Fowler - Strangler Fig Application",
+    "url": "https://martinfowler.com/bliki/StranglerFigApplication.html"
+   }
+  },
+  {
+   "name": "Regrade, calibrate, and extract your three repeated failures",
+   "learn": "After all ten, re-score drills 1-5 against the rubric as it stood at the end rather than the one you started with, and diff each early plan against how you would write it now. Build a personal reference-class table from the set - the sizes you assigned to ingestion, environment access, eval-set creation - and check those against real durations from your own delivered work; most people under-size access approvals and labelled-data creation by two to four times. Write the three patterns that recur (jumped to architecture, no baseline, no kill criteria) as three sentences on a card and re-read it in the sixty seconds before every real interview.",
+   "minutes": 30,
+   "resource": {
+    "label": "Reference class forecasting",
+    "url": "https://en.wikipedia.org/wiki/Reference_class_forecasting"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can run a 30-minute decomposition cold on an unseen prompt: five minutes of clarifying questions, a restated problem you get explicit agreement on, five to seven MECE workstreams with owners, sized ranges, a sequenced phase plan and stated risks - holding the time budget to within two minutes, on video.",
+  "You can turn any vague ask into one sentence containing a metric, a baseline, a target, a population, a date and the instrument that measures it, and name the non-ML baseline you would ship first.",
+  "You can enumerate the customer-side access path (network route, identity and role, egress policy, security review, DPA or BAA) unprompted, size it in calendar weeks, and attach a named owner to each item.",
+  "You can draw the workstream DAG, state the critical path, and correctly answer whether adding a second engineer moves the delivery date.",
+  "You can attach kill criteria to your own plan - the threshold, the dataset it is measured on, and the week it is evaluated - and say the sentence in which you would recommend stopping.",
+  "You can absorb a mid-drill constraint change (timeline halved, production data revoked) and re-sequence out loud, naming what you cut and which risk you now accept.",
+  "You can quote every size as a range with a stated method (appetite, reference class, or three-point) and defend the pessimistic end when challenged.",
+  "You have ten written drill records self-scored against a fixed 10-point rubric with a visible upward trend, plus a first-versus-last diff on one repeated prompt."
+ ],
+ "failureModes": [
+  "You start drawing architecture in the first two minutes, the interviewer writes 'proposed before understanding', and the remaining 28 minutes of good work do not overturn it.",
+  "The plan carries no baseline, so 'reduce denials by 20%' is unfalsifiable and the pilot ends in a meeting where the customer and you quote different numbers from different queries.",
+  "Access and security review are a footnote rather than a workstream, so the model sits finished on your laptop for six weeks waiting on a VPC peering approval nobody was chasing.",
+  "The decomposition is layer-by-layer - all ingestion, then all modelling, then all UI - so the first end-to-end result lands in week six and reveals the join key is not unique.",
+  "Every workstream is a single-point estimate with no range or confidence, so the first slipped date reads as incompetence instead of the uncertainty you had already priced in.",
+  "You accept the customer's stated solution ('we need a dashboard', 'we need a fine-tuned model') as the problem, deliver it exactly to spec, and it goes unused because the real blocker was a disputed definition or an absent decision owner.",
+  "The plan has no cut list, so when the timeline is halved mid-engagement the customer chooses what to drop and drops the evaluation, leaving you unable to prove the thing worked."
+ ],
+ "interviewQuestions": [
+  "A hospital network's COO tells you: 'we want to use AI to reduce patient no-shows.' You have thirty minutes. Go.",
+  "You are four weeks into a ten-week deployment and the customer's security team just confirmed that no hosted model API is reachable from their network. Re-plan out loud: what changes, what gets cut, and what do you tell the sponsor tomorrow morning?",
+  "Size the data-ingestion workstream for a customer you have never worked with before. Give me a number, tell me how you got it, and defend the pessimistic end.",
+  "You have two engineers and eight weeks. Show me the phase plan, then tell me which phases a second engineer actually shortens and which ones they do not.",
+  "How do you decide the very first thing you build in an engagement? Give me an example where the obvious first thing turned out to be wrong.",
+  "What would make you recommend that a customer stop this project? Be specific: which metric, measured on which dataset, in which week.",
+  "The customer's data science team already has a model they say is 92% accurate and they want you to 'just productionise it'. Decompose that."
+ ],
+ "proofOfWork": "Beyond the ten drill write-ups, publish a decomposition kit as a public repo that another engineer could pick up and run in an afternoon: the two-page drill template, the 10-point rubric, a clarification question bank grouped by the six axes with a note on which branch each question opens, and a calibrated reference-class table listing the durations you assigned to environment access, ingestion, eval-set creation, integration and handoff, with the real durations from your own delivered engagements next to them and the multiplier between the two. Include all ten completed drills as filled-in instances of the template with the honest self-scores visible, plus a regrade pass in which drills one through five are re-scored against the final rubric and the diff is written up in a short 'what I was systematically wrong about' note. Anchor it with one unedited 30-minute video of a drill run against a live opponent who injects a curveball at minute 18 - timeline halved or production data revoked - showing the timer, the board artifacts and you changing the plan out loud, plus the write-up produced within ten minutes of the recording ending. The kit proves the process is repeatable and calibrated, not that a single plan happened to be good."
+}

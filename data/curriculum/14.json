@@ -1,0 +1,226 @@
+{
+ "i": 14,
+ "topic": "AWS data: RDS Postgres, S3, ElastiCache, DynamoDB",
+ "track": "C. Cloud and IaC",
+ "month": 2,
+ "hours": 7.0,
+ "why": "Almost every FDE engagement ends with the customer's data living in one of these four services, on the customer's AWS account, under the customer's compliance rules. The FDE is the person on the call when the CFO asks whether the deleted orders table from Tuesday can come back, when the app team says the cache 'lost data' after a failover, or when the AWS bill for a pilot triples because a lifecycle rule pushed ten million tiny objects into Glacier. Being able to restore a database within a measured RTO, lock down a bucket so the security review passes first time, and say with evidence whether a workload belongs in DynamoDB or Postgres is what lets you be trusted with production in week one instead of month three.",
+ "prerequisites": [
+  "Topic 12 (Terraform): providers, state, plan/apply, lifecycle blocks, import, and why ForceNew attributes destroy resources; every hands-on step here is done through Terraform.",
+  "Topic 13 (AWS networking and compute): VPC, private vs public subnets, security groups referencing other security groups, route tables (for gateway endpoints), and the AWS CLI configured with a profile.",
+  "Working Postgres: psql, roles, CREATE EXTENSION, pg_stat_statements, what WAL is and why replication lag exists; Topic 29 goes deeper, but the basics are assumed now.",
+  "IAM policy reading ability: Effect/Action/Resource/Condition, the difference between an identity policy and a resource policy, and that an explicit Deny wins; Topic 15 formalises this, so at minimum read the IAM policy evaluation logic page first.",
+  "Shell and jq fluency from Topic 0 so that aws ... --query and --output json become a scripting substrate rather than something you click through in the console.",
+  "An AWS account you can spend roughly 15-25 USD in for a week of db.t4g.medium Multi-AZ time, snapshots and a few GB of S3; set a billing alarm at 30 USD before starting."
+ ],
+ "subtopics": [
+  {
+   "name": "RDS anatomy: instance classes, gp3 vs io2, subnet groups, security groups",
+   "learn": "Know what an RDS instance actually is: an EC2-class VM (db.t4g burstable with CPU credits, db.m memory-balanced, db.r memory-optimised; the g suffix means Graviton) plus an EBS volume you cannot see. For gp3 on PostgreSQL the baseline is 3,000 IOPS and 125 MiB/s under 400 GiB and 12,000 IOPS / 500 MiB/s at 400 GiB and above, so a 100 GiB volume that needs 10,000 IOPS must be resized or moved to io2. Understand storage autoscaling (max_allocated_storage triggers when free space is under 10% for five minutes, then grows by the larger of 10% or 5 GiB with a six-hour cooldown) and the storage-full status that makes the instance unavailable. Place the instance with a DB subnet group spanning at least two AZs of private subnets, a security group that allows 5432 only from the application security group, and publicly_accessible=false; confirm the endpoint resolves to a private IP with dig.",
+   "minutes": 20,
+   "resource": {
+    "label": "RDS User Guide: DB instance storage",
+    "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/CHAP_Storage.html"
+   }
+  },
+  {
+   "name": "Multi-AZ instance vs Multi-AZ DB cluster vs read replicas, and a forced failover",
+   "learn": "Distinguish the three: a Multi-AZ instance has one synchronous standby that never serves reads and fails over in roughly 60-120 seconds by swapping the CNAME behind the same endpoint hostname; a Multi-AZ DB cluster has one writer plus two semi-synchronous readable standbys, a separate reader endpoint and typically sub-35-second failover; a read replica is asynchronous streaming replication (watch ReplicaLag) that you can promote but that does not fail over automatically. Run aws rds reboot-db-instance --force-failover on your test instance while a psql loop with \\watch 1 is running, and time how long connections fail. Then explain why the endpoint's CNAME TTL is only a few seconds and why a JVM with a cached DNS answer (networkaddress.cache.ttl) or a pooled connection with no keepalive keeps failing long after AWS says the failover finished. Know that Multi-AZ replication traffic is not billed but cross-AZ traffic from your app to the DB is.",
+   "minutes": 25,
+   "resource": {
+    "label": "RDS User Guide: Multi-AZ deployments",
+    "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.MultiAZ.html"
+   }
+  },
+  {
+   "name": "Backups: automated backups, 5-minute log shipping, snapshots, sharing and copying",
+   "learn": "Understand that automated backups are a daily storage-level snapshot taken in the backup window plus transaction logs uploaded to S3 every five minutes, which is why the RPO of a point-in-time restore is up to five minutes; check the exact number with aws rds describe-db-instances --query 'DBInstances[0].LatestRestorableTime'. Retention is 0-35 days and setting it to 0 deletes all existing automated backups immediately, a change that has been made 'to save money' in real accounts. Manual snapshots persist until deleted and are incremental after the first; backup storage is free up to 100% of the provisioned storage in the region and billed per GB-month beyond that. Know the KMS constraint: a snapshot encrypted with the AWS-managed aws/rds key cannot be shared with another account, so cross-account DR requires a customer-managed key from day one, and cross-region copies re-encrypt with a key in the destination region.",
+   "minutes": 20,
+   "resource": {
+    "label": "RDS User Guide: Introduction to backups",
+    "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithAutomatedBackups.html"
+   }
+  },
+  {
+   "name": "The restore drill: point-in-time restore, repoint, measure RTO and RPO",
+   "learn": "Run the whole drill from the CLI and time every step. Seed the instance with pgbench -i -s 300 (about 4.5 GB), insert a marker row with now(), then drop pgbench_accounts and record the wall-clock time. Restore with aws rds restore-db-instance-to-point-in-time --source-db-instance-identifier X --target-db-instance-identifier X-pitr --restore-time <30 s before the drop>, passing --db-subnet-group-name, --vpc-security-group-ids and --db-parameter-group-name explicitly because a restore otherwise lands in the default parameter group and default security group, which is the classic reason the app cannot connect to the 'successful' restore. Time aws rds wait db-instance-available, then time the first SELECT count(*): restored EBS volumes lazy-load blocks from S3, so the first pass is slow and pg_prewarm or a full-table read is part of RTO. Finish by renaming: aws rds modify-db-instance --new-db-instance-identifier on the old instance first, then on the restored one, so the original endpoint hostname is preserved and the app needs no config change. Write down RTO (drop to app healthy) and RPO (marker row present or not) and what dominated each.",
+   "minutes": 40,
+   "resource": {
+    "label": "RDS User Guide: Restoring a DB instance to a specified time",
+    "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PIT.html"
+   }
+  },
+  {
+   "name": "Postgres on RDS: rds_superuser, parameter groups, extensions and logs",
+   "learn": "Know what you lose without real superuser: rds_superuser cannot read pg_hba.conf, cannot install unlisted extensions, and cannot write to the filesystem, so shared_preload_libraries (pg_stat_statements, auto_explain, pg_cron) is set in a custom parameter group rather than postgresql.conf. Understand static versus dynamic parameters: static ones show as pending-reboot in describe-db-parameters and only take effect after aws rds reboot-db-instance, and a modified parameter group attached to an instance is not applied until that reboot. Set log_min_duration_statement, log_connections and log_lock_waits, then ship logs with --cloudwatch-logs-export-configuration '{\"EnableLogTypes\":[\"postgresql\",\"upgrade\"]}' and read them with aws logs tail. Know rds.force_ssl=1 is the default on PostgreSQL 15+, rds.logical_replication=1 is required for Debezium or DMS and needs a reboot, and that rds.allowed_extensions and rds.restrict_password_commands exist for locked-down customers.",
+   "minutes": 25,
+   "resource": {
+    "label": "RDS User Guide: Working with parameters on RDS for PostgreSQL",
+    "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Appendix.PostgreSQL.CommonDBATasks.Parameters.html"
+   }
+  },
+  {
+   "name": "Connections: max_connections, RDS Proxy pinning, IAM auth tokens, Secrets Manager",
+   "learn": "Compute the default max_connections from LEAST({DBInstanceClassMemory/9531392},5000): a 1 GiB db.t4g.micro gets about 112, a 4 GiB db.t4g.medium about 450, and 30 Kubernetes pods with a pool of 20 each will exhaust that. Know when RDS Proxy is the answer (Lambda, serverless bursts, many short-lived clients) and what defeats its multiplexing: SET session variables, temp tables, advisory locks, LISTEN and some prepared-statement flows pin the client to a backend connection, visible in the DatabaseConnectionsCurrentlySessionPinned metric. For IAM database authentication, GRANT rds_iam TO app_user, generate a token with aws rds generate-db-auth-token, understand it is valid for 15 minutes and that the service caps roughly 200 new IAM-auth connections per second, so it belongs behind a pool or proxy. Prefer manage_master_user_password (Secrets Manager) over a password in state, and read the secret with aws secretsmanager get-secret-value to see the JSON shape the app must parse.",
+   "minutes": 25,
+   "resource": {
+    "label": "RDS User Guide: Amazon RDS Proxy",
+    "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy.html"
+   }
+  },
+  {
+   "name": "RDS observability: Database Insights wait events, Enhanced Monitoring, the alarms that matter",
+   "learn": "Use Performance Insights (now surfaced as CloudWatch Database Insights) to read DB load in average active sessions, split by wait event: IO:DataFileRead means you are disk-bound, Lock:transactionid means row lock contention, LWLock:buffer_content or CPU means a query problem; the top-SQL view maps load back to statements, and seven days of retention is free. Turn on Enhanced Monitoring (monitoring_interval 1-60 s, needs monitoring_role_arn) to get real OS metrics into the RDSOSMetrics log group; CloudWatch CPUUtilization comes from the hypervisor and hides steal and iowait. Alarm on FreeStorageSpace, DatabaseConnections against max_connections, ReplicaLag, DiskQueueDepth, SwapUsage, BurstBalance if anyone still runs gp2, and the two Postgres-specific ones people forget: MaximumUsedTransactionIDs (wraparound) and TransactionLogsDiskUsage plus OldestReplicationSlotLag, which grow when an abandoned logical replication slot pins WAL until the volume fills.",
+   "minutes": 20,
+   "resource": {
+    "label": "RDS User Guide: Monitoring DB load with CloudWatch Database Insights",
+    "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PerfInsights.html"
+   }
+  },
+  {
+   "name": "RDS in Terraform: the aws_db_instance attributes that destroy data or wait for a window",
+   "learn": "Write aws_db_instance with engine=\"postgres\", instance_class, storage_type=\"gp3\", allocated_storage plus max_allocated_storage, storage_encrypted=true with kms_key_id, multi_az=true, db_subnet_group_name, vpc_security_group_ids, parameter_group_name from an aws_db_parameter_group (family \"postgres16\", static params with apply_method=\"pending-reboot\"), manage_master_user_password=true, backup_retention_period, backup_window, maintenance_window, deletion_protection=true, skip_final_snapshot=false with final_snapshot_identifier, copy_tags_to_snapshot, performance_insights_enabled, monitoring_interval, enabled_cloudwatch_logs_exports, iam_database_authentication_enabled and ca_cert_identifier. Learn from the plan which changes are ForceNew (identifier, engine, encryption toggle, kms_key_id) versus modify-in-place, and that with apply_immediately=false (the default) Terraform returns while RDS queues the change for the maintenance window. Use snapshot_identifier or the restore_to_point_in_time block to create from backups, then lifecycle { ignore_changes = [snapshot_identifier, restore_to_point_in_time] } so the next plan does not want to rebuild; pin engine_version only to the major version if auto_minor_version_upgrade is on. Practise terraform import of an instance created by a manual restore and reconciling the config until plan is clean.",
+   "minutes": 30,
+   "resource": {
+    "label": "Terraform AWS provider: aws_db_instance",
+    "url": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/db_instance"
+   }
+  },
+  {
+   "name": "S3 data model: consistency, per-prefix request limits, multipart, checksums, conditional writes",
+   "learn": "Internalise that S3 is a flat key space with strong read-after-write consistency for PUT, DELETE and LIST since 2020, so 'eventual consistency' explanations from older material are wrong. Know the scaling unit: about 3,500 PUT/COPY/POST/DELETE and 5,500 GET/HEAD per second per partitioned prefix, that 503 SlowDown means back off exponentially and spread keys across prefixes, and that S3 partitions prefixes over time rather than instantly. Use multipart upload for anything over 100 MB (mandatory over 5 GB single PUT; parts 5 MiB-5 GiB, up to 10,000 parts) and understand that abandoned parts are billed until a lifecycle AbortIncompleteMultipartUpload rule removes them. Do not treat ETag as MD5 (it is not for multipart or SSE-KMS objects); request x-amz-checksum-sha256 or CRC32C/CRC64NVME and verify with head-object --checksum-mode ENABLED. Use conditional writes, If-None-Match: * on PutObject for create-if-absent and If-Match with an ETag for optimistic concurrency, and handle the 412 PreconditionFailed.",
+   "minutes": 25,
+   "resource": {
+    "label": "S3 User Guide: Optimizing S3 performance",
+    "url": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html"
+   }
+  },
+  {
+   "name": "S3 encryption: SSE-S3 vs SSE-KMS, Bucket Keys, KMS key policies, enforce TLS and encryption",
+   "learn": "Know that every new object is SSE-S3 encrypted by default since 2023, so 'is it encrypted' is the wrong question; the customer question is who controls the key and who can be denied. With SSE-KMS and a customer-managed key, every PUT and GET calls KMS (GenerateDataKey and Decrypt), which costs per request and counts against the regional KMS quota (as low as 5,500 requests per second), so a bulk load can throttle; enable S3 Bucket Keys (bucket_key_enabled in Terraform) to cut KMS calls by up to 99%. Understand that a cross-account or cross-role AccessDenied on GetObject is frequently the KMS key policy, not the bucket policy: the principal needs kms:Decrypt in the key policy or via a grant, and for cross-account both the key policy and the caller's IAM policy must allow it. Write the two standard bucket-policy statements, Deny s3:* when aws:SecureTransport is false, and Deny s3:PutObject unless s3:x-amz-server-side-encryption equals aws:kms with your key ARN in s3:x-amz-server-side-encryption-aws-kms-key-id, then prove them with aws s3api put-object calls that return 403. Know SSE-C and DSSE-KMS exist and when a regulator asks for them.",
+   "minutes": 25,
+   "resource": {
+    "label": "S3 User Guide: Using server-side encryption with AWS KMS keys (SSE-KMS)",
+    "url": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingKMSEncryption.html"
+   }
+  },
+  {
+   "name": "S3 lifecycle, versioning, storage classes and Object Lock: the rules and what they cost",
+   "learn": "Write a lifecycle configuration with Filter (Prefix, Tag, ObjectSizeGreaterThan), Transition, Expiration with ExpiredObjectDeleteMarker, NoncurrentVersionTransition and NoncurrentVersionExpiration with NewerNoncurrentVersions, and AbortIncompleteMultipartUpload; in Terraform this is the separate aws_s3_bucket_lifecycle_configuration resource. Know the storage-class economics that turn 'archive it' into a bill increase: Standard-IA and One Zone-IA have a 30-day minimum and a 128 KB minimum billable size plus per-GB retrieval fees, Glacier Instant and Flexible have 90-day minimums, Deep Archive 180 days, each transition is a per-1,000-request charge, and Glacier classes add roughly 40 KB of metadata per object, so millions of 10 KB objects cost more in Glacier than in Standard. Intelligent-Tiering charges a per-object monitoring fee but no retrieval fee, which is the right default when access patterns are unknown. Understand versioning (delete creates a delete marker, noncurrent versions are billed) and Object Lock (requires versioning; Governance can be bypassed with s3:BypassGovernanceRetention, Compliance cannot be shortened by anyone including root), and that lifecycle actions run asynchronously about once a day while billing changes on the scheduled date.",
+   "minutes": 25,
+   "resource": {
+    "label": "S3 User Guide: Managing the lifecycle of objects",
+    "url": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lifecycle-mgmt.html"
+   }
+  },
+  {
+   "name": "S3 access control: Block Public Access, policy evaluation, ACLs off, gateway endpoints",
+   "learn": "Know the four Block Public Access settings, that they are on by default at bucket creation since 2023 and should also be on at the account level, and that BucketOwnerEnforced (ACLs disabled) is now the default so cross-account writers no longer produce objects the bucket owner cannot read. Work through the evaluation order for a same-account request (union of identity and bucket policy, explicit Deny wins) versus cross-account (both sides must allow) and use conditions that customers' security teams expect: aws:PrincipalOrgID, aws:SourceVpce, s3:prefix on ListBucket, and aws:SourceArn on service principals. Create a gateway VPC endpoint for S3 (and one for DynamoDB) so private-subnet workloads do not pay NAT gateway per-GB charges, verify with the route table entry and a traceroute-free check of aws s3 ls working with the NAT detached, then restrict the bucket to that endpoint. Know S3 Access Points for giving each application its own policy on a shared bucket.",
+   "minutes": 20,
+   "resource": {
+    "label": "S3 User Guide: Blocking public access to your S3 storage",
+    "url": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html"
+   }
+  },
+  {
+   "name": "Presigned URLs and direct-to-S3 uploads from a customer's browser or agent",
+   "learn": "Generate SigV4 presigned GET and PUT URLs from the SDK and understand what is actually signed: the method, key, expiry and any headers you include, so a presigned PUT only constrains Content-Type or x-amz-server-side-encryption if you signed them. Know the expiry rules that break in production: up to seven days with long-lived IAM user credentials, but a URL signed with role session credentials (an EKS pod via IRSA, a Lambda) dies when the session does, typically within an hour, regardless of the ExpiresIn you asked for. Configure the bucket CORS rules a browser upload needs (AllowedMethods PUT, ExposeHeaders ETag) and use multipart presigned uploads for large files. Decide when a presigned URL is the right pattern (large files, offloading bandwidth) and when a proxy through your API is better (per-user authorisation, virus scanning, audit).",
+   "minutes": 15,
+   "resource": {
+    "label": "S3 User Guide: Sharing objects with presigned URLs",
+    "url": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ShareObjectPreSignedURL.html"
+   }
+  },
+  {
+   "name": "ElastiCache topology: Valkey/Redis OSS vs Memcached, cluster mode, replication groups, failover",
+   "learn": "Choose the engine deliberately: Valkey is the priced-down successor to Redis OSS with the same protocol, Memcached is multi-threaded but has no replication or persistence, and ElastiCache Serverless trades per-node control for pay-per-GB-hour and ECPU. Understand cluster mode disabled (one shard, up to five replicas, a primary endpoint that moves on failover and a reader endpoint) versus cluster mode enabled (data sharded across slots, a configuration endpoint, MOVED redirects, multi-key commands only work when keys share a hash tag like {tenant42}:..., and the client library must be cluster-aware). Enable Multi-AZ with automatic failover and know what it promises: the primary DNS flips to a promoted replica within tens of seconds, but replication is asynchronous, so the last writes before the failure are gone; this is why a cache is not a datastore. Turn on in-transit TLS and AUTH or RBAC users, and test a failover with aws elasticache test-failover while a client loop runs, watching for connection resets and how long your client's retry policy takes to follow the new primary.",
+   "minutes": 25,
+   "resource": {
+    "label": "ElastiCache User Guide: Cluster Mode Disabled vs Enabled",
+    "url": "https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Replication.Redis-RedisCluster.html"
+   }
+  },
+  {
+   "name": "ElastiCache memory, eviction and the metrics that predict an outage",
+   "learn": "Size a node as dataset plus replication buffer plus reserved-memory-percent (default 25%, needed for BGSAVE forks and sync), and set maxmemory-policy on purpose: allkeys-lru for a pure cache, volatile-lru or volatile-ttl when some keys must never be evicted, noeviction when the app must fail loudly rather than lose queue entries. Watch EngineCPUUtilization rather than CPUUtilization because the engine is single-threaded and 90% on one core is saturation while the node reports 25%; alarm on DatabaseMemoryUsagePercentage, Evictions (any sustained non-zero on a cache that assumed a hit rate), CurrConnections and NewConnections (a client without pooling will exhaust maxclients), ReplicationLag and SwapUsage. Learn the workload anti-patterns you will find in customer code: KEYS * in production (use SCAN), big values over 100 KB, hot keys hammering one shard, and TTL-less keys in a 'cache' that never shrinks; and the two caching disciplines from Topic 31 that matter here, TTL jitter and stampede locks with SET NX PX.",
+   "minutes": 20,
+   "resource": {
+    "label": "ElastiCache User Guide: Which metrics should I monitor?",
+    "url": "https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/CacheMetrics.WhichShouldIMonitor.html"
+   }
+  },
+  {
+   "name": "DynamoDB partitions and capacity: RCU/WCU maths, on-demand vs provisioned, hot partitions",
+   "learn": "Understand the physical model that drives every DynamoDB failure: items (max 400 KB) are hashed by partition key onto partitions that each hold at most 10 GB and serve at most 3,000 RCU and 1,000 WCU, no matter what the table is provisioned for. Do the arithmetic: one RCU is one strongly consistent 4 KB read per second (eventually consistent reads cost half, transactional reads double), one WCU is one 1 KB write (transactional double), and a 12 KB item read strongly consistently is 3 RCU. Know how on-demand really scales: instantly up to twice the previous peak, throttling beyond that until it adapts, with new tables starting around 4,000 WCU / 12,000 RCU, which is why a 3 a.m. batch job on an idle table throttles; pre-warm with warm throughput or switch to provisioned with auto scaling for predictable loads, remembering scale-in is rate-limited. Recognise a hot partition from ThrottledRequests and ProvisionedThroughputExceededException while ConsumedCapacity is far below provisioned, and fix it with write sharding (key suffix 0-N), a better key, or by moving the hot tenant, not by paying for more capacity.",
+   "minutes": 30,
+   "resource": {
+    "label": "DynamoDB Developer Guide: Read/write capacity mode",
+    "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/capacity-mode.html"
+   }
+  },
+  {
+   "name": "DynamoDB access patterns: Query vs Scan, GSI vs LSI, single-table design, conditions and transactions",
+   "learn": "Start from the access-pattern list, never the entity list: every read must be a GetItem or a Query on a partition key with an optional sort-key condition (=, BETWEEN, begins_with), paginated by LastEvaluatedKey in 1 MB pages; a Scan reads the whole table, consumes RCU for filtered-out items, and is a design failure outside admin jobs or parallel exports with Segment/TotalSegments. Model with generic PK and SK attributes and overloaded GSIs (GSI1PK/GSI1SK) so one table answers many patterns; know that a GSI has its own capacity and is eventually consistent, that a throttled GSI throttles writes to the base table, and that an LSI shares the partition key, must exist at creation and caps an item collection at 10 GB. Use sparse indexes for 'find all pending' patterns. Get idempotency and invariants from ConditionExpression (attribute_not_exists(PK) for create-once, a version attribute for optimistic locking, catch ConditionalCheckFailedException) and from TransactWriteItems (up to 100 items, 4 MB, ClientRequestToken for idempotent retries) rather than from application-side checks.",
+   "minutes": 25,
+   "resource": {
+    "label": "DynamoDB Developer Guide: NoSQL design for DynamoDB",
+    "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-general-nosql-design.html"
+   }
+  },
+  {
+   "name": "DynamoDB durability and change: Streams, TTL, point-in-time recovery and what a restore forgets",
+   "learn": "Enable PITR (35-day window) and restore to a new table with aws dynamodb restore-table-to-point-in-time, then check what did not come back: auto scaling policies, IAM policies referencing the old table ARN, CloudWatch alarms, tags, TTL settings, stream settings and PITR itself all have to be reapplied, so the runbook is Terraform plus a rename dance, not one command. Use DynamoDB Streams (NEW_AND_OLD_IMAGES, 24-hour retention, ordered per item, consumed by Lambda or Kinesis) for change data capture and outbox patterns. Set TTL on an epoch-seconds attribute and understand deletion is asynchronous and can lag by days, so reads must filter expired items; TTL deletes are free and appear in Streams as REMOVE events with a userIdentity of dynamodb.amazonaws.com. Know on-demand backups and global tables exist and that global tables resolve conflicts with last-writer-wins.",
+   "minutes": 15,
+   "resource": {
+    "label": "DynamoDB Developer Guide: Point-in-time recovery",
+    "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/PointInTimeRecovery_Howitworks.html"
+   }
+  },
+  {
+   "name": "Decision framework and cost mechanics: DynamoDB vs Postgres vs ElastiCache for a customer workload",
+   "learn": "Be able to run the decision in a customer meeting. DynamoDB wins when the access patterns are few, known up front and key-based, when the scale or burstiness would require sharding Postgres, when the team wants zero database operations, and when items are small; it loses when the customer needs ad hoc queries, joins, aggregates, reporting, constraints, or has a SQL-literate team that will own the system after you leave, and it punishes late-discovered access patterns with GSI backfills. Compare the cost shapes with real numbers: RDS bills instance-hours and storage whether or not anyone is querying (a Multi-AZ db.r6g.large is roughly 400-500 USD a month before storage and backups), DynamoDB bills per request and per GB-month and can be nearly free at low volume but expensive for scan-heavy analytics, and ElastiCache is a per-node cost that only makes sense when it removes a larger database or latency cost. Write a one-page recommendation for a given workload that states the access patterns, the estimated monthly cost of each option, the operational owner, and the migration cost if the choice is wrong.",
+   "minutes": 30,
+   "resource": {
+    "label": "AWS Decision Guides: Choosing an AWS database service",
+    "url": "https://docs.aws.amazon.com/decision-guides/latest/decision-guides/databases-on-aws-how-to-choose.html"
+   }
+  },
+  {
+   "name": "Maintenance and upgrades: windows, pending changes, major versions, blue/green, CA rotation",
+   "learn": "Know what happens in the 30-minute weekly maintenance window (OS patches, minor engine upgrades if auto_minor_version_upgrade is on, queued modifications) and how to see pending work with describe-pending-maintenance-actions and the PendingModifiedValues field. For major PostgreSQL upgrades understand the in-place path: a pre-upgrade snapshot, pg_upgrade with minutes to tens of minutes of downtime, read replicas upgraded alongside, extensions needing ALTER EXTENSION ... UPDATE, and statistics not carried over so ANALYZE is mandatory before declaring success. Compare with RDS Blue/Green Deployments, which build a logically replicated green environment you can test and then switch over in under a minute with guardrails; rehearse whichever path you recommend on a restored snapshot first. Track certificate authority rotation: the rds-ca-2019 CA expired in 2024 and instances now use rds-ca-rsa2048-g1 or the ECC/4096 variants, so a client that pins a CA bundle must update it before you change ca_cert_identifier. Subscribe to RDS events via SNS so failovers, storage-full and maintenance land in the customer's Slack.",
+   "minutes": 20,
+   "resource": {
+    "label": "RDS User Guide: Maintaining a DB instance",
+    "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_UpgradeDBInstance.Maintenance.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can perform a point-in-time restore of a Multi-AZ RDS Postgres instance from the CLI, repoint the application without a config change by renaming instances, and report a measured RTO and RPO with timestamps for a roughly 5 GB database, in under 45 minutes end to end.",
+  "You can force a Multi-AZ failover with reboot-db-instance --force-failover while a client loop runs, state to the second how long connections failed, and explain which client-side settings (DNS caching, pool validation, keepalives) would have extended the outage.",
+  "You can write a Terraform module for RDS Postgres with encryption, deletion protection, final snapshot, Secrets Manager password, a custom parameter group and log exports, and predict from terraform plan which attribute changes replace the instance, which apply in place, and which wait for the maintenance window.",
+  "You can produce an S3 bucket policy that denies non-TLS and unencrypted writes, a lifecycle configuration that transitions noncurrent versions and aborts incomplete multipart uploads, and a written estimate of the monthly bill change for 10 million 50 KB objects under that policy.",
+  "You can take a list of eight access patterns and produce a DynamoDB single-table key schema with GSIs, an RCU/WCU and monthly cost estimate, and a list of which patterns would still require a Scan and what that implies.",
+  "You can diagnose a DynamoDB throttling incident or an ElastiCache Evictions spike from CloudWatch metrics alone, name the mechanism (hot partition, on-demand ceiling, memory pressure, missing TTL) and propose the fix ranked by effort.",
+  "You can explain to a customer architect in five minutes, using their workload, whether it belongs in DynamoDB, Postgres or a cache, including cost shape and who operates it after you leave."
+ ],
+ "failureModes": [
+  "The 'tested' backup has never been restored: the first real PITR comes up in the default parameter group and default security group, the app cannot connect, pg_stat_statements is missing, and a promised 15-minute RTO becomes two hours of a customer watching you read documentation.",
+  "skip_final_snapshot = true is left in the Terraform module from dev; months later someone renames the identifier or toggles encryption, the plan shows a replace nobody reads carefully, and the production database is destroyed with no snapshot.",
+  "A Debezium or DMS task is decommissioned but its logical replication slot is not dropped; WAL is retained, TransactionLogsDiskUsage climbs for weeks, storage autoscaling masks it until max_allocated_storage is hit, and the instance goes storage-full at 2 a.m.",
+  "After a Multi-AZ failover AWS reports 90 seconds of downtime but the application errors for nine minutes because the JVM cached the old DNS answer and the connection pool kept handing out dead sockets; the incident is blamed on RDS.",
+  "An SSE-KMS bucket with no Bucket Key takes a bulk backfill of small objects; every PUT calls KMS, the account hits the regional KMS request quota, the loader sees throttling it interprets as S3 flakiness, and the KMS line item is larger than the S3 storage line.",
+  "A lifecycle rule moves 40 million 8 KB log fragments to Glacier Flexible Retrieval to save money; transition requests, 40 KB per-object overhead and 90-day minimums make the month more expensive than Standard, and the objects the team then deletes are charged for the full minimum anyway.",
+  "A multi-tenant DynamoDB table uses tenant_id as the partition key; one tenant is 60% of traffic, the partition caps at 1,000 WCU regardless of on-demand mode, the SDK's retries hide the throttling as p99 latency, and the customer concludes DynamoDB 'does not scale'."
+ ],
+ "interviewQuestions": [
+  "A customer's RDS Postgres orders table was dropped by a bad migration at 14:07 UTC and they noticed at 15:30. Walk me through exactly what you do, in order, what you tell them about RPO before you start, how long it takes on a 500 GB Multi-AZ instance and why, and what the application team must do on their side.",
+  "Our Multi-AZ RDS instance failed over last night. AWS's event log shows 75 seconds of failover, but the application had errors for nine minutes. Give me the likely causes, how you would confirm each one, and what you would change so the next failover is invisible.",
+  "Design the storage layer for a document-processing pipeline: customers upload files from 1 KB to 2 GB, we extract text and embeddings, users query results, and everything for a customer must be provably deleted 90 days after they leave. Which of RDS, S3, DynamoDB and ElastiCache holds what, where do the keys live, and how do you prove deletion to an auditor?",
+  "A customer wants to migrate a 2 TB Postgres orders database to DynamoDB 'for scale'. What are the first five questions you ask, what answers would make you agree, and what answers would make you decline the work?",
+  "The S3 bill for a pilot went up four times month over month with no change in stored bytes. Give me your investigation order, the three most likely causes, and the CloudWatch or Cost Explorer evidence that would confirm each.",
+  "Compare a Multi-AZ instance, a Multi-AZ DB cluster and a read replica on replication mode, failover time, whether the standby serves reads, and cost. A customer with a read-heavy reporting workload and a 99.95% availability target asks which to buy; what do you recommend and what do you warn them about?",
+  "A DynamoDB on-demand table throttles at 3 a.m. during a nightly batch job even though on-demand 'scales automatically'. Explain the mechanism, then give three fixes ranked from least to most effort, and say which one you would ship this week."
+ ],
+ "proofOfWork": "A public repository named aws-data-restore-drill that extends the plan's Terraform-plus-RTO deliverable into a repeatable, evidence-backed exercise. It contains a Terraform module that stands up a Multi-AZ RDS Postgres instance on gp3 with a customer-managed KMS key, deletion protection, a Secrets Manager-managed password, a custom parameter group loading pg_stat_statements and auto_explain, log exports to CloudWatch, Enhanced Monitoring and the alarms from the observability subtopic, alongside an S3 bucket module with Bucket Keys, the deny-non-TLS and deny-unencrypted policies, a lifecycle configuration with noncurrent-version expiry and multipart abort, and gateway endpoints for S3 and DynamoDB. A drill.sh seeds the database with pgbench, inserts a timestamped marker row, drops a table, performs a point-in-time restore via the CLI with the correct parameter and security groups, waits for availability, measures first-query lazy-load latency, renames instances so the endpoint is unchanged, verifies the marker row, and appends a line to RTO_LOG.md with every timestamp; the log shows at least three runs with RTO and RPO and a paragraph on what dominated each. A failover.py drives reboot --force-failover and records, per second, connection success from a pooled psycopg client with and without DNS caching disabled, plotted into a PNG. A policy_tests.sh proves each S3 deny statement with aws s3api calls that return 403 and one that succeeds. Finally, a dynamodb/ directory holds a single-table model for a sample multi-tenant workload with eight access patterns, a Terraform aws_dynamodb_table with two GSIs, a small load generator that reproduces a hot-partition throttle on tenant_id and then eliminates it with write sharding, screenshots of the ThrottledRequests metric before and after, and a one-page DECISION.md recommending DynamoDB or Postgres for that workload with a monthly cost estimate for each."
+}

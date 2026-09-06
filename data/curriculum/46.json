@@ -1,0 +1,218 @@
+{
+ "i": 46,
+ "topic": "Prompt engineering as code: versioning, regression sets, structured outputs",
+ "track": "G. AI Engineering",
+ "month": 6,
+ "hours": 6,
+ "why": "An FDE ships prompts into a customer's production path - a classifier that writes into their CRM, an extractor that feeds their claims queue - and then changes them weekly as the customer discovers edge cases; without version control, a pinned model snapshot and a regression set that runs before merge, every improvement is an uncontrolled experiment on the customer's data. The failure you are preventing has no stack trace: a prompt edit that fixes the one document the customer complained about and silently degrades the other nine hundred, discovered a fortnight later in their monthly report. Treating prompts as code - files in Git, a changelog, typed outputs behind schemas, and a CI gate with a committed baseline - is what lets you say 'this change moved recall from 0.91 to 0.94 across 240 labelled cases, here is the diff and here is what it cost' instead of 'it seems better now'.",
+ "prerequisites": [
+  "Production Python structure from 'Production Python architecture' (topic 25) and the pytest muscle from 'Testing and contracts' (topic 35): fixtures, conftest.py, parametrize, markers, and the habit of asserting on typed objects rather than strings.",
+  "LLM mechanics from 'LLM fundamentals' (topic 45): tokenisation and why token counts drive cost, sampling parameters (temperature, top_p, top_k), context windows, and why the same input at temperature 0 can still produce different output.",
+  "Git at depth from topic 4: reading a diff properly, git log -p on a path, git bisect, and branch/PR review discipline - you will bisect a prompt regression across a dozen commits and it only works if prompts are files.",
+  "CI/CD from topic 18: GitHub Actions workflow syntax, path filters, repository secrets, required status checks, artifacts and job-level concurrency.",
+  "Working API access to at least Anthropic (and ideally OpenAI for contrast), the SDK installed, and the rate-limit behaviour from 'LLM-era system design' (topic 43): RPM/ITPM/OTPM buckets, 429 with retry-after, exponential backoff with jitter.",
+  "An inventory of DefenderMate's current LLM call sites: every prompt that exists today, what each is supposed to return, and which table or field consumes it (the multi-tenant schema from topic 30 - llm_calls, tool_calls, audit_log)."
+ ],
+ "subtopics": [
+  {
+   "name": "Prompt files as versioned artifacts, not string literals",
+   "learn": "Move every prompt out of application source into prompts/<id>/v<N>.md with YAML front-matter carrying id, version, model snapshot, max_tokens, temperature, declared variables, output schema reference and owner. The loader resolves by (id, version), renders, and computes a SHA-256 of the rendered text; that hash - not the text - is what you log on every call. Choose a version bump rule and write it down: MAJOR when the output contract changes (a field removed, renamed or retyped), MINOR when behaviour changes but the contract holds, PATCH for wording. Never edit a released version in place - add v(N+1) - because traces, baselines and the customer's audit log all reference a version that must stay resolvable forever.",
+   "minutes": 20,
+   "resource": {
+    "label": "Semantic Versioning 2.0.0 specification",
+    "url": "https://semver.org/"
+   }
+  },
+  {
+   "name": "Templating: strict rendering and the data/instruction boundary",
+   "learn": "Render with Jinja2 using Environment(undefined=StrictUndefined) so a missing or misspelled variable raises at render time instead of silently producing an empty slot - that silent empty slot is the single most common cause of 'the model suddenly got confused'. Never use str.format or f-strings on text that contains JSON braces or the customer's own curly braces. Wrap every injected value in explicit delimiters (<document>...</document>, <tenant_taxonomy>...</tenant_taxonomy>) and strip or escape the closing delimiter out of the value so customer content cannot close your tag and start issuing instructions. Snapshot-test the rendered result: a golden file per (prompt version, fixture) so a one-line template change shows up in review as a rendered-text diff, which is what reviewers can actually reason about.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude docs - Use XML tags to structure your prompts",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#structure-prompts-with-xml-tags"
+   }
+  },
+  {
+   "name": "Messages API anatomy: system, turns, prefill, stop_reason",
+   "learn": "Know the request surface cold: POST /v1/messages with model, max_tokens (required, and a truncation risk not a safety net), system as a top-level parameter (string or list of content blocks - there is no role: system message), messages strictly alternating user and assistant, plus temperature, top_p, stop_sequences and metadata.user_id. Force output shape by prefilling: make the final message role assistant with partial content such as '{' or '<analysis>'; the prefill must not end in trailing whitespace or the API rejects it. Branch on stop_reason every single time - end_turn, max_tokens (truncated, never hand it to json.loads), stop_sequence, tool_use, refusal - and persist usage.input_tokens and usage.output_tokens with the trace, because cost regressions are as real as accuracy regressions.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude API reference - Messages",
+    "url": "https://platform.claude.com/docs/en/api/messages"
+   }
+  },
+  {
+   "name": "Structured output by forced tool use",
+   "learn": "Define exactly one tool whose input_schema is your output contract and set tool_choice to {\"type\": \"tool\", \"name\": \"extract_finding\"} so the model must emit it; then read the tool_use content block's input dict rather than parsing prose or stripping markdown fences. Understand why this beats 'reply with JSON only': the schema travels in the request, decoding is steered toward it, and there is no preamble to strip. Understand the costs too - tool definitions are input tokens on every call, forcing a tool removes the model's ability to abstain, so add an explicit no_finding branch or nullable fields rather than letting it fabricate, and forced tool choice interacts badly with extended thinking. Generate input_schema from your Pydantic model so the schema and the parser can never drift apart. Agentic multi-tool orchestration and MCP are topic 47; here the tool is only a typing mechanism.",
+   "minutes": 25,
+   "resource": {
+    "label": "GitHub - anthropics/anthropic-cookbook (tool use and structured extraction recipes)",
+    "url": "https://github.com/anthropics/claude-cookbooks"
+   }
+  },
+  {
+   "name": "Strict JSON Schema modes and the subset they actually enforce",
+   "learn": "With OpenAI's response_format {\"type\": \"json_schema\", \"json_schema\": {\"name\": ..., \"schema\": ..., \"strict\": true}}, constrained decoding guarantees the output parses and matches the shape - but only over a subset of JSON Schema: every object needs \"additionalProperties\": false, every property must appear in required (optionality is expressed as a [\"string\", \"null\"] type union, not by omission), and most value constraints (minimum, maxLength, pattern, format) are not enforced by the decoder. Anthropic's strict output-schema mode carries the same class of restriction. The operating rule: the schema guarantees shape, your validator guarantees meaning. Enum values outside a tenant's taxonomy, dates in the wrong century and confidence scores of 1.7 all still arrive as perfectly valid JSON.",
+   "minutes": 20,
+   "resource": {
+    "label": "OpenAI Platform docs - Structured Outputs",
+    "url": "https://developers.openai.com/api/docs/guides/structured-outputs"
+   }
+  },
+  {
+   "name": "Writing schemas the model reliably obeys",
+   "learn": "Field order is causal: JSON is generated left to right, so {\"reasoning\": ..., \"label\": ...} gives you chain-of-thought before the decision while the reverse commits to a label and then rationalises it. Prefer enums over free strings, flat over deeply nested, and avoid anyOf/oneOf unions and recursive definitions, which degrade both adherence and decoder support. Use field descriptions as instructions (they are read by the model), ISO 8601 strings for dates rather than nested date objects, bounded arrays with maxItems, and only include a confidence field if you have written down what the number means and how you will calibrate it. Then test the schema itself: hand-write or generate 20 valid instances and assert your parser accepts every one before you ever call a model.",
+   "minutes": 20,
+   "resource": {
+    "label": "Understanding JSON Schema (json-schema.org)",
+    "url": "https://json-schema.org/understanding-json-schema/reference"
+   }
+  },
+  {
+   "name": "Validate, repair once, then fail: the parse boundary",
+   "learn": "Every LLM call site returns a typed object or raises - nothing in between reaches the customer's system of record. Use Pydantic v2 model_validate_json for shape and field_validator / model_validator for semantics that no schema can express: end_date >= start_date, label in this tenant's taxonomy, entity IDs that exist in the customer's database. On ValidationError, feed error.errors() back as one repair turn and stop; an unbounded repair loop is a cost incident waiting to happen. Track repair_rate as a first-class metric next to accuracy - a rising repair rate is the earliest signal of prompt or model drift. The caller, not the parser, decides what a hard failure means: fallback model, queue for human review, or 422 to the customer's integration.",
+   "minutes": 20,
+   "resource": {
+    "label": "Pydantic documentation (v2)",
+    "url": "https://pydantic.dev/docs/validation/latest/get-started/"
+   }
+  },
+  {
+   "name": "Determinism controls and model snapshot pinning",
+   "learn": "temperature: 0 is greedy sampling, not determinism - batching, hardware and routing still produce run-to-run variation of roughly one to a few percent on borderline cases, so build for variance instead of pretending it is absent. Pin the dated snapshot string in prompt front-matter (for example claude-sonnet-4-5-20250929) rather than a moving alias, pin the anthropic-version header, set temperature explicitly and leave top_p unset (setting both is discouraged and interacts unpredictably). Make the eval runner record the resolved model id from the response body rather than the one you requested, so an aliased or silently upgraded model shows up in the results file. Treat a model alias in production exactly like :latest on a container image.",
+   "minutes": 15,
+   "resource": {
+    "label": "Claude docs - Models overview (snapshot ids and deprecations)",
+    "url": "https://platform.claude.com/docs/en/models/overview"
+   }
+  },
+  {
+   "name": "Building the regression set: case format, stratification, provenance",
+   "learn": "One JSONL file, one case per line: {id, inputs{}, expected{}, tags[], source, added_at, notes}. Populate from three streams and no others: every production failure the customer has ever reported, converted into a case on the day it is reported; a stratified sample across tenant, document type, language and length so no single slice dominates; and deliberately degenerate inputs (empty document, 200-page document, wrong language, PII-dense, an embedded instruction telling the model to ignore its instructions). A sharp 120-case set beats a vague 1,000-case one. Scrub before committing - real customer text in a fixtures directory is a data-handling problem, so redact, synthesise, or keep fixtures in a separate private store referenced by hash. The source field is what lets you answer 'which incident produced this test' a year later.",
+   "minutes": 25,
+   "resource": {
+    "label": "GitHub - openai/evals (eval registry and JSONL case format)",
+    "url": "https://github.com/openai/evals"
+   }
+  },
+  {
+   "name": "Deterministic graders before LLM judges",
+   "learn": "Climb the assertion ladder cheapest-first and stop as soon as it discriminates: schema validity, exact or normalised match on enums and IDs, set precision/recall/F1 for multi-label extraction, numeric tolerance, must-contain and must-not-contain regexes (banned phrases, no leaked system prompt, no 'XXXX' placeholder, no hallucinated URL), JSONPath field equality, and hard ceilings on latency and output tokens. Only genuinely open-ended outputs need a model-graded judge, and that machinery - judge prompts, rubrics, human agreement calibration - is topic 53; do not build it here. Aggregate per tag, never as one number, so the report says 'recall fell only on tenant=acme, doc_type=invoice'. With imbalanced classes report precision and recall per class; accuracy on a 5% positive rate is a number that cannot go down.",
+   "minutes": 25,
+   "resource": {
+    "label": "promptfoo documentation - Introduction",
+    "url": "https://www.promptfoo.dev/docs/intro/"
+   }
+  },
+  {
+   "name": "Baselines, thresholds and a flakiness budget",
+   "learn": "Commit baseline.json holding per-metric and per-tag scores plus the model snapshot, prompt hash and date that produced them. CI compares the current run to the baseline, fails on any regression beyond epsilon, and moving the baseline requires an explicit --accept-baseline commit that a human reviews. Derive epsilon empirically: run the suite three to five times against an unchanged prompt, compute the per-metric standard deviation, and gate at roughly two sigma. A gate tighter than measured noise produces false failures, and a team that sees four false failures marks the check non-required - at which point you have no gate at all. Track per-case flip history: a case that flips on 30% of runs is not a regression signal, it is a bad case, so sharpen it or move it to a flaky tag that reports without gating.",
+   "minutes": 20,
+   "resource": {
+    "label": "pytest documentation",
+    "url": "https://docs.pytest.org/en/stable/"
+   }
+  },
+  {
+   "name": "Running the suite: pytest, concurrency, response caching, cost caps",
+   "learn": "Load cases in conftest.py and drive them with @pytest.mark.parametrize so each case is an individually named test that CI can report by id. Get concurrency from pytest-xdist -n 8 or an asyncio.Semaphore, and honour 429 with exponential backoff plus jitter and the retry-after header rather than hammering. Cache responses keyed on sha256(model + rendered_prompt + params + schema) into a local directory or bucket so re-running an unchanged prompt is free and a reviewer can reproduce the run offline; keep a --no-cache flag for the authoritative run. Emit results.jsonl plus a markdown summary table, and abort the whole run when accumulated usage crosses a configured USD ceiling so a retry loop cannot burn the customer's budget overnight. For large suites, the Message Batches API trades latency for roughly half the cost.",
+   "minutes": 25,
+   "resource": {
+    "label": "pytest how-to - Parametrizing tests",
+    "url": "https://docs.pytest.org/en/stable/how-to/parametrize.html"
+   }
+  },
+  {
+   "name": "CI wiring: a gate that runs and does not get switched off",
+   "learn": "A GitHub Actions workflow on pull_request with paths filters ('prompts/**', 'src/llm/**', 'evals/**'), a concurrency group that cancels superseded runs, the API key from repository secrets, permissions scoped to contents: read and pull-requests: write, and never pull_request_target on a repo that takes fork PRs. Run two tiers: a smoke suite of ~20 stratified cases finishing in about a minute as a required check on every PR, and the full suite nightly on schedule plus on-demand via workflow_dispatch. Post the score table as a sticky PR comment showing the delta against baseline, upload results.jsonl as an artifact, and make the failure message name the three worst-regressed case IDs - a red X with no explanation gets overridden, a red X that says 'case inv-0142 flipped from correct to missing_total' gets fixed.",
+   "minutes": 25,
+   "resource": {
+    "label": "GitHub Actions documentation",
+    "url": "https://docs.github.com/en/actions"
+   }
+  },
+  {
+   "name": "The prompt pull request: changelog, review checklist, bisect",
+   "learn": "Keep a CHANGELOG.md per prompt in Keep a Changelog form: version, date, what changed, why (the customer ticket number), the metric delta from the eval run, and the model snapshot it was validated against. Give reviewers a fixed checklist: is the rendered-output diff attached, is the output schema unchanged or was MAJOR bumped, was a new regression case added for the bug being fixed, is the baseline delta explained, is the rollback version named. Because prompts are ordinary files, git log -p prompts/classify/ and git bisect actually work - practise bisecting a twelve-commit range to find which change moved recall on one tenant, because that drill is what converts 'prompts in Git' from a filing convention into a debugging capability.",
+   "minutes": 15,
+   "resource": {
+    "label": "Keep a Changelog 1.1.0",
+    "url": "https://keepachangelog.com/en/1.1.0/"
+   }
+  },
+  {
+   "name": "Runtime registry, rollback and trace linkage",
+   "learn": "At runtime, resolve prompts through a registry keyed by (prompt_id, version) with the active version per environment held in configuration, not in code. Log prompt_id, prompt_version, prompt_hash, model snapshot and schema_version on every call and persist them on the row your application writes - DefenderMate's llm_calls table - so 'which prompt produced this wrong answer in the customer's audit log' is one SQL query rather than an archaeology project. Rollback then means flipping a config value to v(N-1) and redeploying config, which is minutes, not reverting and rebuilding a service. If you adopt a hosted prompt registry such as Langfuse, keep Git as the single source of truth and sync one way into it; two writable sources of truth produce a production prompt that never appeared in any code review.",
+   "minutes": 20,
+   "resource": {
+    "label": "Langfuse documentation (prompt management and tracing)",
+    "url": "https://langfuse.com/docs"
+   }
+  },
+  {
+   "name": "Few-shot examples as versioned data, not prose",
+   "learn": "Store examples in examples/<prompt>/*.jsonl with an id per example and render them into <example> blocks at build time, instead of gluing them into the template body where they cannot be diffed, counted or attributed. Enforce four rules: examples must be drawn from the same distribution as production input; the set must include the negative or none-of-the-above case or the model will never emit it; formatting must be internally consistent, because models copy the format of examples far more strongly than they follow prose instructions; and any example used in the prompt is excluded from the regression set, otherwise you are grading on your own training data. Measure marginal value by running the suite at 0, 3 and 8 examples and keeping the smallest set that holds the score - every example is input tokens on every call forever.",
+   "minutes": 15,
+   "resource": {
+    "label": "Claude docs - Use examples (multishot prompting)",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#use-examples-effectively"
+   }
+  },
+  {
+   "name": "Prompt caching and prefix stability as a tested property",
+   "learn": "Mark cache breakpoints with cache_control: {\"type\": \"ephemeral\"} on a content block. Caching is prefix-based: everything before the breakpoint must be byte-identical between calls, so a timestamp, a request id, a tenant name or a shuffled example order anywhere in the system prompt silently destroys every hit. Order the request static to dynamic - tools, then system instructions, then long shared documents with the breakpoint after them, then the per-request user content. Verify with usage.cache_creation_input_tokens and usage.cache_read_input_tokens rather than assuming; the minimum cacheable prefix is around 1024 tokens (2048 on the smallest models), the default TTL is five minutes with a one-hour option, and you get at most four breakpoints. Put cache hit rate in the eval report next to accuracy so a prompt edit that quadruples cost fails CI like any other regression.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude docs - Prompt caching",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+   }
+  },
+  {
+   "name": "Multi-tenant variants without forking the prompt",
+   "learn": "Never create classify_v3_acme.md. Compose instead: one base prompt plus a per-tenant overlay containing only the delta - taxonomy enum values, domain glossary, tone, redaction rules - stored as tenant configuration data and injected into one fixed, clearly delimited slot. The regression set then carries a tenant tag and CI runs base plus every overlay, so a base change that breaks tenant seven fails before merge rather than during their pilot. Enforce overlay limits in code: an overlay may extend enums and glossaries, it may not alter the output schema (that is a base MAJOR bump) and it may not contain text that overrides safety or grounding instructions. Decide deliberately where the overlay sits relative to the cache breakpoint: before it means a per-tenant cache, after it means one shared prefix and cheaper cold starts.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude docs - Giving Claude a role with a system prompt",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#give-claude-a-role"
+   }
+  },
+  {
+   "name": "Model migration drill and per-version cost budgets",
+   "learn": "When a new snapshot ships or the customer asks for a cheaper model, you do not 'try it in prod'. Branch, change only the model field in front-matter, run the full suite with response caching disabled, and produce a three-column table - old, new, delta - per tag, plus p50/p95 latency and input/output tokens and USD per case computed from usage (or estimated up front with the count-tokens endpoint, which is free and lets you price a change before spending). Expect specific breakages: prompts that leaned on prefill or brittle formatting, few-shot sets over-fitted to the previous model's verbosity, and stricter refusal behaviour on customer documents that read as adversarial. Record a per-prompt token budget in front-matter and fail CI when a version exceeds it, keep the previous snapshot pinned and runnable for instant rollback, and diary the published deprecation date sixty days ahead.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude docs - Token counting",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take any row in DefenderMate's llm_calls table and recover the exact prompt text, model snapshot and output schema that produced it, from Git, using only the logged prompt_id, prompt_version and prompt_hash.",
+  "You can run the smoke suite on a prompt change in under two minutes and get a per-tag score table with the delta against a committed baseline and the id of every case that flipped in either direction.",
+  "You can open a pull request that edits a prompt and have CI block the merge on a regression larger than two sigma, with the three worst-regressed case IDs named in the failure output and a sticky score comment on the PR.",
+  "You can return a validated typed object from every LLM call site, with schema violations counted as a repair_rate metric and semantic violations (bad enum, impossible date, unknown entity id) caught by validators rather than written into the customer's database.",
+  "You can convert a customer bug report into a labelled regression case, reproduce the failure locally, fix the prompt and show before/after scores on both that case and the full set within a single working session.",
+  "You can quantify a proposed model swap in one command: accuracy delta per tag, p50/p95 latency, tokens and USD per 1,000 documents, and the list of cases that only the old model gets right.",
+  "You can onboard a new tenant's taxonomy as an overlay without editing the base prompt, and prove from the CI run that every other tenant's scores were unchanged.",
+  "You can show a cache read/creation token ratio above 80% on the shared prefix and name three specific edits that would drop it to zero."
+ ],
+ "failureModes": [
+  "A prompt is tweaked to satisfy one loud customer complaint and shipped without an eval run; recall on the other three document types drops five points and nobody notices until the customer's monthly summary shows findings that stopped appearing two weeks earlier.",
+  "The same system prompt exists as an f-string in three services and has drifted into three different versions, so the incident review cannot establish which text produced the output the customer is angry about.",
+  "Production pins a moving model alias rather than a dated snapshot; the alias advances, output formatting shifts slightly, the downstream parser starts writing nulls into the customer's CRM overnight, and there is no deploy in the timeline to correlate against.",
+  "The regression set was assembled from cases the current prompt already passes, so it reads 100% forever, provides zero signal on every PR, and the first genuine edge case is still discovered by the customer.",
+  "Someone prepends a timestamp or the tenant name to the system prompt for 'better context'; cache hit rate goes to zero, per-document cost quadruples, and it surfaces a month later as a billing question rather than as a failing test.",
+  "The eval gate is set at exactly the baseline with no noise allowance, produces four false failures in a fortnight, and is quietly removed from required checks - after which prompt changes merge unreviewed and the gate exists only in the runbook.",
+  "Real customer PDFs are committed as eval fixtures to make runs reproducible; the repo is later shared with a partner team or a contractor and a reproducibility decision has become a data-handling breach under the customer's DPA."
+ ],
+ "interviewQuestions": [
+  "Three customers each need a slightly different classification taxonomy on the same extraction prompt. Walk me through your versioning design: what lives in Git, what lives in tenant config, what forces a major version bump, how CI proves a base-prompt change did not break tenant two, and how you stop this becoming three forked prompts in six months.",
+  "A customer says the extractor 'got worse this week' and you have no eval set. What do you do in the first hour, what do you do in the first day, and what do you put in place so that next time this question is answerable in five minutes with evidence?",
+  "Your structured output is a forced tool call with a JSON schema. The model returns valid JSON that is semantically wrong: a date in the wrong field and an enum value that does not exist in that tenant's taxonomy. Tell me exactly where each of those is caught, what the caller does in each case, and what you would have to change if the customer required zero human review.",
+  "Design the CI gate for prompt changes end to end. What is the pass threshold and how did you choose the number, what is fast enough to be a required check on every PR versus what runs nightly, what stops it burning money, and what specifically prevents the team from marking it non-required after the third false failure?",
+  "A new model snapshot is announced that is 40% cheaper and the customer wants it in production next week. Give me the migration plan, the evidence you would put in front of their engineering lead, and the two things you expect to break that will not show up as a schema error.",
+  "Explain prompt caching to a customer's architect who believes it is a semantic cache that will answer similar questions for free. What is actually cached, what invalidates it, how do you measure hit rate from the API response, and give me a one-line prompt change that quietly destroys it.",
+  "Your regression set has 200 cases and 12 of them flip between runs at temperature 0. Explain why that happens mechanically, and tell me what you do with each of those 12 - because 'set temperature lower' is not an answer."
+ ],
+ "proofOfWork": "A public repository (`defendermate-prompts`, or the `prompts/` package extracted from DefenderMate) that a stranger can clone and exercise in under five minutes with a single `make eval`, including a fake-provider mode that needs no API key so a reviewer can run it for free. It contains: `prompts/<id>/vN.md` files with YAML front-matter (dated model snapshot, sampling params, declared variables, token budget, output schema reference) and a per-prompt `CHANGELOG.md`; `schemas/` with Pydantic v2 models that generate the JSON Schemas used as tool `input_schema`, so parser and schema cannot drift; `evals/cases/*.jsonl` with at least 120 labelled cases tagged by tenant, document type and difficulty, each carrying a `source` field so the handful that originated in real bug reports are traceable, all scrubbed or synthesised; a grader module implementing the deterministic assertion ladder with per-tag precision and recall; `baseline.json` plus a `bin/eval` runner with response caching, bounded concurrency, a USD cost ceiling and an explicit `--accept-baseline` path; and a GitHub Actions workflow that runs the smoke suite on `pull_request` behind path filters and posts a sticky score-delta comment. The README shows one real pull request where the gate failed, the failure message naming the regressed case IDs, and the follow-up commit that fixed it, alongside a short `MIGRATION.md` recording an actual model-snapshot swap with the old-versus-new table for accuracy per tag, p95 latency, tokens and USD per 1,000 documents. The thing that convinces an interviewer is not the harness - it is the CHANGELOG showing eight prompt versions, each with a metric delta and the customer ticket that motivated it."
+}

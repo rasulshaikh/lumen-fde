@@ -1,0 +1,209 @@
+{
+  "i": 32,
+  "topic": "Real-time transports: SSE, WebSockets, streaming at scale",
+  "track": "E. Backend and Data",
+  "month": 4,
+  "hours": 8.0,
+  "why": "Every LLM feature an FDE ships at a customer site is judged on time-to-first-token and on whether a 40-second answer survives a flaky corporate VPN, a proxy that buffers, and a rolling deploy mid-stream. You will be the person in the customer's war room when their Nginx or ALB silently kills the stream at 60 seconds, when 3 uvicorn workers each hold a different third of a session, or when one slow browser tab makes the whole pod OOM. Choosing SSE vs WebSocket, making delivery resumable, and proving the numbers with a load test are the difference between a demo and a production integration the customer's platform team will sign off on.",
+  "prerequisites": [
+    "HTTP/1.1 request/response lifecycle, headers, and chunked transfer encoding (Track E HTTP and API design topic)",
+    "TCP basics: send/receive buffers, keepalive, half-open connections, and what a proxy in the middle does to them (HPBN ch. 2 from the networking topic)",
+    "Python asyncio: coroutines, tasks, asyncio.Queue, asyncio.gather, cancellation semantics (Track E async Python topic)",
+    "FastAPI/Starlette request handling and dependency injection, since DefenderMate's API is built on it",
+    "Redis fundamentals: connection, key types, TTLs (Track E caching topic) - Streams and Pub/Sub are introduced here",
+    "Claude Messages API non-streaming calls and the tool_use content block shape (Track F Claude API topic)"
+  ],
+  "subtopics": [
+    {
+      "name": "Transport decision matrix: SSE vs WebSocket vs long-poll vs plain HTTP streaming",
+      "learn": "Be able to pick a transport from the actual constraints, not habit: direction (server-to-client only favours SSE; true bidirectional or binary favours WebSocket), proxy/CDN friendliness (SSE is plain HTTP so WAFs, ALBs, service meshes and corporate proxies pass it; WebSocket needs Upgrade support end-to-end), reconnection (EventSource reconnects and resumes for free, WebSocket makes you write it), and auth (EventSource cannot set headers). Know the HTTP/1.1 six-connections-per-origin browser limit that makes multiple SSE tabs stall, and why HTTP/2 removes it. Write the one-paragraph justification you would put in a customer design doc for streaming LLM tokens: SSE for the token stream, a normal POST for user input, WebSocket only when you need client-to-server messages mid-generation (cancel, voice, cursor sync).",
+      "minutes": 25,
+      "resource": {
+        "label": "HPBN ch. 16 - Server-Sent Events (SSE)",
+        "url": "https://hpbn.co/server-sent-events-sse/"
+      }
+    },
+    {
+      "name": "HTTP streaming plumbing: chunked encoding, HTTP/2 streams, and where bytes get stuck",
+      "learn": "Understand what actually goes on the wire when you stream: HTTP/1.1 `Transfer-Encoding: chunked` with hex-length-prefixed chunks and a terminating `0\\r\\n\\r\\n`, versus HTTP/2 DATA frames on a single multiplexed connection with per-stream flow-control windows (WINDOW_UPDATE) and `SETTINGS_MAX_CONCURRENT_STREAMS`. Know that any hop - TLS terminator, reverse proxy, Python WSGI server, gzip middleware - can buffer your chunks until a threshold and destroy time-to-first-token; `Content-Encoding: gzip` in particular must be disabled for `text/event-stream` or flushes never reach the client. Confirm with `curl -N` (no buffering) and `--http2` to see chunks arrive individually.",
+      "minutes": 25,
+      "resource": {
+        "label": "HPBN ch. 12 - HTTP/2 (streams, multiplexing, flow control)",
+        "url": "https://hpbn.co/http2/"
+      }
+    },
+    {
+      "name": "SSE wire format: event, data, id, retry, and comment lines",
+      "learn": "Memorise the framing: UTF-8 text, `Content-Type: text/event-stream`, fields `event:`, `data:`, `id:`, `retry:`, lines beginning with `:` are comments (use them as heartbeats), and a blank line dispatches the event. Multiple `data:` lines concatenate with `\\n`; a JSON payload therefore must not contain raw newlines unless you split it deliberately. Know that `id:` sets the client's last-event-ID which is echoed on reconnect, that `retry:` is milliseconds and overrides the browser default (~3s), and that an event with no `event:` field fires `onmessage` while named events need `addEventListener`. Write the encoder by hand once (`f\"id: {id}\\nevent: {ev}\\ndata: {json}\\n\\n\"`) so you never mis-terminate a frame.",
+      "minutes": 20,
+      "resource": {
+        "label": "MDN - Using server-sent events (event stream format)",
+        "url": "https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events"
+      }
+    },
+    {
+      "name": "EventSource client semantics and its hard limits",
+      "learn": "Know exactly what the browser does for you and what it will not: `new EventSource(url, {withCredentials})` auto-reconnects on network error and on server close, sends `Last-Event-ID` on reconnect, exposes `readyState` (CONNECTING 0, OPEN 1, CLOSED 2), and stops permanently only on HTTP 204 or a non-`text/event-stream` content type. It cannot set custom headers (so no `Authorization: Bearer`), only GET, and treats a 401/500 as fatal without retry. Be able to explain the reconnection algorithm from the spec: on error, wait `retry` ms, reconnect with `Last-Event-ID`, and why your server must therefore be idempotent on replay. Decide per project whether EventSource's convenience beats a fetch-based reader that can send headers.",
+      "minutes": 20,
+      "resource": {
+        "label": "MDN - EventSource interface",
+        "url": "https://developer.mozilla.org/en-US/docs/Web/API/EventSource"
+      }
+    },
+    {
+      "name": "Claude streaming event schema and relaying it faithfully",
+      "learn": "Know the Messages API stream event sequence cold: `message_start` (usage.input_tokens), one or more `content_block_start` / `content_block_delta` / `content_block_stop` groups indexed by `index`, `message_delta` (stop_reason, usage.output_tokens), `message_stop`, plus `ping` events and an `error` event (`overloaded_error`) that can arrive mid-stream and must be surfaced, not swallowed. Deltas are typed: `text_delta` for prose, `input_json_delta` for tool_use arguments which arrive as partial JSON fragments you accumulate and parse only at `content_block_stop`, and `thinking_delta` when extended thinking is on. Build the relay so your SSE `event:` names mirror Anthropic's and you forward `usage` so the customer can meter cost per session; use the SDK's `client.messages.stream()` context manager and `stream.text_stream` / `get_final_message()`.",
+      "minutes": 40,
+      "resource": {
+        "label": "Claude API docs - Streaming Messages",
+        "url": "https://platform.claude.com/docs/en/build-with-claude/streaming"
+      }
+    },
+    {
+      "name": "FastAPI StreamingResponse: async generators, disconnect detection, and the headers that matter",
+      "learn": "Implement the endpoint as `StreamingResponse(gen(), media_type=\"text/event-stream\", headers={...})` where `gen` is an `async def` generator that yields encoded frames. Set `Cache-Control: no-cache, no-transform`, `X-Accel-Buffering: no` (Nginx), and `Connection: keep-alive`; never wrap it in GZipMiddleware. Detect client departure with `await request.is_disconnected()` between yields or catch `asyncio.CancelledError` in the generator's `finally` so you cancel the upstream Anthropic call and release the Redis handle rather than generating tokens nobody will read. Understand that Starlette runs the generator on the event loop, so a blocking `requests` call or `time.sleep` inside it freezes every other stream on the worker.",
+      "minutes": 35,
+      "resource": {
+        "label": "FastAPI - Custom Response (StreamingResponse)",
+        "url": "https://fastapi.tiangolo.com/advanced/custom-response/"
+      }
+    },
+    {
+      "name": "Resumable delivery: Redis Streams as the replay buffer behind Last-Event-ID",
+      "learn": "Design resume properly: the generation task writes each delta to a per-session Redis Stream with `XADD stream:{session_id} MAXLEN ~ 1000 * data ...`, getting back a monotonic `ms-seq` ID that you emit as the SSE `id:`. The HTTP handler is now a pure reader: on connect it does `XRANGE stream:{sid} (last_event_id +` to replay what was missed, then `XREAD BLOCK 15000 STREAMS stream:{sid} $` (or the last replayed ID) to tail live. Set an `EXPIRE` on the stream keyed to your retention policy, write a terminal `done` entry so a late reconnect knows the generation finished, and handle the case where the ID in `Last-Event-ID` predates `MAXLEN` trimming by sending a `event: reset` so the client refetches. This decoupling is also what lets any worker serve any reconnect.",
+      "minutes": 45,
+      "resource": {
+        "label": "Redis docs - Streams (XADD, XRANGE, XREAD, MAXLEN)",
+        "url": "https://redis.io/docs/latest/develop/data-types/streams/"
+      }
+    },
+    {
+      "name": "Reverse proxies and load balancers: buffering, idle timeouts, and Upgrade handling",
+      "learn": "Know the exact knobs that break streams at each hop and their fixes. Nginx: `proxy_buffering off;` (or honour `X-Accel-Buffering: no`), `proxy_read_timeout` above your longest generation (default 60s kills long answers), `proxy_http_version 1.1;` plus `proxy_set_header Connection \"\";` for keepalive, and for WebSocket `proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection \"upgrade\";`. AWS ALB: idle timeout default 60s applies to both SSE and WS - raise it or heartbeat under it; classic ELB does not speak WebSocket on HTTP listeners. Cloudflare and many corporate proxies cap at 100s of inactivity. Add `proxy_cache off` and verify with `curl -N` through the proxy, not just against uvicorn, before telling a customer it works.",
+      "minutes": 30,
+      "resource": {
+        "label": "Nginx - ngx_http_proxy_module (proxy_buffering, proxy_read_timeout)",
+        "url": "https://nginx.org/en/docs/http/ngx_http_proxy_module.html"
+      }
+    },
+    {
+      "name": "Heartbeats, retry hints, and detecting half-open connections",
+      "learn": "A silent TCP connection through NAT or a load balancer will be dropped without either end knowing; the server keeps writing into a dead socket until the kernel buffer fills. Send an SSE comment line (`: keepalive\\n\\n`) every 15s (under every timeout in the path), and for WebSocket rely on protocol-level ping/pong frames with a pong deadline. Use the `retry:` field to steer client reconnect backoff (for example 1000ms normally, larger when you are shedding load) and understand the spec's reconnection state machine so you know a `retry:` sent during a stream persists for future reconnects. On the server, treat a write that raises `ConnectionResetError`/`BrokenPipeError` as the client leaving and tear down the upstream call immediately.",
+      "minutes": 20,
+      "resource": {
+        "label": "WHATWG HTML Living Standard - Server-sent events (reconnection, retry)",
+        "url": "https://html.spec.whatwg.org/multipage/server-sent-events.html"
+      }
+    },
+    {
+      "name": "WebSocket protocol: handshake, frames, control opcodes, and close codes",
+      "learn": "Read the RFC once so you can debug from a packet capture: HTTP/1.1 GET with `Upgrade: websocket`, `Connection: Upgrade`, `Sec-WebSocket-Key`, and the `101 Switching Protocols` response whose `Sec-WebSocket-Accept` is base64(SHA-1(key + GUID)). Frames carry FIN and opcode (0x1 text, 0x2 binary, 0x8 close, 0x9 ping, 0xA pong), client-to-server frames are masked, and large messages fragment across continuation frames. Know the close codes you will actually see: 1000 normal, 1001 going away (tab closed / server shutdown), 1006 abnormal closure (no close frame - the network died), 1008 policy violation, 1009 message too big, 1011 internal error, 1012 service restart, 1013 try again later. Be able to say why 1006 in your client logs points at a proxy or idle timeout rather than your code.",
+      "minutes": 30,
+      "resource": {
+        "label": "RFC 6455 - The WebSocket Protocol (section 7.4.1 status codes)",
+        "url": "https://datatracker.ietf.org/doc/html/rfc6455#section-7.4.1"
+      }
+    },
+    {
+      "name": "FastAPI WebSocket endpoints: bidirectional concurrency without deadlocks",
+      "learn": "Write `@app.websocket(\"/ws\")` handlers that `await websocket.accept()`, then run a receive loop and a send loop concurrently with `asyncio.gather` or a TaskGroup so an inbound `cancel` message can stop an in-flight generation; a single sequential `receive_text()` then `send_text()` loop cannot do this. Catch `WebSocketDisconnect` (it carries `.code`), close deliberately with `await websocket.close(code=1011, reason=...)`, and never `send` after the socket has closed. Use `receive_json`/`send_json` for a typed envelope `{type, id, payload}` and enforce a max message size (uvicorn `--ws-max-size`, default 16 MiB) to stop a client from allocating your memory. Know that dependencies work in WebSocket routes but HTTP exception handlers do not - you must map errors to close codes yourself.",
+      "minutes": 30,
+      "resource": {
+        "label": "FastAPI - WebSockets (accept, receive, WebSocketDisconnect)",
+        "url": "https://fastapi.tiangolo.com/advanced/websockets/"
+      }
+    },
+    {
+      "name": "Backpressure: where the buffers are and what to do when a consumer is slow",
+      "learn": "Trace the chain of buffers a token passes through: your asyncio.Queue, the transport write buffer (`transport.get_write_buffer_size()`, limits via `set_write_buffer_limits(high, low)`), the kernel socket send buffer, the proxy, the client's TCP receive window, and on the browser side `WebSocket.bufferedAmount`. Producers that ignore these grow memory without bound; one slow mobile client on a fan-out channel can take down the pod. Apply the three legitimate responses: block the producer (`await writer.drain()` / a bounded `asyncio.Queue(maxsize=)` that makes `put` await), coalesce (merge pending text deltas into one frame when the queue is deep - safe for LLM tokens because order is preserved), or drop/disconnect with a documented close code when the queue exceeds a hard limit. Measure queue depth as a metric before you choose.",
+      "minutes": 35,
+      "resource": {
+        "label": "Python docs - asyncio Streams (StreamWriter.drain, write buffer limits)",
+        "url": "https://docs.python.org/3/library/asyncio-stream.html"
+      }
+    },
+    {
+      "name": "Multi-worker fan-out: sticky sessions vs Redis Pub/Sub vs Streams consumer groups",
+      "learn": "With `uvicorn --workers 4` or 10 pods, the client's reconnect lands on a different process than the one generating tokens; in-memory dicts of sessions silently break. Compare the three fixes: sticky sessions at the LB (cookie or IP hash - fragile on deploys and uneven), Redis Pub/Sub (`PUBLISH`/`SUBSCRIBE` per session channel - fire-and-forget, a subscriber that is not connected at publish time loses the message, so it cannot resume), and Redis Streams with `XREAD` from a known ID (durable, resumable, one stream per session, readable by any worker). Understand `XGROUP CREATE` / `XREADGROUP` / `XACK` consumer groups for the different problem of distributing work across workers, and why a broadcast to many viewers of one session uses plain `XREAD` on the same stream rather than groups. Benchmark Pub/Sub message latency so you can quote it.",
+      "minutes": 40,
+      "resource": {
+        "label": "Redis docs - Pub/Sub (PUBLISH, SUBSCRIBE, delivery semantics)",
+        "url": "https://redis.io/docs/latest/develop/interact/pubsub/"
+      }
+    },
+    {
+      "name": "Security: Origin checks, cross-site WebSocket hijacking, and authenticating EventSource",
+      "learn": "WebSocket handshakes are not subject to CORS; the browser sends cookies and the server must validate the `Origin` header itself against an allowlist or any site can open an authenticated socket to your API (CSWSH). EventSource sends cookies with `withCredentials` but cannot send `Authorization`, so pick one of: a short-lived (60s) single-use stream token minted by an authenticated POST and passed as a query parameter, a cookie scoped to the streaming path, or a fetch-based reader that can set headers. Never put a long-lived bearer token in a URL - it lands in proxy and LB access logs at the customer. Rate-limit connection establishment per user (not just messages) and cap concurrent streams per account to stop connection-exhaustion attacks.",
+      "minutes": 20,
+      "resource": {
+        "label": "OWASP HTML5 Security Cheat Sheet (WebSockets section)",
+        "url": "https://cheatsheetseries.owasp.org/cheatsheets/HTML5_Security_Cheat_Sheet.html"
+      }
+    },
+    {
+      "name": "Client-side: fetch + ReadableStream SSE parser with headers, abort, and partial lines",
+      "learn": "Build the client you will actually ship when EventSource is too limited: `fetch(url, {method: 'POST', headers: {Authorization}, signal: controller.signal})`, then `response.body.getReader()` with a `TextDecoder('utf-8', {stream: true})` so multi-byte characters split across chunks decode correctly. Buffer incoming text, split on `\\n\\n`, keep the trailing partial frame for the next read, and parse `id:`/`event:`/`data:` lines yourself. Implement the reconnect loop EventSource gave you for free: on error, wait, re-POST with a `Last-Event-ID` header, and de-duplicate by ID. Use `AbortController.abort()` on unmount or user cancel so the server sees the disconnect and stops the upstream generation.",
+      "minutes": 25,
+      "resource": {
+        "label": "MDN - Using readable streams (fetch body reader, TextDecoder)",
+        "url": "https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Using_readable_streams"
+      }
+    },
+    {
+      "name": "Load testing streams with k6: WebSocket scenarios, custom Trend metrics, and SSE caveats",
+      "learn": "Use `import ws from 'k6/ws'` with `ws.connect(url, params, socket => {...})`, registering `socket.on('open'|'message'|'close'|'error')`, `socket.setTimeout` to bound the session, and `socket.ping()` to exercise keepalive. Standard `http_req_duration` is meaningless for streams, so record what matters with `new Trend('ttft_ms')` (time from send to first token), `new Trend('tokens_per_sec')`, and `new Counter('reconnects')`, and gate the run with `thresholds: {ttft_ms: ['p(95)<800']}`. Model load with a `ramping-vus` executor to find the connection count where p95 TTFT degrades and where the server starts closing with 1013. Know that k6's core `http` module buffers the whole response, so SSE needs the `xk6-sse` extension or a WebSocket-equivalent path for load testing; state this limitation in the report.",
+      "minutes": 40,
+      "resource": {
+        "label": "Grafana k6 docs - k6/ws module",
+        "url": "https://grafana.com/docs/k6/latest/javascript-api/k6-ws/"
+      }
+    },
+    {
+      "name": "Server capacity and rolling deploys: uvicorn limits, file descriptors, graceful drain",
+      "learn": "Each open stream is a socket, a task, and buffers; tune `ulimit -n` (and the container's `nofile` limit) above your target concurrency, and set uvicorn `--limit-concurrency` so excess connections get a fast 503 instead of degrading everyone, `--timeout-keep-alive`, `--ws-ping-interval` / `--ws-ping-timeout` (defaults 20s/20s) and `--timeout-graceful-shutdown`. On SIGTERM uvicorn stops accepting and waits for in-flight requests - long streams exceed that window, so on shutdown proactively send an SSE `retry:` then close (or WS close 1012) so clients reconnect to the new pod and resume from `Last-Event-ID` via the Redis Stream. Align Kubernetes `terminationGracePeriodSeconds` and a `preStop` sleep with LB deregistration delay so no connection is routed to a dying pod.",
+      "minutes": 30,
+      "resource": {
+        "label": "Uvicorn docs - Settings (limit-concurrency, ws-ping, graceful shutdown)",
+        "url": "https://uvicorn.dev/settings/"
+      }
+    },
+    {
+      "name": "Observability for streams: the five metrics and how to instrument them",
+      "learn": "Ordinary request metrics hide stream problems because a 40s stream and a 40s hang look identical. Export a Gauge `open_streams{transport}` (inc on connect, dec in `finally`), a Histogram `ttft_seconds`, a Histogram `stream_duration_seconds` labelled by termination reason (`completed`, `client_disconnect`, `upstream_error`, `shutdown`), a Counter `resume_total{outcome=replayed|reset}` and a Gauge `send_queue_depth`. Correlate with the upstream Anthropic `request-id` logged at `message_start`. Alert on `open_streams` flatlining at your `--limit-concurrency` and on `client_disconnect` share rising, which is the early signal of a proxy timeout in the customer's environment.",
+      "minutes": 20,
+      "resource": {
+        "label": "Prometheus docs - Metric types (Counter, Gauge, Histogram)",
+        "url": "https://prometheus.io/docs/concepts/metric_types/"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can defend the SSE-vs-WebSocket choice for a given customer feature in under two minutes, citing direction, proxy path, auth, and reconnection semantics, and write it as a design-doc paragraph.",
+    "You can implement a FastAPI SSE endpoint that relays Claude's stream with matching event names, forwards usage, stops the upstream call within one second of client disconnect, and passes `curl -N` through an Nginx proxy with `proxy_buffering off`.",
+    "You can kill the server mid-generation and show the browser reconnecting with `Last-Event-ID`, receiving only the missed deltas from a Redis Stream, with no duplicated or lost text.",
+    "You can run the endpoint under `uvicorn --workers 4`, connect, reconnect onto a different worker, and still resume - and explain why Pub/Sub alone could not do that.",
+    "You can demonstrate backpressure by throttling a client to 1 KB/s and showing server memory stay flat because the producer blocks on a bounded queue or coalesces deltas, with `send_queue_depth` visible in metrics.",
+    "You can read a WebSocket close code from client logs (1006 vs 1011 vs 1012) and correctly attribute it to network/proxy, server bug, or deploy without looking at server logs.",
+    "You can produce a k6 report with p50/p95 TTFT and tokens/sec at 50, 200, and 500 concurrent streams, identify the knee, and name the limiting resource (FDs, event loop, upstream rate limit).",
+    "You can list the four hops that commonly buffer or time out a stream at a customer (gzip middleware, Nginx, ALB idle timeout, corporate proxy) and the exact config change for each."
+  ],
+  "failureModes": [
+    "The customer's Nginx had `proxy_buffering on` (the default): tokens arrived in one 4 KB burst after several seconds, the product team concluded 'streaming does not work' and the fix was a single `X-Accel-Buffering: no` header.",
+    "ALB idle timeout at the default 60s closed every answer longer than a minute with a 1006 on the client; no heartbeat was being sent because the dev environment had no load balancer.",
+    "Generation kept running after the user closed the tab because the handler never checked `is_disconnected()`; the customer's Anthropic bill showed 30 percent of output tokens were never delivered to anyone.",
+    "Session state lived in a module-level dict; after scaling to 3 pods, one in three reconnects returned 'unknown session' and support blamed the browser.",
+    "A dashboard that broadcast one agent run to 40 viewers used an unbounded per-viewer list; one viewer on a hotel Wi-Fi made the pod OOM and took down the other 39.",
+    "A rolling deploy sent SIGTERM with a 30s grace period while streams ran for 90s; clients received an abrupt close with no `retry:` or resume, and the resulting duplicate requests doubled load on the new pods.",
+    "A stream token was passed as `?token=` with a 24-hour lifetime; it appeared in the customer's ALB access logs shipped to a third-party SIEM, triggering a security review that stalled the rollout."
+  ],
+  "interviewQuestions": [
+    "We stream LLM tokens over SSE and a customer reports 'the whole answer appears at once after ten seconds' only in their production environment. Walk me through how you would localise the buffering hop and what you would change at each candidate.",
+    "Design resumable streaming for a chat product running on 8 pods behind a load balancer. What do you store, where, with what retention, and what happens when a client reconnects with an event ID that has already been trimmed?",
+    "Why would you choose Redis Streams over Redis Pub/Sub for fan-out of a generation to multiple viewers, and when would Pub/Sub actually be the better choice?",
+    "A WebSocket-based agent console shows a spike of close code 1006 every day at 03:00. What are the three most likely causes, in what order would you check them, and what would you add so the incident is self-explanatory next time?",
+    "Explain backpressure in an SSE relay: name every buffer between the Anthropic API and the user's screen, and for a consumer that reads at 1 KB/s tell me exactly which one fills first and what your code does about it.",
+    "You need to load test a streaming endpoint before a go-live. Which metrics do you define, how do you generate realistic load for SSE given k6 buffers HTTP bodies, and how do you decide the concurrency number you will commit to in the customer's SLA?",
+    "EventSource cannot send an Authorization header. Give me two production-safe ways to authenticate an SSE connection for an enterprise customer with an SSO-issued JWT, and the security trade-off of each."
+  ],
+  "proofOfWork": "A short screen recording plus a written runbook, checked into the DefenderMate repo, showing a chaos-style resume drill: start a long Claude generation streaming over SSE through a local Nginx with default settings, observe the buffering, fix it with the documented header and config; then `kill -TERM` the uvicorn worker mid-stream and show the browser reconnecting onto a different worker and continuing from the exact missed token via the Redis Stream replay, with `resume_total{outcome=replayed}` incrementing in the Prometheus endpoint. The runbook lists the four proxy/LB timeouts in the path, the heartbeat interval chosen to stay under each, the close-code interpretation table for WebSocket, and the k6 knee-finding numbers (p95 TTFT and tokens/sec at 50/200/500 concurrent streams), so a customer platform team could reproduce the drill in their own environment."
+}

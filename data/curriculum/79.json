@@ -1,0 +1,192 @@
+{
+  "i": 79,
+  "topic": "STAR stories (ten) and two full-loop simulations",
+  "track": "K. Interview Loop and Mocks",
+  "month": 9,
+  "hours": 7,
+  "why": "An FDE is hired to be trusted alone in a customer's building, so the behavioural round is not a personality check - it is the panel's only direct evidence about how you behave when a VP is angry, when you broke their pipeline, when the scope was never written down, and when you had to hand the system to someone less skilled than you and leave. Every other round in the loop tests whether you could build it; this one tests whether the company can put you in front of a paying customer without supervision. Ten pre-built, evidence-backed stories plus two rehearsed full loops is the difference between recalling incidents live under time pressure and executing a bank you already know cold.",
+  "prerequisites": [
+    "The positioning and narrative from topic 72 - why FDE, why this company, travel and comp answers - since every story must ladder back to that same thesis.",
+    "The line-by-line resume defence from topic 73: each of the ten stories has to be traceable to a bullet you already committed to in writing.",
+    "Real delivered work with real numbers you can defend - the Lumen FDE deployment, the Omnibound GTM systems, the Deepline provider integrations - not hypotheticals.",
+    "Postmortem discipline from topic 23 (blameless timeline, contributing factors, action items with owners) so the failure and conflict stories have a defensible structure.",
+    "Discovery technique from topic 66 and the engagement document set from topic 67, which supply the vocabulary for the discovery, ambiguity and hand-off stories.",
+    "Cost literacy from topics 19 and 59, and security/compliance ground truth from topics 62 and 64, so the cost and security stories survive a follow-up.",
+    "The other four month-9 rounds already rehearsed at least once each - take-home (74), decomposition (75), LLM system design (76), coding (77), client sim (78) - because the full-loop simulations chain them back to back."
+  ],
+  "subtopics": [
+    {
+      "name": "What the FDE behavioural round is actually scoring",
+      "learn": "Write the scorecard down before writing any story. The panel is grading five independent axes: customer judgement (did you protect the relationship and the outcome, not your ego), ownership past the boundary of your job description, calibrated honesty about failure, ability to operate with no spec and no authority, and whether you make yourself unnecessary rather than indispensable. Learn the two dominant anti-signals: the hero story where you personally saved everything and nobody else exists, and the failure story where the root cause conveniently turns out to be someone else's team. Note the structural difference from a SWE behavioural loop - here the counterparty in most stories is a customer, not a colleague, and 'I escalated to my manager' is a weaker answer than 'I told the sponsor directly, in writing, the same day'.",
+      "minutes": 20,
+      "resource": {
+        "label": "Exponent - Forward Deployed Engineer interview guide",
+        "url": "https://www.tryexponent.com/blog/forward-deployed-engineer-interview-the-definitive-2026-guide-fde"
+      }
+    },
+    {
+      "name": "STAR mechanics: the 15/15/50/20 split and why the R loses points",
+      "learn": "Budget a three-minute answer as roughly 25 seconds of Situation, 25 of Task, 90 of Action, 40 of Result - then enforce it with a timer. Situation is who the customer was, what the system did, and one number establishing scale; anything else is stalling. Task is your specific ownership stated in first person singular, plus the constraint that made it hard. Action is a sequence of decisions with the alternatives you rejected and why - not a list of activities. Result is where nearly everyone fails: it needs a number, a comparison to the baseline, a durability claim (is it still true today?), and a 'what I would do differently'. Practise the specific fix for the most common defect - saying 'we' when the interviewer needs 'I' - by rewriting each story once in strict first person and reading it back for the places where the team genuinely deserves credit and you should say so.",
+      "minutes": 20,
+      "resource": {
+        "label": "Wikipedia - Situation, task, action, result",
+        "url": "https://en.wikipedia.org/wiki/Situation,_task,_action,_result"
+      }
+    },
+    {
+      "name": "Incident harvest: 40 raw candidates before you write a single story",
+      "learn": "Do not start from the ten slots - start from raw material, or you will invent stories to fit labels. Spend this block mining sources you can actually cite: git log across your repos filtered to the months that mattered, closed PRs and their review threads, Slack and email archives searched for 'sorry', 'blocked', 'rollback', 'can we talk', incident channels, invoices and cloud bills, and your own calendar for the weeks that were obviously bad. Write 40 one-line candidates in a single file with a date, the counterparty, and the artifact that proves it happened. Only then map candidates onto slots. Kill anything with no artifact behind it; a story you cannot evidence is a story you will hedge on under follow-up, and hedging reads as fabrication.",
+      "minutes": 25,
+      "resource": {
+        "label": "US OPM - Structured Interviews guide (behavioural questioning)",
+        "url": "https://www.opm.gov/policy-data-oversight/assessment-and-selection/structured-interviews/"
+      }
+    },
+    {
+      "name": "The ten-slot coverage matrix and the anti-overlap rule",
+      "learn": "Build a grid: rows are the ten slots (discovery, conflict, failure, ambiguity, shipping, security, cost, hand-off, leadership, learning), columns are the attributes a panel probes - customer-facing, technical depth, cross-team influence, money, risk, a decision you regret. Every column needs at least two rows covering it, and no single project may occupy more than three rows or the bank collapses when an interviewer says 'give me a different example'. Explicitly place at least three stories where you were wrong and at least two where the counterparty was a paying customer's executive rather than an engineer. Then map each row onto the values language of your targets - Amazon's Customer Obsession, Ownership, Dive Deep, Have Backbone; Disagree and Commit; Earn Trust - not to parrot it but to check the bank has no blind spot the frame would expose.",
+      "minutes": 20,
+      "resource": {
+        "label": "Amazon Leadership Principles",
+        "url": "https://www.amazon.jobs/content/en/our-workplace/leadership-principles"
+      }
+    },
+    {
+      "name": "The story card: metric spine, counterfactual, and defensible numbers",
+      "learn": "Standardise a one-page card per story: title, slot, 25-word hook, the four STAR blocks in bullets (never prose you will recite), a metric spine, an evidence list, three anticipated follow-ups with answers, and the two other slots this story can be re-cut for. The metric spine is the discipline that separates senior from mid: baseline value, post value, measurement window, the instrument that produced both numbers, and the confounders you are aware of. If your claim is 'cut p95 latency from 4.2s to 900ms', you must be able to say which endpoint, over which window, measured by which exporter, and what else changed that week. Where you genuinely cannot measure, say the counterfactual explicitly ('the alternative was three analysts doing it manually at roughly six minutes a case') rather than inventing precision - a fabricated number that collapses under one follow-up costs more than an honest estimate.",
+      "minutes": 20,
+      "resource": {
+        "label": "Google SRE Book - Service Level Objectives (how to state a metric honestly)",
+        "url": "https://sre.google/sre-book/service-level-objectives/"
+      }
+    },
+    {
+      "name": "Stories 1-2: Discovery, and Ambiguity with no spec and no owner",
+      "learn": "Story 1 (discovery): a time the stated ask was not the real problem. The Action must contain actual questions you asked and the specific moment the picture changed - the ride-along, the exported spreadsheet someone was maintaining by hand, the row count that did not match. The Result must show you redirected the work without telling the sponsor they were stupid, and the number is the thing that actually moved. Story 2 (ambiguity): no requirements doc, contradictory stakeholders, or an unowned decision. Show the mechanism you used to manufacture clarity - a written assumption register circulated for objections, a one-week timeboxed spike with a stated exit question, a decision you made unilaterally and documented as an ADR with a named reversal date. Be ready for the killer follow-up on both: 'what if the sponsor had said no?'",
+      "minutes": 35,
+      "resource": {
+        "label": "Google - Introduction to Machine Learning Problem Framing",
+        "url": "https://developers.google.com/machine-learning/problem-framing"
+      }
+    },
+    {
+      "name": "Stories 3-4: Conflict with a customer, and a failure you caused",
+      "learn": "Story 3 (conflict) must be with someone who had power over you - a customer architect who refused your design, a sponsor who wanted a feature you believed was wrong - and must end in either a changed mind with the mechanism shown (a shadow run with diffed outputs, a two-week bake-off, a cost model on one page) or in disagree-and-commit where you name what you did to make their choice succeed anyway. Story 4 (failure) must be one where you were the proximate cause, told in blameless-postmortem shape: timeline with timestamps, detection (who noticed - alert or customer?), time to mitigate, contributing factors plural, and action items that actually shipped with a link. State the blast radius honestly, including whose data or money was affected and how you communicated it. The tell of a rehearsed-but-fake failure story is a failure with no cost; pick one that hurt.",
+      "minutes": 35,
+      "resource": {
+        "label": "Google SRE Book - Postmortem Culture: Learning from Failure",
+        "url": "https://sre.google/sre-book/postmortem-culture/"
+      }
+    },
+    {
+      "name": "Stories 5-6: Shipping under a hard constraint, and a security or data-handling call",
+      "learn": "Story 5 (shipping): a real deadline with a real consequence, where the interesting content is what you cut and who you told. Name the scope you hammered, the thing you shipped manually or half-automated on purpose, the tech debt you took on knowingly, and whether you ever paid it back - 'we never went back' is an acceptable answer if you say why. Story 6 (security): a moment you handled credentials, PII, tenant isolation or third-party access properly when the fast path was to not. Concrete anchors beat abstractions: rotating a key that had been pasted into a config, moving from a long-lived access key to a role assumption, adding row-level security instead of filtering in application code, refusing to accept a production dump over email and building a sampled synthetic set instead, or catching an IDOR/broken-access-control issue before a customer did. Know the actual control name you applied.",
+      "minutes": 35,
+      "resource": {
+        "label": "OWASP Top 10 A01:2021 - Broken Access Control (IDOR, tenant isolation, enforcement in data not app code)",
+        "url": "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+      }
+    },
+    {
+      "name": "Stories 7-8: Cost, and a hand-off that survived you leaving",
+      "learn": "Story 7 (cost): you found or prevented real spend. Show the instrumentation before the fix - cost per request, per tenant, per case - and the decision that followed: prompt caching, a smaller model on the cheap path, batching, right-sizing an instance family, killing an idle GPU, or an architectural change that removed the spend entirely. Give the monthly delta and the run-rate, and be honest about engineering time versus savings. Story 8 (hand-off): a system you built that someone else now runs. The Result is not 'they were happy' - it is the artifact set (runbook with the three most likely alerts and their first three commands, dashboard, on-call owner named, an escalation path, a documented process for prompt/model or schema changes) plus evidence it held: an incident they resolved without you, a change they shipped, a month you were not paged. Say what you got wrong about the hand-off, because everyone gets something wrong.",
+      "minutes": 35,
+      "resource": {
+        "label": "AWS Well-Architected - Cost Optimization Pillar",
+        "url": "https://docs.aws.amazon.com/wellarchitected/latest/cost-optimization-pillar/welcome.html"
+      }
+    },
+    {
+      "name": "Stories 9-10: Leadership without authority, and learning a domain cold",
+      "learn": "Story 9 (leadership): you changed the behaviour of people who did not report to you and could have ignored you. The mechanism is the story - a written proposal that got adopted, a prototype that ended an argument, a review standard you enforced by doing the first ten yourself, a customer team you trained. Name the person who disagreed and what convinced them, and give the credit outward where it is due; a leadership story where you are the only competent character reads as the opposite of leadership. Story 10 (learning): a domain or technology you were unqualified for on day one and shipped in. Show the method, not the outcome - who you shadowed, the glossary you built, the first thing you got embarrassingly wrong, how long until you were useful, and the calibration you now apply ('I assume week one is worthless and price it in'). This is the story that predicts whether you can be dropped into an unfamiliar vertical next quarter.",
+      "minutes": 35,
+      "resource": {
+        "label": "Will Larson (StaffEng) - To lead, you have to follow (influence over people who don't report to you)",
+        "url": "https://staffeng.com/guides/to-lead-follow/"
+      }
+    },
+    {
+      "name": "Three lengths per story: 60 seconds, 3 minutes, 8 minutes",
+      "learn": "Every card gets three rehearsed versions, because interviewers cut you off at different depths. The 60-second version is answer-first in Minto pyramid order - the outcome and your role in the first sentence, then three supporting bullets - used when the interviewer is behind schedule or when the story is a supporting example inside a larger answer. The 3-minute version is the default full STAR. The 8-minute version is the deep-dive the hiring manager pulls you into, with architecture, the two alternatives you rejected, and the specific numbers; it must survive a whiteboard. Rehearse the transitions between them out loud, and rehearse the interrupt: when someone says 'skip ahead to what you did', you drop the Situation mid-sentence and land on Action cleanly rather than finishing your set-up.",
+      "minutes": 20,
+      "resource": {
+        "label": "Wikipedia - Barbara Minto (Pyramid Principle, answer-first structure)",
+        "url": "https://en.wikipedia.org/wiki/Barbara_Minto"
+      }
+    },
+    {
+      "name": "Follow-up drilling: the four probe types and defending your numbers",
+      "learn": "The story is the setup; the score comes from the follow-ups. Drill four types against every card until you stop flinching. Depth probes ('why that database / that chunk size / that retry policy?') test whether you actually built it - answer with the alternative and its trade-off. Counterfactual probes ('what if the customer had refused?') test judgement, not memory. Attribution probes ('what did you personally write?' / 'who else could have done this?') test honesty - answer them precisely and do not inflate. Credibility probes ('how do you know it was 40%?') test the metric spine - answer with instrument and window. Then run a two-level five-whys on each of your own stories and find the layer where you run out of answer; that layer is your prep list. Rehearse three sentences you can say honestly when you genuinely do not know, ending with what you would check.",
+      "minutes": 25,
+      "resource": {
+        "label": "Wikipedia - Five whys",
+        "url": "https://en.wikipedia.org/wiki/Five_whys"
+      }
+    },
+    {
+      "name": "Company-specific reframes without sounding coached",
+      "learn": "One bank, three lenses. For a Palantir-style loop, foreground the forward-deployed posture: on-site, unfamiliar data, institutional resistance, shipping something a non-engineer used. For an Anthropic-style loop, foreground judgement under uncertainty, safety and honesty trade-offs, and the times you slowed down or told a customer no. For a Databricks or platform-vendor loop, foreground scale, cost per unit of work, and enabling the customer's own engineers rather than doing the work for them. The reframe is which detail you lead with and which number you quote - never a different set of facts. Read the actual careers and values pages of your target list before the loop and note the specific language they use, then check your stories can answer their frame without you reciting their words back at them, which is the fastest way to sound coached.",
+      "minutes": 15,
+      "resource": {
+        "label": "Anthropic - Core Views on AI Safety (the primary values document an Anthropic-style loop reframes toward)",
+        "url": "https://www.anthropic.com/news/core-views-on-ai-safety"
+      }
+    },
+    {
+      "name": "Delivery: filler, pacing, and landing the 'so what'",
+      "learn": "Record every story once and watch it with the sound on and once with the transcript only. Count filler ('so', 'basically', 'kind of', 'I guess') per minute and drive it under three by replacing each with a silent pause - a beat reads as thinking, filler reads as hedging. Check three delivery defects specifically: trailing off at the end instead of landing the result, upspeak that turns claims into questions, and burning 60 of your 180 seconds on Situation. Fix the landing with a fixed closing move - one sentence of result with the number, one sentence of what you would do differently, then stop talking and let them ask. On video calls, look at the camera for the first and last sentence of each story. Re-record until three consecutive stories land inside 3:00 +/- 20 seconds without notes.",
+      "minutes": 20,
+      "resource": {
+        "label": "Wikipedia - Filler (linguistics)",
+        "url": "https://en.wikipedia.org/wiki/Filler_(linguistics)"
+      }
+    },
+    {
+      "name": "Full-loop simulation #1: four back-to-back rounds, same day, recorded",
+      "learn": "Run a real loop shape in one sitting with only short breaks, because fatigue is the variable no single mock tests: 45 min coding or data manipulation (topic 77), 45 min decomposition or LLM system design (topics 75/76), 45 min client simulation with a hostile or confused stakeholder (topic 78), 45 min behavioural drawn from your bank with the interviewer free to demand a second example for any slot. Use a peer, or book paid sessions on interviewing.io if you want strangers who will not go easy. Rules: camera on, no notes visible, no restarts, record everything. Instruct your interviewer in advance to do the two things friends avoid - interrupt mid-story, and push twice on every number. Note your own energy at rounds three and four; that drop is what you are training against.",
+      "minutes": 45,
+      "resource": {
+        "label": "interviewing.io - Senior engineer's guide to FAANG interview loops (round-by-round onsite structure)",
+        "url": "https://interviewing.io/guides/hiring-process"
+      }
+    },
+    {
+      "name": "Full-loop simulation #2, after-action review, and bank revision",
+      "learn": "Run the second loop at least three days after the first, with a different opponent and a shuffled round order so you cannot rely on warm-up. Debrief both with a structured after-action review rather than vibes: what was supposed to happen, what actually happened, why the gap, what changes - written within an hour while the tape is fresh. Score each behavioural answer on five axes (structure held, first-person ownership, number defended under probe, time budget hit, honest failure content) and diff the two loops. Then do the revision work the debrief demands: retire the two stories that consistently drew weak follow-ups, promote a bench story, and rewrite every Result whose number you could not defend twice. Finish with a one-page cheat card - ten titles, ten numbers, ten 'what I'd do differently' clauses - that you read in the sixty seconds before every real interview.",
+      "minutes": 45,
+      "resource": {
+        "label": "Wikipedia - After-action review",
+        "url": "https://en.wikipedia.org/wiki/After-action_review"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can name any of the ten slots cold and deliver that story in 3:00 +/- 20 seconds, with no notes, on camera, hitting a 15/15/50/20 STAR split.",
+    "Every story's Result contains a baseline, a post value, a measurement window and the instrument that produced both - and you can survive two consecutive 'how do you know that number?' probes on each.",
+    "You can give a second, non-overlapping example for at least six of the ten slots when the interviewer says 'that one doesn't count, give me another'.",
+    "You can tell a failure story in which you were the proximate cause, state the blast radius including whose data or money was affected, and name shipped action items - without shifting blame or minimising cost.",
+    "You can compress any story to 60 seconds answer-first and expand it to an 8-minute deep dive with architecture and rejected alternatives, and switch between them when interrupted mid-sentence.",
+    "You can re-frame the same story for a Palantir-, Anthropic- and Databricks-style loop by changing which detail leads and which number you quote, without changing any fact.",
+    "You have two recorded four-round loops with written after-action reviews, a scored diff between them, and at least two stories retired or rewritten as a direct result.",
+    "You can say 'I don't know' about a detail in your own story and follow it with what you would check, in under fifteen seconds, without hedging or filler."
+  ],
+  "failureModes": [
+    "The Result is 'the customer was happy' with no number, so the story is unfalsifiable and the interviewer moves on without writing down a single piece of evidence.",
+    "You inflate a metric slightly - 40% instead of the 15% you can actually source - and it collapses under one credibility probe, which retroactively discredits the other nine stories.",
+    "Every story is 'we' with no separable personal contribution, and the panel cannot tell whether you led the work or sat next to it.",
+    "The failure story is a cost-free failure (a flaky test, a missed typo), which reads as either dishonesty or as never having owned anything that could break.",
+    "Three of your ten stories come from the same project, so 'give me a different example' takes you to material you have not rehearsed and you improvise a weaker version of a story you already told.",
+    "You burn 90 of 180 seconds setting up the situation, get cut off in the middle of the Action, and never reach the result that was the entire point.",
+    "You recite the company's values language back at the interviewer, which reads as coached and makes them discount the stories that would otherwise have landed."
+  ],
+  "interviewQuestions": [
+    "Tell me about a time you deployed something at a customer site that broke in production. What broke, how did you find out, and what did you say to the customer in the first hour?",
+    "Describe a time a customer stakeholder was firmly against your technical recommendation. Walk me through how it resolved - and if they won, what did you do to make their approach succeed?",
+    "Give me an example of a project where nobody could tell you what success looked like. How did you decide what to build, and what did you write down?",
+    "Tell me about the most expensive mistake you have made - in money, in time, or in a customer relationship. What is different about how you work now because of it?",
+    "Describe a system you handed off and left. How do you know it survived? What did the team hit that you had not documented?",
+    "Tell me about a time you had to say no to a customer, or tell them the thing they asked for was the wrong thing. What did you say, and what happened next?",
+    "Give me a time you had to get people who didn't report to you - possibly at the customer, not your company - to change how they worked. What actually moved them?"
+  ],
+  "proofOfWork": "Beyond the story bank and the two loop debriefs, assemble a private evidence dossier that turns the bank from claims into an auditable record, and a public sanitised subset of it. For each of the ten stories, the dossier holds the artifact set that proves it: commit SHAs or PR links for the change, the dashboard screenshot or query showing the before and after values with visible axes and dates, the actual postmortem or ADR document, the cost graph with the run-rate delta annotated, the runbook you handed over with its git history showing who edited it after you left, and the message you sent the customer when things broke. Each card carries a one-line provenance note stating how each number was produced and what could confound it, plus a redaction policy line naming what you will not disclose about the client and how you will say so in the room. Add a ten-clip playlist of the 60-second versions recorded in one sitting, a follow-up ledger listing every probe question you were asked across both loops with a self-score and whether you could defend the number, and a short 'retired stories' note explaining which two stories were cut and what pattern of weak follow-ups killed them. The dossier proves the bank is calibrated and sourced rather than rehearsed, and the follow-up ledger - not the stories themselves - is the artifact a hiring manager would find most convincing if you ever chose to show it."
+}

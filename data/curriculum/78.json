@@ -1,0 +1,227 @@
+{
+ "i": 78,
+ "topic": "Client simulations (four) and learning interviews (four)",
+ "track": "K. Interview Loop and Mocks",
+ "month": 9,
+ "hours": 8,
+ "why": "The two rounds that actually decide an FDE loop are the ones with no whiteboard: a role-play where an interviewer plays a customer stakeholder who does not want you there, and a learning round where they hand you an unfamiliar API or internal DSL and expect working output in twenty minutes. Both are direct simulations of the job - week two on site you are in a room with an architect whose system you are replacing, and week three you are reading someone's undocumented internal service at 9pm because the demo is Thursday. What gets you rejected is almost never ignorance; it is talking past a hostile question, and saying 'yes, we can do that by Friday' about something that needs their security team, which is the same behaviour that kills real deployments.",
+ "prerequisites": [
+  "Your narrative and motivation work from topic 72, so the sim does not stall on 'why are you here' and you can spend the whole clock on the customer's problem.",
+  "The resume-defence discipline from topic 73: numerator, denominator, window, instrument - because in a client sim you will be asked to back a claim you make about your own past work while the clock runs.",
+  "Decomposition drills (topic 75) and LLM system design mocks (topic 76): the sim collapses if you cannot cut a vague ask into a demoable slice in under five minutes.",
+  "SLO literacy from the observability/SLO topic - good events over valid events over a window - so 'we need it to be 100% accurate' becomes a negotiable threshold conversation rather than a promise or a fight.",
+  "Enough hands-on fluency from topics 25-30 and 45-49 (Python services, Postgres, RAG, evals) that the technical objections in the sim - schema, latency, PII, retrieval quality - land on real knowledge rather than talking points.",
+  "Two or three practice partners willing to play adversarial for 45 minutes without rescuing you, plus a recording setup (screen + audio) and a transcription tool you have already tested end to end."
+ ],
+ "subtopics": [
+  {
+   "name": "Reverse-engineer what each round actually scores",
+   "learn": "Write the two rubrics before you practise anything, because you cannot improve against a vibe. Client sim scores roughly: discovery quality (did you find the real constraint, or the one they volunteered), structure (did the conversation have a shape and an ending), pushback handling (did you stay in the room), commitment hygiene (did you promise things you do not control), and closing (is there a dated next step with named owners). Learning interview scores: how fast you get to a first working call, whether your questions are falsifying rather than clarifying, whether you narrate a mental model out loud, and how quickly you notice and correct a wrong assumption. Convert each dimension into a behavioural anchor you can count on tape - 'asked 9 questions before naming a solution' - not a 1-5 gut score.",
+   "minutes": 20,
+   "resource": {
+    "label": "Wikipedia - Structured interview (behavioural anchors and scoring)",
+    "url": "https://en.wikipedia.org/wiki/Structured_interview"
+   }
+  },
+  {
+   "name": "Build four scenario packs from real deployment shapes",
+   "learn": "Write four packs your partner reads and you do not: (1) a mid-size insurer wants LLM triage on claims notes and the ops director thinks it is a headcount cut; (2) a stalled deployment where your champion left and the new VP wants to cancel in 30 days; (3) integration blocked by a security architect who will not allow data to leave the VPC; (4) a customer who was burned by the previous vendor's pilot that never reached production. Each pack gives the persona a goal, a fear, one hidden constraint that only surfaces if you ask the right question (e.g. the 'API' is a nightly SFTP drop of fixed-width files), and three landmines to detonate at minute 10, 25 and 35. Add a success bar per pack: exactly what you must have extracted and committed to for it to count as a pass.",
+   "minutes": 25,
+   "resource": {
+    "label": "CISA Tabletop Exercise Packages - scenario design with objectives, injects and discussion questions",
+    "url": "https://www.cisa.gov/resources-tools/services/cisa-tabletop-exercise-packages"
+   }
+  },
+  {
+   "name": "The ten-minute pre-brief you run before any customer call",
+   "learn": "Standardise a pre-call kit and run it before every sim so it is muscle memory on site: how the company makes money and which line item your work touches; the org around your champion (who signs, who blocks, who gets blamed); the systems of record they already run (Salesforce? SAP? a Snowflake they just migrated to?); public signals - 10-K risk factors, earnings call language, job postings that reveal their stack, status page incident history, engineering blog. Turn it into three written hypotheses about where the pain is, each phrased so a single question in the meeting can kill it. Walking in with hypotheses is what separates discovery from an interrogation.",
+   "minutes": 20,
+   "resource": {
+    "label": "Wikipedia - Form 10-K (risk factors, MD&A, segment reporting)",
+    "url": "https://en.wikipedia.org/wiki/Form_10-K"
+   }
+  },
+  {
+   "name": "The discovery ladder: symptom to workflow to system to metric",
+   "learn": "Drill a fixed four-rung sequence. Symptom: 'what happens today, walk me through the last time it went wrong.' Workflow: who touches it, in what order, in which tool, and what do they do when the tool is wrong. System: what is the system of record, what writes to it, how does data arrive and at what cadence, what is the actual schema. Metric: volume per day, minutes per unit, error rate, cost of a false positive versus a false negative, and who currently owns that number. Ban solution-shaped questions ('would you want a dashboard?') until you are on the fourth rung - the customer will happily design the wrong thing with you. Practise until you can run all four rungs in eight minutes without a script.",
+   "minutes": 30,
+   "resource": {
+    "label": "Wikipedia - Five whys (root-cause questioning and its limits)",
+    "url": "https://en.wikipedia.org/wiki/Five_whys"
+   }
+  },
+  {
+   "name": "Constraint and authority elicitation in the room",
+   "learn": "Get the boring blockers on the table in the first meeting, because they are what actually slip deployments: where the data physically lives and whether you can get a sample this week, who provisions credentials and how long that has historically taken, whether there is a VPC/air-gap/on-prem requirement, whether a DPA or vendor security review is needed and who runs it, what date is genuinely fixed (board demo, audit, contract renewal) and what happens if it slips. Then map authority explicitly - who is responsible, who approves, who must merely be consulted or informed - and ask out loud 'who else has to say yes after this meeting?' Anyone you fail to name will surface in week four as a surprise veto.",
+   "minutes": 25,
+   "resource": {
+    "label": "Wikipedia - Responsibility assignment matrix (RACI)",
+    "url": "https://en.wikipedia.org/wiki/Responsibility_assignment_matrix"
+   }
+  },
+  {
+   "name": "Hostile stakeholder taxonomy and what each one actually wants",
+   "learn": "Learn the five archetypes and the tell for each. The threatened incumbent built the pipeline you are replacing and attacks your design because attacking his own record is unthinkable - he wants credit and continuity, so make him the owner of the interface. The burned buyer opens with 'the last vendor promised this too' and wants a checkable near-term proof, not a roadmap. The gatekeeper architect asks latency and encryption questions as a proxy for control - answer precisely, then ask him to define the acceptance bar. The proxy attends for an absent decision-maker and cannot say yes, only no - your goal is a meeting with the principal. The budget skeptic wants a number tied to their own P&L line. Misreading which one you are facing produces technically correct answers that lose the room.",
+   "minutes": 30,
+   "resource": {
+    "label": "Wikipedia - Chesterton's fence (why the existing system exists)",
+    "url": "https://en.wikipedia.org/wiki/Chesterton%27s_fence"
+   }
+  },
+  {
+   "name": "De-escalation mechanics: acknowledge, specify, bound",
+   "learn": "Under attack, run a three-beat pattern instead of defending. Acknowledge by restating the objection more precisely than they stated it ('you are saying that if the classifier is wrong on a high-value claim, your adjuster carries the liability, not us'). Specify by separating the factual claim from the fear - which part is measurable, which part is trust. Bound by giving an answer with a number and a condition ('on the 200 notes you gave us, precision at the threshold we would ship is X; below that we route to a human'). Never counter-assert, never 'actually', never speed up. On tape, watch for the physical tells - words per minute jumping, filler stacking, the pronoun switching from 'we' to 'I' - because interviewers score composure from exactly those signals.",
+   "minutes": 30,
+   "resource": {
+    "label": "Wikipedia - Active listening (reflection, paraphrase, clarification)",
+    "url": "https://en.wikipedia.org/wiki/Active_listening"
+   }
+  },
+  {
+   "name": "Disagreeing on technical substance without losing the room",
+   "learn": "Rehearse the three standard wrong asks and hold the line on each. 'Just fine-tune it on our data' - agree with the goal, name why retrieval and evals come first, offer a cheap test that settles it. 'Put everything in the vector database' - ask what queries must be answered and show which ones need filters, joins or recency that similarity search will not give. 'It has to be 100% accurate' - reframe as an error budget: what is the cost of each error class, what threshold routes to a human, what is the review loop. The move is always: accept the objective, name the constraint that breaks their approach, propose a decisive experiment with a date. Practise saying 'I think that will not work, and here is the test that would prove me wrong' out loud until it sounds calm.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google SRE Book - Service Level Objectives (error budgets)",
+    "url": "https://sre.google/sre-book/service-level-objectives/"
+   }
+  },
+  {
+   "name": "Security, PII and data-residency objections",
+   "learn": "The single most common blocker in an AI deployment conversation is 'our data cannot go to a model provider', and vague answers here read as unserious. Be able to state, without notes: enterprise zero-retention and no-training-by-default terms, in-VPC or cloud-marketplace model hosting as an alternative, what redaction at the boundary can and cannot remove, why prompt injection makes tool permissions the real attack surface rather than the prompt, and what you log for audit (inputs, outputs, retrieved doc ids, user, timestamp). Then invert the question: ask what their existing approved path for a SaaS vendor looks like, and which control they need evidence for. You are trying to convert a blanket objection into a named control with an owner.",
+   "minutes": 20,
+   "resource": {
+    "label": "OWASP LLM02:2025 - Sensitive Information Disclosure (PII exposure, sanitisation limits, controls)",
+    "url": "https://genai.owasp.org/llmrisk/llm022025-sensitive-information-disclosure/"
+   }
+  },
+  {
+   "name": "Commitment hygiene: the four verbs you are allowed to use",
+   "learn": "Every future-tense sentence in a customer meeting is a contract. Restrict yourself to four forms: 'I will X by DATE' only when every dependency is inside your control; 'I will find out and come back to you by DATE' for anything that needs someone else; 'we could X, which would cost roughly Y' for an option that is explicitly not yet a commitment; and 'we will not do X' as a stated boundary. Ban the killers outright - 'that should be easy', 'we can definitely', 'by end of week' about anything crossing a team boundary, 'no problem'. Practise catching yourself mid-sentence and converting: 'we can have that by Friday' becomes 'I can have the pipeline running Friday if I have read access by Tuesday; the SSO piece depends on your identity team, so I will get you a date from them by Wednesday.'",
+   "minutes": 30,
+   "resource": {
+    "label": "Wikipedia - Statement of work (deliverables, acceptance, dependencies)",
+    "url": "https://en.wikipedia.org/wiki/Statement_of_work"
+   }
+  },
+  {
+   "name": "Estimating live without lying",
+   "learn": "When asked 'how long', never emit a single number. Decompose out loud into 3-5 chunks (access and data landing, ingest and normalisation, the model/logic slice, evaluation, the integration to their system of record), give a range on each, and name the top two uncertainty drivers plus the assumption that would blow the estimate up ('this assumes the notes are text, not scanned PDFs'). Anchor on a reference class - 'the last three deployments of this shape took 4-7 weeks to first production traffic' - rather than on optimism. The strongest available answer is often a timeboxed spike: 'give me three days and the sample file and I will replace this range with a real number.' Note explicitly that your estimate is conditional on a dated input from them, which makes slippage a shared fact rather than your failure.",
+   "minutes": 20,
+   "resource": {
+    "label": "Wikipedia - Reference class forecasting",
+    "url": "https://en.wikipedia.org/wiki/Reference_class_forecasting"
+   }
+  },
+  {
+   "name": "Scope the thin slice and land the close",
+   "learn": "Every sim must end with the same four-part close, delivered in under 90 seconds: one sentence restating the problem in their words and their units; the thinnest demoable slice with a date (one workflow, one data source, one user, one metric); the three things you need from them, each with a named person and a date - access, a sample of real data, and a decision-maker's calendar; and the explicit non-goals for this slice. Choose the slice by what retires the most risk, not what demos best: if the whole deployment dies on data quality, the slice is a profiling report on their actual export, not a chat UI. Rehearse the close on its own until it is automatic, because in a real meeting it always gets squeezed into the last two minutes.",
+   "minutes": 30,
+   "resource": {
+    "label": "Wikipedia - Minimum viable product",
+    "url": "https://en.wikipedia.org/wiki/Minimum_viable_product"
+   }
+  },
+  {
+   "name": "Handling the mid-meeting scope grenade",
+   "learn": "At minute 30 someone asks 'can it also handle the EU entity / French documents / our legacy system?' Wrong answers are 'sure' and 'that is out of scope'. The move: acknowledge it as a real requirement, ask the sizing question ('does the pilot fail if it ships without it, or is it a phase-two must?'), write it in a visible parking lot with the person's name against it, and restate the slice unchanged. If it genuinely invalidates the slice, say so immediately and re-scope in the room rather than absorbing it silently - silent absorption is how a four-week pilot becomes a four-month one with the same original date.",
+   "minutes": 18,
+   "resource": {
+    "label": "Wikipedia - Scope creep",
+    "url": "https://en.wikipedia.org/wiki/Scope_creep"
+   }
+  },
+  {
+   "name": "The two-hour written recap",
+   "learn": "Within two hours of every sim, send the recap you would send a real customer, and have your partner grade it against what they actually said. Fixed sections: decisions made; open questions with an owner and a date each; what I committed to (dated, only things you control); what I did not commit to (explicit, so it cannot be assumed later); risks and the assumption each one rests on. Keep it under 300 words, put the asks in a list not a paragraph, and send it in the existing thread so it is searchable. The purpose is to force the customer to correct you in writing while the meeting is still fresh - a recap nobody disputes is the cheapest contract you will ever get.",
+   "minutes": 22,
+   "resource": {
+    "label": "Google Technical Writing Two - writing for your reader",
+    "url": "https://developers.google.com/tech-writing/two"
+   }
+  },
+  {
+   "name": "Learning interview: the twenty-minute doc triage protocol",
+   "learn": "Fix a protocol so you never freeze on unfamiliar docs. Minutes 0-3: map the shape - quickstart, reference, errors/limits, changelog - and find the smallest complete example. Minutes 3-8: get one end-to-end call working with hardcoded inputs, verifying the environment (auth, versions, endpoint) before writing any logic. Minutes 8-15: expand only along the axis the task requires, reading the reference page for the exact parameters you use rather than reading linearly. Throughout: grep the docs and the repo instead of scrolling, read error messages as specification, check the errors/limits page before assuming a bug is yours, and use --help, man and the tool's own introspection first. Never read a doc site front-to-back on a clock.",
+   "minutes": 30,
+   "resource": {
+    "label": "MIT Missing Semester - Shell tools and scripting (finding help)",
+    "url": "https://missing.csail.mit.edu/2020/shell-tools/"
+   }
+  },
+  {
+   "name": "Learning interview: state the model, then apply it, out loud",
+   "learn": "Before you write anything, say the mental model back in 60 seconds: the objects, the verbs, the lifecycle, the units, and the failure states ('so a Workflow is durable and must be deterministic, an Activity is the part allowed to be non-deterministic and gets retried by policy - what happens if an Activity is not idempotent?'). Then ask two falsifying questions, not clarifying ones: questions whose answer changes what you build. While working, narrate hypothesis, test, result, update - 'I expect this to fail on the second call because the token is scoped per session; let us see.' Interviewers cannot score silent competence, and in front of a customer the same narration is what turns confusion into visible progress instead of dead air.",
+   "minutes": 28,
+   "resource": {
+    "label": "Wikipedia - Think aloud protocol",
+    "url": "https://en.wikipedia.org/wiki/Think_aloud_protocol"
+   }
+  },
+  {
+   "name": "Learning drill mechanics: timer, artifact, error-first log",
+   "learn": "Structure every learning rep identically: a 20-minute hard timer, a stated goal you did not choose in advance (have your partner pick), a working artifact at the end, and a 'what I got wrong first' note listing every incorrect assumption and how long it cost you. Score three things: time to first working call, number of times you guessed a flag or field name instead of checking it, and whether you verified output or assumed it. Guessing an API parameter and asserting it confidently is the single most damaging habit in this round - in front of a customer it is how you end up debugging your own hallucination on a screen share. Start with jq: build a filter over a real nested JSON export using to_entries, select, --slurp and --raw-output, and explain why the streaming model differs from loading the whole file.",
+   "minutes": 25,
+   "resource": {
+    "label": "jq tutorial - build filters over a real nested JSON API response",
+    "url": "https://jqlang.org/tutorial/"
+   }
+  },
+  {
+   "name": "Four unfamiliar-tool reps with concrete targets",
+   "learn": "Run four timed reps on tools you do not know, each producing an artifact. DuckDB: query a Parquet file directly with read_parquet, aggregate with a window function, and COPY the result out - explain columnar versus row scan cost. Temporal: write a workflow plus an activity with a retry policy, and state the determinism constraint and what breaks if you call time.now() inside a workflow. Terraform: plan and apply a trivial resource, then explain state, drift, and why -target is a break-glass rather than a workflow. A model API: make one structured-output/tool-use call and describe how errors and token limits surface. Space the four reps across the month rather than batching them, so you are practising cold starts, which is the actual skill being tested.",
+   "minutes": 35,
+   "resource": {
+    "label": "Temporal docs - Workflows (replay, determinism constraints, why Date.now() breaks)",
+    "url": "https://docs.temporal.io/workflows"
+   }
+  },
+  {
+   "name": "Tape review: score your own recordings against the rubric",
+   "learn": "Transcribe all eight recordings and count, do not impressionistically judge. Metrics per sim: questions asked before you first named a solution (target 8+), your share of talk time during discovery (target under 45%), seconds of dead air after the hardest pushback, number of unhedged future-tense statements, number of times you said 'I do not know' followed by a path, and whether the close contained all four parts. Per learning interview: time to first working call, guessed-versus-checked ratio, and the count of wrong assumptions you caught yourself. Chart the six numbers across the four reps - flat lines mean you are performing, not practising, and the fix is usually a harder partner rather than more reps.",
+   "minutes": 25,
+   "resource": {
+    "label": "OpenAI Whisper (speech-to-text, official repo)",
+    "url": "https://github.com/openai/whisper"
+   }
+  },
+  {
+   "name": "The promises-you-couldn't-keep ledger",
+   "learn": "Mine every transcript for future-tense and capability statements and classify each: (a) in your control and dated - fine; (b) depended on someone else - should have been 'I will get you a date'; (c) technically false or unknowable at the time - the dangerous class; (d) vague enough that the customer and you would remember it differently - the class that actually causes deployment disputes. Compute promises-per-sim and the share in classes (b)-(d), and write the replacement phrasing for each one. Review it like a blameless postmortem: the interesting question is what pressure produced the promise - an uncomfortable silence, a status challenge, wanting to be liked - because that pressure is identical on site with a real customer and a real renewal date.",
+   "minutes": 22,
+   "resource": {
+    "label": "Google SRE Book - Postmortem Culture: Learning from Failure",
+    "url": "https://sre.google/sre-book/postmortem-culture/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can run a 45-minute client simulation that ends with a restated problem, a dated thin slice, three named asks with owners, and explicit non-goals - without ever proposing a solution in the first eight minutes.",
+  "You can name which hostile archetype you are facing within five minutes, cite the tell that told you, and adapt the conversation accordingly on tape.",
+  "You can take a direct attack on your design and respond with acknowledge-specify-bound in under 20 seconds of dead air, verified by transcript timing across four recordings.",
+  "You can convert any 'can you do it by Friday' into a conditional commitment that names the dependency, the owner and the date you will supply the real answer.",
+  "You can produce a written recap within two hours that your role-play partner signs off as an accurate record of decisions, commitments and non-commitments.",
+  "You can go from zero knowledge of a tool to a working, verified artifact in under 20 minutes while narrating hypotheses, with a written log of every wrong assumption and its cost.",
+  "You can state an unfamiliar system's object model, lifecycle and failure states back in 60 seconds and ask two questions whose answers would change your implementation.",
+  "You have a promises ledger across eight recordings showing the count of unbacked commitments falling rep over rep, with the replacement phrasing written for each."
+ ],
+ "failureModes": [
+  "A date is committed in the room that silently depends on the customer's security review or identity team, and when it slips by three weeks the customer records it as the vendor missing a deadline rather than their own queue.",
+  "The pilot is scoped off the workflow the champion described, and in week three the data turns out to arrive as a nightly fixed-width SFTP drop rather than the API everyone referred to, invalidating the ingest design.",
+  "The engineer wins the argument with the customer's architect on technical merit, publicly, and the architect - who owns the change-approval process - becomes a permanent silent blocker on every subsequent request.",
+  "'It needs to be accurate' is accepted without defining an error budget, a threshold or a human-review route, so a 92%-precision system that saves real money is judged a failure against an unstated 100% bar.",
+  "A capability is asserted from memory during a demo - a parameter, a connector, a limit that does not exist - and the customer's engineer finds the doc page contradicting it within the hour, which costs more trust than saying 'I do not know' would have.",
+  "Scope added mid-meeting is absorbed silently rather than parked, and the four-week pilot quietly becomes ten weeks of work still owed on the original date.",
+  "The meeting ends warm with no owner, no date and no written recap, and by the next call the customer remembers a broader promise than was made, with no artifact that can settle it."
+ ],
+ "interviewQuestions": [
+  "You are two weeks into a deployment. The customer's lead architect - who built the rules engine you are replacing - says in front of his VP that your approach will not scale and that they have seen this fail before. What do you say next, word for word, and what do you do after the meeting?",
+  "A customer asks in the room whether you can have this live before their board demo in three weeks. You genuinely do not know. Give me your actual answer, and tell me what you would need to say instead if it turns out the answer is no.",
+  "Their compliance lead says no customer data may leave their VPC and no third-party model may be used. Walk me through how you keep the project alive - what you ask, what options you put on the table, and what you would refuse to promise.",
+  "Run discovery on me: I am a support operations director drowning in tickets and I have already decided I want a chatbot. You have ten minutes to find out whether that is the right thing to build.",
+  "Here is the documentation for an internal service you have never seen. In twenty minutes, get a working call through and tell me what the system's failure modes are - narrate as you go.",
+  "Tell me about a time you told a customer or a stakeholder something that turned out not to be true. How did you find out, how did you handle it, and what did you change about how you commit to things?",
+  "Your champion just left the company and the new VP wants to cancel in 30 days. You get one 30-minute meeting. What is your agenda, and what is the single artifact you bring?"
+ ],
+ "proofOfWork": "Beyond the eight recordings and the promises ledger, publish a redacted 'deployment call kit' repository that turns this month into a reusable instrument rather than a set of memories. It contains: the four scenario packs, written so any partner can run them cold - persona brief, hidden constraint, three timed landmines, and the explicit pass bar per scenario; the two scoring rubrics with behavioural anchors and a CSV of your own scores across all eight reps, plus a small chart showing the six countable metrics (questions before first solution, discovery talk ratio, dead-air seconds after hardest pushback, unhedged commitments, time-to-first-working-call, guessed-versus-checked ratio) trending across reps, including the ones that did not improve; a de-escalation phrasebook built from your own transcripts, where each entry is the objection as it was actually spoken, the response you actually gave with a timestamp, and the rewritten response, so the improvement is traceable to a specific moment on tape; the promises ledger with every future-tense statement classified as in-control, dependent, false, or ambiguous, with a per-rep rate and replacement phrasing; and one 20-minute unedited screen recording of a learning rep on a tool you had never used, ending in a working artifact and a committed 'what I got wrong first' note listing each wrong assumption and the minutes it cost. The part a hiring manager will actually read is the phrasebook and the ledger - together they show someone who instruments their own behaviour under pressure, which is precisely the trait that keeps a deployment from quietly overcommitting itself to death."
+}

@@ -1,0 +1,191 @@
+{
+  "i": 54,
+  "topic": "LLM observability: traces, cost, latency, datasets",
+  "track": "H. AI in Production",
+  "month": 7,
+  "hours": 6,
+  "why": "When a customer says 'the assistant gave a wrong answer at about 3pm yesterday' or 'finance says this thing cost eleven thousand dollars last month', an FDE either opens a trace and answers in ninety seconds or spends two days reconstructing the incident from application logs that never captured the prompt. LLM observability is the difference between debugging a non-deterministic system with evidence and debugging it with opinions, and it is the only mechanism that turns real production failures into a growing eval dataset instead of a growing list of complaints. It is also how you defend a deployment commercially: cost per tenant, p95 latency by prompt version, and refusal rate are the numbers that decide renewal, and nobody else on the account team can produce them.",
+  "prerequisites": [
+    "Observability: OpenTelemetry, Prometheus, Grafana (topic 21) - spans, span context, the collector, OTLP exporters, and why a trace id is not a log line.",
+    "FastAPI in production (topic 26) - lifespan hooks, dependency injection, background tasks and worker processes, because that is where you install the tracer and where you must flush it before shutdown.",
+    "SRE fundamentals: SLIs, SLOs, error budgets (topic 20) - you will define availability, latency and cost SLIs for an LLM feature, not just stare at dashboards.",
+    "LLM fundamentals and prompt engineering as code (topics 45, 46) - tokenisation, context windows, streaming, prompt versioning; a trace without a prompt version attached is barely a trace.",
+    "Agents and RAG at depth (topics 48, 49) - the shape of the thing you are instrumenting is nested: retriever spans, tool calls, retries, sub-agents.",
+    "Docker Compose and enough Postgres/ClickHouse literacy (topics 5, 29) to stand up and reason about a self-hosted Langfuse deployment inside a customer VPC."
+  ],
+  "subtopics": [
+    {
+      "name": "The data model: trace, observation, and the ids you join on",
+      "learn": "Learn the object graph cold: a trace holds many observations; observations nest by parent id and carry a type - event, span, generation, agent, tool, chain, retriever, embedding, evaluator, guardrail. Only generation and embedding carry usage and cost. Trace ids are 32 hex chars, observation ids 16 hex, matching W3C trace-context, which is exactly why joining to your OTel backend is possible at all. Be able to draw, for one Kaupex request, which node is a span, which is a generation, and which fields (input, output, metadata, level, statusMessage) you would need to reproduce the bug without asking the customer anything.",
+      "minutes": 20,
+      "resource": {
+        "label": "Langfuse docs - Observability core concepts / data model",
+        "url": "https://langfuse.com/docs/observability/data-model"
+      }
+    },
+    {
+      "name": "Instrumenting the application: decorators, context managers, and flush",
+      "learn": "Instrument three ways and know when each is right: the `@observe()` decorator for whole functions, `start_as_current_observation(as_type=...)` for explicit blocks, and framework/provider auto-instrumentation for the model client. Set `as_type=\"tool\"`, `\"retriever\"`, `\"generation\"` deliberately - the UI's agent graph and every later filter depend on it. The failure that bites everyone: the SDK batches and exports asynchronously, so short-lived processes (Lambda, Celery task, CLI, a `pytest` run) lose traces unless you call `langfuse.flush()` or shut the client down in a FastAPI lifespan handler. Verify with `auth_check()` at startup rather than discovering a bad `LANGFUSE_HOST` in production.",
+      "minutes": 25,
+      "resource": {
+        "label": "Langfuse docs - SDK instrumentation",
+        "url": "https://langfuse.com/docs/observability/sdk/instrumentation"
+      }
+    },
+    {
+      "name": "Wiring LLM traces into the existing OTel pipeline",
+      "learn": "Langfuse receives OTLP on `/api/public/otel`; set `OTEL_EXPORTER_OTLP_ENDPOINT` to the region host (`cloud.langfuse.com`, `us.`, `jp.`, `hipaa.`, or your self-hosted origin) and pass basic-auth public/secret keys via `OTEL_EXPORTER_OTLP_HEADERS`. Decide the topology up front: export from the app directly, or fan out from an OpenTelemetry Collector so the same spans reach both Tempo/Datadog and Langfuse. Know the collector-side pieces you will actually touch - `otlp` receiver, `batch` processor, multiple exporters in one pipeline - and that per-signal endpoint overrides exist because most enterprises already own the metrics path.",
+      "minutes": 25,
+      "resource": {
+        "label": "Langfuse docs - OpenTelemetry (OTLP) integration",
+        "url": "https://langfuse.com/integrations/native/opentelemetry"
+      }
+    },
+    {
+      "name": "Joining the LLM trace to the service trace",
+      "learn": "This is the depth target: one id from the customer's ingress to the model call. Propagate W3C `traceparent` (`00-<32 hex trace-id>-<16 hex span-id>-<flags>`) across service hops so the LLM spans land in the same trace, and use `get_current_trace_id()` / `get_current_observation_id()` to stamp the id into your own application logs and into the API response header you hand support. Use `create_trace_id(seed=...)` to derive a deterministic id from an external key (ticket id, DefenderMate scan id) so a customer's reference number resolves straight to a trace. Test the failure case: a queue hop or a `httpx` client without the propagator silently starts a fresh trace, and you get two orphan traces instead of one.",
+      "minutes": 25,
+      "resource": {
+        "label": "Langfuse docs - Trace IDs and distributed tracing",
+        "url": "https://langfuse.com/docs/observability/features/trace-ids-and-distributed-tracing"
+      }
+    },
+    {
+      "name": "OTel GenAI semantic conventions - naming attributes so they survive a vendor swap",
+      "learn": "Use the standard attribute names rather than inventing your own: `gen_ai.system`, `gen_ai.operation.name`, `gen_ai.request.model`, `gen_ai.request.temperature`, `gen_ai.request.max_tokens`, `gen_ai.response.model`, `gen_ai.response.finish_reasons`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`. Know that the conventions are still experimental and moved to their own repository, that prompt/completion content is captured under opt-in content-capture settings precisely because it is sensitive, and that span names follow `{operation} {model}`. The payoff is portability: when the customer's platform team standardises on Datadog LLM Observability or Grafana next year, conforming attributes migrate and bespoke `my_app.llm_tokens` does not.",
+      "minutes": 20,
+      "resource": {
+        "label": "OpenTelemetry - GenAI semantic conventions repository",
+        "url": "https://github.com/open-telemetry/semantic-conventions-genai"
+      }
+    },
+    {
+      "name": "Cost attribution: ingested vs inferred, usage types, custom models",
+      "learn": "Understand the precedence rule: values you ingest from the provider response win; otherwise Langfuse infers usage with a tokenizer and cost by matching the `model` string to a model definition with a price per usage type. Usage types are not just input/output - `cache_creation_input_tokens`, `cache_read_input_tokens`, `reasoning`, `audio` all price differently, and dropping them makes prompt-caching savings invisible. Register custom model definitions (regex match, unit prices, start date) for self-hosted, fine-tuned or Bedrock-renamed models, and know that a price change applies from its effective date rather than retroactively. Streaming responses are the classic silent failure: usage arrives in the terminal chunk, and if you close the span first, cost silently reads zero.",
+      "minutes": 30,
+      "resource": {
+        "label": "Langfuse docs - Token and cost tracking",
+        "url": "https://langfuse.com/docs/observability/features/token-and-cost-tracking"
+      }
+    },
+    {
+      "name": "Latency decomposition: TTFT, self-time, retries, queueing",
+      "learn": "A generation span's wall time is not model latency. Decompose it into time-to-first-token (record it explicitly - it is the number that governs perceived speed for a streamed UI), inter-token latency, and total; then compute self-time (span duration minus children) to separate your orchestration overhead from provider time. Represent SDK retries as sibling spans with the HTTP status and `retry-after` in attributes, or you will see one 40-second call instead of three 429s and a success. Always report p50/p95/p99 rather than mean - LLM latency distributions are fat-tailed and the mean hides the tail the customer is complaining about.",
+      "minutes": 30,
+      "resource": {
+        "label": "OpenTelemetry docs - Traces (spans, attributes, events)",
+        "url": "https://opentelemetry.io/docs/concepts/signals/traces/"
+      }
+    },
+    {
+      "name": "The dimensions that make traces queryable: sessions, users, tags, environments, release",
+      "learn": "Set `session_id` for a multi-turn conversation, `user_id` for the end user, `tags` for tenant/feature/model-tier, and `environment` to keep staging out of the production cost chart. Stamp `release` (git sha) and prompt `version` on every trace so a latency regression can be attributed to a deploy in one filter. Design this like a cardinality-conscious metrics label set: tenant slug yes, raw email no, request uuid never as a tag. The test of a good scheme is that you can answer 'cost per tenant per day for the last 30 days, excluding staging' without writing any code.",
+      "minutes": 25,
+      "resource": {
+        "label": "Langfuse docs - Sessions",
+        "url": "https://langfuse.com/docs/observability/features/sessions"
+      }
+    },
+    {
+      "name": "Linking prompt versions to traces",
+      "learn": "Attach the managed prompt object to the generation so every trace records which prompt version produced it, then compare cost, latency and scores across versions in one view. This is what makes 'we changed the system prompt on Tuesday' a testable claim rather than a hypothesis. Know the operational detail that the client caches prompts with a TTL and falls back to the last cached version when the control plane is unreachable, so a prompt-management outage degrades to stale-but-working rather than down.",
+      "minutes": 15,
+      "resource": {
+        "label": "Langfuse docs - Link prompts to traces",
+        "url": "https://langfuse.com/docs/prompt-management/features/link-to-traces"
+      }
+    },
+    {
+      "name": "Scores: attaching quality and feedback signals to traces",
+      "learn": "A score references exactly one of trace, observation, session or dataset run, and is numeric, categorical, boolean or text, optionally bound to a ScoreConfig that enforces range and allowed categories. Wire three sources: explicit user feedback (thumbs, correction), implicit signals (did the user re-ask, did they copy the answer, did the tool call succeed), and automated evaluators. Sending scores from the browser needs the trace id returned to the client, which is the practical reason you surfaced it in step four. Without a ScoreConfig you get 'helpfulness' scored 1-5 by one service and 0-1 by another, and every aggregate afterwards is garbage.",
+      "minutes": 25,
+      "resource": {
+        "label": "Langfuse docs - Scores data model",
+        "url": "https://langfuse.com/docs/evaluation/scores/data-model"
+      }
+    },
+    {
+      "name": "Online evaluation and human review queues on sampled production traces",
+      "learn": "Configure an LLM-as-a-judge evaluator to run on a filtered slice of live traces (for example: only Kaupex traces tagged `tier=enterprise`, sampled at 10%) with variable mappings from trace input/output into the judge prompt, and know that the judge itself costs tokens and needs its own model connection and budget. Route low-scoring or flagged traces into an annotation queue so a human reviewer labels them and their verdict becomes the ground truth your automated judge is calibrated against. Track judge-versus-human agreement explicitly - an uncalibrated judge is a confident random number generator that will make you ship a regression.",
+      "minutes": 25,
+      "resource": {
+        "label": "Langfuse docs - LLM-as-a-judge evaluation",
+        "url": "https://langfuse.com/docs/evaluation/evaluation-methods/llm-as-a-judge"
+      }
+    },
+    {
+      "name": "Datasets built from production traces, and runs linked back to them",
+      "learn": "Close the loop: when a trace is wrong, promote it to a dataset item in one action, capturing input, the expected output you wrote after diagnosis, and metadata (tenant, model, prompt version). Run experiments over the dataset so each item execution produces its own trace linked to the dataset run, letting you diff run A vs run B item by item rather than comparing two aggregate percentages. Keep dataset items versioned and immutable-by-convention, and split into a working set and a held-out set so you do not tune against the same fifty examples forever. The measure of a healthy deployment is that the dataset grows every week from real incidents.",
+      "minutes": 25,
+      "resource": {
+        "label": "Langfuse docs - Datasets",
+        "url": "https://langfuse.com/docs/evaluation/experiments/datasets"
+      }
+    },
+    {
+      "name": "Sampling, batching, and the overhead budget",
+      "learn": "Sampling is client-side and trace-level: set `LANGFUSE_SAMPLE_RATE` or the `sample_rate` constructor arg between 0 and 1, and if a trace is dropped every observation and score under it is dropped too - consistent, but it means you cannot sample at 0.1 and still expect complete cost totals, so keep usage aggregates on a separate always-on path. Know the export machinery you will have to debug: an in-process queue, a batch worker, `flush_at`/`flush_interval` style tuning, and what happens when the queue fills (drops, not blocks - which is the behaviour you want on the request path). Measure the added p95 on your own endpoint before and after instrumentation and state the number; 'observability is free' is not an answer a platform team accepts.",
+      "minutes": 25,
+      "resource": {
+        "label": "Langfuse docs - Sampling",
+        "url": "https://langfuse.com/docs/observability/features/sampling"
+      }
+    },
+    {
+      "name": "PII, masking and retention - the answer to the security review",
+      "learn": "Prompt and completion payloads are the most sensitive data in the system, so masking runs before export: the modern hook patches raw OpenTelemetry span attributes at export time (deleting or rewriting things like `gen_ai.prompt.*` content), while the legacy `mask` callback only covers data set through the SDK's own APIs - know which one covers third-party instrumentation, because that is where leaks happen. Combine regex/entity redaction with structural rules (never trace raw file bytes, hash identifiers, keep tenant id but drop names), and set project-level retention in days so trace payloads expire on a schedule you can point at in a DPA. Assume you will be asked 'where does this data live and for how long' in week one of an enterprise deployment.",
+      "minutes": 25,
+      "resource": {
+        "label": "Langfuse docs - Masking sensitive LLM data",
+        "url": "https://langfuse.com/docs/observability/features/masking"
+      }
+    },
+    {
+      "name": "Dashboards, the Metrics API, and alerts that page someone",
+      "learn": "Build custom dashboards over the trace store, then learn the programmatic path: `GET /api/public/v2/metrics` takes a view, dimensions, metrics, filters and time granularity and returns aggregated cost, tokens, volume, latency and scores as JSON - that is how you produce a weekly cost-per-tenant report or feed a chargeback spreadsheet without exporting rows. Define real SLIs for the feature (availability = non-error traces, latency = p95 TTFT, quality = judge score above threshold, cost = USD per successful answer) and wire threshold alerts plus spend alerts to Slack or a webhook. An alert that nobody owns is a dashboard; make each one name the runbook step.",
+      "minutes": 25,
+      "resource": {
+        "label": "Langfuse docs - Custom dashboards",
+        "url": "https://langfuse.com/docs/metrics/features/custom-dashboards"
+      }
+    },
+    {
+      "name": "Self-hosting inside the customer's boundary",
+      "learn": "Most regulated customers will not send prompts to a vendor cloud, so be able to stand the stack up yourself: the web/worker containers plus Postgres (transactional), ClickHouse (traces, observations, scores), Redis/Valkey (queue and cache) and S3-compatible blob storage for large payloads and events. Know the environment variables that matter (`DATABASE_URL`, `CLICKHOUSE_URL`, `REDIS_CONNECTION_STRING`, `LANGFUSE_S3_EVENT_UPLOAD_*`, `NEXTAUTH_URL`, the encryption and salt secrets), that the worker is what actually ingests, and the sizing consequence: ClickHouse is the component that grows, so retention and sampling are capacity decisions. Practise the ninety-second version of this for a customer architect: what runs where, what leaves the VPC (nothing), and how backups and upgrades work.",
+      "minutes": 25,
+      "resource": {
+        "label": "Langfuse self-hosting guide",
+        "url": "https://langfuse.com/self-hosting"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can take a single request id from a Kaupex API response and open one trace that shows the HTTP span, retrieval span, every model generation with its prompt version, token usage, USD cost and TTFT, and the tool calls in between - with no gap where the LLM call is an opaque 8-second block.",
+    "You can state cost per tenant per day and cost per successful answer for a deployment, pulled from the Metrics API rather than a provider invoice, and explain the difference between the two numbers.",
+    "You can show p50/p95/p99 latency broken down into time-to-first-token, provider time and your own orchestration self-time, and name which of the three you would attack first for a given complaint.",
+    "You can turn a customer-reported bad answer into a dataset item with an expected output in under five minutes, then re-run the dataset and show per-item pass/fail against the previous run.",
+    "You can demonstrate masking working end to end: a trace containing a synthetic national-ID string in the prompt arrives at the backend with that field redacted, including for spans produced by third-party auto-instrumentation.",
+    "You can quantify instrumentation overhead: measured p95 delta on your endpoint with tracing on versus off, plus the trace volume and storage growth per 1,000 requests at your chosen sample rate.",
+    "You can stand up a self-hosted Langfuse (web, worker, Postgres, ClickHouse, Redis, S3-compatible storage) from scratch and point your app at it by changing only environment variables.",
+    "You can define and defend four SLIs for one LLM feature with alert thresholds and, for each, the runbook step the alert triggers."
+  ],
+  "failureModes": [
+    "Tracing is added to the request path but never flushed in the worker or Lambda, so the exact background jobs that fail at 3am are the ones with no traces, and the incident is reconstructed from nothing.",
+    "The customer's gateway strips or regenerates `traceparent` at the ingress, so every LLM trace is an orphan with no parent service span, and the join you promised in the design review quietly does not exist.",
+    "Streaming responses close the generation span before the final usage chunk arrives, so token counts and cost read zero for the entire streaming code path and the cost dashboard understates real spend by half.",
+    "A model is deployed under a custom or fine-tuned name that matches no price definition, so its cost silently records as zero, and the miss is discovered when finance compares the dashboard to the provider invoice.",
+    "Raw prompts containing customer PII are shipped to a vendor-hosted trace store before anyone reviews it, turning a debugging win into a data-processing incident and a contract escalation.",
+    "Sampling is set to 0.05 to control storage and then someone builds the monthly chargeback report off sampled traces, so one tenant is billed twenty times more or less than they used.",
+    "`user_id` is populated with a raw email address and `tags` with a per-request uuid, so the store's cardinality explodes, filters time out, and the dashboards become unusable exactly when traffic gets interesting."
+  ],
+  "interviewQuestions": [
+    "A customer says one specific answer from your assistant was wrong yesterday afternoon. Walk me through, minute by minute, how you go from that sentence to a root cause, and tell me exactly which fields you need to have captured in advance for that path to work.",
+    "Design end-to-end tracing for an agent running in a customer VPC where the platform team already runs an OpenTelemetry Collector into Datadog, and legal will not allow prompt text to leave the VPC. What ships where, what is redacted, and where does the trace id come from?",
+    "Your LLM cost dashboard says $4,100 for the month and the provider invoice says $9,800. List the causes you would check, in the order you would check them, and how you would confirm each one.",
+    "You have a p95 latency SLO of 4 seconds and you are at 6.5. The generation span averages 5.2 seconds. How do you decide whether the fix is a smaller model, streaming, caching, retry tuning, or your own orchestration code - and what does the trace need to show for you to decide with evidence?",
+    "Explain how you would sample traces at high volume without breaking cost reporting, quality monitoring, or incident debugging. What do you sample, what do you never sample, and where do the aggregates come from?",
+    "Argue for or against using an LLM judge on live production traffic to a customer who is worried about both cost and correctness. What would you measure to prove the judge is trustworthy, and what would make you turn it off?",
+    "Two weeks after go-live, quality has visibly drifted but nothing was deployed. What in your observability setup lets you distinguish a provider-side model change, an input-distribution change, and a retrieval regression - and what would you have had to instrument on day one?"
+  ],
+  "proofOfWork": "Ship an 'LLM trace forensics kit' as a small repository plus a five-minute recorded walkthrough over Kaupex and DefenderMate. The repo contains a single instrumentation module both apps import (tracer setup, propagation, masking hook, sampling config, `as_type` conventions, prompt-version stamping) and a `tracectl` CLI with three commands: `tracectl explain <trace_id>` printing the span tree with per-span self-time, TTFT, tokens by usage type and USD cost; `tracectl cost --group-by tenant --since 30d` calling the Metrics API to produce the chargeback table; and `tracectl promote <trace_id>` turning a bad production trace into a dataset item with an expected output. Include a `load/` script that drives synthetic traffic with deliberate faults - a 429 storm, a streaming call that returns usage only in the final chunk, a request with an unpriced custom model name, and a prompt containing a synthetic national ID - and a `FINDINGS.md` recording, with screenshots, what each fault looked like in the trace before and after the fix, the measured p95 overhead of instrumentation on and off, and the storage growth per 1,000 traces. Finish with a one-page `SLO.md` defining availability, p95 TTFT, judge-score and cost-per-answer SLIs with thresholds, the alert wired to each, and the runbook step it triggers - so the artifact reads as an operable system a customer's platform team could adopt, not a screenshot of a demo dashboard."
+}

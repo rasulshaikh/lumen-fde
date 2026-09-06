@@ -1,0 +1,210 @@
+{
+ "i": 20,
+ "topic": "SRE fundamentals: SLIs, SLOs, error budgets, toil, on-call",
+ "track": "D. Reliability and Observability",
+ "month": 3,
+ "hours": 8.0,
+ "why": "An FDE is the person the customer asks 'how reliable is this, and what happens when it breaks' before they sign off the production rollout, and the person whose phone rings at 02:00 when the answer turns out to be wrong. SLIs, SLOs and an error budget turn that conversation from adjectives into one number both sides can measure, gate releases against, and write into a contract; toil accounting and on-call design are what let a one- or two-person deployed team run a customer's system for a year without burning out or handing the customer a pager they cannot hold. Palantir, Anthropic and Databricks deployed teams all inherit this vocabulary from Google SRE, so fluency is checked in the loop and expected on day one of the engagement.",
+ "prerequisites": [
+  "PromQL basics: `rate()`, `sum by (...)`, label matchers and dividing two series; this topic teaches the SLO-specific queries, and 'Observability: OpenTelemetry, Prometheus, Grafana, logs, traces, metrics' (topic 21) goes deep on instrumentation afterwards",
+  "Kubernetes readiness and liveness probes, rollouts and `kubectl rollout undo` from 'Kubernetes production ops' (topic 8), so you know why health-check traffic pollutes an SLI and how a page actually gets mitigated",
+  "Single-box troubleshooting from 'Performance and troubleshooting on a single box' (topic 3): saturation, OOM kills, full disks, so a runbook step such as 'check event-loop lag and Postgres connection count' is something you can do under pressure",
+  "DefenderMate running locally via Docker Compose (the hardened image from topic 6) with a `/metrics` endpoint from prom-client that exposes an `http_request_duration_seconds` histogram labelled by route and status code",
+  "A Grafana Cloud free-tier account or a local Prometheus + Alertmanager + Grafana stack in Docker Compose, plus a 40-line Python or k6 script that generates traffic with a controllable error rate",
+  "Percentiles versus means, and why a p50 of 80 ms can coexist with a p99 of 4 s; you should be able to read a cumulative histogram",
+  "Git and CI habits from 'Git at depth' (topic 4) so rules, dashboards and documents live in one repository with `promtool` checks on every pull request"
+ ],
+ "subtopics": [
+  {
+   "name": "Why 100% is the wrong target: the cost of the next nine",
+   "learn": "Read Embracing Risk and be able to state, for DefenderMate, what the marginal nine costs (a second region, a queue in front of the classifier, a warm standby Postgres) and what it buys (about 39 extra minutes per month going from 99.9 to 99.99). Know the two availability formulas, time-based (uptime / total time) and aggregate (good requests / total requests), and why Google and every cloud SLA use the request-based form: a 30-second blip at 03:00 and a 30-second blip during the customer's Monday triage are identical in uptime terms and wildly different in the request form. Be ready to explain to a customer that the target is set by user tolerance and by what their alternatives offer, not by engineering pride, and that an error budget that is never spent is a signal you are shipping too slowly.",
+   "minutes": 20,
+   "resource": {
+    "label": "Google SRE Book, ch. 3: Embracing Risk",
+    "url": "https://sre.google/sre-book/embracing-risk/"
+   }
+  },
+  {
+   "name": "The SLI menu and the good-events / valid-events ratio",
+   "learn": "Every SLI in this plan is written as good events / valid events x 100, so the first job for each user journey is to define 'valid' (exclude /healthz, exclude 4xx caused by the caller, exclude synthetic traffic) and 'good' (2xx or 3xx, and under the latency threshold). Use the Workbook's SLI menu by service type: request/response gets availability, latency and quality; data processing gets freshness, correctness, coverage and throughput; storage gets durability. Map DefenderMate's journeys onto it: dashboard page loads and API calls are request/response; inbound alert webhooks are request/response with an acceptance-latency SLI; the LLM classification pipeline is freshness plus correctness; the weekly digest email is a count-based freshness SLI. Write each as a one-line SLI specification before touching any query, for example 'proportion of /api/* requests served in under 500 ms, measured at the ingress controller'.",
+   "minutes": 30,
+   "resource": {
+    "label": "SRE Workbook, ch. 2: Implementing SLOs",
+    "url": "https://sre.google/workbook/implementing-slos/"
+   }
+  },
+  {
+   "name": "Where you measure changes what you see",
+   "learn": "For each SLI pick a measurement point and write down its blind spots. Server-side application metrics (prom-client's histogram) miss every request the app never saw, so during a crashloop they report 100% availability while the ingress returns 503. Load-balancer or ingress-controller metrics (`nginx_ingress_controller_requests`, ALB `HTTPCode_ELB_5XX_Count`) see failures the app missed but not app-internal correctness. Blackbox probes (`probe_success` from blackbox_exporter) see the whole path including DNS and TLS but only for the paths you probe and at low volume. Client-side telemetry sees the truth including the customer's flaky Wi-Fi. Choose ingress metrics for API availability and latency, a probe for 'is the dashboard up at all', and app-side counters only for internal pipeline steps. Know the PromQL defence against silence, `absent(up{job=\"dm-api\"})` or a probe, because a missing series is not a good series.",
+   "minutes": 20,
+   "resource": {
+    "label": "Prometheus guide: Understanding and using the multi-target exporter pattern (blackbox probing)",
+    "url": "https://prometheus.io/docs/guides/multi-target-exporter/"
+   }
+  },
+  {
+   "name": "Availability SLI in PromQL, including the 'valid' filter",
+   "learn": "Write the ratio with `rate()` over a window and identical label sets on both sides: `sum(rate(nginx_ingress_controller_requests{ingress=\"defendermate\",status!~\"5..\",path!=\"/healthz\"}[5m])) / sum(rate(nginx_ingress_controller_requests{ingress=\"defendermate\",path!=\"/healthz\"}[5m]))`. Understand why `rate()` needs at least two samples inside the range (so `[5m]` at a 30 s scrape interval is fine and `[1m]` at 60 s is not), why `increase()` is `rate()` times the range and is the primitive for 'errors in the last 30 days', and why dividing two series with different label sets without `sum by (...)` on both sides yields an empty result and a panel that silently shows nothing. Decide explicitly whether 429 and 499 count as bad: for the webhook endpoint a 429 you returned under load is your failure, a 400 on malformed JSON is the caller's. Record the result as `slo:sli_error:ratio_rate5m` with a recording rule so panels and alerts share one definition.",
+   "minutes": 30,
+   "resource": {
+    "label": "Prometheus docs: Querying basics",
+    "url": "https://prometheus.io/docs/prometheus/latest/querying/basics/"
+   }
+  },
+  {
+   "name": "Latency SLI from histograms: threshold form, not quantile form",
+   "learn": "Instrument DefenderMate's Node API with prom-client's `Histogram` for `http_request_duration_seconds` and choose buckets so every SLO threshold is exactly a bucket boundary (0.5 and 2 for the dashboard SLO); `histogram_quantile()` interpolates inside a bucket, so a 'p95 under 500 ms' computed from buckets [0.25, 1] is a guess, and quantiles cannot be averaged across instances or windows. The SLO-compatible form counts good events directly: `sum(rate(http_request_duration_seconds_bucket{le=\"0.5\",route=~\"/api/.*\"}[5m])) / sum(rate(http_request_duration_seconds_count{route=~\"/api/.*\"}[5m]))`; because `_bucket` is cumulative, the `le=\"0.5\"` series already includes everything faster. Know that `le` is a string label ('0.5', never '.5' or '0.50'), that the `+Inf` bucket equals `_count`, and that Prometheus native histograms with `histogram_fraction(0, 0.5, ...)` remove the boundary problem when the customer's stack has them enabled. Keep the quantile panel for humans; alert and budget on the fraction.",
+   "minutes": 35,
+   "resource": {
+    "label": "Prometheus docs: Histograms and summaries (best practices)",
+    "url": "https://prometheus.io/docs/practices/histograms/"
+   }
+  },
+  {
+   "name": "Pipeline SLIs for ingestion and the weekly digest: freshness, correctness, coverage",
+   "learn": "DefenderMate's value is asynchronous: a webhook lands, an LLM classifies it, the dashboard and weekly email reflect it, so request SLIs alone say nothing about whether the customer's analyst sees the right alert in time. Define freshness as the proportion of events classified within 300 s of receipt: emit a histogram of `classified_at - received_at` with a 300 bucket and use the threshold form, or for a batch job export `job_last_success_timestamp_seconds` and alert on `time() - max(job_last_success_timestamp_seconds) > 900`. Define correctness as the proportion of a golden sample (a fixed set of known alerts replayed hourly) classified to the expected label, which is the bridge to 'Evals as infrastructure' (topic 53). Define coverage as events processed / events accepted at the webhook over the window, which is how you catch a queue silently dropping messages. For the weekly digest treat each scheduled send as one event and set a count-based objective over a quarter ('at most one late digest per thirteen'), because a 99.9% ratio over four weekly events is meaningless.",
+   "minutes": 30,
+   "resource": {
+    "label": "SRE Workbook, ch. 13: Data Processing Pipelines",
+    "url": "https://sre.google/workbook/data-processing/"
+   }
+  },
+  {
+   "name": "Picking targets and windows; SLO versus SLA and the dependency ceiling",
+   "learn": "Choose a rolling 28- or 30-day window for engineering decisions (a rolling window keeps the budget continuously meaningful; a calendar month resets it and invites end-of-month risk-taking) and know that the customer's SLA is almost always calendar-month, so you will report both. Do the arithmetic cold: 30 days is 43,200 minutes, so 99.9% leaves 43.2 minutes of full outage, 99.95% leaves 21.6, 99.5% leaves 3 h 36 m, 99% leaves 7.2 h; over 28 days 99.9% is 40.3 minutes. Set the internal SLO tighter than any contractual SLA so you are paged before you owe credits, and never set an SLO above the availability of a serial dependency: if classification calls one LLM provider with a 99.9% published SLA and Postgres at 99.95%, the naive ceiling is 0.999 x 0.9995, about 99.85%, so a 99.9% classification SLO requires a retry queue or a degraded rules-based fallback, and that trade-off belongs in the SLO document's rationale. Start from measured history (run the SLI query over the last four weeks before committing) but do not simply codify current performance.",
+   "minutes": 30,
+   "resource": {
+    "label": "Google SRE Book, ch. 4: Service Level Objectives (Choosing Targets)",
+    "url": "https://sre.google/sre-book/service-level-objectives/"
+   }
+  },
+  {
+   "name": "Writing the SLO document (Workbook Appendix A shape)",
+   "learn": "Produce one document per service with the sections the Workbook's example uses: service overview and owner; for each SLI the specification (plain English) and the implementation (the exact query and measurement point), the target and window, and the rationale (why 99.9 and not 99.5, what the customer said, what history showed); an error budget section linking the policy; clarifications and caveats (traffic excluded, known measurement gaps such as ingress-level blindness to DNS failures); and a review schedule with a next-review date. The document is a contract between you, the customer's ops lead and their product owner, so every query is paired with a sentence a non-engineer can read. Store it in the repository next to the rules and version it; a customer will ask 'what did the SLO say in March' during a dispute. Have a colleague read the SLI implementation and reproduce the number in Grafana without asking you anything; if they cannot, the document is not finished.",
+   "minutes": 30,
+   "resource": {
+    "label": "SRE Workbook, Appendix A: Example SLO Document",
+    "url": "https://sre.google/workbook/slo-document/"
+   }
+  },
+  {
+   "name": "The error budget policy: thresholds, consequences, signatures",
+   "learn": "Write the policy from the Workbook's example: what happens when the 30-day budget is below 100% but above zero (normal operation), when a single incident burns more than 20% (mandatory postmortem within five working days), when the budget is exhausted (feature freeze on the affected service until the trailing window recovers, engineers redirected to reliability items, exceptions only by a named executive), and when the budget is untouched for two consecutive windows (loosen the SLO or ship faster). Name who has authority to override and where the decision is recorded. Rehearse the FDE version of the hard conversation: the customer's product owner wants a Friday release with the budget at zero, and you point at the policy they signed rather than argue in the moment. Define how customer-caused outages (their firewall change, their identity-tenant misconfiguration) are handled: excluded from the SLA, counted in the SLO unless the document's caveats say otherwise, always postmortemed.",
+   "minutes": 25,
+   "resource": {
+    "label": "SRE Workbook, Appendix B: Example Error Budget Policy",
+    "url": "https://sre.google/workbook/error-budget-policy/"
+   }
+  },
+  {
+   "name": "Burn-rate alerting math: deriving 14.4, 6 and 1",
+   "learn": "Burn rate is observed error ratio / (1 - SLO); burn rate 1 spends exactly the budget over the whole window. Over a 30-day window an alert on burn rate B over a lookback of L hours fires when B x L / 720 of the budget is gone, so 2% in 1 h needs B = 14.4, 5% in 6 h needs B = 6, 10% in 3 days needs B = 1. Convert to thresholds for a 99.9% SLO: 1.44%, 0.6% and 0.1% error ratio. Understand the reset problem (a 1 h window keeps firing for up to an hour after the outage ends) and the Workbook's fix of also requiring a short window (one twelfth: 5 m, 30 m, 6 h) to exceed the threshold so the alert clears within minutes. The 14.4x/1 h and 6x/6 h pairs page; the 1x/3 d pair opens a ticket. Know the failure of the naive alert this replaces ('error rate above 0.1% for 10 m'): it either pages on noise or misses slow burns. For low-traffic services (under roughly one request per second) know the options: longer windows, synthetic traffic to raise the denominator, or a minimum event count before the alert may fire.",
+   "minutes": 40,
+   "resource": {
+    "label": "SRE Workbook, ch. 5: Alerting on SLOs",
+    "url": "https://sre.google/workbook/alerting-on-slos/"
+   }
+  },
+  {
+   "name": "Implementing the alerts as Prometheus recording and alerting rules",
+   "learn": "Create recording rules for the error ratio at every window you need, `slo:sli_error:ratio_rate5m`, `ratio_rate30m`, `ratio_rate1h`, `ratio_rate6h`, `ratio_rate3d`, so the alert expression is cheap, then write the page rule as `(ratio_rate1h > 14.4 * 0.001 and ratio_rate5m > 14.4 * 0.001) or (ratio_rate6h > 6 * 0.001 and ratio_rate30m > 6 * 0.001)` with `for: 2m`, `labels: {severity: page, slo: api-availability}` and `annotations: {summary, runbook_url}`; the ticket rule uses the 3 d / 6 h pair at burn rate 1. Validate with `promtool check rules rules.yaml` and, crucially, write a `promtool test rules` file whose `input_series` ramps error counts and whose `alert_rule_test` entries assert the page fires at `eval_time: 1h` for a 1.5% error ramp and does not fire for 0.05%. Understand `for:` semantics (pending until continuously true), that rule groups evaluate every `evaluation_interval` so a 3 d recording rule at 15 s is wasteful (put long windows in a group with `interval: 1m`), and that a rule's output inherits the labels of the expression's result, so `sum` without `by` erases the `service` and `slo` labels your routing depends on.",
+   "minutes": 35,
+   "resource": {
+    "label": "Prometheus docs: Alerting rules",
+    "url": "https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/"
+   }
+  },
+  {
+   "name": "Generating SLOs from a spec: Sloth and OpenSLO",
+   "learn": "Hand-writing fifteen recording rules per SLO is toil, so declare each SLO once and generate. With Sloth write a `prometheus/v1` spec with `service`, per-SLO `objective: 99.9`, `sli.events.error_query` and `total_query` using the `{{.window}}` placeholder, and `alerting.page_alert` / `ticket_alert` labels; run `sloth validate -i slo.yaml` then `sloth generate -i slo.yaml -o rules.yaml` and read what it produces: the multiwindow error-ratio recording rules, metadata series such as `slo:objective:ratio`, `slo:error_budget:ratio`, `slo:period_error_budget_remaining:ratio` and `slo:current_burn_rate:ratio`, and two alert rules with the Workbook's windows already wired. Understand the trade-off: generated names are stable and one dashboard becomes reusable across every customer engagement, at the cost of learning the tool's naming scheme. Know that OpenSLO is a vendor-neutral YAML schema so an SLO written for one customer on Prometheus can be re-expressed for another on Datadog or Cloud Monitoring, and that Pyrra is the Kubernetes-CRD alternative when the customer runs kube-prometheus.",
+   "minutes": 25,
+   "resource": {
+    "label": "Sloth: Prometheus SLO generator (GitHub)",
+    "url": "https://github.com/slok/sloth"
+   }
+  },
+  {
+   "name": "The Grafana SLO dashboard: four panels that answer four questions",
+   "learn": "Build one dashboard per service with `service` and `slo` variables and exactly these panels: (1) SLI over the window as a time series with a constant line at the objective; (2) remaining error budget as a Stat panel with thresholds green above 50%, amber 20-50%, red below 20%, fed by a recording rule such as `slo:period_error_budget_remaining:ratio` rather than a 30 d `increase()` in the panel, because range queries over 30 days of raw counters time out on a busy Prometheus and show 'No data' exactly when an executive is looking; (3) current burn rate as a time series with threshold lines at 1, 6 and 14.4 so a page is visually explained; (4) a budget-consumption timeline that shows when budget was spent, which is the panel that makes an incident review honest. Use `$__rate_interval` instead of a hard-coded `[5m]` so zooming does not break rates, set units to percent (0.0-1.0) correctly, and provision the dashboard as JSON through the provisioning directory or the HTTP API so it lives in git. On Grafana Cloud compare your hand-built dashboard with the native SLO feature under Alerts & IRM, which generates the same views from a query and an objective, and note what it hides.",
+   "minutes": 45,
+   "resource": {
+    "label": "Grafana Cloud docs: SLO (Alerts & IRM)",
+    "url": "https://grafana.com/docs/grafana-cloud/observe-and-act/alert-and-measure-reliability/slo/"
+   }
+  },
+  {
+   "name": "Page on symptoms, not causes: the four golden signals",
+   "learn": "From Monitoring Distributed Systems: a page must be urgent, actionable and about a user-visible symptom; a cause-based alert (CPU above 80%, pod restarted, queue depth high) belongs on a dashboard or in a ticket unless it predicts imminent SLO breach. The four golden signals, latency, traffic, errors and saturation, are the front page of every service dashboard, with saturation (connection-pool usage, Postgres connections against `max_connections`, Node event-loop lag, queue age) as the leading indicator. Audit DefenderMate's existing alerts and delete or downgrade every one not tied to an SLO or an imminent-saturation prediction; the target is that every page has a runbook and a person who would be upset to be woken by it. Record the reason for every page for a month in a sheet and count how many changed anyone's behaviour; that count is your alert-quality metric.",
+   "minutes": 20,
+   "resource": {
+    "label": "Google SRE Book, ch. 6: Monitoring Distributed Systems",
+    "url": "https://sre.google/sre-book/monitoring-distributed-systems/"
+   }
+  },
+  {
+   "name": "Alertmanager routing: severity to pager, everything else to a channel",
+   "learn": "Configure `route` with `group_by: ['alertname', 'service', 'slo']`, `group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 4h`, and child `routes` matching `severity=\"page\"` to the PagerDuty or Opsgenie receiver and `severity=\"ticket\"` to Slack or the issue tracker; add an `inhibit_rules` entry so the ticket alert for the same `service` and `slo` is suppressed while the page is firing, and a `mute_time_intervals` entry for the customer's agreed maintenance window. Learn `amtool check-config alertmanager.yml`, `amtool alert query`, and `amtool silence add alertname=... --duration=2h --comment=\"INC-123\"` so every silence carries an owner and an expiry, because a silence without an expiry is how a customer outage goes unpaged three months later. Know that Grafana Alerting has the same concepts (notification policies, mute timings, silences) under different names when the customer runs Grafana-managed rules.",
+   "minutes": 25,
+   "resource": {
+    "label": "Prometheus Alertmanager docs: Configuration",
+    "url": "https://prometheus.io/docs/alerting/latest/configuration/"
+   }
+  },
+  {
+   "name": "Toil: measuring it and removing it on a customer engagement",
+   "learn": "Toil is work that is manual, repetitive, automatable, tactical, without enduring value, and that grows linearly with the service; the SRE book caps it at 50% of an engineer's time, and FDE engagements drift far above that because customers ask for 'quick' manual actions. Keep a toil log for two weeks on DefenderMate, every rerun of a failed classification batch, every manual tenant onboarding, every certificate or API-key rotation, every 'can you pull me the numbers', with minutes spent and frequency; sort by minutes x frequency and automate the top item with a script that is checked in, tested and runnable by the customer's ops team without you. Distinguish toil from overhead (meetings, planning) and from engineering (a fix that removes the class of work). Bring the inventory to the engagement steering meeting as a number, 'we spend 11 hours a week on manual reruns; two days of engineering removes it', which is the argument that funds reliability work.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google SRE Book, ch. 5: Eliminating Toil",
+    "url": "https://sre.google/sre-book/eliminating-toil/"
+   }
+  },
+  {
+   "name": "On-call design for a shared FDE and customer team",
+   "learn": "From Being On-Call: a sustainable rotation keeps on-call under 25% of anyone's time (the book's floor is roughly eight engineers for a single-site 24/7 rotation, or six per site when two sites split the day), allows at most two incidents per 12-hour shift, and compensates in time off or money. Design DefenderMate's arrangement explicitly: business-hours primary is the customer's ops team with you as escalation; out-of-hours pages route only for the two SLOs that matter overnight (webhook acceptance and ingestion freshness); dashboard latency is a ticket until 08:00; the escalation matrix names people and response times (acknowledge within 5 minutes, escalate at 15). Write the handoff checklist (open incidents, active silences and their expiry, degraded dependencies, upcoming changes) and insist on a shadowing period before anyone takes a solo shift. Know the cognitive-load argument: responders under stress make worse decisions, so clear pages and runbooks are an engineering deliverable, not documentation polish.",
+   "minutes": 30,
+   "resource": {
+    "label": "Google SRE Book, ch. 11: Being On-Call",
+    "url": "https://sre.google/sre-book/being-on-call/"
+   }
+  },
+  {
+   "name": "Runbooks, runbook_url and the first five minutes of a page",
+   "learn": "Every paging rule carries a `runbook_url` annotation to a page that fits on one screen: what the alert means in user terms, the dashboard link, the three most likely causes each with the exact command or query that confirms it (`kubectl -n defendermate get pods`, a `pg_stat_activity` count, the LLM provider's status endpoint), the mitigation for each (`kubectl rollout undo`, scale out, fail over to rules-based classification), and when to escalate. Use PagerDuty's open incident response guide for the roles and vocabulary (incident commander, communications lead, severity levels) you will formalise in 'Incident response and postmortems' (topic 23), and adopt its rule that the person paged owns the incident until it is handed off explicitly. Test each runbook by having someone who did not write it follow it during a game day; the steps that fail are your backlog. Keep runbooks in the same repository as the rules so a rule change and its runbook change are one pull request.",
+   "minutes": 20,
+   "resource": {
+    "label": "PagerDuty Incident Response: During an Incident (roles and first-response steps)",
+    "url": "https://response.pagerduty.com/during/during_an_incident/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can write a complete SLO document for DefenderMate with at least four SLIs (API availability, dashboard latency, webhook acceptance, classification freshness), each with a plain-English specification, the exact PromQL implementation and measurement point, a target, a window and a rationale, such that a colleague can reproduce every number in Grafana from the document alone.",
+  "You can do the budget arithmetic cold: state the minutes of downtime allowed by 99, 99.5, 99.9 and 99.95 percent over 28 and 30 days, derive the 14.4, 6 and 1 burn rates from the 2%/1 h, 5%/6 h and 10%/3 d budget-consumption targets, and convert them into error-ratio thresholds for any objective.",
+  "You can implement multiwindow multi-burn-rate alerts as Prometheus recording and alerting rules, pass `promtool check rules` and a `promtool test rules` suite, and demonstrate live that a 1.5% injected 5xx rate pages within five minutes while 0.05% stays silent and the page clears within minutes of the injection stopping.",
+  "You can build and provision a Grafana dashboard with SLI, remaining-budget, burn-rate and budget-timeline panels backed by recording rules that loads in under three seconds over a 30-day range, and explain the query behind every panel.",
+  "You can take a 'dashboard shows 100% but the customer saw an outage' report and, within fifteen minutes, name the measurement-point blind spot or query error responsible and propose the corrected SLI.",
+  "You can write an error budget policy with numeric thresholds, named consequences and named decision owners, and walk a customer's product owner through what it means for their Friday release when the budget is at zero.",
+  "You can design an on-call rotation and escalation matrix for a shared FDE and customer team that respects the two-incidents-per-shift and 25% ceilings, with a handoff checklist and a runbook behind every page.",
+  "You can quantify a fortnight of toil on an engagement in hours per week per category and present a costed automation proposal for the top item."
+ ],
+ "failureModes": [
+  "The availability SLI is computed from the application's own request counters; during a 40-minute crashloop the pods emit nothing, the ratio has no data, the panel shows 100%, and meanwhile the ingress returned 503 to every request and the customer's SOC missed real alerts.",
+  "The latency SLO is 'p95 under 500 ms' but the histogram buckets are 0.1, 0.25, 1 and 2.5 seconds; `histogram_quantile` interpolates between 0.25 and 1 and reports 480 ms while real users see 900 ms, and nobody notices until a customer sends a screen recording.",
+  "Kubernetes readiness probes and a synthetic checker make up 35% of requests to the API; they are counted as valid and always succeed, so a 3% real-user error rate shows as 2% and the burn-rate page never reaches its threshold.",
+  "A single-window alert of 'error ratio above 0.1% for 10 minutes' fires 30 times a week on normal noise, the team routes it to a muted Slack channel, and a genuine six-hour slow burn that spends 40% of the budget is discovered from a customer email.",
+  "Every Grafana panel runs `increase(...[30d])` against raw counters; the dashboard takes 90 seconds to load and shows 'No data' during the very incident review where the customer's director asks how much budget is left.",
+  "The error budget policy exists as a document but was never signed by the customer's product owner; when the budget hits zero the release train continues, the number stops meaning anything, and the FDE has no leverage in the next reliability argument.",
+  "Weekend traffic drops to ten requests an hour; one failed request is a 10% error ratio, the 5-minute short window trips instantly, and the on-call FDE is paged at 03:00 for a single 500 that the caller retried successfully."
+ ],
+ "interviewQuestions": [
+  "A customer's CISO says the DefenderMate alert dashboard must be 'five nines'. Walk me through the conversation: how you find the number they actually need, what 99.999 would cost on the current architecture, and what you propose instead.",
+  "Design the SLIs for an asynchronous pipeline that ingests webhooks, classifies them with a third-party LLM, and updates a dashboard. Where is each measured, what counts as a valid event, and what does an error budget mean when the biggest dependency is a provider you do not control?",
+  "Derive burn-rate alerting from first principles: why 14.4, why two windows, what the short window buys you, and what you lose if you only keep the long one. Then tell me how it breaks at ten requests an hour.",
+  "Our SLO dashboard shows 100% availability for the past week; the customer reports three outages. Give me every plausible explanation and the specific check that confirms or rules out each one.",
+  "The error budget is exhausted ten days into the window and the customer's product owner wants to ship a feature on Friday. What happens, who decides, what does the policy say, and how do you handle it if they overrule you?",
+  "A p99 latency alert fires every night at 02:00 and the team has learned to ignore it. Diagnose the alerting-design failure, fix it, and tell me what you would say in the retrospective about why it lasted so long.",
+  "You are the only engineer on a customer engagement with a two-person customer ops team. Design an on-call arrangement that is sustainable for a year and explain how you would measure and reduce toil over the first quarter."
+ ],
+ "proofOfWork": "A public repository, `defendermate-slo`, that a reviewer can run cold with `make up && make burn`. It contains a Sloth spec (`slo/defendermate.yaml`) declaring four SLOs (API availability 99.9, dashboard latency 99.5 under 500 ms, webhook acceptance 99.95, classification freshness 99 within 300 s), the generated recording and alerting rules committed alongside it, and a `promtool test rules` suite that ramps synthetic error series and asserts the page alert fires at 14.4x and stays silent at 1x. A Docker Compose file brings up Prometheus, Alertmanager, Grafana and a small traffic generator with an `--error-rate` flag; `make burn` injects 1.5% 5xx for ten minutes and captures screenshots of the remaining-budget stat dropping, the burn-rate panel crossing the 14.4 line, and the page arriving in Alertmanager, then shows the alert clearing after injection stops. The repo also holds the signed SLO document and error budget policy as Markdown, a runbook per paging alert linked via `runbook_url`, and a `report.py` that queries `/api/v1/query` to produce a calendar-month attainment report alongside the rolling-window dashboard, with a README paragraph explaining why the two numbers legitimately differ."
+}

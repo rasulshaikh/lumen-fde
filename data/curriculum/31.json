@@ -1,0 +1,200 @@
+{
+  "i": 31,
+  "topic": "Redis: caching, rate limiting, idempotency, streams",
+  "track": "E. Backend and Data",
+  "month": 4,
+  "hours": 6.0,
+  "why": "Every customer integration an FDE ships sits between a flaky upstream (webhooks that retry, LLM providers that 429 you, browsers that double-submit) and a database the customer cannot afford to overload, and Redis is the component you put in that gap: a cache so the demo stays fast on their real data, a limiter so one tenant cannot starve the others, an idempotency store so a retried webhook does not create two invoices, and a stream so the work survives a pod restart. The customer usually already runs ElastiCache or a Redis in a corner of the cluster, so you inherit its eviction policy, persistence settings and single-threaded limits rather than choosing them, and you need to know which of your guarantees silently disappear when that instance is configured as a cache. Take-home reviewers at Anthropic, Databricks and Palantir specifically look for whether your rate limiter is atomic, whether your idempotency layer survives a crash between claim and completion, and whether you can say what happens to each of them on failover.",
+  "prerequisites": [
+    "HTTP semantics at the level of topic 2 (status codes, `Retry-After`, `X-Forwarded-For` behind an ALB, what a client library does on 429 vs 503) and FastAPI middleware, dependencies and `lifespan` from topic 26, because the limiter and idempotency layer are wired in as middleware/dependencies sharing one connection pool",
+    "PostgreSQL transactions and `INSERT ... ON CONFLICT DO NOTHING` / unique indexes from topic 29, because in this design Postgres is the source of truth and Redis is the fast path; you must be able to say which one catches a duplicate when the other fails",
+    "Docker Compose from topic 5 to run `redis:7` locally with a mounted `redis.conf`, and the ElastiCache basics from topic 14 (cluster mode on/off, reader endpoint, Multi-AZ failover) so the production section maps onto something you have already provisioned",
+    "Python asyncio fluency (`async with`, task groups, `asyncio.gather`) and the ability to read redis-py source, since every code sample uses `redis.asyncio`",
+    "Enough Lua to read a 30-line script: `local`, tables, `tonumber`, `math.min`, `redis.call` vs `redis.pcall`; 30 minutes with the EVAL introduction page covers it",
+    "Access to the DefenderMate webhook receiver code and a week of real numbers (events per minute per provider, p99 handler time, duplicate rate seen in Postgres) so limits and TTLs are sized from data rather than guessed"
+  ],
+  "subtopics": [
+    {
+      "name": "Single-threaded command loop: what blocks Redis and how to see it",
+      "learn": "Redis executes commands on one main thread (`io-threads` in 6+ only parallelise socket read/write), so any O(N) command stalls every client: `KEYS *`, `SMEMBERS`/`HGETALL` on a million-element key, `DEL` of a huge key (use `UNLINK` and `lazyfree-lazy-user-del yes`), `FLUSHALL`, or a Lua script that loops. Find the culprits with `SLOWLOG GET 25` (threshold `slowlog-log-slower-than`, default 10000 microseconds), `LATENCY DOCTOR` after setting `latency-monitor-threshold 100`, `INFO commandstats` for per-command usec, `redis-cli --latency` from an app pod, and `redis-cli --bigkeys` / `--memkeys` to find the keys that cause them. Replace `KEYS pattern` with a `SCAN cursor MATCH pattern COUNT 1000` loop and accept that SCAN may return duplicates and misses keys created during the scan. Be able to explain why a 200 ms `HGETALL` on one tenant's key shows up as a p99 spike on every other tenant's API.",
+      "minutes": 20,
+      "resource": {
+        "label": "Redis docs: Diagnosing latency issues",
+        "url": "https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/latency/"
+      }
+    },
+    {
+      "name": "Key naming, hash tags and TTL semantics (SET EX/PX/NX/XX/KEEPTTL, GETEX, expiry mechanics)",
+      "learn": "Adopt one key grammar for the engagement, `{tenant}:domain:id` (e.g. `{t_42}:idem:7f3a...`), where the `{...}` hash tag pins every key for a tenant to the same Cluster slot so multi-key commands and Lua scripts still work when the customer moves to cluster mode. Know the SET options cold: `SET k v EX 300 NX` is the atomic set-if-absent-with-TTL that replaced `SETNX` + `EXPIRE`, `PX` for milliseconds, `XX` for update-only, `KEEPTTL` to overwrite a value without resetting its expiry, and `GET` to return the old value; `GETEX k EX 60` refreshes TTL on read, `GETDEL` reads-and-removes, `EXPIRE k 60 NX|XX|GT|LT` (7.0+) sets expiry conditionally, `TTL` returns -1 for no expiry and -2 for missing. Expiry is passive on access plus an active sampler (20 keys per cycle, `hz` cycles per second), so expired keys linger in memory and in `DBSIZE` under load. Jitter TTLs by plus or minus 10% so ten thousand keys written by the same batch job do not expire and refill in the same second.",
+      "minutes": 20,
+      "resource": {
+        "label": "Redis command reference: SET (options and patterns)",
+        "url": "https://redis.io/docs/latest/commands/set/"
+      }
+    },
+    {
+      "name": "Cache-aside done properly: negative caching, stampede control, versioned invalidation",
+      "learn": "Implement cache-aside (read key, on miss load from Postgres, `SET k v EX ttl`) and know its race: a reader misses and reads the old row, a writer updates the row and `DEL`s the key, then the reader `SET`s the stale value which now lives for a full TTL; mitigate with short TTLs, a delayed second delete, or versioned keys (`v3:` prefix bumped by the writer) rather than pretending it cannot happen. Negative-cache 'not found' with a sentinel value and a 30 second TTL so a scraper hitting missing IDs does not turn into a full-table-scan storm on the customer's database. Stop stampedes on a hot key expiring three ways and be able to choose: a per-key mutex `SET lock:k token NX PX 5000` where losers serve stale or wait; probabilistic early recomputation (recompute when `now - delta * beta * ln(rand()) >= expiry`); or a soft TTL stored inside the value with a hard Redis TTL so one worker refreshes while others serve stale. Pick serialisation deliberately (JSON for debuggability, msgpack for size, never unpickle anything a tenant could influence) and measure hit ratio from `INFO stats` `keyspace_hits` / (`keyspace_hits` + `keyspace_misses`) before claiming the cache helps.",
+      "minutes": 30,
+      "resource": {
+        "label": "AWS whitepaper: Database Caching Strategies Using Redis",
+        "url": "https://docs.aws.amazon.com/whitepapers/latest/database-caching-strategies-using-redis/welcome.html"
+      }
+    },
+    {
+      "name": "Fixed and sliding window counters with INCR/EXPIRE and sorted sets",
+      "learn": "Build the naive fixed-window limiter, key `rl:{tenant}:route:<floor(now/window)>`, `INCR` then `EXPIRE` when the result is 1, and then break it: a crash or timeout between the two commands leaves a key with no TTL that blocks that tenant forever, and two requests racing on a fresh key can both see 1. Fix it with `SET k 0 EX window NX` followed by `INCR`, or a MULTI block, and note fixed windows still admit 2x the limit across a boundary. Build the sliding-window log with a sorted set in one MULTI/EXEC: `ZREMRANGEBYSCORE k -inf (now-window)`, `ZADD k now <now:uuid>` (unique member or two requests in the same millisecond collapse), `ZCARD k`, `EXPIRE k window`; it is exact but costs O(limit) memory per key, fine for 100/min and wrong for 100k/min. Know the sliding-window counter approximation (`prev_count * (1 - elapsed/window) + curr_count`) as the cheap middle ground. The INCR command page documents the canonical versions of these patterns and their pitfalls.",
+      "minutes": 25,
+      "resource": {
+        "label": "Redis command reference: INCR (rate limiter patterns)",
+        "url": "https://redis.io/docs/latest/commands/incr/"
+      }
+    },
+    {
+      "name": "Token bucket in Lua: EVAL, KEYS/ARGV, EVALSHA and NOSCRIPT, Redis Functions",
+      "learn": "Write the token bucket as one Lua script so refill, check and debit are atomic: state is a hash with `tokens` and `ts`, refill is `min(capacity, tokens + (now - ts) * rate_per_ms)`, debit `cost` if enough, return `{allowed, remaining, retry_after_ms}`, and `PEXPIRE` the key to `ceil(capacity / rate)` so idle buckets clean themselves. Pass the key in `KEYS[1]` and rate/capacity/now/cost in `ARGV` (declaring keys correctly is what lets Cluster route the script); pass `now` from the client and clamp `elapsed = max(0, now - ts)` so clock skew between app pods cannot drive tokens backwards. Load once with `SCRIPT LOAD` and call `EVALSHA sha 1 key ...`; handle the `NOSCRIPT` error after a restart or failover by falling back to `EVAL` (redis-py's `Script` object does this for you). Know the Redis 7 alternative, `FUNCTION LOAD \"#!lua name=ratelimit ...\"` with `redis.register_function` and `FCALL ratelimit_take 1 key ...`, which is persisted and replicated so there is no NOSCRIPT after failover. Verify atomicity with 20 concurrent workers hammering one key and asserting total admitted equals capacity plus rate times elapsed, plus or minus one.",
+      "minutes": 35,
+      "resource": {
+        "label": "Redis docs: Scripting with Lua (EVAL introduction)",
+        "url": "https://redis.io/docs/latest/develop/programmability/eval-intro/"
+      }
+    },
+    {
+      "name": "The 429 contract: Retry-After, RateLimit headers, limit dimensions, fail-open vs fail-closed",
+      "learn": "Return 429 for a client exceeding its quota and 503 for server-side load shedding, always with `Retry-After` in whole seconds derived from the limiter's `retry_after_ms`. Emit the IETF draft headers (`RateLimit` and `RateLimit-Policy` structured fields in the current draft; older drafts and most vendors still use `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` or `X-RateLimit-*`) so the customer's SDK and your own retry code can back off precisely. Choose dimensions explicitly and layer them: per API key or tenant for fairness, per route for expensive endpoints, per source IP only from the first trusted hop of `X-Forwarded-For`, and a burst bucket (10/s) stacked on a sustained bucket (5000/h). Decide and document what happens when Redis is unreachable (`ConnectionError`, `TimeoutError`): a public unauthenticated endpoint fails closed or falls back to an in-process limiter, an internal paid API fails open and pages someone; a limiter that silently fails open is how a customer discovers their bill.",
+      "minutes": 15,
+      "resource": {
+        "label": "IETF httpapi draft: RateLimit header fields for HTTP",
+        "url": "https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/"
+      }
+    },
+    {
+      "name": "Idempotency keys for mutating APIs: claim, fingerprint, replay, conflict",
+      "learn": "Implement the Stripe-style contract: the client sends `Idempotency-Key: <uuid4>` on POST/PATCH, the server scopes it to (tenant, key), and fingerprints the request as SHA-256 over method, path and canonicalised body. Claim with `SET idem:{tenant}:key '{state:in_progress, fp}' NX PX 60000`; if NX fails, `GET` it and branch: `in_progress` returns 409 (a retry is racing the original), `completed` with a matching fingerprint replays the stored status, headers and body byte-for-byte, and a mismatched fingerprint returns 422 (Stripe returns a 400 `idempotency_error`), because the same key with a different payload is a client bug you must not paper over. On completion, `SET ... '{state:completed, status, body}' PX 86400000 XX` (24 hour retention like Stripe), and decide whether to store 5xx results (Stripe does; for your own service prefer not to, so the client's retry can succeed). The 60 second in-progress lease is the crash recovery mechanism: if the pod dies between claim and completion, the retry re-claims after the lease expires, so the handler itself must be safe to run twice, which means a unique index on `idempotency_key` in Postgres is the real guarantee and Redis is the fast path in front of it. Cap stored bodies and store a pointer for anything large.",
+      "minutes": 35,
+      "resource": {
+        "label": "Stripe API reference: Idempotent requests",
+        "url": "https://docs.stripe.com/api/idempotent_requests"
+      }
+    },
+    {
+      "name": "Webhook dedup and at-least-once processing for the DefenderMate receiver",
+      "learn": "Providers (Stripe, GitHub, Slack, Twilio) deliver at least once and retry on any non-2xx or slow response, so the receiver must verify the HMAC signature (`Stripe-Signature` with timestamp tolerance, `X-Hub-Signature-256`) before touching Redis, then dedup on the provider's event id with `SET wh:{provider}:event_id <pod> NX EX 259200` (three days, longer than any provider's retry horizon); on NX failure return 200 immediately. Hand the event off with `XADD webhooks:{provider} MAXLEN ~ 100000 * ...` and return 200 within a second; never do the work inline. Find the crash window between the `SET NX` and the `XADD` (event marked seen, never enqueued) and close it by putting both in a MULTI or a single Lua script, or by enqueueing first and deduping in the consumer. Dedup again at the consumer with `INSERT ... ON CONFLICT (provider, event_id) DO NOTHING`, because Redis can lose the dedup key on failover. Handle out-of-order delivery by fetching current resource state from the provider API rather than trusting event sequence. Export `duplicates_dropped_total`, `signature_failures_total` and ack latency; the same draft standard tells you how DefenderMate's own outbound webhooks should let receivers dedup you.",
+      "minutes": 30,
+      "resource": {
+        "label": "IETF httpapi draft: The Idempotency-Key HTTP header field",
+        "url": "https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/"
+      }
+    },
+    {
+      "name": "MULTI/EXEC, WATCH and pipelines: which atomicity you actually get",
+      "learn": "MULTI/EXEC queues commands and runs them without interleaving, but there is no rollback: a command that fails at runtime (`WRONGTYPE`) fails alone while the others commit, and only a queue-time error aborts the whole EXEC. You cannot read a value and branch inside MULTI, which is exactly why the limiter and lock release are Lua. `WATCH k` then MULTI/EXEC gives optimistic compare-and-set: EXEC returns nil if any watched key changed, and you retry in a bounded loop. Pipelining (redis-py `pipeline(transaction=False)`) batches N commands into one round trip and turns 10k SETs from 10k RTTs into a handful, but the replies buffer server-side against `client-output-buffer-limit`, so chunk to about a thousand; redis-py's `pipeline()` defaults to `transaction=True`, which silently wraps your batch in MULTI. In Cluster every key in a MULTI, pipeline or script must hash to one slot or you get `CROSSSLOT`. Rule of thumb: MULTI for grouping, WATCH for rare contention, Lua for read-then-decide, and all three hold the single thread for their whole duration.",
+      "minutes": 20,
+      "resource": {
+        "label": "Redis docs: Transactions (MULTI, EXEC, WATCH)",
+        "url": "https://redis.io/docs/latest/develop/using-commands/transactions/"
+      }
+    },
+    {
+      "name": "Distributed locks: SET NX PX with a token, compare-and-delete release, fencing",
+      "learn": "Acquire with `SET lock:resource <random-token> NX PX 30000` and release only through a Lua compare-and-delete (`if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end`), because a plain `DEL` after your lease expired releases the next holder's lock. The lease must exceed the work or you extend it on a heartbeat (`PEXPIRE` guarded by the same token check); if a GC pause or slow disk pushes work past the lease, two workers run concurrently, so the protected operation must be idempotent or carry a fencing token (`INCR lock:fence`, stored with the lock, rejected by the resource if stale). Know the Redlock argument (N/2+1 of independent masters) and Kleppmann's critique (unsafe without fencing under clock jumps and pauses), and be ready to say when you would instead use `SELECT ... FOR UPDATE SKIP LOCKED` or `pg_advisory_xact_lock` from topic 29, or a Temporal workflow from topic 34. redis-py ships `redis.lock.Lock` with `blocking_timeout`, `extend()` and `thread_local`; read it before writing your own.",
+      "minutes": 20,
+      "resource": {
+        "label": "Redis docs: Distributed Locks with Redis",
+        "url": "https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/"
+      }
+    },
+    {
+      "name": "Streams as an append-only log: XADD, entry IDs, MAXLEN/MINID trimming vs Pub/Sub vs Lists",
+      "learn": "A stream is an append-only log whose entries have IDs `<unix-ms>-<seq>`; write with `XADD key MAXLEN ~ 100000 * field value ...` (the `~` makes trimming O(1) amortised; exact trimming is expensive), trim by time with `MINID`, use `NOMKSTREAM` when the stream must pre-exist, read ranges with `XRANGE key - + COUNT 10` / `XREVRANGE`, block on new entries with `XREAD BLOCK 5000 STREAMS key $`. Pick the right primitive: Pub/Sub is fire-and-forget with no persistence and drops slow subscribers at `client-output-buffer-limit pubsub` (right for cache-invalidation broadcasts, wrong for jobs); a List with `LPUSH` and `BLMOVE src processing RIGHT LEFT 0` gives a reliable queue with one consumer per item and no replay or fan-out; Streams give replay, fan-out via groups and per-consumer acknowledgement. Everything lives in RAM under `maxmemory`, so an untrimmed stream is the single most common Redis OOM in production; every `XADD` in your code carries `MAXLEN` or `MINID`, and `XINFO STREAM` length is a dashboard panel. Say clearly what Streams are not: no partitions (shard across N streams by key yourself), no disk retention, no Kafka-style consumer offsets.",
+      "minutes": 20,
+      "resource": {
+        "label": "Redis docs: Redis Streams data type",
+        "url": "https://redis.io/docs/latest/develop/data-types/streams/"
+      }
+    },
+    {
+      "name": "Consumer groups: XREADGROUP, XACK, XPENDING, XAUTOCLAIM and a dead-letter policy",
+      "learn": "Create with `XGROUP CREATE key grp $ MKSTREAM` (`$` = only new entries, `0` = from the beginning). Consume with `XREADGROUP GROUP grp consumer-a COUNT 10 BLOCK 2000 STREAMS key >`; delivered entries enter the group's pending entries list until `XACK key grp id`. On restart, read with ID `0` instead of `>` to recover your own unacked entries first. `XPENDING key grp - + 10` shows idle time and delivery count per entry; `XAUTOCLAIM key grp consumer-b 60000 0-0 COUNT 100` (6.2+) atomically steals entries idle over 60 seconds from dead consumers and returns them, replacing the old XPENDING plus XCLAIM loop, and in 7.0 also reports IDs whose data was already trimmed. Define the poison-message rule up front: when delivery count exceeds five, `XADD key:dlq` the entry and `XACK` the original, and alert on DLQ length. Monitor `lag` and `pending` from `XINFO GROUPS key` (7.0+). Use stable consumer names (the pod name) so restarts reclaim their own work, run a reclaimer loop in every consumer, and never `MAXLEN`-trim below the oldest pending ID unless you accept losing in-flight work. This is at-least-once delivery; the consumer's handler is idempotent by construction (subtopic 8) or it is wrong.",
+      "minutes": 35,
+      "resource": {
+        "label": "Redis command reference: XAUTOCLAIM",
+        "url": "https://redis.io/docs/latest/commands/xautoclaim/"
+      }
+    },
+    {
+      "name": "maxmemory and eviction policies; memory accounting and fragmentation",
+      "learn": "The default `maxmemory 0` means unlimited on 64-bit, so an unbounded cache grows until the kernel OOM-kills the process; always set it (and to at most 50 to 60 percent of RAM when RDB or AOF rewrite is on, for fork copy-on-write headroom). Know each `maxmemory-policy` and which data it is safe for: `noeviction` makes writes fail with `OOM command not allowed` and is the correct setting for limiter buckets, idempotency keys and streams; `allkeys-lru` and `allkeys-lfu` (tune `lfu-log-factor`, `lfu-decay-time`) for pure caches with skewed access; the `volatile-*` policies only evict keys that have a TTL, so a store with no TTLs under `volatile-lru` behaves like `noeviction` and surprises everyone. LRU and LFU are approximate, sampling `maxmemory-samples` keys (default 5; 10 is close to true LRU). Hard rule for engagements: cache data and state data never share an instance with an `allkeys-*` policy, because one hot cache day evicts your dedup keys and the duplicates appear a week later in the customer's ledger. Read `INFO memory`: `used_memory` vs `used_memory_rss`, `mem_fragmentation_ratio` above 1.5 means turn on `activedefrag yes`, below 1.0 means you are swapping; `MEMORY USAGE key SAMPLES 5` and `redis-cli --memkeys` find the offenders; `evicted_keys` in `INFO stats` must stay at zero on a state instance.",
+      "minutes": 25,
+      "resource": {
+        "label": "Redis docs: Key eviction (maxmemory and policies)",
+        "url": "https://redis.io/docs/latest/develop/reference/eviction/"
+      }
+    },
+    {
+      "name": "Persistence and durability: RDB fork/COW, AOF appendfsync, WAIT and async replication",
+      "learn": "RDB snapshots (`save 3600 1 300 100 60 10000`, or `BGSAVE`) fork a child that writes a point-in-time file using copy-on-write, so a write-heavy workload during a snapshot can double resident memory and a `vm.overcommit_memory=0` host can refuse the fork; the loss window is everything since the last snapshot. AOF (`appendonly yes`) logs every write, with `appendfsync everysec` (default, about one second of loss) versus `always` (fsync per write, slow) versus `no`; rewrites are triggered by `auto-aof-rewrite-percentage 100` and `auto-aof-rewrite-min-size 64mb`, and Redis 7 stores a multi-part AOF (RDB base plus incremental files under `appenddirname`). Replication is asynchronous: `WAIT numreplicas timeout` blocks until replicas acknowledge receipt (not fsync; `WAITAOF` in 7.2 covers fsync), and a failover can promote a replica missing the last writes. Map each of your four uses onto this: a cache gets `save \"\"` and no AOF and reboots cold; a limiter tolerates losing buckets (limits reset once); idempotency keys and streams get AOF everysec plus a replica, and the critical path still relies on the Postgres unique index because none of this is a durable database.",
+      "minutes": 25,
+      "resource": {
+        "label": "Redis docs: Persistence (RDB and AOF)",
+        "url": "https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/"
+      }
+    },
+    {
+      "name": "HA topologies and managed Redis: Sentinel vs Cluster slots, ElastiCache, TLS and ACLs",
+      "learn": "Sentinel is one master with replicas plus at least three sentinels agreeing a quorum to fail over; clients must be Sentinel-aware (`redis.sentinel.Sentinel(...).master_for('mymaster')`) and the dataset is bounded by one box. Cluster shards 16384 hash slots across at least three masters each with a replica; `CLUSTER KEYSLOT k` shows where a key lives, cluster-aware clients (`redis.cluster.RedisCluster`) follow `MOVED` and `ASK` redirects, multi-key commands, MULTI and Lua require every key in one slot (hence the `{tenant}` hash tags from subtopic 2), and there is no `SELECT db`. On ElastiCache, cluster mode disabled gives one shard with a primary endpoint and a reader endpoint, cluster mode enabled gives a configuration endpoint, and Multi-AZ auto-failover flips DNS so clients see `ReadOnlyError` or `ConnectionError` for some seconds; leave `reserved-memory-percent 25` for fork overhead and pin the engine version. Lock it down the way the customer's security review expects: ACL users instead of a shared `requirepass` (`ACL SETUSER app on >pw ~{app}:* +@read +@write -@dangerous` blocks FLUSHALL, KEYS, CONFIG and DEBUG), TLS in transit (`rediss://`), encryption at rest, VPC-only with no public endpoint. Know the licensing story in one sentence for the customer's lawyer: Redis 7.4 moved to RSAL/SSPL, 8.0 added AGPL, and ElastiCache now defaults to the Valkey fork, which is command-compatible for everything in this topic.",
+      "minutes": 25,
+      "resource": {
+        "label": "Amazon ElastiCache docs: Best practices and caching strategies",
+        "url": "https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/BestPractices.html"
+      }
+    },
+    {
+      "name": "redis-py in production: pool sizing, timeouts, retries, failover errors, circuit breaking",
+      "learn": "Build one `redis.asyncio.Redis` on a shared `ConnectionPool(max_connections=50)` in the FastAPI lifespan and inject it; a `Redis()` per request exhausts the pool and leaves the box in TIME_WAIT. Set `socket_connect_timeout=1`, `socket_timeout=0.5` (never leave it None on a request path), `health_check_interval=30`, and `retry=Retry(ExponentialBackoff(cap=0.5, base=0.01), 3)` with `retry_on_error=[ConnectionError, TimeoutError, BusyLoadingError]`; know that `ReadOnlyError` during a failover means you are talking to the demoted node and must reconnect, which redis-py handles for Cluster but you must handle for a single endpoint. Do the latency arithmetic: 0.5 s timeout times three retries inside a 1 s API budget is broken by construction, so align timeouts with the latency budget from topic 43. Wrap the cache path in a circuit breaker that bypasses Redis to Postgres for N seconds after a failure so a Redis outage does not become a database outage through multiplied timeouts. Call `CLIENT SETNAME <service>-<pod>` so `CLIENT LIST` shows who owns each connection when the customer asks why there are 900 of them.",
+      "minutes": 20,
+      "resource": {
+        "label": "Redis docs: redis-py production usage guide",
+        "url": "https://redis.io/docs/latest/develop/clients/redis-py/produsage/"
+      }
+    },
+    {
+      "name": "Observability and test harness: INFO metrics, redis_exporter, fakeredis vs testcontainers, chaos",
+      "learn": "Run oliver006's redis_exporter next to the instance and graph `redis_keyspace_hits_total` / `redis_keyspace_misses_total` (hit ratio), `redis_evicted_keys_total`, `redis_memory_used_bytes` against `redis_memory_max_bytes`, `redis_connected_clients`, `redis_blocked_clients`, `redis_rejected_connections_total`, `redis_commands_duration_seconds_total`, and with `--check-streams` the per-group pending and lag; alert on hit ratio under 0.8 for a cache instance, any eviction on a state instance, memory over 80 percent, and `master_link_down`. Match each metric to its `INFO` field so you can debug without Grafana. Unit-test limiter and idempotency logic with `fakeredis[lua]` (it runs your EVAL scripts in-process), integration-test with a testcontainers `RedisContainer` for real expiry timing and real `NOSCRIPT` behaviour, and run one chaos test in CI: `docker pause` the Redis container mid-request and assert the fail-open or fail-closed behaviour you documented in subtopic 6. Never leave `MONITOR` running in production; it roughly halves throughput.",
+      "minutes": 20,
+      "resource": {
+        "label": "redis_exporter GitHub repository (Prometheus exporter for Redis)",
+        "url": "https://github.com/oliver006/redis_exporter"
+      }
+    }
+  ],
+  "outcomes": [
+    "You can implement a token-bucket limiter as a single Lua script (or Redis Function) with per-tenant and per-route dimensions, prove under 20 concurrent workers that admitted requests never exceed capacity plus refill, and return 429 with correct `Retry-After` and RateLimit headers.",
+    "You can implement an idempotency layer that claims with `SET NX PX`, fingerprints the request, replays completed responses byte-for-byte, rejects mismatched payloads, and demonstrate by killing the process between claim and completion that the retry recovers and Postgres still holds exactly one row.",
+    "You can make a webhook receiver dedup at-least-once deliveries from Stripe or GitHub, ack within one second, and show in a test that replaying the same event id 50 times produces one side effect.",
+    "You can build a Streams consumer group that survives a consumer crash, reclaims idle work with XAUTOCLAIM, routes entries past five deliveries to a dead-letter stream, and exposes lag and pending counts as metrics.",
+    "You can read `INFO memory`, `INFO stats` and `SLOWLOG` on an unfamiliar customer instance and, within ten minutes, state its eviction policy, whether it has ever evicted, its fragmentation ratio, and which commands are stalling it.",
+    "You can state, for each of cache, limiter, idempotency store and stream, exactly what is lost on process crash, on RDB-only restart, on AOF everysec restart, and on async failover, and which Postgres constraint backstops each loss.",
+    "You can configure an ElastiCache or self-hosted instance for a state workload (noeviction, AOF everysec, replica, ACL user with `-@dangerous`, TLS, no public endpoint) and explain to a customer security reviewer why each setting is there.",
+    "You can size and defend redis-py timeouts, retries and pool size against an API latency budget, and show a circuit breaker that keeps a Redis outage from cascading into the database."
+  ],
+  "failureModes": [
+    "A limiter written as `INCR` then `EXPIRE` times out between the two commands during a Redis blip; the counter key has no TTL, and one tenant is rate-limited to zero until someone runs `TTL` on the key three days later.",
+    "Cache and idempotency keys share one ElastiCache node with `allkeys-lru`; a marketing campaign fills the cache, dedup keys are evicted, Stripe retries a payment webhook, and the customer's ledger shows duplicate invoices that nobody connects to Redis.",
+    "A webhook stream is written with `XADD key *` and no `MAXLEN`; three weeks later the instance hits `maxmemory` with `noeviction`, every `SET` in the API returns `OOM command not allowed`, and the whole product goes down because a log was never trimmed.",
+    "A consumer group is deployed with random consumer names per pod restart and no XAUTOCLAIM loop; after a rolling deploy, thousands of entries sit in the pending list owned by consumers that no longer exist and are never processed.",
+    "An idempotency layer relies on Redis alone; Multi-AZ failover promotes a replica missing the last two seconds of writes, the client's retry re-executes, and two payouts are created because there was no unique index in Postgres behind the fast path.",
+    "A lock is released with a plain `DEL` after a slow LLM call ran past the 30 second lease; the DEL removes the next worker's lock, three workers process the same batch concurrently, and the bug reproduces only under load.",
+    "redis-py is constructed with default `socket_timeout=None` and three retries; when the instance stalls on a `BGSAVE` fork under memory pressure, every API worker blocks on Redis, the connection pool drains, and a 400 ms cache hiccup becomes a five minute total outage of the customer's API."
+  ],
+  "interviewQuestions": [
+    "Design a rate limiter for a multi-tenant LLM gateway where tenants have both a requests-per-second burst limit and a tokens-per-day budget. Where does the state live, how do you keep the check atomic, what happens on Redis failover, and what do you return to the client?",
+    "A customer says their idempotency layer 'works' because they check Redis for the key before processing. Walk me through three ways it still produces duplicates and how you would fix each without a rewrite.",
+    "We see p99 latency spikes across all tenants every few minutes on an otherwise healthy Redis. Take me through your diagnosis: which commands you run, what you expect to see, and the three most likely root causes.",
+    "Compare Redis Streams with consumer groups to Kafka for a webhook ingestion pipeline handling 2,000 events per second with strict no-loss requirements. When would you accept Streams, and what specifically would you configure and monitor to make it safe?",
+    "Explain what happens to the data when a Redis node with `appendfsync everysec` and one async replica loses power. Now the same for RDB only. Which of your four workloads (cache, limiter, idempotency, stream) is acceptable under each, and why?",
+    "A Lua token-bucket script is running fine in one environment and returning `NOSCRIPT` intermittently in another. What is going on, what are two fixes, and which one would you ship to a customer on ElastiCache?",
+    "You inherit a customer's ElastiCache cluster running `volatile-lru` with `maxmemory` at 90 percent of RAM and a mix of cache and session data. What is wrong, what breaks first, and how do you migrate to a safe configuration with zero downtime?"
+  ],
+  "proofOfWork": "A public repository `redis-edge-kit` containing a FastAPI service with three middleware components (token-bucket limiter, idempotency layer, webhook receiver with Streams hand-off) and a `docker compose` file that runs the service, Redis 7 with a committed `redis.conf`, Postgres, redis_exporter and Prometheus. The README shows, with pasted terminal output, five experiments you ran: (1) 20 concurrent workers against one bucket with the admitted count matching capacity plus refill; (2) `kill -9` of the API between idempotency claim and completion followed by a retry, with Postgres showing one row; (3) the same Stripe event replayed 50 times through the receiver producing one Stream entry and one DB row; (4) `docker kill` of one consumer mid-batch with XAUTOCLAIM recovery visible in `XPENDING` before and after; (5) `docker pause redis` during traffic showing the documented fail-closed 503 on the public route and fail-open on the internal route, then recovery. A one-page `DURABILITY.md` table lists each of the four stores against crash, RDB restart, AOF restart and async failover, with what is lost and which Postgres constraint catches it. This is what you walk a reviewer through in a take-home defence."
+}

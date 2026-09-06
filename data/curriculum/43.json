@@ -1,0 +1,209 @@
+{
+ "i": 43,
+ "topic": "LLM-era system design: serving, caching, batching, rate limits, retries, latency budgets",
+ "track": "F. Distributed Systems and System Design",
+ "month": 5,
+ "hours": 8,
+ "why": "An LLM call breaks every assumption the classic system design playbook is built on: latency is a function of output length rather than of work done, the dependency is a metered third party that returns 429 and 529 under load you do not control, cost is per request and visible on the customer's invoice, and the response is non-deterministic so a naive retry can double-charge and double-write. As the FDE you are the one who has to tell the customer's architect, before go-live, what p95 will be at their peak, what a request costs, and what the system does when the model provider is degraded for forty minutes. Getting the answer wrong is not an SLO miss, it is a checkout page that hangs on Black Friday and a bill nobody approved.",
+ "prerequisites": [
+  "The system design playbook from topic 42: back-of-envelope estimation, load balancing, cache key design and stampede protection, partitioning, queues, and the 45-minute delivery frame you will now run against an LLM-shaped prompt",
+  "FastAPI in production from topic 26 (async event loop, timeouts, graceful shutdown, worker sizing) and Redis from topic 31 (TTL, `maxmemory` eviction, Lua atomicity, token-bucket limiter, idempotency store)",
+  "Temporal from topic 34 and Kafka/queues from topic 33: retry policies, activity heartbeats and timeouts, visibility timeout, DLQ, and what an idempotent consumer actually requires",
+  "SLIs/SLOs and error budgets from topic 20, OpenTelemetry and Prometheus histograms from topic 21, and k6 load testing from topic 22 so latency claims are measured with `histogram_quantile()` rather than asserted",
+  "Working knowledge of the Anthropic Messages API: system vs user blocks, `stream: true` SSE events, `usage.input_tokens` / `output_tokens`, `stop_reason`, and the shape of a 429 vs a 529 (topic 60 goes deeper; the vocabulary is assumed now)",
+  "The Kaupex Task Compiler running locally under Docker Compose (FastAPI + Postgres + Temporal + httpx to Claude) with at least a few days of real per-request token counts and durations to anchor the numbers"
+ ],
+ "subtopics": [
+  {
+   "name": "The LLM latency model: prefill vs decode, TTFT and TPOT, why p95 tracks output length",
+   "learn": "Internalise that an LLM request has two phases with completely different scaling behaviour: prefill is compute-bound and roughly linear in input tokens, producing time-to-first-token (TTFT); decode is memory-bandwidth-bound and produces one token per forward pass, so total latency is approximately TTFT + output_tokens x TPOT (time-per-output-token). The consequence is that trimming a 4k-token prompt to 2k saves tens of milliseconds while capping `max_tokens` from 1000 to 250 saves seconds; latency is governed by what the model writes, not what you send. Learn to read the four numbers that matter on any serving stack (TTFT, TPOT, end-to-end, queue wait) and to recognise from a latency histogram whether you are queueing (bimodal, flat right tail) or generating long outputs (smooth right tail correlated with `output_tokens`). Record `output_tokens` as an exemplar or label on every latency observation so you can prove which one you are looking at.",
+   "minutes": 30,
+   "resource": {
+    "label": "vLLM docs - Production metrics (TTFT, TPOT, queue time histograms)",
+    "url": "https://docs.vllm.ai/en/latest/usage/metrics/"
+   }
+  },
+  {
+   "name": "Streaming as a latency product decision: SSE contract, cancellation, and what p95 you publish",
+   "learn": "Decide per endpoint whether the SLI is TTFT or full-completion latency, because streaming changes what the user experiences without changing total work. Know the Anthropic SSE event sequence (`message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`, `message_delta` carrying `stop_reason` and final `usage`, `message_stop`, plus periodic `ping`) and that the token counts only settle on `message_delta`, so cost accounting must happen at the end of the stream, not the start. Handle the two failure cases customers actually hit: a client disconnect mid-stream, where you must propagate cancellation (in httpx, exit the `stream()` context; in FastAPI, detect `await request.is_disconnected()` or catch `asyncio.CancelledError`) or you keep paying for tokens nobody reads; and an error emitted mid-stream after a 200 status, which no HTTP status code will tell you about. Set the proxy correctly: `proxy_buffering off` in Nginx and an idle timeout longer than the longest generation, or the customer's load balancer will cut streams at 60 s.",
+   "minutes": 25,
+   "resource": {
+    "label": "Anthropic docs - Streaming Messages",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/streaming"
+   }
+  },
+  {
+   "name": "Building a per-hop latency budget table and defending it",
+   "learn": "Write the budget as a table before you write code: ingress TLS + auth 15 ms, tenant lookup and RLS query 20 ms, retrieval (embed 40 ms + vector search 60 ms + rerank 120 ms), model call 1800 ms, post-processing and persistence 50 ms, egress 10 ms, leaving explicit slack. Then state the rule that a p95 end-to-end budget is not the sum of per-hop p95s: independent hops compose closer to the sum of means plus a tail allowance, and any hop you retry contributes its timeout, not its median. Set each hop's timeout from the budget (hop timeout = remaining budget, never a global 30 s default) and propagate a deadline down the call chain so a request that has already burned 4 s does not start a fresh 30 s model call. Publish the budget as two SLIs (TTFT and completion) with a stated `histogram_quantile(0.95, sum by (le) (rate(..._bucket[5m])))` expression so the customer's SRE can verify it on their own Grafana.",
+   "minutes": 30,
+   "resource": {
+    "label": "Google SRE Workbook - Implementing SLOs",
+    "url": "https://sre.google/workbook/implementing-slos/"
+   }
+  },
+  {
+   "name": "Cost per request: token accounting, the unit-economics formula, and where it silently doubles",
+   "learn": "Write cost per request explicitly as (input_tokens x input_price + output_tokens x output_price + cache_write_tokens x write_price + cache_read_tokens x read_price) / 1e6, then multiply by the hidden multipliers nobody puts in the first draft: retries, an agent loop that makes N model calls per user action, tool-use round trips that resend the entire conversation each turn, and a reranker or judge model called per request. Learn to count tokens before you send with the count-tokens endpoint so you can enforce a per-request ceiling and reject oversized inputs at the edge with a 413-style error rather than discovering them on the invoice. Instrument `usage` from every response into a `llm_calls` table with tenant, feature, model, token counts and cache fields, because 'what does this feature cost per tenant per month' is a question the customer will ask in week two and you cannot answer retroactively.",
+   "minutes": 25,
+   "resource": {
+    "label": "Anthropic docs - Token counting",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+   }
+  },
+  {
+   "name": "Prompt caching: cache_control breakpoints, prefix stability, TTL, and the economics of a hit",
+   "learn": "Understand that prompt caching is a prefix cache: everything before a `cache_control` breakpoint is cached, and a single changed byte anywhere in that prefix invalidates the whole thing. Structure the prompt so the stable material comes first (tool definitions, system instructions, the customer's schema or policy document, few-shot examples) and the volatile material last (retrieved chunks, user turn, timestamps); the classic bug is a rendered `datetime.now()` or a shuffled retrieval order at the top of the prompt driving a permanent 0% hit rate. Know the price asymmetry (a cache write costs more than an uncached token, a cache read costs a small fraction), which means caching is a loss on a one-shot request and a large win on a conversation or a fan-out where the same prefix is reused within the TTL. Verify with `cache_creation_input_tokens` and `cache_read_input_tokens` in `usage` on every response and alert when the hit ratio drops, because a prompt-template PR is the usual cause of an overnight cost spike.",
+   "minutes": 35,
+   "resource": {
+    "label": "Anthropic docs - Prompt caching",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+   }
+  },
+  {
+   "name": "Response caching: exact-match keys, semantic caching, and why tenant isolation is non-negotiable",
+   "learn": "Layer three caches with different keys and different risks. Exact-match: key = hash(model, prompt_version, normalised_input, temperature, tool_schema_hash) with the tenant id in the key prefix, TTL with jitter, and a stampede lock so a cold key does not fan out; this is safe and boring and should exist first. Semantic: embed the query, nearest-neighbour search, serve the cached answer above a cosine threshold; know that the threshold is a precision/recall dial where a wrong answer is served confidently, so it belongs on FAQ-shaped traffic and never on anything personalised. Understand the correctness trap in both: if the answer depends on retrieved documents, the cache key must include a version of the retrieval corpus or you will serve pre-update answers after the customer uploads a new policy. Never key on user text alone in a multi-tenant system: one tenant seeing another tenant's cached completion is a breach, not a bug.",
+   "minutes": 25,
+   "resource": {
+    "label": "GPTCache - semantic cache for LLM queries (official repo)",
+    "url": "https://github.com/zilliztech/GPTCache"
+   }
+  },
+  {
+   "name": "Async batch APIs: 50% cheaper, hours of latency, and the workloads that qualify",
+   "learn": "Learn the Message Batches shape: submit up to tens of thousands of requests with `custom_id` per item, poll `processing_status`, results return unordered as JSONL keyed by `custom_id`, with a completion window measured in hours and roughly half the per-token price. The design skill is classification: nightly re-scoring, backfills, bulk document extraction, eval runs and re-embedding jobs all qualify; anything a human is waiting on does not. Build the plumbing once (a submitter that chunks and records `custom_id` to row-id mapping, a poller with exponential backoff, a results reader that is idempotent because a re-read must not double-write) and reuse it. State the failure mode clearly in the design doc: a batch is not a queue with SLA, so a job that must complete before the customer's 06:00 report needs a deadline check and a synchronous fallback path, not hope.",
+   "minutes": 25,
+   "resource": {
+    "label": "Anthropic docs - Batch processing (Message Batches API)",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/batch-processing"
+   }
+  },
+  {
+   "name": "Continuous batching and KV cache when you self-host: the throughput/latency dial",
+   "learn": "For customers who must run in their own VPC on their own GPUs, know that modern servers use continuous (in-flight) batching: new requests join the running batch at each decode step instead of waiting for a static batch to drain, and PagedAttention stores the KV cache in fixed-size blocks so memory is not fragmented by variable sequence lengths. Learn the four knobs and what each trades: `--gpu-memory-utilization` (how much VRAM is given to the KV cache, so how many concurrent sequences fit), `--max-num-seqs` and `--max-num-batched-tokens` (bigger batch = more throughput, worse TTFT for everyone), `--max-model-len` (a long context reserves KV blocks and cuts concurrency), and tensor parallel size. Understand preemption: when KV blocks run out, running sequences get swapped or recomputed, which shows up as latency cliffs rather than errors, and is visible in the preemption counter. Compute the KV cache footprint per sequence (2 x layers x kv_heads x head_dim x bytes_per_element x seq_len) so you can answer 'how many concurrent users on one A100?' with arithmetic.",
+   "minutes": 30,
+   "resource": {
+    "label": "vLLM docs - Optimization and tuning",
+    "url": "https://docs.vllm.ai/en/latest/configuration/optimization/"
+   }
+  },
+  {
+   "name": "Model routing and cascades: cheap-first, escalate on a measurable signal",
+   "learn": "Design the router as an explicit policy object, not scattered `if` statements: route by task class (extraction and classification to a small fast model, synthesis and reasoning to a frontier model), by tenant tier, and by a cascade where the small model runs first and escalates only when a checkable condition fails (schema validation error, low self-reported confidence, `stop_reason` of `max_tokens`, or a retrieval score below threshold). Price the cascade honestly: escalation rate e means cost = cheap + e x (cheap + expensive) and latency = cheap_latency + e x expensive_latency, so a cascade at e = 0.5 is usually worse than routing directly. Keep the model id, prompt version and routing decision on the request record and in the trace so a regression can be attributed. Build the routing layer behind one internal interface with per-model timeouts and fallbacks so swapping a model is a config change the customer can approve, not a deploy.",
+   "minutes": 30,
+   "resource": {
+    "label": "LiteLLM docs - Routing, fallbacks and load balancing",
+    "url": "https://docs.litellm.ai/docs/routing"
+   }
+  },
+  {
+   "name": "Provider rate limits: RPM, input/output TPM, 429 vs 529, and reading the limit headers",
+   "learn": "Know that provider limits are multi-dimensional and enforced per organisation, not per process: requests per minute plus input tokens per minute plus output tokens per minute, typically with a token-bucket refill rather than a fixed window, so a burst can exhaust the bucket and then trickle. Read the response headers (`anthropic-ratelimit-requests-remaining`, `anthropic-ratelimit-tokens-remaining`, the corresponding `-reset` timestamps, and `retry-after` on a 429) and feed them into your own admission control rather than discovering limits by failing. Distinguish the error classes and their correct handling: 429 means slow down and honour `retry-after`; 529 (overloaded) means the provider is saturated and is retryable with heavy backoff; 400 and 422 mean your request is wrong and retrying is pure waste; 500 is retryable but only within a budget. Understand that in a multi-worker deployment the limit is shared, so every replica retrying independently converges on a synchronised stampede unless the budget is coordinated in Redis.",
+   "minutes": 25,
+   "resource": {
+    "label": "Anthropic docs - Rate limits",
+    "url": "https://platform.claude.com/docs/en/api/rate-limits"
+   }
+  },
+  {
+   "name": "Client-side admission control: apportioning one upstream quota across tenants fairly",
+   "learn": "Build the limiter that sits between your tenants and the single shared provider quota, because a 429 from upstream is an outage for everyone while a 429 from you is a policy. Implement a distributed token bucket in Redis via a Lua script that debits estimated tokens (input counted exactly, output estimated at `max_tokens`) at admission and reconciles the difference from `usage` after the response, keyed `rl:{tenant}:{minute}` alongside a global `rl:org` bucket. Choose the fairness policy deliberately: hard per-tenant caps are simple and predictable; weighted fair queueing with a per-tenant deficit counter stops one bulk-import tenant starving interactive traffic; a small reserved share per tenant plus a shared burst pool is usually what customers accept. Return a correct contract on rejection: HTTP 429, `Retry-After`, and `RateLimit-Limit` / `RateLimit-Remaining` / `RateLimit-Reset` headers so the customer's client can behave, plus an error body naming which dimension was hit.",
+   "minutes": 30,
+   "resource": {
+    "label": "IETF draft - RateLimit header fields for HTTP",
+    "url": "https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/"
+   }
+  },
+  {
+   "name": "Retries that cannot make things worse: jitter, budgets, circuit breakers, idempotency",
+   "learn": "Use exponential backoff with full jitter (`sleep = random(0, min(cap, base * 2**attempt))`) rather than fixed or equal-jitter backoff, and cap total attempts at three for interactive paths. Enforce a retry budget: a token bucket that allows retries only up to roughly 10% of successful request volume, so a total upstream outage produces 1.1x load instead of 3x. Add a circuit breaker per provider with explicit closed/open/half-open states and a failure-rate threshold over a rolling window, so an outage fails fast in 5 ms instead of burning the full timeout on every request. Understand the LLM-specific hazard: retries are only safe if the effects are idempotent, and an LLM call whose output triggers a tool that writes to the customer's CRM is not idempotent, so the unit of retry must be the whole workflow step guarded by an idempotency key, not the HTTP call. Never retry inside two layers at once; count the multiplication (3 client x 3 gateway x 3 SDK = 27) and pick exactly one layer that owns retry.",
+   "minutes": 30,
+   "resource": {
+    "label": "Amazon Builders' Library - Timeouts, retries and backoff with jitter",
+    "url": "https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"
+   }
+  },
+  {
+   "name": "Queueing, backpressure and load shedding: bounded queues and deadline-aware dropping",
+   "learn": "Accept that an LLM tier has a hard concurrency ceiling and design the queue in front of it on purpose: a bounded in-flight semaphore sized to the provider concurrency you actually have, a bounded wait queue, and a rejection when the queue is full. Learn why an unbounded queue is the worst option: under overload it grows until every request in it has already exceeded the client's timeout, so the server does 100% of the work and delivers 0% of the value. Apply the fixes from the SRE playbook: drop requests whose deadline has already passed before dispatching them, prefer LIFO over FIFO under sustained overload so at least the newest requests are still wanted, shed by criticality (interactive chat before batch enrichment), and return 503 with `Retry-After` for capacity versus 429 for policy. Use Little's Law (L = lambda x W) to size the queue: at 20 rps with a 2 s service time you need 40 concurrent slots, and a queue deeper than a few seconds of service time is a latency bomb, not a buffer.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google SRE Book - Handling overload",
+    "url": "https://sre.google/sre-book/handling-overload/"
+   }
+  },
+  {
+   "name": "Fallback paths that actually hold: the degradation ladder and its rehearsal",
+   "learn": "Write the ladder explicitly, most to least preferred: retry same provider, switch to a secondary provider or region behind the same interface, drop to a smaller/faster model with a shortened prompt, serve a cached or template answer clearly labelled as degraded, queue the request for async completion with a notification, and finally fail with an honest error. For each rung state the trigger, the user-visible difference, and who is told. Then internalise the hard lesson from the Builders' Library: untested fallback code is the most likely thing to fail, because it only runs during an outage and it fails at exactly the moment load is highest; a fallback that requires a cold connection pool, an unwarmed cache, or a different auth path will not work when you need it. The fix is to exercise the fallback continuously (route 1% of traffic through it always) and to add a kill switch the on-call can flip without a deploy, backed by a feature flag the customer's ops team also understands.",
+   "minutes": 25,
+   "resource": {
+    "label": "Amazon Builders' Library - Avoiding fallback in distributed systems",
+    "url": "https://builder.aws.com/content/3EuS9Sakq7L3VLQIF3qzfMfke1Y/avoiding-fallback-in-distributed-systems"
+   }
+  },
+  {
+   "name": "Moving from sync to async: when the request/response model stops working",
+   "learn": "Recognise the tripwires that force a job model: work exceeding a hop timeout (multi-step agents, long extractions, anything over ~60 s), work that must survive a deploy or pod eviction, and work with side effects on the customer's systems. Design the async contract properly: POST returns 202 with a job id and a poll URL or webhook registration; state lives in Postgres and the orchestration in Temporal so retries, heartbeats and `start_to_close_timeout` are declarative rather than hand-rolled; the LLM call is an activity with its own timeout and retry policy separate from the workflow's. Get the semantics right at each hop: visibility timeout must exceed worst-case processing or the message is redelivered while still running, a DLQ with `maxReceiveCount` catches poison inputs, and the consumer must be idempotent on `custom_id` or `job_id` because at-least-once delivery is the only guarantee you get. State plainly what the user sees during each of the five crash points between their POST and the stored result.",
+   "minutes": 25,
+   "resource": {
+    "label": "Azure Architecture Center - Queue-Based Load Leveling pattern",
+    "url": "https://learn.microsoft.com/en-us/azure/architecture/patterns/queue-based-load-leveling"
+   }
+  },
+  {
+   "name": "Autoscaling an LLM workload: why CPU% is the wrong signal",
+   "learn": "Understand that an LLM-calling service is IO-bound waiting on a provider, so a pod at 8% CPU can be completely saturated on in-flight requests; scaling on `resource: cpu` will never fire and the HPA will sit idle while p95 triples. Scale on the signal that reflects saturation: in-flight requests per pod, queue depth, or provider concurrency utilisation, exposed as a Prometheus custom metric and consumed via the `external`/`pods` metric types or KEDA's Prometheus scaler. Tune the behaviour block: `scaleUp.stabilizationWindowSeconds: 0` with a fast policy so a burst is absorbed, `scaleDown` at 300 s so a lull does not flap, plus `minReplicas` sized for the cold-start floor. Know the limits of horizontal scaling here: adding pods does not add provider quota, so past a point you are only redistributing 429s, and for self-hosted GPU serving the scaling unit is a node with a multi-minute image pull and model load, which means you pre-warm or you shed.",
+   "minutes": 25,
+   "resource": {
+    "label": "KEDA docs - event-driven autoscaling for Kubernetes",
+    "url": "https://keda.sh/docs/2.20/"
+   }
+  },
+  {
+   "name": "Observability and cost attribution: OTel GenAI semantics, per-tenant dashboards, the alerts you actually set",
+   "learn": "Emit one span per model call using the OpenTelemetry GenAI semantic conventions (`gen_ai.system`, `gen_ai.request.model`, `gen_ai.request.max_tokens`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`) plus your own `tenant.id`, `prompt.version`, `cache.hit` and `retry.attempt`, so a trace answers 'why was this request slow and what did it cost' in one view. Build two dashboards and ship them with the deployment: an ops board (TTFT and completion p50/p95/p99, error rate split 429/529/5xx, in-flight and queue depth, provider quota headroom) and a cost board (spend per tenant per feature per day, cache hit ratio, tokens per request trend). Set the four alerts that earn their pager: cache hit ratio dropping more than 20 points day-over-day, 429 rate above threshold for 5 minutes, p95 TTFT breaching the published budget, and daily spend on pace to exceed the agreed ceiling. Anything else is a dashboard, not an alert.",
+   "minutes": 25,
+   "resource": {
+    "label": "OpenTelemetry - Semantic conventions for generative AI spans",
+    "url": "https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/"
+   }
+  },
+  {
+   "name": "The write-up: Kaupex under Black Friday, with numbers and a rehearsed failure story",
+   "learn": "Turn the whole topic into the artefact a customer signs off on. Fix the scenario: Kaupex normally compiles 2k tasks/hour, Black Friday week is 15x with a two-hour spike at 40x, and the customer's SLA says a task is acknowledged in under 2 s and compiled within 5 minutes. Produce (1) an assumptions table where every number is derived, not asserted; (2) a per-hop latency budget for the interactive path and a throughput budget for the compile path; (3) cost per task and cost for the peak day, with the prompt-caching hit ratio as an explicit sensitivity row; (4) the capacity plan against the provider quota, showing the arithmetic for how many concurrent calls the quota permits and therefore where you queue; (5) the degradation ladder with triggers and kill switches; and (6) a failure story with a timeline: what breaks first, at what number, what the customer sees, and what the runbook says. Close with the one sentence the architect will repeat to their CTO. Then rehearse it aloud in 20 minutes and cut anything you cannot defend with a number.",
+   "minutes": 35,
+   "resource": {
+    "label": "Eugene Yan - Patterns for building LLM-based systems and products",
+    "url": "https://eugeneyan.com/writing/llm-patterns/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can write a per-hop latency budget for an LLM feature that sums to a stated p95, set every hop timeout from it, propagate a deadline down the chain, and show the `histogram_quantile()` query that proves the budget is being met in Grafana.",
+  "You can state cost per request as a formula with named token terms, name the four multipliers that inflate it (retries, agent loops, tool round-trips, judge models), and produce a per-tenant per-feature monthly cost number from a `llm_calls` table you designed.",
+  "You can restructure a prompt so the stable prefix is cacheable, place `cache_control` correctly, and demonstrate a measured cache hit ratio with `cache_read_input_tokens` before and after, including the cost break-even point where caching starts paying.",
+  "You can design a per-tenant admission controller over one shared provider quota (Redis Lua token bucket debiting estimated tokens and reconciling from `usage`) with a stated fairness policy and a correct 429 contract including `Retry-After` and `RateLimit-*` headers.",
+  "You can write a retry and circuit-breaker policy that provably cannot amplify an outage beyond ~1.1x (full jitter, single retrying layer, 10% retry budget, breaker thresholds) and explain which LLM operations are unsafe to retry and what idempotency key makes them safe.",
+  "You can draw the degradation ladder for a given feature with a trigger, user-visible effect and owner per rung, and show the always-on traffic slice and kill switch that keep the fallback from being dead code.",
+  "You can choose sync vs streaming vs async-job vs batch-API for a stated workload and defend it with the latency SLA, the cost delta and the crash-safety requirement rather than with preference.",
+  "You can run a 45-minute LLM system design end to end (requirements, numbers, diagram, two deep dives, failure story) and finish with 'the thing that saturates first is X at Y rps, and here is what the customer sees'."
+ ],
+ "failureModes": [
+  "A prompt template rendered the current timestamp in the system block, so every prompt-cache lookup missed silently, and the customer's bill quadrupled over a weekend with no latency or error signal to catch it.",
+  "Retries were configured in the SDK, the internal gateway and the customer's frontend simultaneously; a 90-second provider degradation turned into 27x load, exhausted the org token quota, and kept the system down for twenty minutes after the provider had recovered.",
+  "An unbounded asyncio queue in front of the model tier absorbed a burst until every queued request had already exceeded the client's 30-second timeout, so the service spent an hour generating tokens for connections that were long closed while users saw only errors.",
+  "The provider outage fallback to a secondary region had never run in production; when it finally fired, its connection pool was cold, its API key had expired six weeks earlier, and the fallback path failed faster than the primary it was replacing.",
+  "Latency was tuned by shrinking the prompt from 6k to 3k tokens with no measurable effect, because p95 was dominated by a `max_tokens: 4096` default and a model that habitually wrote 1,200-token answers.",
+  "The semantic cache used a cosine threshold of 0.85 with no tenant prefix in the key, and one customer's support agent was served another customer's cached answer containing their account details.",
+  "The HPA was configured on CPU utilisation for an IO-bound LLM service; pods sat at 7% CPU while p95 tripled, no scaling event ever fired, and the postmortem blamed the model provider."
+ ],
+ "interviewQuestions": [
+  "Design the LLM layer of an order-triage system that normally handles 2,000 requests an hour and hits 40x during a two-hour Black Friday spike, with a 2-second acknowledgement SLA and a 5-minute completion SLA. Give me the latency budget, the cost per request, where you queue, and the first thing that saturates, with numbers.",
+  "Your p95 latency is 9 seconds against a 4-second target. Walk me through diagnosis: what do you measure first, how do you tell queueing from generation, and what are the three levers you would pull in order of effect per unit of risk?",
+  "You have one organisation-level token-per-minute quota shared by 200 tenants, and one of them starts a bulk import. Design the admission control: what do you meter, where does the state live, what does a throttled tenant see, and how do you keep interactive traffic alive without hard-capping everyone?",
+  "The model provider is returning 529s for 40% of calls. Walk me through exactly what your system does in the first 60 seconds and the next 30 minutes, and tell me what the customer's users see at each stage. Then tell me how you tested that path before it happened.",
+  "When is it correct to retry an LLM call, and when does a retry corrupt state? Give me a concrete example from a system that writes to a customer's CRM, and show me the idempotency design that makes the retry safe.",
+  "A customer wants sub-second responses and refuses to accept streaming as an answer because their UI is a batch report. What options do you actually have, what does each cost, and which would you recommend for a 3,000-token summarisation task?",
+  "Prompt caching gives you a 10x read discount but costs more to write. Derive the break-even and tell me for which of these three workloads it pays: a single-turn classifier, a 20-turn support conversation, and a nightly fan-out of 50,000 documents against the same 8k-token policy prompt."
+ ],
+ "proofOfWork": "A public `llm-load-lab` repository that turns the two written designs into something a reviewer can run. It contains a docker-compose stack with the Kaupex API in front of a deliberately hostile fake provider: a small FastAPI service that emulates a model endpoint with configurable TTFT and per-token delay, a token-bucket RPM/TPM quota that returns real 429s with `retry-after` and `anthropic-ratelimit-*`-style headers, a 529 injection rate, and a mid-stream error mode. Against it run four k6 `ramping-arrival-rate` scenarios that each reproduce one failure and then its fix, with before/after Grafana panels committed as PNGs: (1) a layered-retry storm showing 27x amplification collapsing to ~1.1x once full jitter, a single retry layer and a 10% retry budget are enabled; (2) an unbounded queue showing every request completing after its client deadline, fixed by a bounded semaphore plus deadline-aware LIFO shedding; (3) a prompt-cache regression where a timestamp in the system block drops the hit ratio to zero and doubles cost per request, caught by a hit-ratio alert rule checked into the repo; (4) an HPA-on-CPU non-event replaced by a KEDA Prometheus scaler on in-flight requests. Alongside the code sit the two design documents themselves, each with an assumptions table, a per-hop budget, a cost model with a prompt-caching sensitivity row, a degradation ladder with kill switches, and a dated failure timeline. The README opens with a one-paragraph summary written for a customer architect, and `make demo` reproduces every chart from scratch in under ten minutes."
+}

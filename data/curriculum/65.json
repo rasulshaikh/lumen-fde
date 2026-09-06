@@ -1,0 +1,191 @@
+{
+ "i": 65,
+ "topic": "Incident tabletop and security briefing",
+ "track": "I. Security and Compliance",
+ "month": 8,
+ "hours": 5,
+ "why": "When something breaks inside a customer's environment, the FDE is the only person in the room who both understands the system and has the customer's trust, which means you become the incident commander and the customer-facing voice at the same time - a conflict you have to resolve deliberately rather than by accident at 2am. The technical fix is rarely the hard part; the hard part is running a call with your customer's VP of Engineering on it, deciding when to say the word 'breach', and starting a regulatory clock you cannot stop. This topic is the rehearsal: you run a real tabletop against your own architecture, and you build the five-minute briefing that a customer's board or CISO will actually sit through, because the deployment survives or dies on whether they believe you had control.",
+ "prerequisites": [
+  "Incident response and postmortems (topic 23) and SRE fundamentals (topic 20): SLIs/SLOs, error budgets, on-call rotation mechanics, and the basic incident lifecycle - this topic is the security-flavoured, customer-facing escalation of that material, not a repeat of it.",
+  "Application security hands-on (topic 61) and threat modelling and secrets lifecycle (topic 62): you need a real threat model and a real set of findings to build believable scenarios and injects from, plus a secrets rotation runbook you can actually execute under time pressure.",
+  "Compliance (topic 64): the control map, and specifically which of your customers are under GDPR, HIPAA, PCI or a SOC 2 report, because notification obligations are what turn an outage into a legal event.",
+  "Observability (topic 21): the ability to answer 'when did this start, who was affected, and what did they access' from traces, structured logs and audit tables - a tabletop where nobody can answer the scoping question is the most common real failure.",
+  "Cloud and Kubernetes security (topics 10, 15, 63): IAM roles, IRSA, key revocation, NetworkPolicy and node isolation - the containment actions you will be asked to perform live.",
+  "A deployed system you own end to end - Dokeo and DefenderMate, with their architecture diagrams, on-call contacts and runbooks - because a tabletop against a hypothetical system teaches nothing."
+ ],
+ "subtopics": [
+  {
+   "name": "The declaration threshold: when a bug becomes an incident",
+   "learn": "Write down, before the exercise, the exact conditions under which you declare - and internalise that the cost of declaring early is a Slack channel, while the cost of declaring late is a six-week dwell time. Define triggers concretely for your stack: any confirmed cross-tenant data read, any credential found outside a secrets manager, any unexplained IAM principal, any 403-to-200 change on an admin route, any customer report of seeing data they should not. Learn PagerDuty's key move - anyone can declare, and declaring is never punished - and why 'we thought it might be a display bug' is the sentence that appears in every bad post-incident report. Also define what is explicitly not an incident so the channel does not become a triage queue.",
+   "minutes": 15,
+   "resource": {
+    "label": "PagerDuty Incident Response: What is an incident?",
+    "url": "https://response.pagerduty.com/before/what_is_an_incident/"
+   }
+  },
+  {
+   "name": "A severity scale that a customer will accept",
+   "learn": "Build a SEV1-SEV5 table where each level names the observable condition, the response expectation, who gets woken, and the external communication obligation - not adjectives like 'major'. Add the security dimension explicitly: SEV1 includes confirmed unauthorised access to customer data or production credentials, regardless of whether the service is up, because availability-only scales systematically under-rate breaches. Learn to separate severity (impact now) from priority (what we work on) from CVSS (vulnerability badness, topic 61) - conflating them is why a CVSS 9.8 in a dev-only dependency gets a page. Write the mapping to your contract: which SEV levels trip a customer notification SLA and within how many hours.",
+   "minutes": 15,
+   "resource": {
+    "label": "PagerDuty Incident Response: Severity levels",
+    "url": "https://response.pagerduty.com/before/severity_levels/"
+   }
+  },
+  {
+   "name": "Roles, and the FDE's dual-hat problem",
+   "learn": "Learn the four roles that make an incident call work: Incident Commander (owns the incident, makes decisions, does not debug), Scribe (timestamps every decision and finding in the channel), Subject Matter Expert (does the actual work, one task at a time), and Customer/Internal Liaison (owns all outbound communication). The FDE-specific trap is that you are the SME, the IC and the Liaison simultaneously, and doing all three means all three are done badly - practise explicitly handing off: 'I am the SME, I need an IC from your side or I will take IC and hand SME to Priya.' Learn the IC's authority rule - the IC's decision stands during the incident and is reviewed after, never debated during - and how to state that out loud to a customer executive who outranks you.",
+   "minutes": 20,
+   "resource": {
+    "label": "PagerDuty Incident Response: Different roles",
+    "url": "https://response.pagerduty.com/before/different_roles/"
+   }
+  },
+  {
+   "name": "Running the call: the IC loop and the decision log",
+   "learn": "Drill the loop: state current status, take structured input round-robin ('what do you know, what do you need'), assign one owner and one deadline per action, set a re-sync interval (10 minutes for SEV1), repeat. Practise the verbal patterns that keep a bridge from degenerating - 'hold, one conversation', 'that is a theory, what would prove it', 'we are timeboxing this to five minutes then rolling back', and closed-loop confirmation ('Priya, revoke the key, confirm back when done'). Keep a single source of truth channel with timestamps: every hypothesis, every action taken, every command run, every 'we decided not to'. That log is the artifact your postmortem, your customer's auditor and possibly their lawyers will read, so it must be written during the incident, never reconstructed after.",
+   "minutes": 20,
+   "resource": {
+    "label": "PagerDuty Incident Response: During an incident",
+    "url": "https://response.pagerduty.com/during/during_an_incident/"
+   }
+  },
+  {
+   "name": "Security incidents differ: containment, eradication, evidence",
+   "learn": "Understand why a security incident inverts your reliability instincts. In an outage you restore service as fast as possible; in a suspected compromise, the first restart can destroy the only evidence of what happened, and a premature block tips off an attacker who then burns their other access. Learn the sequence - detect, scope, contain, eradicate, recover - and that scoping ('what else did this principal touch') usually precedes containment. Know the concrete tension points: rotating a credential closes the door but also breaks the customer's integration; isolating a node preserves memory but drops live traffic; a public status page update is also a public disclosure. Learn who must be in the loop that is never in an outage call: the customer's security team, their legal/privacy counsel, and often an external IR retainer.",
+   "minutes": 20,
+   "resource": {
+    "label": "PagerDuty Incident Response: Security incident response",
+    "url": "https://response.pagerduty.com/during/security_incident_response/"
+   }
+  },
+  {
+   "name": "NIST SP 800-61 lifecycle mapped onto your own runbook",
+   "learn": "Read the four phases - Preparation; Detection and Analysis; Containment, Eradication and Recovery; Post-Incident Activity - and then do the useful part: map each phase to a named artifact in your own deployment. Preparation is your contact tree, jump-box access and pre-provisioned break-glass role; Detection is the specific alert rule and the log source that fires it; Analysis is the query you would actually run against the audit table; Containment is the exact CLI call. Learn the standard's vocabulary because customer security teams speak it - 'event' vs 'incident', indicator, precursor, chain of custody - and learn why the standard insists that severity is a function of functional impact, information impact and recoverability rather than a single number.",
+   "minutes": 15,
+   "resource": {
+    "label": "NIST SP 800-61: Computer Security Incident Handling Guide",
+    "url": "https://csrc.nist.gov/pubs/sp/800/61/r2/final"
+   }
+  },
+  {
+   "name": "Containment actions you must be able to execute in under five minutes",
+   "learn": "Turn theory into muscle memory by writing and dry-running the actual commands for your stack, with the pre-authorisation you would need. Credential kill: revoke an IAM access key, attach an explicit Deny policy to a role, and know that AWS STS session tokens already issued keep working until they expire unless you add a Deny with an `aws:TokenIssueTime` condition. Identity kill: revoke refresh tokens and force re-auth at the IdP, invalidate sessions server-side (which is why JWT-only sessions with no revocation list is a containment liability, topic 27). Network kill: tighten a security group, apply a deny-all NetworkPolicy to a namespace, cordon and drain a node while taking a snapshot first. Data kill: disable an integration's webhook, and know your object-storage versioning and retention settings before you need them.",
+   "minutes": 20,
+   "resource": {
+    "label": "AWS IAM User Guide: Disabling permissions for temporary security credentials",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp_control-access_disable-perms.html"
+   }
+  },
+  {
+   "name": "The clocks: regulatory and contractual notification windows",
+   "learn": "Know precisely what starts running the moment you say 'confirmed'. GDPR Article 33 requires notification to the supervisory authority without undue delay and where feasible within 72 hours of becoming aware, with Article 34 covering notice to data subjects when risk is high; the clock starts at awareness, not at full understanding, and a phased notification is explicitly allowed. HIPAA's Breach Notification Rule runs on 60 days for affected individuals, with different rules above and below 500 records. Most enterprise MSAs and DPAs impose a tighter contractual clock on you as a processor - commonly 24 or 48 hours to notify the controller - and that is usually the one that bites first. The FDE's job is not to make the legal call; it is to know the clock exists, get counsel engaged immediately, and produce the facts (what data, whose, how many, when) that the call depends on.",
+   "minutes": 20,
+   "resource": {
+    "label": "Regulation (EU) 2016/679 (GDPR), Articles 33-34",
+    "url": "https://eur-lex.europa.eu/eli/reg/2016/679/oj"
+   }
+  },
+  {
+   "name": "Customer communication during the incident",
+   "learn": "Write the update template and practise using it under pressure: what is happening in one sentence, who is affected, what we know, what we do not yet know, what we are doing, when the next update comes - and then actually send the next update on time even when there is no news, because silence is what destroys trust. Learn the language discipline: no speculation, no attribution, no 'breach' or 'data loss' until confirmed, no blaming a vendor, no promises about root cause during the incident. Understand the difference between the internal channel (raw, fast, wrong sometimes) and the external update (slower, checked, quotable) and never let the two merge. Know that anything you write may be forwarded to the customer's legal team and their regulator, and write accordingly.",
+   "minutes": 20,
+   "resource": {
+    "label": "Atlassian Incident Management Handbook",
+    "url": "https://www.atlassian.com/incident-management/handbook"
+   }
+  },
+  {
+   "name": "Designing the tabletop: objectives, injects and evaluation criteria",
+   "learn": "Build the exercise like an engineer, not a workshop facilitator. Write three or four measurable objectives ('the team can scope which tenants were affected within 20 minutes using only real tooling'), a scope statement of what is in play and what is assumed working, and a set of timed injects that escalate the scenario - initial alert at T+0, an ambiguous second signal at T+10, a journalist or customer executive appearing at T+25, evidence of exfiltration at T+35. Every inject should force a decision, not just add detail. Define evaluation criteria in advance and a data-collection plan (who observes, what they record), plus explicit ground rules: no-fault, artificial time compression is allowed, and 'I would look it up' is not an answer - open the runbook and show it.",
+   "minutes": 25,
+   "resource": {
+    "label": "CISA Tabletop Exercise Packages (CTEP)",
+    "url": "https://www.cisa.gov/resources-tools/services/cisa-tabletop-exercise-packages"
+   }
+  },
+  {
+   "name": "Choosing a scenario grounded in your own architecture",
+   "learn": "Reject generic ransomware scenarios and pick something derived from your own threat model (topic 62) so the exercise actually stresses real gaps. Strong candidates for an AI deployment: a support engineer's laptop compromise leading to a stolen long-lived API key with tenant-wide read access; a cross-tenant leak surfacing because one customer sees another's document in a RAG answer; a model-provider outage combined with a fallback route that silently sends regulated data to a second vendor; a compromised CI token pushing a signed image; a prompt-injection payload in an uploaded document causing an agent to call a tool with elevated credentials. Ground each inject in a real artifact - an actual log line format, an actual dashboard, an actual IAM role name - so participants must use real systems rather than imagine them.",
+   "minutes": 15,
+   "resource": {
+    "label": "OWASP GenAI Security Project: Top 10 for LLM Applications 2026 (risks and attack scenarios)",
+    "url": "https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/"
+   }
+  },
+  {
+   "name": "Facilitating live: running the tabletop with a client stand-in",
+   "learn": "Run it for real, 45-60 minutes, with a friend playing the customer stakeholder and a written role card telling them their pressure moves - demanding a root cause in the first ten minutes, asking whether to notify regulators, asking whether their competitor's data was touched, threatening to page their CEO. Your facilitation job is to keep time, deliver injects on schedule, never rescue the participants, and take notes on decision latency rather than on correctness. Practise the IC skills that only show up under pressure: declaring severity out loud, refusing to answer an unanswerable question ('I will not speculate; you will have a scoped answer by 14:30'), parking scope creep, and making an explicit, logged decision when the information is incomplete. Record it - the recording is where you will see yourself talking over the customer.",
+   "minutes": 25,
+   "resource": {
+    "label": "PagerDuty Incident Response: Incident commander training",
+    "url": "https://response.pagerduty.com/training/incident_commander/"
+   }
+  },
+  {
+   "name": "Hotwash and after-action report",
+   "learn": "Run the hotwash within fifteen minutes of finishing, while it is raw: each participant states one thing that worked and one thing that did not, then the facilitator presents observations against the pre-written objectives. Convert it into an after-action report with a findings table - observation, root cause, recommendation, owner, due date, and whether the gap is a documentation gap, a tooling gap, an access gap or a decision-authority gap. The most valuable output is usually mundane and specific: nobody had standing access to the audit query, the break-glass role required an approval from someone in another timezone, the contact list had a person who left. Track the corrective actions like real work with real tickets, and re-run the same scenario in three months to prove the gaps closed.",
+   "minutes": 15,
+   "resource": {
+    "label": "NIST SP 800-84: Guide to Test, Training, and Exercise Programs",
+    "url": "https://csrc.nist.gov/pubs/sp/800/84/final"
+   }
+  },
+  {
+   "name": "The blameless postmortem, written so an outsider can learn from it",
+   "learn": "Write the postmortem for the tabletop as if it were real: summary, impact in user and business terms, a timestamped timeline with detection and mitigation times marked, root causes (plural, and never a person's name), what went well, what went poorly, where we got lucky, and action items with owners and priorities. Learn the actual mechanism of blamelessness - you assume every participant acted reasonably given what they knew, so 'the engineer ran the wrong command' becomes 'the command was destructive by default and the runbook did not distinguish it from the safe variant'. Compute and record the metrics that make a trend visible: time to detect, time to declare, time to scope, time to contain, time to communicate externally. Note explicitly that the customer-facing version is a different, shorter document than the internal one, and say what is deliberately omitted.",
+   "minutes": 20,
+   "resource": {
+    "label": "Google SRE Book: Postmortem Culture - Learning from Failure",
+    "url": "https://sre.google/sre-book/postmortem-culture/"
+   }
+  },
+  {
+   "name": "Debrief facilitation: the questions that surface real causes",
+   "learn": "Learn to run the review meeting itself, because a badly facilitated debrief produces a document full of 'add more monitoring'. Use questions that reconstruct how the situation looked at the time rather than how it looks now: 'what did you expect to see when you ran that', 'what would have had to be true for your action to be correct', 'when did you realise this was different from the usual', 'what else was going on for you that hour'. Actively suppress counterfactuals ('they should have just...') and hindsight framing, and separate the fact-gathering pass from the remediation pass so the group cannot jump to fixes before the story is complete. Practise handling the customer executive who wants a single name and a single cause, and have the reframing ready before you are in the room.",
+   "minutes": 15,
+   "resource": {
+    "label": "Etsy Debriefing Facilitation Guide (official repository)",
+    "url": "https://github.com/etsy/DebriefingFacilitationGuide"
+   }
+  },
+  {
+   "name": "The five-minute board briefing: structure, evidence, rehearsal",
+   "learn": "Build the deliverable to a hard five-minute budget with a bottom-line-up-front structure: what happened and whether customer data was affected (15 seconds), current status and whether it is contained (30 seconds), scope and how you know - the evidence, not the assurance (90 seconds), what you changed so it cannot recur (90 seconds), what you still do not know and when you will know it (45 seconds), what you need from the board (30 seconds). Speak in impact, obligation and risk-reduction, not in Kubernetes; anchor to a framework the board already uses, such as the NIST CSF functions, so remediation lands as a control improvement rather than a task list. Rehearse against the four questions that always come: are we still exposed, do we have to notify anyone, has this happened before, and what would have caught it sooner. Record, watch it back, cut every hedge and every filler clause, and re-record until it lands under five minutes without rushing.",
+   "minutes": 20,
+   "resource": {
+    "label": "NIST IR 8286 Rev. 1: Integrating Cybersecurity and Enterprise Risk Management (ERM)",
+    "url": "https://csrc.nist.gov/pubs/ir/8286/r1/final"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can declare an incident against a written threshold, assign a severity from a scale that names observable conditions, and state the customer notification obligation that severity triggers, in under two minutes from first signal.",
+  "You can act as incident commander on a live bridge with a customer executive present: assigning single owners with deadlines, enforcing one conversation, maintaining a timestamped decision log, and refusing to speculate about root cause.",
+  "You can design a tabletop exercise for a specific customer architecture with written objectives, at least four timed injects that each force a decision, evaluation criteria, and a data-collection plan - and facilitate it for 45-60 minutes without rescuing the participants.",
+  "You can execute or precisely describe containment for your own deployment: revoking an IAM key and denying already-issued STS sessions, forcing IdP re-auth and server-side session invalidation, applying a deny-all NetworkPolicy, and isolating a node after snapshotting it.",
+  "You can state the GDPR 72-hour Article 33 clock, the HIPAA 60-day rule and the typical 24-48 hour contractual processor obligation, say what starts each clock, and name the facts you must produce for counsel to make the call.",
+  "You can write a blameless postmortem with a timestamped timeline, plural root causes, no individual named, and time-to-detect / declare / scope / contain / communicate recorded as metrics.",
+  "You can deliver a recorded five-minute executive security briefing in bottom-line-up-front order that a non-technical board member can follow, and answer the four standard follow-ups - still exposed, notification required, happened before, what would have caught it sooner - without notes.",
+  "You can produce an after-action report that classifies every finding as a documentation, tooling, access or decision-authority gap, with an owner and a due date, and re-run the scenario to demonstrate the gaps closed."
+ ],
+ "failureModes": [
+  "Nobody declares for six hours because the first signal looks like a display bug, so the timeline in the postmortem starts at the moment someone finally believed a customer rather than at the first alert, and the 72-hour clock had already been running.",
+  "The FDE runs the bridge as commander, subject-matter expert and customer liaison at once, stops updating the customer while deep in a query, and the customer's VP escalates to your CEO because twenty minutes of silence read as a cover-up.",
+  "A well-meaning engineer restarts the suspicious pod to 'clear it', destroying the process memory and the only unrotated copy of the container filesystem, and the incident permanently loses the ability to answer whether data left the environment.",
+  "The compromised access key is revoked but already-issued STS session tokens keep working for another eleven hours because no Deny with a token-issue-time condition was attached, and the team believes containment is complete.",
+  "The scoping question - which tenants, which records, which time window - cannot be answered because audit logging captured the request but not the resource identifiers, so the customer is forced into an over-broad notification to every account.",
+  "A status page update written by an engineer uses the word 'breach' before legal has made a determination, and that sentence is quoted back in a regulator's follow-up and in a customer's contract termination notice.",
+  "The tabletop produces a tidy report with fourteen action items, none of them get a ticket or an owner, and the same missing break-glass access blocks the response during the real incident four months later."
+ ],
+ "interviewQuestions": [
+  "You are on site with a customer and their analyst says she just saw a document in a search result that belongs to a different business unit. It is 4pm on a Thursday. Walk me through the next sixty minutes - what you declare, who you pull in, what you touch and what you deliberately do not touch, and what you say to her manager.",
+  "Design a tabletop exercise for a deployment of our product inside a regulated customer. Tell me the scenario, the injects and their timing, who is in the room, what you are measuring, and how you would know afterwards whether the exercise was worth their time.",
+  "Explain the tension between restoring service and preserving evidence in a suspected compromise. Give me two concrete decisions where those goals conflict in a Kubernetes and AWS deployment, and tell me how you would decide and who has the authority to make that call.",
+  "You have five minutes with the customer's board the morning after. Give me the briefing. Then I will ask you the questions they will ask, and you will not be allowed to say 'we are still investigating' more than once.",
+  "During the incident, the customer's CTO tells you to roll back to last week's release immediately. You believe the rollback will destroy the evidence you need and may not even remove the attacker's access. What do you do?",
+  "Your postmortem draft says the root cause was that an engineer disabled a check to unblock a demo. Rewrite that finding blamelessly and tell me what you would actually change - and how you would defend the rewrite to a customer executive who wants accountability.",
+  "How do you scope a suspected cross-tenant data exposure? Be specific about which logs, which fields and which queries you would need, and tell me what you would have had to instrument months earlier for that answer to take minutes instead of days."
+ ],
+ "proofOfWork": "Publish a public incident-readiness pack for one of your own deployments (Dokeo or DefenderMate) that a customer's security team could adopt as-is. It contains four linked pieces. First, an incident response plan: declaration threshold, a SEV1-SEV5 table where each level names an observable condition and its notification obligation, the role definitions with the explicit rule for how the FDE hands off IC or SME when they cannot hold both, and a contact and escalation tree with the break-glass access path named. Second, an executable containment runbook - a real script or documented command sequence with a dry-run mode that revokes an API key, attaches a deny policy covering already-issued sessions, forces IdP re-authentication, applies a deny-all NetworkPolicy to the workload namespace, and snapshots a node before isolating it - with evidence you actually ran it against a staging environment and the wall-clock time each step took. Third, the tabletop artifacts: the scenario and inject schedule with timestamps, the observer notes, the recording or transcript of the 45-60 minute exercise you ran with someone playing the customer, and an after-action report whose findings are each classified as a documentation, tooling, access or decision-authority gap with an owner, a due date and a link to the ticket that closed it. Fourth, the blameless postmortem written from the exercise with time-to-detect, declare, scope, contain and communicate recorded as numbers, alongside the customer-facing short version and an explicit note on what was omitted from it and why. Then re-run the same scenario six to eight weeks later and add a one-page delta showing which timings improved, which findings recurred, and what you changed in the plan as a result - a second run is the part almost nobody does, and it is the part that proves the pack is real."
+}

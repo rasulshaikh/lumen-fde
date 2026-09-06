@@ -1,0 +1,227 @@
+{
+ "i": 45,
+ "topic": "LLM fundamentals: tokens, attention, pretraining, RLHF, scaling, limits",
+ "track": "G. AI Engineering",
+ "month": 6,
+ "hours": 10,
+ "why": "An FDE is the person a customer's VP of Ops corners after the demo and asks \"why did it make that up, and can you guarantee it won't?\" — and the answer has to be mechanistic, honest, and scoped, not a shrug or a sales line. Everything else in this track (prompting, tool use, RAG, evals, fine-tuning) is a set of levers whose behaviour only makes sense once you can say which part of the stack each lever touches: tokenizer, attention, pretraining distribution, or post-training preference model. Getting this wrong in front of a customer costs you the engagement — you either overpromise a determinism the architecture cannot deliver, or you kill a viable use case because you could not explain that the failure was retrieval, not the model.",
+ "prerequisites": [
+  "The LLM serving mental model from 'LLM-era system design' (topic 43): tokens-per-second rate limits, seconds-not-milliseconds p99, streaming responses, and queue-plus-worker rather than synchronous calls — this topic explains *why* those constraints exist.",
+  "Working Python and the ability to run a script against a hosted API (topic 25): you will call a tokenizer, count tokens, sweep temperature, and read logprobs, so `uv`/`venv`, `pip install tiktoken transformers`, and an API key in an env var must be non-events.",
+  "Basic linear algebra vocabulary: matrix multiply, dot product, vector norm, softmax. You do not need to derive backprop, but you must be able to read `softmax(QK^T / sqrt(d_k))V` and say what each symbol is and what shape it has.",
+  "Napkin-maths fluency from topic 42's estimation drills: powers of two, GB/s versus GFLOP/s, and the habit of writing the number down before arguing about the architecture — scaling laws and KV-cache sizing are pure napkin maths.",
+  "Enough statistics to distinguish a sampled distribution from a point estimate: what a probability distribution over 100k+ classes means, what sampling from it does, and why a single benchmark score without a confidence interval is close to meaningless.",
+  "The writing discipline from topic 69 in draft form: this topic's deliverable is a client-facing one-pager, so you need to be able to compress a mechanism into two sentences a non-engineer can repeat to their boss."
+ ],
+ "subtopics": [
+  {
+   "name": "Tokenization: BPE merges, byte-level fallback, and the bugs they cause",
+   "learn": "Understand byte-pair encoding end to end: start from a byte-level alphabet, count adjacent pair frequencies in the training corpus, greedily merge the most frequent pair, repeat until you hit vocab size, and store the ordered merge list. Know that encoding at inference replays those merges in order, which is why the tokenizer is frozen with the model and why a fine-tune cannot add a token without resizing the embedding matrix. Learn the concrete consequences: leading whitespace makes ' the' and 'the' different tokens; digits split unpredictably so arithmetic and ID matching are brittle; non-Latin scripts and code inflate token counts 2-4x; a trailing space before a completion boundary silently degrades quality. Be able to run a tokenizer on a customer's actual document and show which fields fragment badly.",
+   "minutes": 35,
+   "resource": {
+    "label": "Hugging Face LLM Course - Byte-Pair Encoding tokenization",
+    "url": "https://huggingface.co/learn/llm-course/chapter6/5"
+   }
+  },
+  {
+   "name": "Token accounting: measuring, not guessing, before you quote a price",
+   "learn": "Get hands-on with at least two tokenizers and prove to yourself that '4 characters per token' is a Latin-prose-only heuristic. Use `tiktoken.encoding_for_model()` or `tiktoken.get_encoding('cl100k_base')` / `o200k_base` to count, and the provider's own token-counting endpoint for the model you will actually bill against, because vocabularies differ and a cross-vendor estimate can be 30% off. Measure the same 10 KB of the customer's real content in English prose, JSON, SQL, Japanese, and a base64 blob, and record the tokens-per-KB for each. Know that images and tool schemas also consume input tokens, and that a system prompt plus tool definitions is a fixed per-call tax you pay on every request.",
+   "minutes": 25,
+   "resource": {
+    "label": "tiktoken (official OpenAI BPE tokenizer repository)",
+    "url": "https://github.com/openai/tiktoken"
+   }
+  },
+  {
+   "name": "Embeddings and position: why order is not free",
+   "learn": "Understand that the token ID indexes a row of an embedding matrix of shape [vocab_size, d_model], and that attention itself is permutation-equivariant — without position information, 'A caused B' and 'B caused A' are the same input. Learn the three families you will see in model configs: learned absolute positions (GPT-2), sinusoidal, and rotary (RoPE), which rotates Q and K by an angle proportional to position so attention scores depend on relative distance. Know that RoPE's `theta`/`rope_scaling` config is what vendors change to extend context, and that a naively extended context degrades before it breaks. Separately, do not confuse these internal token embeddings with the sentence-embedding models you will use in topic 49 for retrieval — different objective, different output.",
+   "minutes": 25,
+   "resource": {
+    "label": "Hugging Face LLM Course - How do Transformers work?",
+    "url": "https://huggingface.co/learn/llm-course/chapter1/4"
+   }
+  },
+  {
+   "name": "Self-attention: Q, K, V and the causal mask, at the level where you can draw it",
+   "learn": "Be able to derive and draw scaled dot-product attention: project each token into query, key and value vectors; score every query against every key with a dot product; divide by sqrt(d_k) to keep the softmax out of saturation; softmax over the key axis to get weights that sum to 1; take the weighted sum of values. Understand multi-head attention as running h of these in parallel on d_model/h dimensions and concatenating, so different heads can track different relations. Know the causal mask concretely: positions j > i are set to -inf before the softmax so a decoder-only model can be trained on every position of a sequence in one pass. From this, derive two things you will use constantly: attention is O(n^2) in sequence length, and every output token attends to every prior token, which is why the whole prompt is re-read (from cache) at each step.",
+   "minutes": 40,
+   "resource": {
+    "label": "Vaswani et al., \"Attention Is All You Need\" (arXiv)",
+    "url": "https://arxiv.org/abs/1706.03762"
+   }
+  },
+  {
+   "name": "The decoder-only stack and parameter arithmetic",
+   "learn": "Assemble the block: pre-norm (RMSNorm or LayerNorm) -> multi-head attention -> residual add -> norm -> MLP (usually SwiGLU, ~4x or 8/3x d_model wide) -> residual add, repeated n_layer times, then a final norm and an unembedding projection to vocab logits. Read `nanoGPT`'s `model.py` until you can point at each of those lines. Then do the arithmetic yourself: for a model with n_layer, d_model and vocab V, estimate parameters as roughly 12 * n_layer * d_model^2 plus V * d_model, and memory at bf16 as 2 bytes per parameter — so a 70B model needs ~140 GB of weights before any activations or KV cache. This one calculation lets you answer 'can we self-host this in our VPC on the GPUs we already own?' in a meeting, which is a question FDEs get constantly.",
+   "minutes": 30,
+   "resource": {
+    "label": "karpathy/nanoGPT (reference decoder-only implementation)",
+    "url": "https://github.com/karpathy/nanoGPT"
+   }
+  },
+  {
+   "name": "Decoding and sampling: temperature, top_p, top_k, stop, seed, logprobs",
+   "learn": "Understand generation as a loop: logits -> optional repetition/frequency penalty -> divide by temperature -> softmax -> truncate with top_k and/or top_p (nucleus) -> sample -> append -> repeat until an EOS or stop sequence or max_tokens. Know exactly what each knob does: temperature < 1 sharpens the distribution (T -> 0 approaches greedy), top_p=0.9 keeps the smallest set of tokens whose cumulative probability exceeds 0.9, top_k caps the candidate count, and `stop`/`stop_sequences` truncate without consuming budget. Know that greedy decoding is not 'more accurate', it is lower-variance and more repetitive, and that beam search is wrong for open-ended generation. Learn to request logprobs and use the top-token probability as a cheap, real confidence signal for routing to human review.",
+   "minutes": 35,
+   "resource": {
+    "label": "Hugging Face Transformers - Generation strategies",
+    "url": "https://huggingface.co/docs/transformers/generation_strategies"
+   }
+  },
+  {
+   "name": "KV cache, prefill vs decode, and why TTFT and throughput are different problems",
+   "learn": "Know that without a cache, generating token n would recompute attention over all n-1 previous tokens; the KV cache stores per-layer key and value tensors so each new token does O(n) work instead of O(n^2). Split inference into prefill (the whole prompt processed in one compute-bound, highly parallel pass -> time to first token) and decode (one token at a time, memory-bandwidth-bound -> tokens per second). Size the cache: roughly 2 (K and V) * n_layer * n_kv_heads * head_dim * 2 bytes * sequence_length per request, which is why long contexts and high concurrency blow up GPU memory long before FLOPs run out, and why GQA/MQA exist. Understand that provider prompt caching is this cache persisted across calls, which is why a stable prefix is worth engineering for.",
+   "minutes": 40,
+   "resource": {
+    "label": "Hugging Face Transformers - Cache strategies (KV cache)",
+    "url": "https://huggingface.co/docs/transformers/kv_cache"
+   }
+  },
+  {
+   "name": "Context windows: advertised length vs effective length",
+   "learn": "Learn that the advertised window is a hard architectural cap on input plus output tokens (and that `max_tokens` is carved out of it), while the *effective* window — where accuracy stays flat — is usually much shorter. Internalise the 'lost in the middle' result: retrieval accuracy is U-shaped in position, best at the start and end of the context, materially worse in the middle, so stuffing 80 documents in and hoping is a design error. Know what overflow actually does: a hard API error, not silent truncation, on most providers — so your app needs explicit budgeting and a truncation policy. Be able to compute a context budget for a real engagement: system prompt + tool schemas + retrieved chunks + conversation history + reserved output, with a named policy for what gets dropped first.",
+   "minutes": 30,
+   "resource": {
+    "label": "Claude Platform Docs - Context windows",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+   }
+  },
+  {
+   "name": "Pretraining: the objective, the corpus, and what perplexity measures",
+   "learn": "Understand that pretraining is one objective — predict the next token, cross-entropy loss over the vocabulary — run over trillions of tokens of web crawl, code, books and curated data, with deduplication and quality filtering doing more for final quality than most architecture tweaks. Learn perplexity as exp(mean negative log-likelihood) and be able to say precisely what it does and does not tell you: it measures fit to a held-out distribution, is not comparable across tokenizers, and correlates only loosely with usefulness on a customer's task. Know that the corpus distribution is the single best predictor of where the model is strong: it is excellent at Python and Wikipedia-shaped facts, weak at your customer's internal jargon and their 2024 pricing table, and that no prompt fixes a knowledge gap that grounding should fix.",
+   "minutes": 30,
+   "resource": {
+    "label": "Hugging Face Transformers - Perplexity of fixed-length models",
+    "url": "https://huggingface.co/docs/transformers/perplexity"
+   }
+  },
+  {
+   "name": "Scaling laws: Kaplan vs Chinchilla, and compute-optimal vs inference-optimal",
+   "learn": "Know the shape of the result: test loss falls as a smooth power law in parameters, data and compute, with no discontinuity — which is why capability forecasts are possible at all. Know the correction Chinchilla made to Kaplan: for a fixed training-compute budget, parameters and training tokens should scale roughly in proportion (~20 tokens per parameter), so the earlier generation of models was badly undertrained rather than too small. Then know the practical twist that matters to your customer: nobody trains compute-optimal any more, because inference cost dominates over a model's lifetime, so vendors deliberately overtrain small models. That is the mechanism behind 'the 8B model this year beats last year's 70B' — and it is the honest argument for a cascade or router design instead of always calling the frontier model.",
+   "minutes": 25,
+   "resource": {
+    "label": "Hoffmann et al., \"Training Compute-Optimal Large Language Models\" (Chinchilla, arXiv)",
+    "url": "https://arxiv.org/abs/2203.15556"
+   }
+  },
+  {
+   "name": "Post-training I: SFT and instruction tuning",
+   "learn": "Understand that a base model is a document completer, not an assistant: prompted with a question it may continue with more questions. Supervised fine-tuning on tens of thousands of (instruction, response) pairs, formatted with a chat template that inserts role markers and special tokens, is what creates the turn-taking behaviour you take for granted. Know that the chat template is part of the contract — using the wrong template on a self-hosted model produces quietly worse output with no error — and that loss is masked so only response tokens contribute. Know that SFT teaches format and style far more than it teaches facts, which is the core of the argument you will make again in topic 50 about when fine-tuning is the wrong tool.",
+   "minutes": 25,
+   "resource": {
+    "label": "Hugging Face LLM Course - Supervised Fine-Tuning",
+    "url": "https://huggingface.co/learn/llm-course/chapter11/1"
+   }
+  },
+  {
+   "name": "Post-training II: RLHF, DPO, and RLAIF/Constitutional AI",
+   "learn": "Walk the classic InstructGPT pipeline: SFT, then collect human rankings over sampled completions, then train a reward model to score responses, then optimise the policy with PPO against that reward plus a KL penalty to keep it near the SFT model. Understand what this buys (helpfulness, instruction-following, refusals) and what it costs: reward hacking, sycophancy — agreeing with a confidently wrong user because agreement was rewarded — verbosity bias, and an 'alignment tax' on some raw capabilities. Know DPO as the simpler alternative that skips the explicit reward model and optimises a closed-form preference loss directly, and RLAIF/Constitutional AI as replacing most human labels with model critiques against a written principle set. This is the layer that explains why models sound confident when they are wrong: confident, fluent answers were preferred by labellers.",
+   "minutes": 40,
+   "resource": {
+    "label": "Ouyang et al., \"Training language models to follow instructions with human feedback\" (InstructGPT, arXiv)",
+    "url": "https://arxiv.org/abs/2203.02155"
+   }
+  },
+  {
+   "name": "Why models hallucinate: five distinct mechanisms, named separately",
+   "learn": "Stop treating hallucination as one phenomenon and learn to diagnose which of these you are looking at, because each has a different fix. (1) Objective mismatch: the model is trained to produce a likely continuation, and there is no term in the loss for 'I don't know'. (2) Parametric recall failure: facts are lossily compressed into weights, so rare entities, exact numbers, dates, citations and URLs get plausibly reconstructed rather than recalled. (3) Preference-tuning pressure: hedging was scored lower than a confident answer, so calibration was trained out. (4) Context failure: the right evidence is absent, buried mid-context, or contradicted by the model's prior — and the model splits the difference. (5) Tokenizer and format artefacts: character counting, digit arithmetic and exact-string echoing fail for reasons that have nothing to do with reasoning. Practise labelling 20 real failures from your own transcripts with one of these five.",
+   "minutes": 40,
+   "resource": {
+    "label": "Prompt Engineering Guide - Factuality (risks)",
+    "url": "https://www.promptingguide.ai/risks/factuality"
+   }
+  },
+  {
+   "name": "What actually reduces hallucination, ranked by effect size",
+   "learn": "Build the ranked list you will defend in front of a customer, with the mechanism for each. Highest leverage: ground the answer in retrieved source text and require verbatim citations that a system can check against the source (provider citation features return character/page spans you can validate programmatically — a fabricated span fails the check). Next: constrain the output space with JSON schema / structured outputs so the model cannot free-associate a field. Next: give an explicit abstention path ('answer only from the provided documents; if the answer is not there, return {\"answer\": null}') and reward it in your evals. Then: decompose and verify — a second pass that checks each claim against the source, or self-consistency across n samples. Know what does *not* work: 'do not hallucinate' in the system prompt, temperature 0 alone, and a bigger model. Know the honest ceiling: you reduce the rate and make failures detectable; you do not reach zero.",
+   "minutes": 45,
+   "resource": {
+    "label": "Claude Platform Docs - Citations",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/citations"
+   }
+  },
+  {
+   "name": "Reasoning models and inference-time compute",
+   "learn": "Understand the newer axis: rather than scaling training, spend more tokens at inference on an internal reasoning trace, trained with RL against verifiable outcomes (maths, code, tests). Know the operational consequences that hit your architecture: thinking tokens are billed and count against the context window, latency goes from seconds to tens of seconds, streaming semantics change, and a thinking budget becomes a tuning parameter you set per task. Know the honest scoping rule for a customer: reasoning models help on multi-step derivation, planning and code where a verifier exists; they do not help on extraction, classification, or anything where the bottleneck is missing information rather than missing computation — spending 8k thinking tokens on 'what is this invoice number' is pure waste.",
+   "minutes": 25,
+   "resource": {
+    "label": "Claude Platform Docs - Extended thinking",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/extended-thinking"
+   }
+  },
+  {
+   "name": "Reading a model card critically",
+   "learn": "Learn the intended anatomy of a model card — intended use, out-of-scope use, training data, evaluation, ethical considerations, caveats — then read three real cards (a frontier vendor card, an open-weights card such as Llama or Qwen, and a small fine-tune on the Hub) and grade each against it. Build a fixed checklist of questions you ask every time: what is the exact knowledge cutoff and does it match the marketing page; which context length is supported versus tested; are evals reported at 0-shot or few-shot, with or without CoT, and with what decoding parameters; is there a contamination analysis; what is the licence and does it permit your customer's use; what safety evaluations were run and on which languages. The senior move is naming what the card *omits*: an eval table with no error bars and no per-domain breakdown is a marketing asset, not evidence.",
+   "minutes": 30,
+   "resource": {
+    "label": "Mitchell et al., \"Model Cards for Model Reporting\" (arXiv)",
+    "url": "https://arxiv.org/abs/1810.03993"
+   }
+  },
+  {
+   "name": "Benchmarks and contamination: why a leaderboard number does not transfer",
+   "learn": "Learn how public evals are actually scored so you can read a claim precisely: multiple-choice with log-likelihood ranking (MMLU) versus generative exact-match versus pass@k with an executed test suite (HumanEval, SWE-bench). Know that the same model scores several points differently depending on prompt format, few-shot count and normalisation, which is why harness-reported numbers and vendor-reported numbers diverge legitimately. Know contamination: benchmark test sets leak into web-scale pretraining corpora, so a high score can be memorisation, and n-gram overlap analyses are the standard (partial) defence. Run at least one task with `lm-evaluation-harness` to see the machinery. The takeaway you sell to a customer: public benchmarks pick a shortlist, a 50-example eval on their own data picks the model (topic 53).",
+   "minutes": 30,
+   "resource": {
+    "label": "EleutherAI lm-evaluation-harness (official repo)",
+    "url": "https://github.com/EleutherAI/lm-evaluation-harness"
+   }
+  },
+  {
+   "name": "Hard limits: determinism, arithmetic, self-knowledge, cutoffs",
+   "learn": "Be able to state each limit with its mechanism, because customers ask for guarantees you cannot give. Determinism: even with temperature=0 and a fixed seed, hosted inference is not bit-reproducible — batching changes floating-point reduction order, MoE routing depends on batch composition, and the served model version changes under you; so your contract language is 'stable behaviour under eval', never 'identical output'. Arithmetic and counting: digits are tokens, there is no ALU, so exact computation belongs in a tool call. Self-knowledge: a model cannot reliably report its own confidence, training data, or version — ask the API, not the model. Knowledge cutoff: fixed at pretraining, so anything after it must be retrieved. Also know sensitivity to prompt order and formatting, and that these are properties of the architecture, not bugs a vendor will patch.",
+   "minutes": 35,
+   "resource": {
+    "label": "Hugging Face Transformers - GenerationConfig / text generation parameters",
+    "url": "https://huggingface.co/docs/transformers/main_classes/text_generation"
+   }
+  },
+  {
+   "name": "Model-level safety: refusals, jailbreaks, and why injection is architectural",
+   "learn": "Understand that refusal behaviour is a post-training artefact, not a filter bolted on top, which explains both over-refusal on benign customer content (medical, security, legal, financial domains are common false positives) and the fact that jailbreaks work by shifting the input distribution away from where refusals were trained. Understand prompt injection at the fundamentals level: the model sees one flat token sequence, so 'instructions' and 'data' are a convention enforced by training, not a boundary enforced by the architecture — which is why retrieved documents, tool outputs and user files are all executable-by-accident. Read the OWASP LLM Top 10 categories so you have shared vocabulary with a customer's security team; the hands-on defences come in topic 51.",
+   "minutes": 25,
+   "resource": {
+    "label": "OWASP Top 10 for Large Language Model Applications",
+    "url": "https://owasp.org/www-project-top-10-for-large-language-model-applications/"
+   }
+  },
+  {
+   "name": "Translating all of this into client language, with sources",
+   "learn": "Convert each mechanism above into one claim a non-technical stakeholder can repeat, paired with a citable source and an explicit scope. Practise the four sentences you will use most: what an LLM is (a next-token predictor over a frozen corpus, tuned by human preference), why it invents citations (lossy parametric recall plus a preference for confident answers), what grounding actually changes (moves facts from weights into checkable context), and what you can and cannot guarantee (a measured error rate on their eval set, not zero errors and not identical outputs). Write the can/cannot table with a third column — 'what we would need to build to change this' — so the document opens scope rather than closing doors. Every claim gets a link; no claim gets an adjective.",
+   "minutes": 30,
+   "resource": {
+    "label": "Hugging Face Hub - Model Cards (structure and metadata for sourcing claims)",
+    "url": "https://huggingface.co/docs/hub/model-cards"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take a customer's real document, tokenize it with two different tokenizers, and state tokens-per-KB and the resulting per-1000-document cost within 10% of the actual billed amount.",
+  "You can draw scaled dot-product attention on a whiteboard from memory — Q/K/V projections, sqrt(d_k), softmax over keys, causal mask — and derive from the drawing why context is O(n^2) and why a KV cache exists.",
+  "You can size a self-hosted deployment on the spot: given parameter count, precision, concurrency and context length, you produce weight memory and KV-cache memory and say whether it fits the customer's GPUs.",
+  "You can take 20 logged failures from a running system and classify each into objective mismatch, parametric recall failure, preference-tuning pressure, context failure, or tokenizer artefact — and name the different fix for each class.",
+  "You can explain why temperature=0 does not give reproducible output, and write contract or SLA language that promises stable eval-measured behaviour instead of identical strings.",
+  "You can read a model card in ten minutes and produce a written list of what it omits — missing error bars, untested context length, unstated few-shot setting, no contamination analysis — and say which omissions block the customer's use case.",
+  "You can defend a ranked list of hallucination mitigations with a mechanism for each, and explicitly tell a customer that 'do not hallucinate' in the system prompt and a bigger model are not on the list.",
+  "You can explain Chinchilla scaling and the inference-cost twist well enough to justify a small-model-plus-router architecture to an economic buyer who was expecting 'use the biggest model'."
+ ],
+ "failureModes": [
+  "Quoting a project cost from a '4 characters per token' estimate when the customer's corpus is Japanese contracts, JSON payloads or scanned-PDF text, then discovering the real bill is 2-3x the number in the SOW.",
+  "Promising deterministic output because the config sets temperature=0, then having a customer's QA team open a defect when two identical requests return different strings on a batched endpoint.",
+  "Diagnosing a retrieval failure as a model failure and burning three weeks on prompt tuning or a fine-tune, when the correct chunk was never in the context window in the first place.",
+  "Stuffing 60 retrieved chunks into a long context and reporting the system as working because spot checks passed, while accuracy on evidence placed in the middle of the context has quietly collapsed.",
+  "Shipping a model whose refusal behaviour over-triggers on the customer's actual domain — clinical notes, security incident reports, credit decisions — so the pilot looks broken to the exact users who matter.",
+  "Selecting a model from public leaderboard scores, then finding it loses to a cheaper model on the customer's own 50-example eval because the benchmark was contaminated or measured a different task shape.",
+  "Letting a model's own self-report — its claimed version, cutoff, or confidence — into a status update or a client email, and being contradicted later by the API's actual model metadata."
+ ],
+ "interviewQuestions": [
+  "A customer says the assistant invented a policy number that looks exactly like their real format. Walk me through your diagnosis: what are the candidate mechanisms, what would you log or measure to distinguish them, and what do you change first?",
+  "Explain the KV cache to a customer's platform architect who is deciding whether to buy 8xA100 or 8xH100. Derive the memory arithmetic and tell them which of context length, concurrency, or model size hurts them most.",
+  "Your customer's legal team wants a contractual guarantee of reproducible outputs for an audit trail. What can you actually commit to, what can you not, and what would you build to satisfy the underlying audit requirement?",
+  "Chinchilla says compute-optimal training uses roughly 20 tokens per parameter. Vendors deliberately violate that. Explain why, and then use the reasoning to argue for or against a cascaded small-model architecture for a 10M-document-per-month classification pipeline.",
+  "Here is a model card for an open-weights model a customer wants to self-host in their VPC. Read it and tell me the three things you would refuse to sign off on until you had run your own tests.",
+  "Rank the interventions that reduce hallucination on a document-QA product from highest to lowest effect, give the mechanism for each, and name two commonly-suggested interventions you would refuse to spend the customer's money on.",
+  "A security reviewer asks why you cannot just tell the model to ignore instructions inside uploaded documents. Answer at the level of the architecture, not the product, and then say what you would build instead."
+ ],
+ "proofOfWork": "Build a small public repo, `llm-mechanics-lab`, that turns each claim in your client one-pager into a reproducible experiment with committed outputs. It should contain: (1) a tokenizer study that runs tiktoken and a SentencePiece/HF tokenizer over five content types (English prose, JSON, SQL, Japanese, base64) and emits a tokens-per-KB table plus a cost projection at current published prices; (2) a KV-cache and weight-memory calculator that takes n_layer, n_kv_heads, head_dim, precision, context length and concurrency and prints the GPU memory envelope, validated against one real open-weights config.json; (3) a determinism harness that fires the same request 50 times at temperature 0 against a hosted endpoint and reports the exact-match rate, the first divergent token position, and the distribution of top-token logprobs; (4) a hallucination taxonomy notebook that runs a closed-book vs grounded vs grounded-with-citations vs grounded-with-abstention comparison over 30 questions where you know the ground truth, reporting error rate and, critically, detected-error rate per condition; and (5) a `MODEL_CARD_REVIEW.md` applying your checklist to three real model cards with a written list of omissions. The README should state each finding as a one-line claim with a link to the script that produced it, so the client one-pager can cite your own measurements rather than vendor marketing."
+}

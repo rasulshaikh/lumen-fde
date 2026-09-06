@@ -1,0 +1,227 @@
+{
+ "i": 49,
+ "topic": "RAG at depth: chunking, embeddings, hybrid retrieval, reranking, contextual retrieval, caching",
+ "track": "G. AI Engineering",
+ "month": 6,
+ "hours": 10,
+ "why": "Every enterprise AI deployment an FDE lands on is a retrieval problem wearing a model's clothes: answer quality is capped by whether the right paragraph of the customer's MSA, runbook or ticket history actually reached the prompt. Customers do not report 'low nDCG', they report 'it could not find the liability cap in our own contract', and the fix is almost never a bigger model - it is parsing, chunking, hybrid retrieval, reranking and context assembly, each of which you must defend with a before/after number in front of their architect. It is also the highest-leverage thing you can change on site in a single week without asking anyone for GPUs, a fine-tune or a new budget line.",
+ "prerequisites": [
+  "PostgreSQL at depth (topic 29): EXPLAIN (ANALYZE, BUFFERS), btree vs GIN index choice, planner row estimates, CREATE INDEX CONCURRENTLY, maintenance_work_mem - you tune pgvector as a Postgres problem, not as a vector-database problem.",
+  "Data modelling for multi-tenant AI systems (topic 30): tenant_id everywhere, row-level security, PII classification and audit trails, because a retrieval index is the easiest place in the stack to leak one customer's documents into another's answer.",
+  "Prompt engineering as code (topic 46): versioned prompt files, structured outputs, and a regression set you can re-run - the RAG ablation table is the same discipline applied to retrieval.",
+  "LLM fundamentals (topic 45): tokenisation, context windows, what an embedding actually is, and cost/latency per 1k tokens, so 'add a contextual preamble to every chunk' is a number you can compute rather than a vibe.",
+  "Production Python (topics 25 and 26): batched, resumable jobs with exponential backoff and jitter, connection pooling, and a FastAPI service boundary to put the retriever behind.",
+  "Enough evaluation literacy to know that 60 labelled questions gives you wide confidence intervals, so a 1-point recall move is noise and a 10-point move is a result."
+ ],
+ "subtopics": [
+  {
+   "name": "Freeze a naive baseline and a one-command harness",
+   "learn": "Build the dumbest thing that works and then never change it: fixed 512-token chunks, no overlap, one embedding model, cosine top-5, one prompt, temperature 0. Put it behind two functions - retrieve(query, k) -> list[Chunk] and answer(query) -> (text, cited_chunk_ids) - so every later improvement is a swap of exactly one component. Persist run_config (model ids, chunk params, k, prompt hash, git sha) and write every retrieval result row-level to a runs table keyed by (run_id, question_id, rank, chunk_id); without those rows you cannot later say which questions a change fixed and which it broke. Ban notebook-only experiments from day one: if the ablation is not re-runnable with one command on the held-out set, the numbers are anecdote.",
+   "minutes": 25,
+   "resource": {
+    "label": "Claude Docs - Define success criteria and build evaluations",
+    "url": "https://platform.claude.com/docs/en/test-and-evaluate/develop-tests"
+   }
+  },
+  {
+   "name": "Build the golden eval set before touching retrieval",
+   "learn": "Write 50-80 real questions against the Dokeo corpus, sampled by shape rather than convenience: single-fact lookup, multi-hop across two documents, comparative ('what changed between v2 and v3'), negation, acronym/jargon, and 5-10 deliberately unanswerable questions that must produce a refusal. For each answerable question, label the chunk ids or (doc_id, span) that genuinely contain the answer - that ground truth is what makes recall@k computable and is roughly 80% of the total effort. Split into dev (tune freely) and held-out (touch once per milestone) so you do not overfit chunk size to thirty questions. Store it as versioned JSONL in the repo, never a spreadsheet, and make 'add the question that broke in production' the standing maintenance ritual.",
+   "minutes": 40,
+   "resource": {
+    "label": "Ragas - RAG evaluation framework (repo and docs)",
+    "url": "https://github.com/vibrantlabsai/ragas"
+   }
+  },
+  {
+   "name": "Retrieval metrics vs generation metrics",
+   "learn": "Compute recall@k, precision@k, MRR and nDCG@10 on retrieval alone, separately from any answer-quality score, and always report recall at the k you feed the model and at a much larger k (5 and 50). The gap between them is the single most useful diagnostic you own: high recall@50 with low recall@5 is a ranking problem (buy a reranker), low recall@50 is a representation problem (fix parsing, chunking, hybrid, embeddings). Know why end-to-end answer accuracy alone is a trap - a strong model papers over bad retrieval on easy questions and you end up optimising noise. Break every metric down by question type so one aggregate number can never hide that multi-hop sits at 20%.",
+   "minutes": 30,
+   "resource": {
+    "label": "Introduction to Information Retrieval - 8.4 Evaluation of ranked retrieval results (precision/recall at k, MAP, NDCG)",
+    "url": "https://nlp.stanford.edu/IR-book/html/htmledition/evaluation-of-ranked-retrieval-results-1.html"
+   }
+  },
+  {
+   "name": "Parsing: getting text out without destroying structure",
+   "learn": "Extract per-page text with coordinates, preserve heading levels, keep table cells as rows instead of smashed whitespace, and strip repeated headers, footers and nav chrome. Know the standard failure set cold: two-column PDFs that interleave lines, scanned pages with no text layer (needs OCR, and OCR errors poison embeddings silently), ligatures and soft hyphens breaking tokenisation, and tables that degrade into unreadable prose. Emit a normalised intermediate (markdown or JSON with doc_id, section_path, page, text) so the chunker never touches a raw PDF. Log extracted character count per document and alert when a 40-page contract yields 200 characters - you want that caught at ingest, not six weeks later when the customer asks why clause 9 is invisible.",
+   "minutes": 30,
+   "resource": {
+    "label": "PyMuPDF documentation (text, blocks and table extraction)",
+    "url": "https://pymupdf.readthedocs.io/en/latest/"
+   }
+  },
+  {
+   "name": "Chunking: structure first, tokens second",
+   "learn": "Split on structure first (heading boundaries, list items, table rows), then split oversize sections by token count using the real tokenizer, not len(text)/4. Tune exactly three knobs against the eval set: target size (start at 300-800 tokens), overlap (0-20%), and whether to prepend the section path ('Billing > Refunds > Partial refunds') to every chunk. Understand both failure directions - chunks too small lose the antecedent so the embedding is about nothing, chunks too large dilute the vector and blow the reranker budget - and that tables and code blocks must never be split mid-structure. Run at least three configs through the identical harness and report recall@5 for each; the win here is usually several points, not a rounding error.",
+   "minutes": 40,
+   "resource": {
+    "label": "Microsoft Learn - Chunking large documents for vector search",
+    "url": "https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-chunk-documents"
+   }
+  },
+  {
+   "name": "Chunk schema and metadata that the planner can use",
+   "learn": "Design the chunks table deliberately: chunk_id, doc_id, tenant_id, ordinal, section_path, text, token_count, content_hash, embedding vector(1024), tsv tsvector, metadata jsonb, model_version, created_at. Put filterable high-selectivity fields (tenant_id, doc_type, effective_date) in real typed columns with btree indexes rather than burying them in jsonb, because the planner estimates jsonb predicates badly and you will get a Seq Scan you did not budget for; keep jsonb for the long tail and index it with GIN jsonb_path_ops only if you actually query it. Store content_hash (sha256 of normalised text) so re-ingest is idempotent and re-embedding touches only changed rows, and keep ordinal or prev/next chunk ids so a hit can be expanded into its neighbours at answer time.",
+   "minutes": 25,
+   "resource": {
+    "label": "PostgreSQL docs - JSON types and jsonb indexing",
+    "url": "https://www.postgresql.org/docs/current/datatype-json.html"
+   }
+  },
+  {
+   "name": "Choosing an embedding model on your corpus, not a leaderboard",
+   "learn": "Run two or three candidates (a strong general model, a domain or multilingual one, a small local one) through the identical harness and compare recall@5, index size and p95 embed latency on your documents. Know the axes that decide the outcome: dimensionality (768 vs 1536 vs 3072 changes index memory and HNSW build time roughly linearly), max sequence length (chunks over it are silently truncated), asymmetric training where query and passage need different prefixes such as 'query: ' (omitting them quietly costs you double-digit recall), and whether the model targets cosine (normalise) or raw dot product. Price it out - embedding 5M chunks is a real invoice line, and every model upgrade is that invoice again plus a migration.",
+   "minutes": 30,
+   "resource": {
+    "label": "MTEB - Massive Text Embedding Benchmark (repo)",
+    "url": "https://github.com/embeddings-benchmark/mteb"
+   }
+  },
+  {
+   "name": "Embedding pipeline mechanics: batching, limits, idempotency",
+   "learn": "Build ingestion as a batched, resumable job: 64-256 texts per request, a token-bucket that respects the provider's tokens-per-minute limit, retries on 429 and 5xx with exponential backoff plus jitter, and checkpointing by content_hash so a crash at 80% resumes instead of restarting. Normalise vectors to unit length when using cosine so you can switch to the cheaper inner-product operator, and only use a reduced dimensions parameter (Matryoshka truncation) after you have measured the recall cost on your eval set. Two silent killers to guard against: preprocessing that differs between ingest and query time (different prefix, casing or truncation), and vectors from two model versions coexisting in one index - enforce a model_version column and refuse to search across versions.",
+   "minutes": 35,
+   "resource": {
+    "label": "OpenAI Platform docs - Embeddings guide",
+    "url": "https://developers.openai.com/api/docs/guides/embeddings"
+   }
+  },
+  {
+   "name": "pgvector internals: HNSW vs IVFFlat and the operators",
+   "learn": "Know the storage and index model exactly: types vector and halfvec (2 bytes per dimension, roughly halves index size), operators <-> (L2), <=> (cosine) and <#> (negative inner product), and the fact that the index is only used when the ORDER BY expression matches the opclass exactly - one mismatched operator silently gives you a full scan. HNSW takes m and ef_construction at build time and hnsw.ef_search at query time, supports incremental inserts, and gives better recall/latency; IVFFlat takes lists at build and ivfflat.probes at query, builds far faster, but needs representative data present at build time and degrades as the table grows past it. Rehearse the operations: raise maintenance_work_mem and max_parallel_maintenance_workers before CREATE INDEX or a 5M-row HNSW build runs for hours, build CONCURRENTLY on live tables, and keep the index inside RAM or p95 collapses.",
+   "minutes": 40,
+   "resource": {
+    "label": "pgvector README - Indexing section (HNSW vs IVFFlat, operators, build/query parameters)",
+    "url": "https://github.com/pgvector/pgvector#indexing"
+   }
+  },
+  {
+   "name": "Measuring ANN recall against exact search",
+   "learn": "ANN is an approximation and a senior engineer quantifies the approximation rather than trusting it. Compute exact top-k on a sample with a brute-force scan (SET enable_indexscan = off, or a table without the index) and measure overlap with the index result to get true recall@k for a given hnsw.ef_search. Sweep ef_search across 40, 100, 200, 400 and plot recall against p95 latency, then pick the knee rather than the maximum. Learn to read EXPLAIN (ANALYZE, BUFFERS) on a vector query: a Seq Scan means the operator or ORDER BY does not match your opclass, and rows-removed-by-filter far above k means the planner is filtering after the index rather than before it.",
+   "minutes": 30,
+   "resource": {
+    "label": "ANN-Benchmarks: A Benchmarking Tool for Approximate Nearest Neighbor Algorithms (paper: recall vs QPS methodology)",
+    "url": "https://arxiv.org/abs/1807.05614"
+   }
+  },
+  {
+   "name": "Lexical retrieval in Postgres: tsvector, GIN, ranking, trigrams",
+   "learn": "Implement the keyword half properly: to_tsvector('english', text) in a generated column with a GIN index, query with websearch_to_tsquery (handles quoted phrases, OR and leading minus), and rank with ts_rank_cd plus a normalisation flag so long documents do not win purely by length. Be clear on what lexical search gives you that no embedding will - exact error codes, SKUs, API names, rare acronyms, version strings - and where it fails (synonyms, paraphrase, cross-lingual). Add pg_trgm with a GIN index for typo and identifier fuzzy matching. Know that Postgres full-text search is not true BM25 (no IDF-weighted term saturation), so if lexical recall turns out to be decisive on your eval set, measure whether a real BM25 engine or a BM25 extension justifies the extra operational surface for this customer.",
+   "minutes": 35,
+   "resource": {
+    "label": "PostgreSQL docs - Controlling Text Search (tsquery, ts_rank_cd)",
+    "url": "https://www.postgresql.org/docs/current/textsearch-controls.html"
+   }
+  },
+  {
+   "name": "Hybrid fusion: RRF versus weighted score fusion",
+   "learn": "Run the vector and lexical queries independently to depth 50-100 each, then fuse. Default to Reciprocal Rank Fusion - score = sum over lists of 1/(k + rank) with k around 60 - because it needs no score calibration and stays robust when one retriever returns garbage. Use weighted score fusion (min-max or z-score normalise each list first, then alpha*dense + (1-alpha)*sparse) only when you have the eval set to tune alpha and the score distributions are stable across queries. Know the three traps: fusing raw cosine against raw ts_rank is meaningless because the scales are unrelated; RRF throws away score magnitude so a dramatically better top hit gets no extra credit; and fusing at depth 10 wastes the recall you just paid for - fuse deep, then rerank.",
+   "minutes": 35,
+   "resource": {
+    "label": "Microsoft Learn - Relevance scoring in hybrid search using RRF",
+    "url": "https://learn.microsoft.com/en-us/azure/search/hybrid-search-ranking"
+   }
+  },
+  {
+   "name": "Filtered vector search and multi-tenant isolation",
+   "learn": "Get filtered ANN right or you ship either a data leak or a latency cliff. Understand pre-filter versus post-filter: post-filtering runs ANN over everything then drops non-matching rows, so a tenant holding 0.1% of the corpus can get zero results even though its documents are indexed. In pgvector, know that a highly selective btree predicate can push the planner off the HNSW index entirely, that partial indexes (one per large tenant) and table partitioning are the practical escapes, and that iterative scan exists for filtered queries. Layer row-level security on tenant_id with a per-request SET LOCAL so a forgotten WHERE clause fails closed rather than open, and add a permanent eval case asserting that tenant A can never retrieve a tenant B chunk.",
+   "minutes": 30,
+   "resource": {
+    "label": "PostgreSQL docs - Row Security Policies",
+    "url": "https://www.postgresql.org/docs/current/ddl-rowsecurity.html"
+   }
+  },
+  {
+   "name": "Cross-encoder reranking and the retrieval funnel",
+   "learn": "Add a cross-encoder that scores (query, chunk) pairs jointly and reorders: retrieve 50-100 candidates from hybrid, rerank, keep the top 5-8. Understand the economics - unlike a bi-encoder there are no precomputed document vectors, so cost and latency scale linearly with candidate count; batch the pairs, truncate candidate text, and set a hard timeout with a fallback to the fusion order so a slow reranker degrades ranking instead of returning a 504. Measure nDCG@10 improvement and added p95 latency as two separate numbers, and compare a hosted reranker, a local cross-encoder and an LLM-as-reranker at your actual budget. Use the reranker score as a confidence signal: below a threshold calibrated on your eval set, answer 'I do not have that in the provided documents'.",
+   "minutes": 35,
+   "resource": {
+    "label": "Sentence Transformers - Retrieve & Re-Rank (bi-encoder recall then cross-encoder reranking)",
+    "url": "https://www.sbert.net/examples/sentence_transformer/applications/retrieve_rerank/README.html"
+   }
+  },
+  {
+   "name": "Contextual retrieval: situating every chunk before indexing",
+   "learn": "Implement Anthropic's contextual retrieval: for each chunk, call a cheap model with the whole document plus that chunk and ask for a 50-100 token situating preamble ('This section of the 2024 Acme MSA describes the liability cap...'), then prepend it before both embedding and tsvector generation, so the chunk stops being an orphaned 'it' and starts carrying its own context. The cost only survives contact with reality because of prompt caching - cache the document once per document rather than paying for it once per chunk, which means understanding cache_control placement, the minimum cacheable prefix length and the cache TTL; without it the ingest bill is an order of magnitude higher. Anthropic report roughly a 35% reduction in top-20 retrieval failures from contextual embeddings plus contextual BM25 and around 67% with reranking added; reproduce the direction on your corpus and quote your own numbers, never theirs.",
+   "minutes": 40,
+   "resource": {
+    "label": "Anthropic - Introducing Contextual Retrieval",
+    "url": "https://www.anthropic.com/engineering/contextual-retrieval"
+   }
+  },
+  {
+   "name": "Query-side transformation: rewrite, decompose, HyDE",
+   "learn": "Fix the query, not just the index. Strip conversational framing, expand acronyms from a corpus-derived glossary, and for multi-hop questions decompose into two or three sub-queries, retrieve each and RRF the union. Implement HyDE (generate a hypothetical answer paragraph and embed that instead of the raw question) and measure it honestly - it tends to help short keyword-ish queries and to hurt when the model invents entities that anchor retrieval on the wrong documents. In any chat surface, rewrite follow-ups into standalone queries using the last few turns, because 'what about the second one?' is unretrievable on its own. Every transform adds an LLM call to the critical path, so log its latency and keep each one only if it earned measurable recall.",
+   "minutes": 30,
+   "resource": {
+    "label": "HyDE paper - Precise Zero-Shot Dense Retrieval without Relevance Labels (Gao et al.)",
+    "url": "https://arxiv.org/abs/2212.10496"
+   }
+  },
+  {
+   "name": "Three caches: embedding, prompt prefix, semantic answer",
+   "learn": "They have different keys, different lifetimes and very different blast radii. Embedding cache: key on sha256(model_version + normalised text), effectively permanent, removes most re-ingest cost. Prompt cache: put the stable system prompt and any long shared context in the cached prefix and place retrieved chunks after it, because any change before a cache breakpoint invalidates everything after it - prompt ordering is why teams report a 0% cache hit rate. Semantic answer cache: embed the query and return a stored answer when cosine similarity exceeds a threshold you calibrated on real query pairs (usually 0.95+); this is the only one of the three that can confidently serve a wrong answer, so scope keys by tenant and by document-set version and invalidate on ingest.",
+   "minutes": 30,
+   "resource": {
+    "label": "Claude Docs - prompt caching and API reference",
+    "url": "https://platform.claude.com/docs/en/home"
+   }
+  },
+  {
+   "name": "Context assembly, ordering and enforceable citations",
+   "learn": "What lands in the prompt is a design decision, not a concatenation. Deduplicate near-identical chunks, merge adjacent chunks from the same document into one contiguous block carrying its section path, cap total context by tokens and drop from the tail rather than truncating mid-chunk, and order deliberately - models attend worse to the middle of a long context, so put the strongest evidence first and the next strongest last. Give every chunk a stable inline id, require the model to cite those ids, then verify programmatically that each cited id was actually in the context and that the numbers in the claim appear in the cited text; that check turns hallucination into a catchable eval failure instead of a customer escalation. Include an explicit 'if the context does not contain the answer, say so' instruction and keep unanswerable questions in the eval set to prove it holds.",
+   "minutes": 30,
+   "resource": {
+    "label": "Lost in the Middle: How Language Models Use Long Contexts (Liu et al.) - why context ordering matters",
+    "url": "https://arxiv.org/abs/2307.03172"
+   }
+  },
+  {
+   "name": "The ablation table and a CI regression gate",
+   "learn": "Produce the artifact that makes all of this credible: one table, one row per change (baseline, chunking v2, better embeddings, hybrid, rerank, contextual), with columns recall@5, recall@20, nDCG@10, answer accuracy, p95 latency and cost per 1k queries. Change one variable at a time and re-run the whole held-out set - if two changes ship together you cannot attribute the gain and you cannot roll back intelligently. Then wire it into CI: a GitHub Actions job that runs the eval on every PR touching retrieval code, prompts or chunking config, fails when recall@5 drops more than two points or p95 rises more than 20%, and uploads the run artifact so the delta is visible in the PR rather than discovered by the customer.",
+   "minutes": 30,
+   "resource": {
+    "label": "GitHub Actions documentation (workflows, artifacts, required checks)",
+    "url": "https://docs.github.com/en/actions"
+   }
+  },
+  {
+   "name": "Index operations: incremental ingest, deletes, re-embedding migrations",
+   "learn": "Treat the index as a production database, not a build artifact. Support incremental ingest with upsert by content_hash and hard deletion of chunks whose document version disappeared - orphaned chunks answering from a terminated contract is a compliance incident, not a staleness bug - and know that HNSW deletes leave tombstones so recall and latency drift until you REINDEX CONCURRENTLY. Plan the re-embedding migration you will inevitably run: add a second embedding column or a shadow table, backfill in rate-limited batches, build the new index CONCURRENTLY, compare recall on the held-out set, then flip the read path behind a feature flag with a tested rollback. Track ingest lag (document change to searchable) as an SLI and alert on it, because 'the answer is out of date' is the most common customer complaint about a working RAG system.",
+   "minutes": 30,
+   "resource": {
+    "label": "PostgreSQL docs - REINDEX (including REINDEX CONCURRENTLY for rebuilding live indexes)",
+    "url": "https://www.postgresql.org/docs/current/sql-reindex.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can re-run the full retrieval eval on the held-out set with a single command and produce a table showing recall@5, recall@20, nDCG@10, answer accuracy, p95 latency and cost per 1k queries for every variant, with one variable changed per row.",
+  "You can beat your frozen naive baseline by a stated margin (target: at least +15 points recall@5 or a halving of top-20 retrieval failures) and name which specific change produced which part of the gain.",
+  "You can write the hybrid SQL from memory - a pgvector ORDER BY embedding <=> $1 arm and a websearch_to_tsquery/ts_rank_cd arm, each to depth 50, fused with RRF at k=60 - and explain why fusing raw scores instead would be wrong.",
+  "You can tune an HNSW index with measured evidence: report true recall@10 against exact search for at least four ef_search values with the matching p95 latency, and justify the value you shipped.",
+  "You can diagnose a bad answer to a specific stage - parsing, chunking, embedding, ranking, or context assembly - in under fifteen minutes using stored per-question retrieval rows, rather than guessing and re-prompting.",
+  "You can implement contextual retrieval with prompt caching and state the ingest cost per 1,000 chunks with and without caching, plus the measured retrieval-failure reduction on your own corpus.",
+  "You can demonstrate tenant isolation under filtered ANN: a test proving a small tenant still returns results (no post-filter starvation) and a test proving tenant A never retrieves tenant B's chunk even with RLS bypassed in application code.",
+  "You can gate a pull request on retrieval quality: a CI job that fails when recall@5 regresses by more than two points and publishes the before/after table as a PR artifact."
+ ],
+ "failureModes": [
+  "Filtering is applied after the ANN search, so the tenant holding 0.1% of the corpus gets zero results while their documents sit correctly indexed, and the customer concludes the product is broken for them specifically.",
+  "A batch of scanned PDFs has no text layer and the ingest pipeline extracts a few hundred characters per document instead of failing loudly, so an entire class of contracts is invisible to retrieval and nobody notices until legal asks why a clause cannot be found.",
+  "An IVFFlat index was built when the table held 5,000 rows and the corpus grew to 5,000,000; the lists value is now wildly wrong, recall silently collapses, and the symptom presents as 'the model got worse' after a model upgrade that was actually irrelevant.",
+  "An embedding model upgrade is rolled out to the query path but the corpus backfill is still running, so queries and documents live in different vector spaces for six hours and every answer is confidently assembled from unrelated chunks.",
+  "The semantic answer cache has a threshold set by intuition rather than calibration, and a 0.93-similarity match serves one customer's pricing answer to a different question - or, worse, is scoped without tenant_id and serves it to a different customer.",
+  "A document is deleted or superseded in the source system but its chunks remain in the index, so the assistant cites a terminated agreement or a retracted policy and the incident becomes a compliance finding rather than a bug ticket.",
+  "The reranker is added to the critical path with no timeout and no fallback ordering; under a load spike its p99 doubles, request threads pile up, and the whole retrieval endpoint returns 504s instead of returning slightly worse-ordered results."
+ ],
+ "interviewQuestions": [
+  "A customer says your assistant 'cannot find things in our documents'. Walk me through how you localise the failure to parsing, chunking, embedding, ranking, or context assembly, and tell me exactly what you measure at each stage and in what order.",
+  "Design retrieval for a single deployment serving 200 tenants where the largest has 40 million chunks and the smallest has 2,000, with hard isolation guarantees. Cover pre- versus post-filtering, index layout, what degrades first, and how you would prove isolation to their security team.",
+  "Your eval shows recall@50 of 0.92 but recall@5 of 0.48. What do you do next, and how would your answer change if instead recall@50 were 0.50?",
+  "Explain reciprocal rank fusion versus weighted score fusion for combining dense and lexical results. When is RRF the wrong choice, and what would you need in place before switching?",
+  "You have 15% of your p99 latency budget left. Do you spend it on reranking 100 candidates or on a larger embedding model, and how do you decide with data rather than opinion?",
+  "Contextual retrieval costs an extra LLM call per chunk at ingest. Justify that to a customer who is already unhappy about token spend: how do you make it affordable, and how do you prove after the fact that it was worth it?",
+  "A vector query that ran in 20ms now takes 4 seconds after you added a WHERE clause on tenant_id and document_type. What happened inside Postgres, what does EXPLAIN show, and what are your options to fix it without moving to a dedicated vector database?"
+ ],
+ "proofOfWork": "Publish a self-contained 'retrieval ablation report' repository over the Dokeo documentation corpus: a versioned JSONL eval set of 60-80 labelled questions (including unanswerable ones), a single `make eval` entrypoint that runs any named configuration against the held-out split, and a generated README containing the ablation table with one row per change - naive baseline, structure-aware chunking, alternate embedding model, hybrid RRF, cross-encoder reranking, contextual retrieval - and columns for recall@5, recall@20, nDCG@10, citation-verified answer accuracy, p95 end-to-end latency and cost per 1,000 queries, each cell reproducible from a stored run_id. Include the two plots that show you measured rather than assumed: true ANN recall versus p95 latency across hnsw.ef_search values, and recall@5 broken down by question type across configurations. Add a GitHub Actions workflow that re-runs the eval on every PR touching retrieval and fails the build on a >2-point recall@5 regression, plus a short RUNBOOK.md covering the re-embedding migration procedure, the delete/tombstone reindex policy, and the ingest-lag SLI - so the artifact reads as a production retrieval system with evidence, not a demo notebook."
+}
