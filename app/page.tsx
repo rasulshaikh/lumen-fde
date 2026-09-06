@@ -6,6 +6,7 @@ import library from "@/data/library-context.json";
 import repositories from "@/data/repository-context.json";
 import { LogoMark, AskMark } from "./brand";
 import { RecallStrip } from "./recall";
+import { Terminal } from "./terminal";
 
 type Row = (string | number | null)[];
 const planRows = workbook.Plan.slice(1) as Row[];
@@ -45,7 +46,7 @@ const FAQS = [
   "What will a senior FDE interview actually test that my plan does not cover?",
 ];
 
-const TABS = ["Overview", "Plan", "Curriculum", "Mocks", "Roadmaps", "Library", "Assessments", "Comp reality"];
+const TABS = ["Overview", "Plan", "Curriculum", "Sandbox", "Mocks", "Roadmaps", "Library", "Assessments", "Comp reality"];
 type Subtopic = { name: string; learn: string; minutes: number; resource: { label: string; url: string } };
 type Syllabus = { i: number; topic: string; hours: number; why: string; prerequisites: string[]; subtopics: Subtopic[]; outcomes: string[]; failureModes: string[]; interviewQuestions: string[]; proofOfWork: string };
 function SyllabusView({ s, row }: { s: Syllabus; row?: Row }) {
@@ -214,6 +215,7 @@ export default function Home() {
     <section className="hero"><div><p className="kicker">Preparation command center</p><h1>Build proof, not just knowledge.</h1><p className="hero-copy">Your {hours}-hour Senior FDE plan, reduced to the pace, practice, and proof that matter this week.</p></div><div className="hero-note"><span className="note-pin">●</span><div><strong>Current focus</strong><p>{focus ? `Month ${focus.month} · ${focus.track}` : "Plan complete"}</p></div></div></section>
     <nav className="tabs" aria-label="Workbook views">{TABS.map((item) => <button key={item} className={tab === item ? "tab active" : "tab"} onClick={() => setView(item)}>{item}</button>)}</nav><RecallStrip startedTopics={startedTopics} />
     {tab === "Assessments" && <Assessments />}
+    {tab === "Sandbox" && <Terminal />}
     {tab === "Overview" && <>
       <section className="metric-grid"><Metric label="Plan progress" value={`${pct(done, activeRows.length)}%`} detail={`${done} of ${activeRows.length} active${skipped ? ` · ${skipped} of ${planRows.length} skipped` : ""}`} tone="rose" /><Metric label="Hours remaining" value={`${Math.max(hours - doneHours, 0)}`} detail={`of ${hours} active hours${skippedHours ? ` · ${skippedHours}h skipped` : ""}`} tone="teal" /><div className="metric brass"><span className="metric-label">Weekly commitment</span><strong><input className="weekly-input" type="number" min={1} max={80} value={weeklyHours} aria-label="Hours you study each week" onChange={(e) => setWeekly(Number(e.target.value))} />h</strong><span className="metric-detail">{(hours / weeklyHours).toFixed(1)} weeks · {(hours / weeklyHours / 4.333).toFixed(1)} months</span></div><Metric label="Mocks" value={`${mockRows.reduce((n, r) => n + Number(r[6] || 0), 0)} / ${mockRows.reduce((n, r) => n + Number(r[1] || 0), 0)}`} detail="completed / target" tone="ink" /></section>
       <section className="content-grid"><div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Pace map</p><h2>Where the hours go</h2></div><span className="panel-meta">{hours}h · {tracks.length} tracks</span></div><div className="bar-chart">{monthHours.map((item) => <div className="bar-item" key={item.month}><div className="bar-value">{item.hours}h</div><div className="bar-track"><div className="bar-fill" style={{ height: `${Math.max(12, item.hours / maxMonthHours * 100)}%` }} /></div><div className="bar-label">M{item.month}</div></div>)}</div><div className="chart-foot"><span><i className="legend-dot rose" /> planned hours</span><span>Peak: Month {peakMonth.month} · {peakMonth.hours}h</span></div></div><div className="panel"><div className="panel-head"><div><p className="eyebrow">Next action</p><h2>Start here</h2></div><span className="priority">P1</span></div><div className="next-action"><div className="action-index">{nextRow ? String(nextIndex + 1).padStart(2, "0") : "—"}</div><div><h3>{nextRow ? String(nextRow[2]) : "Plan complete"}</h3><p>{nextRow ? (String(nextRow[3]).length > 118 ? `${String(nextRow[3]).slice(0, 118)}…` : String(nextRow[3])) : "Every topic is done or skipped."}</p>{nextRow && <Link href={String(nextRow[5])}>Open reading</Link>}</div></div><button className="primary-button" onClick={() => setView("Plan")}>Open the plan <span>→</span></button></div></section>
