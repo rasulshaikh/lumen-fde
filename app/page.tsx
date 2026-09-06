@@ -79,6 +79,20 @@ export default function Home() {
   const [weeklyHours, setWeeklyHours] = useState(16);
   useEffect(() => { const v = Number(localStorage.getItem("lumen-weekly-hours")); if (v >= 1 && v <= 80) setWeeklyHours(v); }, []);
   const setWeekly = (value: number) => { const v = Math.min(80, Math.max(1, Math.round(value) || 1)); setWeeklyHours(v); localStorage.setItem("lumen-weekly-hours", String(v)); };
+  // The applied theme is set by an inline script in layout.tsx before first paint, so this
+  // only mirrors it into React state for the button label — reading it here rather than
+  // recomputing avoids a flash of the wrong icon on hydration.
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  useEffect(() => { setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light"); }, []);
+  const toggleTheme = () => setTheme((current) => {
+    const next = current === "dark" ? "light" : "dark";
+    const root = document.documentElement;
+    root.classList.add("theme-switching");
+    root.dataset.theme = next;
+    localStorage.setItem("lumen-theme", next);
+    requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("theme-switching")));
+    return next;
+  });
   const [curriculum, setCurriculum] = useState<Record<string, Syllabus>>({});
   const [curSummary, setCurSummary] = useState<Record<string, { parts: number; minutes: number }> | null>(null);
   const [curriculumState, setCurriculumState] = useState<"idle" | "loading" | "error">("idle");
@@ -148,7 +162,7 @@ export default function Home() {
   };
 
   return <main className={askOpen ? "shell ask-open" : "shell"}>
-    <header className="topbar"><a className="brand brand-link" href="/" aria-label="Return to Lumen home"><LogoMark className="brand-mark" /><div><div className="brand-name">Lumen</div><div className="brand-sub">Rasul · {months.length}-month operating view</div></div></a><div className="top-actions"><span className="sync-dot" /> Workbook snapshot · {library.length} books · {repositories.length} repos<button className="ask-trigger" onClick={() => { setAskTopic(null); setAskOpen(true); }}>✦ Ask Lumen</button><button className="ghost-button" onClick={share} aria-live="polite">{shared ? "✓ Link copied" : "↗ Share"}</button></div></header>
+    <header className="topbar"><a className="brand brand-link" href="/" aria-label="Return to Lumen home"><LogoMark className="brand-mark" /><div><div className="brand-name">Lumen</div><div className="brand-sub">Rasul · {months.length}-month operating view</div></div></a><div className="top-actions"><span className="sync-dot" /> Workbook snapshot · {library.length} books · {repositories.length} repos<button className="ask-trigger" onClick={() => { setAskTopic(null); setAskOpen(true); }}>✦ Ask Lumen</button><button className="ghost-button" onClick={share} aria-live="polite">{shared ? "✓ Link copied" : "↗ Share"}</button><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`} title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>{theme === "dark" ? "☀" : "☾"}</button></div></header>
     <section className="hero"><div><p className="kicker">Preparation command center</p><h1>Build proof, not just knowledge.</h1><p className="hero-copy">Your {hours}-hour Senior FDE plan, reduced to the pace, practice, and proof that matter this week.</p></div><div className="hero-note"><span className="note-pin">●</span><div><strong>Current focus</strong><p>{focus ? `Month ${focus.month} · ${focus.track}` : "Plan complete"}</p></div></div></section>
     <nav className="tabs" aria-label="Workbook views">{TABS.map((item) => <button key={item} className={tab === item ? "tab active" : "tab"} onClick={() => setView(item)}>{item}</button>)}</nav><QuickQuiz />
     {tab === "Assessments" && <Assessments />}

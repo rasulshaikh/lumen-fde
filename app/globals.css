@@ -89,7 +89,7 @@ a.resource-link{min-height:24px;align-items:center;padding:4px 2px}
 .topic-toggle .chev{flex:none;width:20px;height:20px;border-radius:5px;background:var(--surface-strong);color:var(--muted);display:grid;place-items:center;font-size:14px;line-height:1}
 td .topic-toggle{margin-bottom:6px}
 .syllabus-row td{background:var(--surface);padding:18px 16px 22px;border-top:0}
-.syllabus{display:grid;gap:18px;max-width:1100px}
+.syllabus{display:grid;gap:18px}
 .syllabus-why{margin:0;color:var(--ink);font-size:13px;line-height:1.55}
 .syllabus h4{margin:0 0 8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--primary);display:flex;justify-content:space-between;gap:10px;align-items:baseline}
 .syllabus h4 span{color:var(--muted);text-transform:none;letter-spacing:0;font-weight:500}
@@ -145,10 +145,10 @@ td .topic-toggle{margin-bottom:6px}
    invisibility. Fixed to the viewport, it reads as ambient light. --- */
 body::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:
-    radial-gradient(at 8% 12%,rgba(195,178,222,.55) 0,transparent 42%),
-    radial-gradient(at 90% 18%,rgba(245,210,198,.55) 0,transparent 45%),
-    radial-gradient(at 78% 92%,rgba(196,224,215,.55) 0,transparent 48%),
-    radial-gradient(at 14% 88%,rgba(238,226,200,.50) 0,transparent 45%),
+    radial-gradient(at 8% 12%,rgba(195,178,222,var(--blob-a)) 0,transparent 56%),
+    radial-gradient(at 90% 18%,rgba(245,210,198,var(--blob-a)) 0,transparent 58%),
+    radial-gradient(at 78% 92%,rgba(196,224,215,var(--blob-a)) 0,transparent 60%),
+    radial-gradient(at 14% 88%,rgba(238,226,200,var(--blob-b)) 0,transparent 54%),
     var(--bg)}
 /* body must stay transparent: an opaque background here paints straight over the
    z-index:-1 pseudo-element and the gradient disappears. The base colour lives on
@@ -170,7 +170,10 @@ h3{font-size:1.0625rem;line-height:1.35;letter-spacing:-.01em}
   letter-spacing:.08em;text-transform:uppercase}
 .metric strong,.mock-stats b,.track-hours,.bar-value{font-variant-numeric:tabular-nums}
 code,.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
-p,.depth,.syllabus ul,.syllabus ol{max-width:66ch}
+/* 66ch is the measure for running prose only. Applied to every <p> it turns dashboard
+   panels into narrow ribbons with dead space beside them — the syllabus intro was 523px
+   inside a 1298px card. Scoped to the places that actually read as prose. */
+.hero-copy,.assessment-lead,.library-note,.reality p,.syllabus-why,.assessment-body p{max-width:66ch}
 .hero-copy,.assessment-lead,.library-note{line-height:1.7}
 
 /* --- Cards: pure white on the gradient. The contrast IS the design — never tint,
@@ -191,8 +194,11 @@ p,.depth,.syllabus ul,.syllabus ol{max-width:66ch}
   box-shadow:0 16px 48px -16px rgba(160,136,184,.25);transform:translateY(-2px);
   border-color:rgba(160,136,184,.5)}
 .panel,.metric,.book-row,.cur-topic,.resource-card,.tab,.primary-button,.quiz-option,.quiz-action{
+  /* background-color, NOT the `background` shorthand: the shorthand also covers
+     background-image, and a var()-driven swap under it leaves Chrome's computed value
+     stranded — quiz options stayed white in dark mode, 1.13:1, indefinitely. */
   transition:box-shadow 200ms cubic-bezier(.32,.72,0,1),transform 200ms cubic-bezier(.32,.72,0,1),
-    background 200ms cubic-bezier(.32,.72,0,1),border-color 200ms cubic-bezier(.32,.72,0,1)}
+    background-color 200ms cubic-bezier(.32,.72,0,1),border-color 200ms cubic-bezier(.32,.72,0,1)}
 
 /* --- Buttons: four pill variants, never blended. Ink primary stays quiet so the
    gradient stays the protagonist. --- */
@@ -235,7 +241,8 @@ p,.depth,.syllabus ul,.syllabus ol{max-width:66ch}
 
 /* --- Tabs: mauve wash on the selected tab, no heavy underline --- */
 .tabs{border-bottom:1px solid var(--line)}
-.tab{color:var(--muted);font-weight:500;border-radius:var(--r-pill) var(--r-pill) 0 0;padding:0 12px 13px}
+.tab{color:var(--muted);font-weight:500;border-radius:var(--r-pill) var(--r-pill) 0 0;padding:0 12px 13px;white-space:nowrap}
+.tabs{overflow-x:auto;scrollbar-width:thin}
 .tab:hover{background:rgba(160,136,184,.08)}
 .tab.active{color:var(--accent-text);font-weight:600}
 .tab.active:after{background:var(--accent-text);height:2px}
@@ -297,3 +304,113 @@ p,.depth,.syllabus ul,.syllabus ol{max-width:66ch}
   .book-row:hover,.cur-topic:hover,.resource-card:hover,.primary-button:hover,.login-button:hover{transform:none}
   *{transition-duration:1ms!important}
 }
+
+/* ============================================================
+   TONAL GRADING + THEMES
+   The flat read came from one accent doing every job. Sorbet
+   ships a three-stop mauve scale (#A088B8 / #C7B4D8 / #E0D2EA);
+   using it as a real ramp gives depth without a second hue.
+   ============================================================ */
+:root{
+  --mauve-1:#a088b8;--mauve-2:#c7b4d8;--mauve-3:#e0d2ea;
+  --blob-a:.55;--blob-b:.50;
+  --elev-1:0 2px 8px rgba(40,35,60,.06);
+  --elev-2:0 12px 32px -8px rgba(40,35,60,.14);
+  --elev-3:0 24px 64px -16px rgba(40,35,60,.22);
+}
+
+/* Graded, not flat: the chart walks the mauve ramp and the current month lands on the
+   strongest stop, so the eye is told where "now" is instead of scanning 13 equal bars. */
+.bar-fill{background:var(--mauve-2)}
+.bar-item:nth-child(3n+1) .bar-fill{background:var(--mauve-3)}
+.bar-item:nth-child(3n+2) .bar-fill{background:var(--mauve-2)}
+.bar-item:nth-child(3n) .bar-fill{background:var(--mauve-1)}
+.bar-item:hover .bar-fill{background:var(--accent-text)}
+.track-progress span,.mock-bar span{background:var(--mauve-1)}
+
+/* Elevation is graded too — a metric tile should not carry a modal's shadow. */
+.metric,.book-row,.resource-card,.quiz-strip{box-shadow:var(--elev-1)}
+.panel,.cur-topic,.repo-row,.assessment-card{box-shadow:var(--elev-2)}
+.ask-panel,.login-card{box-shadow:var(--elev-3)}
+
+/* The four metric numerals were three shades of near-black. Give them the ramp so the
+   row reads as a graded set rather than a wall of ink. */
+.metric.rose strong{color:var(--accent-text)}
+.metric.teal strong{color:var(--teal)}
+.metric.brass strong{color:var(--mauve-1)}
+
+/* --- Ask Lumen empty state. Making the panel full height exposed this: a 42px strip
+   floating above 547px of void. It now centres in the space it has and says what the
+   panel can actually do. --- */
+.messages:has(.empty-chat){display:flex;align-items:center;justify-content:center}
+.empty-chat{background:transparent;text-align:center;padding:24px 18px;max-width:34ch;
+  color:var(--muted);line-height:1.7}
+.empty-chat:before{content:'';display:block;width:44px;height:44px;margin:0 auto 14px;
+  border-radius:var(--r-pill);background:var(--primary-soft)}
+
+/* ============================================================
+   DARK THEME
+   Sorbet ships light only, so this is derived, not quoted: the
+   same four blobs at a tenth of the alpha over deep ink, cards
+   lifted off the canvas rather than sunk into it. Every text
+   tone is solved against the LIGHTEST composited pixel
+   (rgb(45,41,45)) — the binding constraint when type is light.
+   ============================================================ */
+:root[data-theme="dark"]{
+  --bg:#17161c;--surface:#201f27;--surface-strong:#2b2a33;
+  --ink:#f2f0f6;--ink-2:#c9c5d2;--muted:#a29ead;
+  --line:rgba(255,255,255,.12);--line-strong:#7c7889;
+  --primary:#edeaf2;--primary-hover:#ffffff;--primary-soft:rgba(160,136,184,.16);/* .26 lifted the expanded card enough to drop muted text to 4.15:1 */
+  --accent:#a088b8;--accent-text:#c4b0dc;
+  --teal:#7fc79b;--brass:#c4b0dc;--danger:#f0949e;
+  --mauve-1:#8f76a8;--mauve-2:#a892c2;--mauve-3:#c4b0dc;
+  --blob-a:.10;--blob-b:.09;
+  --shadow-card:0 18px 48px -24px rgba(0,0,0,.6),0 1px 3px rgba(0,0,0,.4);
+  --shadow-cta:0 6px 18px -8px rgba(0,0,0,.5);
+  --elev-1:0 2px 8px rgba(0,0,0,.35);
+  --elev-2:0 12px 32px -8px rgba(0,0,0,.45);
+  --elev-3:0 24px 64px -16px rgba(0,0,0,.55);
+  color-scheme:dark;
+}
+/* The ink pill inverts to paper, so its label has to invert too. */
+:root[data-theme="dark"] .primary-button,:root[data-theme="dark"] .quiz-action,
+:root[data-theme="dark"] .login-button,:root[data-theme="dark"] .ask-form button{color:var(--bg)}
+:root[data-theme="dark"] .reality{background:var(--surface-strong)}
+:root[data-theme="dark"] .reality p{color:var(--muted)}
+:root[data-theme="dark"] .reality .eyebrow{color:var(--accent-text)}
+:root[data-theme="dark"] .brand-mark rect{fill:var(--primary)}
+:root[data-theme="dark"] .brand-mark path{fill:var(--bg)}
+:root[data-theme="dark"] .res-watch{background:rgba(127,199,155,.16);color:var(--teal)}
+:root[data-theme="dark"] .res-do{background:rgba(245,210,198,.16);color:#e8b79c}
+:root[data-theme="dark"] .quiz-option.correct{background:rgba(127,199,155,.16)}
+:root[data-theme="dark"] .quiz-option.wrong{background:rgba(240,148,158,.16)}
+:root[data-theme="dark"] .login-shell{background:var(--bg)}
+
+/* Follow the OS until the user states a preference. */
+@media(prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){color-scheme:dark}
+}
+
+.theme-toggle{display:inline-flex;align-items:center;justify-content:center;
+  width:34px;height:34px;min-width:34px;border:1px solid var(--line-strong);
+  background:var(--surface);color:var(--ink);border-radius:var(--r-pill);
+  font-size:14px;line-height:1;padding:0}
+.theme-toggle:hover{background:var(--primary-soft);border-color:rgba(160,136,184,.5)}
+.theme-toggle:focus-visible{outline:2px solid rgba(160,136,184,.85);outline-offset:3px}
+
+/* The lead prose holds a 66ch measure, which is correct for reading — but in a
+   single-column syllabus that left ~745px of dead space beside it, which is what read
+   as "truncated". Pair it with the three entry-point resources and tighten column one
+   to the measure itself, so the band is full and the motivation sits next to the first
+   action rather than above it. */
+@media(min-width:1000px){
+  .syllabus{grid-template-columns:minmax(0,66ch) minmax(0,1fr);align-items:start}
+  .syllabus>*{grid-column:1 / -1}
+  .syllabus-why{grid-column:1;grid-row:1;margin:0}
+  .syllabus-primary{grid-column:2;grid-row:1}
+}
+
+/* Swapping themes animated every background and colour for 200ms, sweeping the whole
+   page through a muddy intermediate. Transitions are suppressed for the swap frame. */
+.theme-switching,.theme-switching *,.theme-switching *::before,.theme-switching *::after{
+  transition:none!important}
