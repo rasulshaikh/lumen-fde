@@ -284,13 +284,8 @@ code,.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
 /* --- Ask Lumen: a full-height right rail, not a 600px box floating in the corner.
    The shell already reserves 478px at this width, so the panel fills the gutter
    top to bottom instead of leaving two thirds of it empty. --- */
-@media(min-width:1201px){
-  .ask-panel{top:24px;bottom:24px;right:24px;max-height:none;height:auto;
-    width:430px;border-radius:var(--r-lg)}
-}
-@media(max-width:1200px){
-  .ask-panel{top:16px;bottom:16px;max-height:none;height:auto;border-radius:var(--r-lg)}
-}
+/* Ask Lumen sizing lives in ONE place — see the consolidated tiers at the end of this
+   file. Eight competing .ask-panel rules had accumulated across breakpoints. */
 .messages{max-height:none;flex:1;min-height:0}
 
 /* The pace chart is 13 bars wide; below ~600px it scrolls inside its own panel
@@ -437,3 +432,58 @@ code,.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
    page through a muddy intermediate. Transitions are suppressed for the swap frame. */
 .theme-switching,.theme-switching *,.theme-switching *::before,.theme-switching *::after{
   transition:none!important}
+
+/* ============================================================
+   ASK LUMEN — one consolidated set of size tiers
+   Eight competing .ask-panel rules had accumulated across seven
+   breakpoints. Measured across nine viewports, the real defect
+   was the rail breakpoint sitting at 1201px: a 1024x768 tablet
+   or a 1180x820 iPad Pro got a 91-94% fullscreen takeover even
+   though either has room for a rail beside the dashboard.
+   ============================================================ */
+
+/* Tier 1 — docked rail. The shell yields space so the dashboard stays readable beside
+   it. At 1000px this still leaves ~520px of plan visible. */
+@media(min-width:1000px){
+  .ask-panel{position:fixed;top:20px;bottom:20px;right:20px;left:auto;
+    width:clamp(360px,30vw,440px);height:auto;max-height:none;
+    border-radius:var(--r-lg);padding:22px}
+  .shell.ask-open{margin-left:auto;margin-right:calc(clamp(360px,30vw,440px) + 44px);
+    max-width:min(1440px,calc(100vw - clamp(360px,30vw,440px) - 88px))}
+}
+
+/* Tier 2 — overlay rail. Too narrow to give the shell a gutter, wide enough that a
+   fullscreen takeover would be wrong: the panel floats over the right side and leaves
+   the plan visible behind it. */
+@media(min-width:700px) and (max-width:999px){
+  .ask-panel{position:fixed;top:16px;bottom:16px;right:16px;left:auto;
+    width:min(380px,52vw);height:auto;max-height:none;
+    border-radius:var(--r-lg);padding:20px}
+  .shell.ask-open{margin-right:auto;max-width:1440px}
+}
+
+/* Tier 3 — sheet. Below 700px there is no room to keep context, so it covers the screen
+   deliberately rather than by accident. */
+@media(max-width:699px){
+  .ask-panel{position:fixed;inset:10px;width:auto;height:auto;max-height:none;
+    border-radius:var(--r-md);padding:18px}
+  .shell.ask-open{margin-right:auto;max-width:1440px}
+}
+
+/* Short viewports — a landscape phone is 375px tall. Reclaim vertical space by dropping
+   the intro copy, which the header and the prompts already imply. */
+@media(max-height:460px){
+  .ask-intro{display:none}
+  .ask-panel{padding:14px}
+  .ask-head h2{font-size:17px}
+  .empty-chat{padding:12px 14px}
+}
+
+/* Internal rhythm: the panel had 10px/14px margins inherited from the old compact popover
+   and read as cramped against Sorbet's 20px+ card padding. */
+.ask-head{margin-bottom:14px}
+.ask-intro{margin:0 0 14px;font-size:13px;line-height:1.6}
+.context-status{margin-bottom:14px}
+.suggestions{gap:8px;margin-bottom:16px}
+.messages{margin:0;gap:12px}
+.ask-form{margin-top:16px}
