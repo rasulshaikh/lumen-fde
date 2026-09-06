@@ -1,208 +1,227 @@
 {
-  "i": 30,
-  "topic": "Data modelling for multi-tenant AI systems: RLS, PII, encryption, audit trails",
-  "track": "E. Backend and Data",
-  "month": 4,
-  "hours": 6.0,
-  "why": "An FDE is usually the person who puts a customer's data into an AI system for the first time, and the customer's security team will not let a pilot touch production data until someone shows them, table by table, how tenant A cannot read tenant B, where PII lives, how it is encrypted and who can prove what was accessed. Application-layer `WHERE tenant_id = ?` filters fail the moment an engineer forgets one, an LLM-generated query bypasses the ORM, or a background job runs as the wrong principal; Postgres row-level security, pgcrypto and an append-only audit log move those guarantees into the database where a reviewer can actually verify them. The schema you design in week one is the schema that survives the handover, so getting isolation, PII handling and auditability right before the first customer row lands is the cheapest security work you will ever do.",
-  "prerequisites": [
-    "PostgreSQL fundamentals from 'PostgreSQL at depth' (topic 29): EXPLAIN ANALYZE, B-tree and composite indexes, transactions and isolation levels, `SET ROLE`, and reading `pg_catalog` views",
-    "Auth model from 'Auth: OAuth2, OIDC, JWT, RBAC, multi-tenant claims' (topic 27): where `tenant_id` and `sub` come from in a verified JWT and why the database must never trust a tenant id the client supplied in a body or query string",
-    "FastAPI dependency injection and request lifecycle from topic 26 (or the Next.js route-handler and server-action equivalent for DefenderMate) so you can set per-request session state at the exact point the connection is checked out",
-    "IAM and KMS basics from topic 15: what a KMS key policy is, `kms:Decrypt` versus `kms:GenerateDataKey`, and why the application role must never hold both the ciphertext store and unrestricted key access",
-    "Docker Compose with a local Postgres 16 container and psql, plus a pytest (or Vitest) harness that can open two connections as different roles inside one test",
-    "A written list of every table in DefenderMate today, which columns hold customer-supplied free text, and who (human or service) reads each one"
-  ],
-  "subtopics": [
-    {
-      "name": "Choosing the tenancy model: shared schema, schema-per-tenant, database-per-tenant",
-      "learn": "Lay out the three isolation models with their real costs: pooled (one schema, `tenant_id` on every row, RLS enforces isolation), bridge (schema-per-tenant with `search_path` switching and N copies of every migration), and silo (database or cluster per tenant, hard isolation, N connection pools and N backups). Know the questions that decide it: does the customer's security policy require physical separation or a dedicated encryption key per tenant, how many tenants will exist in 18 months, does any tenant need a different region for residency, and can you afford per-tenant migrations at 3 a.m. Be able to defend pooled-with-RLS as the default for an AI product with hundreds of small tenants, and name the two triggers (a regulated customer demanding a dedicated key or region; one tenant at 100x the load of the rest) that move a specific tenant to a silo while the others stay pooled.",
-      "minutes": 20,
-      "resource": {
-        "label": "AWS Well-Architected SaaS Lens (tenant isolation and data partitioning)",
-        "url": "https://docs.aws.amazon.com/wellarchitected/latest/saas-lens/saas-lens.html"
-      }
-    },
-    {
-      "name": "Tenant key discipline: tenant_id on every row and composite foreign keys",
-      "learn": "Every tenant-owned table gets `tenant_id uuid NOT NULL REFERENCES tenants(id)` and a `UNIQUE (tenant_id, id)` constraint, and every child table references its parent with a composite `FOREIGN KEY (tenant_id, parent_id) REFERENCES parent (tenant_id, id)` so a row cannot point at another tenant's parent even when application code is wrong. Put `tenant_id` first in every index so RLS predicates and tenant-scoped queries show up as `Index Cond` rather than `Filter` in EXPLAIN. Write a catalog query against `information_schema.columns` that lists tables in the `public` schema lacking a `tenant_id` column and run it in CI; the exceptions list (lookup tables, the `tenants` table itself) should be explicit, short and reviewed.",
-      "minutes": 25,
-      "resource": {
-        "label": "PostgreSQL docs: Constraints (composite unique and foreign keys)",
-        "url": "https://www.postgresql.org/docs/current/ddl-constraints.html"
-      }
-    },
-    {
-      "name": "RLS mechanics: ENABLE, FORCE, USING vs WITH CHECK, PERMISSIVE vs RESTRICTIVE",
-      "learn": "Understand exactly what `ALTER TABLE t ENABLE ROW LEVEL SECURITY` does (default-deny for every role that is not the owner, a superuser or BYPASSRLS) and why you always also run `ALTER TABLE t FORCE ROW LEVEL SECURITY` so the owner is bound too. Write `CREATE POLICY tenant_isolation ON t FOR ALL TO app_user USING (tenant_id = current_tenant_id()) WITH CHECK (tenant_id = current_tenant_id())` and know the asymmetry: `USING` filters rows visible to SELECT, UPDATE and DELETE, `WITH CHECK` validates rows produced by INSERT and UPDATE, and a policy with only `USING` lets an UPDATE move a row into another tenant. Know that multiple PERMISSIVE policies are ORed while `AS RESTRICTIVE` policies are ANDed on top, so a second permissive policy added for a 'support can read everything' feature silently widens access to every row; use RESTRICTIVE for hard constraints such as `deleted_at IS NULL` or region pinning.",
-      "minutes": 30,
-      "resource": {
-        "label": "PostgreSQL docs: Row Security Policies",
-        "url": "https://www.postgresql.org/docs/current/ddl-rowsecurity.html"
-      }
-    },
-    {
-      "name": "Getting the tenant into the session: set_config, current_setting and pooled connections",
-      "learn": "Carry the verified tenant id from the JWT into Postgres with `SELECT set_config('app.tenant_id', $1, true)` at the start of every transaction and read it inside policies as `NULLIF(current_setting('app.tenant_id', true), '')::uuid`; the second argument to `current_setting` is `missing_ok`, which turns an unset variable into NULL (the policy evaluates to NULL, so zero rows) instead of raising. The third argument of `set_config` (`is_local = true`, the equivalent of `SET LOCAL`) scopes the value to the current transaction; with PgBouncer in transaction pooling mode a session-level `SET` leaks the previous tenant to whichever request gets that connection next, which is the single most common cross-tenant bug in pooled RLS deployments. Wrap `set_config` and the business query in one explicit transaction in the repository layer, and add a test that checks out two connections from the pool in sequence and proves the second one sees no tenant.",
-      "minutes": 25,
-      "resource": {
-        "label": "PostgreSQL docs: Configuration Settings Functions (set_config, current_setting)",
-        "url": "https://www.postgresql.org/docs/current/functions-admin.html"
-      }
-    },
-    {
-      "name": "Role model: app role without BYPASSRLS, migrator as owner, SECURITY DEFINER escape hatches",
-      "learn": "Create three roles: `app_migrator` owns every object and runs migrations, `app_user` (NOLOGIN, NOBYPASSRLS) is granted to the login role the API uses, and `app_readonly` for analytics gets SELECT on masked views only. Never connect the application as the owner or a superuser; verify with `SELECT rolname, rolsuper, rolbypassrls FROM pg_roles` in a CI check. When a cross-tenant operation is genuinely required (a system job aggregating usage across tenants), implement it as a `SECURITY DEFINER` function owned by a dedicated role with `SET search_path = pg_catalog, public` in the definition to block search_path hijacking, `REVOKE EXECUTE ... FROM PUBLIC`, and a narrow signature that cannot be turned into a generic query runner.",
-      "minutes": 20,
-      "resource": {
-        "label": "PostgreSQL docs: CREATE ROLE (BYPASSRLS, NOLOGIN, INHERIT)",
-        "url": "https://www.postgresql.org/docs/current/sql-createrole.html"
-      }
-    },
-    {
-      "name": "RLS performance: InitPlan wrapping, LEAKPROOF, and reading EXPLAIN as the app role",
-      "learn": "A policy expression is appended to every query as a predicate, so `tenant_id = current_setting('app.tenant_id')::uuid` is evaluated per row unless you write it as `(SELECT current_setting('app.tenant_id', true)::uuid)`, which the planner turns into a single InitPlan. Understand the leakproof rule: the planner will not push a user-defined or non-`LEAKPROOF` function below the RLS filter (an error message could leak a row), so a `WHERE my_func(col)` that used an index without RLS becomes a sequential scan with it; check `proleakproof` in `pg_proc` and mark trusted immutable functions `LEAKPROOF` only as superuser and only when they cannot throw on any input. Always benchmark with `SET ROLE app_user; SET LOCAL app.tenant_id = ...; EXPLAIN (ANALYZE, BUFFERS)` because the owner or a BYPASSRLS role gets a different plan, and confirm the composite index led by `tenant_id` is the one used.",
-      "minutes": 25,
-      "resource": {
-        "label": "Supabase docs: Row Level Security (RLS performance recommendations)",
-        "url": "https://supabase.com/docs/guides/database/postgres/row-level-security"
-      }
-    },
-    {
-      "name": "The RLS test matrix: positive, negative and privilege-escalation cases per table",
-      "learn": "For every RLS-protected table write at least five tests as the application role: tenant A sees exactly A's rows; tenant B sees zero of A's rows; INSERT with a foreign `tenant_id` fails with `new row violates row-level security policy for table`; UPDATE that changes `tenant_id` to another tenant fails on `WITH CHECK`; DELETE of another tenant's row affects 0 rows and raises no error (silent filtering is RLS behaviour you must document for the client). Add the bypass checks: with no `app.tenant_id` set the count is 0 not an exception; the owner is also filtered because of `FORCE`; and `SET ROLE app_user` cannot then `SET ROLE app_migrator`. Generate the matrix from the catalog (loop over `pg_tables WHERE schemaname = 'public'`) so a new table without a policy fails the suite instead of being forgotten, and run it against a real Postgres container in CI, never SQLite or a mock.",
-      "minutes": 30,
-      "resource": {
-        "label": "pgTAP documentation (throws_ok, results_eq, policies_are)",
-        "url": "https://pgtap.org/documentation.html"
-      }
-    },
-    {
-      "name": "Catalog invariants in CI: pg_policies, relrowsecurity, relforcerowsecurity, event triggers",
-      "learn": "Encode the security posture as queries the pipeline runs after migrations: every table in `public` has `relrowsecurity` and `relforcerowsecurity` true in `pg_class` (joined to `pg_namespace`), every such table has at least one row in `pg_policies` for the app role, no role other than the migrator owns any object, and no function referenced from a policy is `SECURITY DEFINER` unless allow-listed. Print the offending table names as the failure message so the reviewer does not have to dig. Optionally add an event trigger `ON ddl_command_end` that inspects `pg_event_trigger_ddl_commands()` and runs `ENABLE ROW LEVEL SECURITY; FORCE ROW LEVEL SECURITY` on any newly created table in `public`, so an engineer who forgets RLS creates an inaccessible table (a loud failure) rather than an open one.",
-      "minutes": 15,
-      "resource": {
-        "label": "PostgreSQL docs: pg_policies system view",
-        "url": "https://www.postgresql.org/docs/current/view-pg-policies.html"
-      }
-    },
-    {
-      "name": "PII inventory and classification per column",
-      "learn": "Classify every column as: direct identifier (email, phone, full name, national id), quasi-identifier (postcode, birth date, IP address, device id), special category (health, biometrics, ethnicity, union membership, sexual orientation under GDPR Art. 9), secret (password hash, API key, refresh token), or free text that may contain any of the above (support tickets, chat transcripts, the prompt and completion columns of your AI system). Record the classification, lawful basis, retention period and encryption treatment in one place the security team can read: a `data_inventory` table, or `COMMENT ON COLUMN customers.email IS 'pii:direct;retain:account+30d;enc:column'` parsed by a script into the model doc. The rule for AI systems is that any column an LLM writes to is free text and inherits the highest classification of its inputs.",
-      "minutes": 15,
-      "resource": {
-        "label": "OWASP Cheat Sheet: User Privacy Protection",
-        "url": "https://cheatsheetseries.owasp.org/cheatsheets/User_Privacy_Protection_Cheat_Sheet.html"
-      }
-    },
-    {
-      "name": "Encryption layers and pgcrypto: what each layer actually protects against",
-      "learn": "Separate the three layers and the threat each defeats: volume encryption (RDS/EBS with a KMS key) stops a stolen disk or snapshot and nothing else; column encryption with pgcrypto (`pgp_sym_encrypt(text, key)` / `pgp_sym_decrypt(bytea, key)`, or `encrypt(data, key, 'aes-cbc/pad:pkcs')` when you manage IVs yourself) stops a DBA or a leaked `pg_dump` from reading plaintext, but the key is visible in `pg_stat_statements` and server logs if it is passed as a literal; application-layer encryption before the row reaches Postgres stops even the database host from seeing plaintext at the cost of losing SQL search and indexing on that column. Know the pgcrypto footguns: `pgp_sym_encrypt` output is non-deterministic (good for confidentiality, means no equality index), the column type is `bytea`, and keys must travel as bound parameters with `SET LOCAL log_statement = 'none'` for that transaction or they end up in the log.",
-      "minutes": 25,
-      "resource": {
-        "label": "PostgreSQL docs: pgcrypto module",
-        "url": "https://www.postgresql.org/docs/current/pgcrypto.html"
-      }
-    },
-    {
-      "name": "Envelope encryption, per-tenant data keys and crypto-shredding",
-      "learn": "Implement the KMS hierarchy: one customer-managed KEK in KMS with a key policy granting the application role `kms:GenerateDataKey` and `kms:Decrypt` only; per tenant, call `GenerateDataKey` once, store the encrypted DEK in `tenants.dek_ciphertext`, cache the plaintext DEK in process memory with a short TTL, and encrypt PII columns with the tenant's DEK using AES-256-GCM with `tenant_id` and the column name as additional authenticated data so a ciphertext copied between rows or tenants fails to decrypt. Rotation is re-wrapping DEKs under the new KEK version, not re-encrypting rows. Crypto-shredding is the payoff: deleting a tenant's DEK (and every copy of it) renders every PII row, backup and replica unreadable, which is how you honour an erasure request without rewriting PITR history; document this as the deletion mechanism in the model doc.",
-      "minutes": 20,
-      "resource": {
-        "label": "AWS KMS Developer Guide: Concepts (envelope encryption, data keys, key policies)",
-        "url": "https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html"
-      }
-    },
-    {
-      "name": "Searchable PII: HMAC blind indexes, last-four columns, and password hashing",
-      "learn": "You cannot index or filter on a non-deterministic ciphertext, so for each PII column that needs exact lookup (email for login, phone for dedupe) add a sibling `email_hmac bytea` computed as `hmac(lower(trim(email)), :blind_index_key, 'sha256')` with a key different from the encryption key, index that column, and query by HMAC. Understand why a plain `digest(email, 'sha256')` is unacceptable (offline dictionary attack on a low-entropy space like emails) and why per-row salts defeat the purpose (you could no longer look anything up). Store display fragments (`card_last4`, `phone_last2`) as separate plaintext columns rather than decrypting for every list view. For passwords use `crypt(password, gen_salt('bf', 12))` or, better, application-side argon2id; never `pgp_sym_encrypt` a password.",
-      "minutes": 20,
-      "resource": {
-        "label": "OWASP Cheat Sheet: Cryptographic Storage",
-        "url": "https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html"
-      }
-    },
-    {
-      "name": "Masked views, column-level GRANT and security_invoker",
-      "learn": "Give analysts, dashboards and the eval pipeline a redacted surface instead of base tables: `CREATE VIEW customers_masked WITH (security_invoker = true) AS SELECT id, tenant_id, left(email, 1) || '***@' || split_part(email, '@', 2) AS email, ...` so RLS on the base table is evaluated as the querying role (without `security_invoker`, a view runs with the owner's privileges and bypasses RLS). Add `security_barrier = true` when the view filters rows, so a malicious function in the caller's WHERE clause cannot execute before the view's predicate and leak rows through error messages. Use column-level privileges for the reverse case: `GRANT SELECT (id, tenant_id, created_at) ON customers TO app_readonly` lets a role read a table without its PII columns, and `SELECT *` from that role fails loudly with a permission error.",
-      "minutes": 15,
-      "resource": {
-        "label": "PostgreSQL docs: CREATE VIEW (security_barrier, security_invoker)",
-        "url": "https://www.postgresql.org/docs/current/sql-createview.html"
-      }
-    },
-    {
-      "name": "Trigger-based audit log: who, what, when, why on every tenant table",
-      "learn": "Design `audit_log (id bigint generated always as identity, tenant_id uuid, occurred_at timestamptz default clock_timestamp(), actor_id uuid, actor_role text, session_user_name text default session_user, application_name text, request_id text, table_name text, row_pk text, op text, old_row jsonb, new_row jsonb, changed_cols text[])` and one generic PL/pgSQL function attached with `CREATE TRIGGER audit AFTER INSERT OR UPDATE OR DELETE ON t FOR EACH ROW EXECUTE FUNCTION audit_row()` that reads `TG_OP`, `TG_TABLE_NAME`, `to_jsonb(OLD)`, `to_jsonb(NEW)`, and the actor from `current_setting('app.actor_id', true)` and `current_setting('app.request_id', true)`. Strip or encrypt PII columns in `old_row`/`new_row` using the inventory from the classification step so the audit log does not become the least protected copy of the data. Use `AFTER` not `BEFORE` so a rolled-back statement leaves no audit row, and compute `changed_cols` from a jsonb diff so reviewers can filter for changes to sensitive fields.",
-      "minutes": 30,
-      "resource": {
-        "label": "PostgreSQL docs: PL/pgSQL Trigger Functions (TG_OP, OLD, NEW)",
-        "url": "https://www.postgresql.org/docs/current/plpgsql-trigger.html"
-      }
-    },
-    {
-      "name": "Making the audit trail append-only and tamper-evident; pgaudit for DDL and roles",
-      "learn": "Append-only means four things: `REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM PUBLIC, app_user` plus a `BEFORE UPDATE OR DELETE OR TRUNCATE` trigger that raises `EXCEPTION 'audit_log is append-only'` to cover the owner as well; RLS on `audit_log` so tenants read only their own entries; a `prev_hash bytea` chain (`digest(prev_hash || canonical_row_json, 'sha256')`) that lets an auditor detect a deleted or edited row; and periodic export of closed partitions to object storage with S3 Object Lock in compliance mode. Application triggers cannot see `ALTER ROLE`, `GRANT`, `DROP TRIGGER` or a DBA at a psql prompt; enable the `pgaudit` extension with `pgaudit.log = 'ddl, role'` (and `read, write` on sensitive schemas via `pgaudit.role`) so those events land in the server log shipped to the SIEM, and document which events live in which log.",
-      "minutes": 20,
-      "resource": {
-        "label": "pgaudit: PostgreSQL Audit Extension (GitHub, configuration reference)",
-        "url": "https://github.com/pgaudit/pgaudit"
-      }
-    },
-    {
-      "name": "Retention, erasure and partitions: deleting without breaking the audit trail",
-      "learn": "Partition high-volume tables (`audit_log`, `llm_calls`, `messages`) by month with `PARTITION BY RANGE (occurred_at)` so retention is `DROP TABLE audit_log_2025_03` (instant, no bloat) rather than a `DELETE` that vacuums for hours; pre-create partitions from a scheduled job and test the 'no partition for this month' failure before it happens on a Sunday. Separate three deletion semantics and put each in the model doc: soft delete (`deleted_at` plus a RESTRICTIVE policy `deleted_at IS NULL` so hidden rows stay hidden from every query path), hard delete (row gone, audit rows remain but the PII inside them is pseudonymised by rewriting `actor_id` to a tombstone via a privileged job), and crypto-shred for tenant offboarding. State plainly that PITR backups retain data for the backup window and that any erasure SLA must include that window.",
-      "minutes": 15,
-      "resource": {
-        "label": "PostgreSQL docs: Table Partitioning (declarative range partitioning, detaching)",
-        "url": "https://www.postgresql.org/docs/current/ddl-partitioning.html"
-      }
-    },
-    {
-      "name": "Modelling AI-specific tables: conversations, llm_calls, tool_calls and embeddings under RLS",
-      "learn": "Design `conversations`, `messages`, `llm_calls` (model, prompt_tokens, completion_tokens, latency_ms, cost_usd, provider_request_id, `prompt_ref` pointing at redacted storage), `tool_calls` (name, arguments jsonb, result jsonb, approved_by) and `embeddings` (pgvector `vector(1536)` plus `source_table`, `source_id`, `tenant_id`) all carrying `tenant_id` and the same RLS policy; the vector table is the one people forget, and a `<->` nearest-neighbour query without tenant scoping returns another tenant's document chunks as context. Treat embeddings as derived PII (inversion attacks recover text) and tool `arguments`/`result` as free text with the highest classification of their inputs. Store raw prompts and completions in a short-TTL partition or as a hash plus a redacted copy, add `training_opt_out boolean` and `data_region text` on `tenants`, and make sure the LLM observability exporter (topic 54) reads from the masked view, never the base table.",
-      "minutes": 20,
-      "resource": {
-        "label": "pgvector (GitHub README: indexing, filtering with WHERE, iterative scans)",
-        "url": "https://github.com/pgvector/pgvector"
-      }
-    },
-    {
-      "name": "Writing the data model doc a client security team signs off",
-      "learn": "Structure the document the way reviewers read it: one data-flow diagram with trust boundaries (browser, API, worker, Postgres, KMS, LLM provider, object storage), a table of every store with its tenancy model and encryption layer, a threat list with the control that answers each one (IDOR across tenants -> RLS + composite FKs + test matrix; SQL injection -> parameterised queries + RLS as defence in depth; snapshot theft -> KMS volume + column encryption; insider DBA -> pgaudit + column encryption + no superuser app role; log leakage -> masked views + `log_statement` policy; backup retention -> stated PITR window + crypto-shred), and an evidence section linking to the CI output for the RLS matrix and catalog invariants. Map controls to the frameworks the client will cite (SOC 2 CC6.1 and CC6.7, ISO 27001 Annex A.8, GDPR Art. 32 and Art. 17) without claiming compliance, and end with the residual risks you are asking them to accept, because a doc with no residual risks is the one they do not believe.",
-      "minutes": 20,
-      "resource": {
-        "label": "OWASP Cheat Sheet: Threat Modeling",
-        "url": "https://cheatsheetseries.owasp.org/cheatsheets/Threat_Modeling_Cheat_Sheet.html"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can stand up DefenderMate's schema in a fresh Postgres 16 container and run an RLS test matrix (positive, negative, cross-tenant INSERT and UPDATE, unset tenant, owner-with-FORCE) generated from the catalog across every table in `public`, passing in CI in under 60 seconds; deliberately dropping one policy makes the suite fail naming that table.",
-    "You can explain, with `EXPLAIN (ANALYZE, BUFFERS)` output captured as `app_user`, why a policy written as `(SELECT current_setting(...))` produces an InitPlan and why a non-LEAKPROOF function in the query turned an index scan into a sequential scan, then fix it without weakening the policy.",
-    "You can reproduce the PgBouncer transaction-pooling leak (session-level `SET app.tenant_id` visible on the next checkout) in an automated test, and show the `set_config(..., true)` fix turning it green.",
-    "You can encrypt a PII column with a per-tenant data key wrapped by a KEK, look rows up by HMAC blind index, rotate the KEK without touching rows, and crypto-shred one tenant so its rows fail to decrypt while every other tenant is unaffected.",
-    "You can show an `audit_log` where UPDATE, DELETE and TRUNCATE fail for every role including the owner, each row carries actor, request id, `TG_OP` and a redacted jsonb diff, and a hash-chain verification query pinpoints a manually deleted row.",
-    "You can run one catalog query that lists any table missing `tenant_id`, RLS, FORCE or a policy, and the CI job fails with that list when a new migration forgets any of them.",
-    "You can walk a security reviewer through the model doc in 20 minutes and answer 'what stops your support engineer reading tenant B's chat logs' and 'what happens to my data in your backups after I churn' with the specific control, its limits and a link to the evidence."
-  ],
-  "failureModes": [
-    "A support tool needed read-all-tenants access, so an engineer added a second PERMISSIVE policy `USING (true) TO app_user` instead of a separate role; because permissive policies are ORed, every API request could read every tenant, and it was found by a customer who saw another company's name in an autocomplete dropdown.",
-    "RLS was enabled but never FORCED, and the API connected as the table owner because the Terraform module reused the migration credentials; RLS applied to nobody for eight months and the first indication was a penetration tester swapping a UUID in a URL.",
-    "Session-level `SET app.tenant_id` behind PgBouncer in transaction mode: under load, connections were reused mid-request and roughly one in 400 requests ran as the previous request's tenant, surfacing as 'random' data-corruption tickets nobody could reproduce in staging, which had no pooler.",
-    "The pgvector table for RAG had no `tenant_id` column because it was created from a notebook, so nearest-neighbour retrieval pulled another tenant's contract clauses into a prompt; the model summarised them fluently and the leak was only visible in the LLM trace store weeks later.",
-    "pgcrypto keys were interpolated as string literals by the ORM, so every encryption key sat in `pg_stat_statements`, the slow-query log and the APM tool's query capture, meaning the column encryption protected against nothing the volume encryption did not already cover.",
-    "The audit trigger logged `to_jsonb(NEW)` for the users table including plaintext PII columns, so the audit log became the largest unencrypted copy of customer data in the system and was excluded from the encryption review because 'it's just logs'.",
-    "A GDPR erasure request was fulfilled with `DELETE FROM users WHERE id = ...` while the audit log, the embeddings table and 35 days of PITR backups still held the data; the DPO found out when the same person's name appeared in a support search a month later."
-  ],
-  "interviewQuestions": [
-    "A regulated customer wants to run our multi-tenant AI product but their security team says shared tables are unacceptable. Walk me through how you decide between arguing for pooled tables with RLS, moving them to a dedicated schema or database, and what evidence you bring to the meeting to change their mind or to concede gracefully.",
-    "Explain how a Postgres row-level security policy is actually evaluated inside a query, what USING versus WITH CHECK protect, how permissive and restrictive policies combine, and give me a concrete case where a correct-looking policy still leaks data.",
-    "We run the API behind PgBouncer in transaction pooling mode and set the tenant with `SET app.tenant_id` at the start of each request. Production shows occasional cross-tenant reads that never reproduce in staging. Debug it out loud, then tell me the fix and the test that proves the fix.",
-    "Design the encryption story for PII in a system where customers must be able to search by email, we must honour erasure requests within 30 days, and we keep 35 days of backups. Which layer encrypts what, where do the keys live, how does lookup work, and what exactly happens on an erasure request?",
-    "After enabling RLS, a dashboard query went from 40 ms to 6 seconds. The policy is `tenant_id = current_setting('app.tenant_id')::uuid` and the query filters on a user-defined function. What is happening in the planner, and how do you fix it without weakening the policy?",
-    "Design an append-only audit trail for a multi-tenant system that a SOC 2 auditor will accept. How do you make it immutable when the table owner can always drop a trigger, what do you deliberately keep out of it, and how would you prove to the auditor that nothing was deleted last quarter?",
-    "Our RAG pipeline stores document chunks and embeddings in pgvector. A customer asks whether another tenant could ever see their documents in a model answer. Give me the complete answer: the retrieval query, the storage model, the tests, and the residual risk you would disclose."
-  ],
-  "proofOfWork": "A public repository containing DefenderMate's multi-tenant schema as versioned migrations (tenants, users, conversations, messages, llm_calls, tool_calls, embeddings, audit_log) with RLS enabled and forced on every table, composite tenant foreign keys, pgcrypto-encrypted PII columns with HMAC blind indexes, an envelope-encryption module with per-tenant data keys (a local KEK stub for CI, KMS in production), and a generic audit trigger with hash chaining and an append-only guard. The CI workflow spins up Postgres 16 behind PgBouncer in transaction mode, runs the catalog-generated RLS test matrix across every table, runs the catalog invariant queries, demonstrates the pooled-connection tenant leak failing before the `set_config` fix and passing after, and crypto-shreds one tenant while asserting the others still decrypt. Alongside the code sits a six-page security review document with a data-flow diagram, threat-to-control table, framework mapping, evidence links to the green CI run and a residual-risk section, written so a client CISO could sign it without a call."
+ "i": 30,
+ "topic": "TypeScript and Node for FDEs",
+ "track": "E. Backend and Data",
+ "month": 4,
+ "hours": 8,
+ "why": "Customer platform teams, internal tools, agent tooling and nearly every vendor SDK (including the MCP reference SDK) are TypeScript-first, so a Python-first FDE who cannot read a tsconfig, diagnose an ESM import error or explain why a Node service stalls loses the platform team's trust in week one. The fastest way to build an integration or demo UI over a customer's API that survives their next backend deploy is a client whose types are generated from their OpenAPI document and whose boundaries are validated at runtime. This topic gets you to the point where you ship a small, tested Node service and a typed MCP client without asking the customer's frontend lead for help.",
+ "prerequisites": [
+  "Modern JavaScript fluency: closures, classes and prototypes, `this` binding, destructuring, Promises and async/await; you should be able to read an unfamiliar Node codebase before you type it",
+  "Topic 26 (FastAPI in production): you will consume its `/openapi.json`, so know how Pydantic models, `Optional`, and `response_model` map to schema `required`, `nullable` and `anyOf`",
+  "Topic 0 (Shell mastery): stdin/stdout/stderr separation, exit codes and pipes; the MCP stdio transport is exactly this contract",
+  "Topic 2 (Networking): HTTP keep-alive, idle timeouts, TLS and what an ALB does to a connection Node has already closed",
+  "JSON Schema basics: `type`, `required`, `properties`, `additionalProperties`, `anyOf`/`oneOf`, `$ref`; MCP tool schemas and OpenAPI are both JSON Schema dialects",
+  "Topic 5 (Docker internals): you will containerise the Node service and hit SIGTERM handling and `--max-old-space-size` when the pod OOMs"
+ ],
+ "subtopics": [
+  {
+   "name": "Event loop phases and what actually blocks it",
+   "learn": "Trace one tick: timers, pending callbacks, poll, check (`setImmediate`), close; the microtask queue drains between every macrotask and `process.nextTick` runs before promise microtasks, which is why a recursive `nextTick` starves I/O. Know the sync calls that freeze every concurrent request on the single thread: `JSON.parse` of a multi-MB body, `fs.readFileSync`, `crypto.pbkdf2Sync`, catastrophic regex backtracking, and a tight `for` over a large array. Measure with `perf_hooks.monitorEventLoopDelay()` p99 and `node --cpu-prof`; offload to `worker_threads` or a child process. The libuv threadpool (`UV_THREADPOOL_SIZE`, default 4) covers only fs, `dns.lookup`, zlib and crypto, so `dns.lookup` under load serialises behind slow file reads.",
+   "minutes": 25,
+   "resource": {
+    "label": "Node.js Learn - The Node.js Event Loop, Timers, and process.nextTick()",
+    "url": "https://nodejs.org/learn/asynchronous-work/event-loop-timers-and-nexttick"
+   }
+  },
+  {
+   "name": "A tsconfig that catches real bugs",
+   "learn": "Start from `strict: true` and add `noUncheckedIndexedAccess` (indexing returns `T | undefined`, which kills a whole class of customer-data crashes), `exactOptionalPropertyTypes`, `useUnknownInCatchVariables`, `noImplicitOverride`, `noFallthroughCasesInSwitch`. For a Node service choose `module: \"NodeNext\"` and `moduleResolution: \"NodeNext\"` (forces explicit `.js` extensions in relative imports), `target: \"ES2022\"`, `verbatimModuleSyntax` so type-only imports are `import type` and cannot leak into runtime, `isolatedModules` for esbuild/tsx compatibility, `sourceMap` plus `node --enable-source-maps` for readable production stack traces, and `declaration` + `declarationMap` only for libraries. Understand `skipLibCheck` as a speed trade you accept knowingly, and that `tsc --noEmit` is the CI type gate while emit is a separate concern.",
+   "minutes": 30,
+   "resource": {
+    "label": "TypeScript TSConfig Reference - strict (the strict-mode family of checks)",
+    "url": "https://www.typescriptlang.org/tsconfig/strict.html"
+   }
+  },
+  {
+   "name": "ESM vs CommonJS and the exports map",
+   "learn": "`\"type\": \"module\"` in package.json makes `.js` files ESM; `.mjs`/`.cjs` override per file. ESM has no `__dirname`, `__filename` or `require`: use `fileURLToPath(import.meta.url)` and `createRequire(import.meta.url)`. Diagnose `ERR_REQUIRE_ESM` (CJS requiring an ESM-only package; Node 22 lifts this for synchronous ESM graphs), `ERR_MODULE_NOT_FOUND` (missing `.js` extension or a deep import the package does not export), and `Cannot use import statement outside a module`. Read an `exports` map with `import`/`require`/`types`/`default` conditions and understand that `@modelcontextprotocol/sdk/client/index.js` resolves only because the SDK exports that subpath; use the `imports` field (`#internal/*`) for in-package aliases instead of tsconfig `paths`. Know the dual-package hazard: two copies of a module, two `instanceof` identities.",
+   "minutes": 30,
+   "resource": {
+    "label": "Node.js API - Modules: Packages (type, exports, imports, conditions)",
+    "url": "https://nodejs.org/api/packages.html"
+   }
+  },
+  {
+   "name": "Narrowing, discriminated unions and exhaustiveness",
+   "learn": "TypeScript is structural, so `unknown` (not `any`) is the type of anything crossing a boundary, and you narrow it with `typeof`, `in`, `instanceof`, equality and truthiness checks. Model MCP `content` items as a discriminated union on the `type` literal (`text` | `image` | `audio` | `resource_link` | `resource`) and `switch` on it with `default: assertNever(item)` returning `never`, so a new variant fails compilation instead of silently falling through. Write type predicates `(x): x is ToolResult` and assertion functions `asserts x is Config`; use `satisfies` to check a literal against a type without widening it and `as const` to keep literal types. Know where narrowing does not survive: inside callbacks, across `await`, and on `obj[dynamicKey]`.",
+   "minutes": 30,
+   "resource": {
+    "label": "TypeScript Handbook - Narrowing",
+    "url": "https://www.typescriptlang.org/docs/handbook/2/narrowing.html"
+   }
+  },
+  {
+   "name": "Generics, mapped and conditional types you will actually use",
+   "learn": "Generic functions with constraints (`<T extends { id: string }>`), default type parameters, and when inference from arguments beats an explicit type argument. Build the four tools you need daily: `keyof` and indexed access `T[K]`; mapped types `{ [K in keyof T]-?: ... }` with `readonly`/`?` modifiers and `as` key remapping; conditional types with `infer` (this is how `Awaited`, `ReturnType`, `Parameters` are defined) and their distribution over unions; template literal types for event and route names. Derive `ToolName = keyof Tools` and `ToolInput<N extends ToolName> = z.infer<Tools[N][\"input\"]>` so adding a tool is one line. Recognise a type that has become a liability: `tsc --extendedDiagnostics` instantiation counts and `--generateTrace` when the editor slows down.",
+   "minutes": 30,
+   "resource": {
+    "label": "TypeScript Handbook - Creating Types from Types",
+    "url": "https://www.typescriptlang.org/docs/handbook/2/types-from-types.html"
+   }
+  },
+  {
+   "name": "Runtime validation with Zod at every boundary",
+   "learn": "Types are erased at compile time, so every value from `JSON.parse`, `process.env`, HTTP bodies, stdin and tool results must be parsed, not cast. Use `z.object` with the default strip behaviour understood (unknown keys are silently dropped), `.strict()` when drift must be loud, `.passthrough()` when you forward opaque data; `z.discriminatedUnion(\"type\", [...])` for tagged payloads; `z.coerce.number()` for env vars; `.transform` to normalise at the edge. Prefer `.safeParse` returning `{ success, data | error }` in request paths so validation never throws; surface `error.issues[].path` and `message` as customer-readable text. `z.infer<typeof Schema>` is the single source of truth, never a hand-written interface next to the schema. Validate at boundaries only; interior code trusts its types.",
+   "minutes": 30,
+   "resource": {
+    "label": "Zod - Defining schemas (z.object strict/passthrough, discriminatedUnion, coerce, transform)",
+    "url": "https://zod.dev/api"
+   }
+  },
+  {
+   "name": "Generating TypeScript from FastAPI's OpenAPI document",
+   "learn": "FastAPI serves `/openapi.json`; set `generate_unique_id_function` so `operationId` becomes `{tag}-{name}` instead of `read_items_items__get`, because every generator turns operationId into a method name. Run `npx openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.d.ts` and read the output: a `paths` interface keyed by route and method with `parameters`, `requestBody` and `responses` by status code, and `components[\"schemas\"]` for Pydantic models. Know the mapping rules: `Optional[str]` with a default is optional and nullable, `str | None` without default is required and nullable, `Literal` becomes a union of literals, `dict` becomes `Record<string, unknown>`. Commit the generated file and add a CI step that regenerates and runs `git diff --exit-code` so backend drift fails the build.",
+   "minutes": 30,
+   "resource": {
+    "label": "FastAPI - Generate Clients (OpenAPI, operationId, client generation)",
+    "url": "https://fastapi.tiangolo.com/advanced/generate-clients/"
+   }
+  },
+  {
+   "name": "A typed HTTP client with openapi-fetch",
+   "learn": "`createClient<paths>({ baseUrl })` gives you `client.GET(\"/items/{id}\", { params: { path: { id } } })` where path, query, headers and body are all typed from the generated schema and a typo in a route is a compile error. The response is `{ data, error, response }` discriminated by status, so a 2xx `data` and 4xx `error` have different types and you cannot forget the failure branch. Add middleware with `onRequest` for `Authorization` and `X-Request-Id` headers and `onResponse` for retry-on-429 with `Retry-After`; pass `signal: AbortSignal.timeout(ms)` on every call. Understand why this beats heavyweight codegen (orval, openapi-generator) for an FDE: zero runtime schema, a few kB, and regeneration is one command. Wrap it in a domain module so callers never see raw paths.",
+   "minutes": 25,
+   "resource": {
+    "label": "openapi-fetch API reference - createClient, fetch options, middleware",
+    "url": "https://openapi-ts.dev/openapi-fetch/api"
+   }
+  },
+  {
+   "name": "Promises, cancellation and timeouts done right",
+   "learn": "`Promise.all` rejects on the first failure and leaves the rest running; `allSettled` for fan-out where partial results matter; `Promise.race` for timeouts leaks the loser, so use `AbortSignal.timeout(ms)` and `AbortSignal.any([userSignal, timeoutSignal])` and pass the signal into `fetch`, `setTimeout` from `timers/promises`, `events.once(emitter, \"x\", { signal })` and your own loops via `signal.throwIfAborted()`. Since Node 15 an unhandled rejection crashes the process (`--unhandled-rejections=strict|warn|none`), so a `.then` without `.catch` or an un-awaited async call in an event handler is a latent outage. Bound concurrency with a semaphore or `p-limit` instead of `Promise.all` over ten thousand items; consume async iterables with `for await`.",
+   "minutes": 30,
+   "resource": {
+    "label": "MDN - AbortController and AbortSignal",
+    "url": "https://developer.mozilla.org/en-US/docs/Web/API/AbortController"
+   }
+  },
+  {
+   "name": "Streams, backpressure and newline-delimited JSON",
+   "learn": "Node streams: `Readable`, `Writable`, `Transform`, `highWaterMark` (16 KiB in bytes, 16 items in `objectMode`), `write()` returning `false` and waiting for `drain`. Never chain `.pipe()` in production; use `pipeline()` from `stream/promises`, which propagates errors and destroys every stream on failure. `fetch().body` is a Web `ReadableStream`, not a Node stream; bridge with `Readable.fromWeb` and `Readable.toWeb`, decode with `TextDecoderStream`. For the MCP stdio transport, read `process.stdin` line by line with `readline.createInterface({ input })` and `for await (const line of rl)`, parse each line as one JSON-RPC message, and write responses with `process.stdout.write(JSON.stringify(msg) + \"\\n\")`; logs go to stderr because any stray byte on stdout corrupts the protocol stream.",
+   "minutes": 25,
+   "resource": {
+    "label": "Node.js API - Stream (pipeline, backpressure, Web Streams interop)",
+    "url": "https://nodejs.org/api/stream.html"
+   }
+  },
+  {
+   "name": "HTTP servers, keep-alive and graceful shutdown",
+   "learn": "`http.createServer` timeouts you must set consciously: `server.keepAliveTimeout` (default 5 s; must exceed the load balancer idle timeout, typically 60 s on an ALB, or the LB reuses a socket Node already closed and the customer sees 502s), `server.headersTimeout`, `server.requestTimeout`, `maxHeadersCount`. Graceful shutdown on `SIGTERM`: stop accepting with `server.close()`, call `server.closeIdleConnections()`, give in-flight requests a deadline, then `process.exit(0)`; the Kubernetes `terminationGracePeriodSeconds` must exceed that deadline and readiness must flip first. Global `fetch` is undici: configure an `Agent` with `connections`, `keepAliveTimeout`, `headersTimeout` and `bodyTimeout` rather than trusting defaults. Trust `X-Forwarded-For` only behind a proxy you control.",
+   "minutes": 25,
+   "resource": {
+    "label": "Node.js API - HTTP (server timeouts, close, closeIdleConnections)",
+    "url": "https://nodejs.org/api/http.html"
+   }
+  },
+  {
+   "name": "Errors: unknown catch, cause chains and system codes",
+   "learn": "With `useUnknownInCatchVariables`, `catch (e)` is `unknown`; narrow with `instanceof Error` and wrap anything else. Chain context with `new Error(msg, { cause: e })` and define `class ToolCallError extends Error` with a `code` and `toolName`, setting `this.name` so logs and `instanceof` work. Node system errors carry `code` (`ECONNRESET`, `ECONNREFUSED`, `ETIMEDOUT`, `ENOTFOUND`, `EPIPE`, `ERR_MODULE_NOT_FOUND`), so branch on `code`, never on message text. `process.on(\"uncaughtException\")` and `\"unhandledRejection\"` exist to log and exit, not to keep running in a corrupted state. Use a result type `{ ok: true, value } | { ok: false, error }` for expected failures (validation, not found) and throw only for bugs and infrastructure faults. `--enable-source-maps` and `Error.stackTraceLimit` for usable traces from `dist/`.",
+   "minutes": 25,
+   "resource": {
+    "label": "Node.js API - Errors (system error codes, cause, captureStackTrace)",
+    "url": "https://nodejs.org/api/errors.html"
+   }
+  },
+  {
+   "name": "MCP wire protocol: JSON-RPC, lifecycle and transports",
+   "learn": "Every MCP message is JSON-RPC 2.0: requests carry `jsonrpc`, `id`, `method`, `params`; responses carry `result` or `error` with `code` and `message`; notifications have no `id`. Lifecycle: client sends `initialize` with `protocolVersion`, `capabilities` and `clientInfo`; server replies with its `capabilities` (`tools`, `resources`, `prompts`, `logging`, each optionally with `listChanged`) and `serverInfo`; client sends `notifications/initialized`; only then may it call `tools/list`, `tools/call`, `resources/read`, `prompts/get`. stdio transport is one message per line on stdout with stderr free for logs. Streamable HTTP uses a single endpoint, POST for client messages, optional `text/event-stream` responses, `Mcp-Session-Id` for session affinity and `Last-Event-ID` for resumption. Standard error codes -32700 to -32603, server range -32000 to -32099; a tool result with `isError: true` is a tool-level failure, not a protocol error.",
+   "minutes": 30,
+   "resource": {
+    "label": "Model Context Protocol Specification - Lifecycle (2025-06-18)",
+    "url": "https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle"
+   }
+  },
+  {
+   "name": "Building the DefenderMate client on the TypeScript SDK",
+   "learn": "Import `Client` from `@modelcontextprotocol/sdk/client/index.js` and a transport: `StdioClientTransport({ command, args, env })` spawns the server as a child process; `StreamableHTTPClientTransport(new URL(endpoint), { requestInit: { headers } })` for a remote server. `await client.connect(transport)` performs the handshake; then `client.listTools()`, `client.callTool({ name, arguments })`, `client.listResources()`, `client.readResource({ uri })`, `client.getServerCapabilities()`. Pass per-request `RequestOptions` with `timeout` and `resetTimeoutOnProgress` for long tools; subscribe to `notifications/tools/list_changed` and re-list. Always `await client.close()` in `finally` so the child process does not orphan. Wrap all of this in a `DefenderMateClient` class exposing one typed method per tool so consumers never touch raw JSON-RPC.",
+   "minutes": 30,
+   "resource": {
+    "label": "Model Context Protocol - TypeScript SDK (GitHub)",
+    "url": "https://github.com/modelcontextprotocol/typescript-sdk"
+   }
+  },
+  {
+   "name": "Typing tool inputs and outputs end to end",
+   "learn": "MCP `inputSchema` and optional `outputSchema` are JSON Schema, so author one Zod schema per DefenderMate tool and emit JSON Schema with Zod 4's `z.toJSONSchema(schema)`; write a test that fetches `tools/list` from the running server and asserts each emitted schema deep-equals the server's `inputSchema`, which turns silent contract drift into a red test. Validate every `callTool` result: `content` as a discriminated union on `type`, `isError`, and `structuredContent` parsed with the tool's output schema. Implement `callTyped<N extends ToolName>(name: N, args: ToolInput<N>): Promise<ToolOutput<N>>` on top of the SDK so the compiler rejects a wrong argument shape and the runtime rejects a wrong response shape. Know the conversion edges: Zod `.optional()` vs `.nullable()`, `z.record`, `z.enum` to `enum`, and unrepresentable types like `z.date()` and transforms.",
+   "minutes": 30,
+   "resource": {
+    "label": "Zod - JSON Schema conversion (z.toJSONSchema)",
+    "url": "https://zod.dev/json-schema"
+   }
+  },
+  {
+   "name": "Testing with Vitest: transport mocks, fake timers, type tests",
+   "learn": "`vitest.config.ts` with `test.include`, `coverage.provider: \"v8\"` and thresholds; `describe`/`it`/`expect`, `vi.fn()`, `vi.spyOn`, and `vi.mock(\"module\", factory)` with its hoisting rules. Mock the transport, not the network: implement the SDK `Transport` interface with an in-memory fake that returns canned JSON-RPC responses so `Client` runs the real handshake against your fixtures. Use `vi.useFakeTimers()` and `await vi.advanceTimersByTimeAsync(ms)` to test exponential backoff and `AbortSignal.timeout` paths in milliseconds of wall time. Add type-level tests with `expectTypeOf<ToolInput<\"scan\">>().toEqualTypeOf<{ target: string }>()` and run `vitest --typecheck` so a regenerated schema that changes a type fails a test. A contract test in `globalSetup` starts the FastAPI server and hits it through the generated client; `--reporter=junit` for CI.",
+   "minutes": 30,
+   "resource": {
+    "label": "Vitest Guide - Mocking (vi.mock hoisting, spies, fake timers)",
+    "url": "https://vitest.dev/guide/mocking"
+   }
+  },
+  {
+   "name": "Dev loop, build and run: tsx, tsc, native type stripping",
+   "learn": "Development: `tsx --watch src/main.ts` (esbuild under the hood, no type checking, so keep `tsc --noEmit --watch` running beside it). Node 22.6+ runs `.ts` directly with `--experimental-strip-types`, and Node 23.6+ strips by default; only erasable syntax is allowed (no `enum`, `namespace`, parameter properties) unless you pass `--experimental-transform-types`, and the `erasableSyntaxOnly` tsconfig flag enforces this at compile time. Production: `tsc -p tsconfig.build.json` to `dist/` and `node --enable-source-maps dist/main.js`, or bundle with `esbuild src/main.ts --bundle --platform=node --format=esm --outfile=dist/main.js` (externalise native modules) to sidestep the `.js` extension problem and ship one file. For a CLI, `bin` in package.json plus `#!/usr/bin/env node`. Know `NODE_OPTIONS` and `--max-old-space-size` when a container OOMs at 2 GB while the heap default is lower.",
+   "minutes": 25,
+   "resource": {
+    "label": "Node.js API - Modules: TypeScript (type stripping, transform types)",
+    "url": "https://nodejs.org/api/typescript.html"
+   }
+  },
+  {
+   "name": "Dependency hygiene and npm supply chain",
+   "learn": "`npm ci` installs exactly the lockfile, deletes `node_modules` first and fails if `package.json` and lock disagree; `npm install` re-resolves and mutates the lock, so CI and Dockerfiles use `ci`. Commit `package-lock.json` (lockfile v3) and pin the runtime with `engines` plus `.nvmrc` or `.node-version`. `npm audit --omit=dev` for what ships; `overrides` to force a patched transitive version; `npm ls <pkg>` to find who pulls a dependency; `--ignore-scripts` to defuse install-time payloads in untrusted environments. Pin the MCP SDK to an exact version while the protocol is moving and upgrade deliberately with a changelog read. Verify publisher provenance with `npm view <pkg> dist.integrity` and prefer packages published with `--provenance`. pnpm's strict `node_modules` layout is the cheap way to kill phantom imports.",
+   "minutes": 20,
+   "resource": {
+    "label": "npm Docs - npm ci",
+    "url": "https://docs.npmjs.com/cli/v10/commands/npm-ci/"
+   }
+  },
+  {
+   "name": "Type-aware ESLint rules that prevent outages",
+   "learn": "Flat config `eslint.config.js` using `tseslint.config(...tseslint.configs.recommendedTypeChecked)` with `languageOptions.parserOptions.projectService: true` so rules can see types. The rules that pay for themselves on day one: `@typescript-eslint/no-floating-promises` (an un-awaited promise is a swallowed error and a future crash), `no-misused-promises` (an async function passed where a void callback is expected, e.g. `server.on(\"request\", async ...)` or an Express handler), `switch-exhaustiveness-check`, `no-unnecessary-condition`, `consistent-type-imports`, `no-unsafe-argument`. Run `eslint . --max-warnings 0` in CI and let Prettier own formatting only. Know how to introduce these on a legacy codebase: enable as `warn`, fix the hottest paths, flip to `error` per directory.",
+   "minutes": 20,
+   "resource": {
+    "label": "typescript-eslint - no-floating-promises rule",
+    "url": "https://typescript-eslint.io/rules/no-floating-promises/"
+   }
+  },
+  {
+   "name": "Config, structured logging and debugging a live Node process",
+   "learn": "Parse `process.env` once at boot with `z.object({ DEFENDERMATE_URL: z.string().url(), TIMEOUT_MS: z.coerce.number().default(30000), ... }).parse(process.env)` into a frozen typed `config`, so a missing variable fails fast with a list of every issue rather than `undefined` three calls deep. Log JSON lines to stdout with pino: `pino({ level, redact: [\"req.headers.authorization\", \"*.apiKey\"] })`, child loggers carrying `requestId` and `toolName`, `pino-pretty` only in development. Debug a running service with `node --inspect` and `chrome://inspect`, `--inspect-brk` for start-up bugs, `--cpu-prof` and `--heap-prof` for profiles written to cwd, `process.memoryUsage().heapUsed` trended over an hour for leaks, `NODE_DEBUG=http,net` when a connection mysteriously hangs.",
+   "minutes": 25,
+   "resource": {
+    "label": "Node.js Learn - Debugging Node.js",
+    "url": "https://nodejs.org/learn/getting-started/debugging"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take a customer's FastAPI `/openapi.json`, generate `paths` and `components` types with openapi-typescript, and produce an openapi-fetch client where a backend field rename fails `tsc` in CI instead of failing a demo.",
+  "You can write a `DefenderMateClient` that connects over stdio or Streamable HTTP, completes the `initialize` handshake, lists tools, calls a tool with Zod-validated arguments and results, and closes cleanly in `finally` without orphaning the child process.",
+  "You can diagnose `ERR_REQUIRE_ESM`, `ERR_MODULE_NOT_FOUND` and `Cannot use import statement outside a module` in under five minutes by reading `package.json` `type` and `exports` and the tsconfig `module` and `moduleResolution` settings.",
+  "You can prove a Node service is blocking its event loop with `monitorEventLoopDelay` or `--cpu-prof`, name the offending synchronous call, and move it to a worker thread or a stream with a measured before/after p99.",
+  "You can write a Vitest suite that mocks the MCP transport rather than the network, uses fake timers to test retry and backoff, asserts generated types with `expectTypeOf`, and enforces coverage thresholds in CI.",
+  "You can enable `strict`, `noUncheckedIndexedAccess` and `no-floating-promises` on an existing codebase and explain to the customer's team which category of production bug each newly surfaced error represents.",
+  "You can shut a Node HTTP server down on SIGTERM behind an ALB with zero 502s, with `keepAliveTimeout`, load balancer idle timeout, drain deadline and Kubernetes `terminationGracePeriodSeconds` correctly ordered and verified under load.",
+  "You can explain to a Python team, in their vocabulary, that Zod is Pydantic, `tsc --noEmit` is mypy, `npm ci` is a locked `pip install -r`, Vitest is pytest, and precisely where each analogy breaks."
+ ],
+ "failureModes": [
+  "The service passes every type check but crashes nightly with `ERR_UNHANDLED_REJECTION` because one `client.callTool()` inside an event handler was never awaited; `no-floating-promises` would have flagged it on the first commit.",
+  "An MCP server prints a `console.log` startup banner to stdout; the client's JSON-RPC parser hits `Starting DefenderMate...` as its first line, throws, and every tool call fails with an opaque parse error while the server process looks perfectly healthy.",
+  "The TypeScript client was generated from `/openapi.json` once in March; the backend made `tenant_id` required in June, the client kept sending `undefined`, and the resulting 422s were swallowed by a `catch (e) { console.error(e) }` for six weeks.",
+  "Behind an ALB with a 60 s idle timeout, `server.keepAliveTimeout` is left at Node's 5 s default, so the ALB reuses sockets Node has already closed and the customer sees intermittent 502s that never reproduce in a load test against the pod directly.",
+  "`JSON.parse` on a 40 MB tool result blocks the event loop for 800 ms, every concurrent SSE stream stalls, the liveness probe times out, and Kubernetes restarts the pod in the middle of the executive demo.",
+  "Results are validated with Zod's default strip mode, so the server's new `warnings` field is silently dropped and nobody notices for a month that the model is no longer being told when a scan returned degraded data.",
+  "CI runs `npm install` instead of `npm ci`, resolves a fresh transitive MCP SDK version with a protocol bump, and the handshake fails only in staging because every developer machine still has the old lockfile-resolved tree."
+ ],
+ "interviewQuestions": [
+  "Walk me through everything that happens between `node dist/main.js` and the first `tools/call` response of an MCP client: module resolution, the initialize handshake, transport framing, and where each class of failure would surface and how you would recognise it.",
+  "A customer's Node service handles 200 requests per second comfortably, then p99 jumps to three seconds whenever one specific report endpoint is hit, with nothing in the logs. How do you find the cause, what are the three most likely culprits, and what is the fix for each?",
+  "Design the type layer for a client that calls twelve MCP tools whose schemas are owned by another team. Where do types come from, where exactly do you validate at runtime, and what fails in CI on the day they change a schema without telling you?",
+  "Explain the difference between `Promise.race` against a timeout promise and `AbortSignal.timeout` passed into `fetch`. What leaks in the first approach, and how would you cancel a chain of three dependent async calls when the user closes the tab?",
+  "We have a mixed codebase with `require` in some files and `import` in others, and the build intermittently fails with `ERR_REQUIRE_ESM`. What are the realistic options, and what would you recommend for a team that publishes a library consumed by both CommonJS and ESM customers?",
+  "You are handed a TypeScript service with `strict: false` and roughly four hundred `any`s, and the customer wants it hardened in two weeks without pausing feature work. What sequence of compiler flags and lint rules do you introduce, in what order, and how do you keep the team from reverting them?",
+  "How would you drain a Node HTTP server in Kubernetes behind an ALB so a rolling deploy produces zero 502s? Name every timeout that has to be ordered, the order, and how you would verify it before telling the customer it is safe."
+ ],
+ "proofOfWork": "A public repository `defendermate-ts-client` containing: (1) `src/api/schema.d.ts` generated from DefenderMate's `/openapi.json` with a `npm run gen && git diff --exit-code` CI step that fails on drift; (2) a `DefenderMateClient` class wrapping the MCP TypeScript SDK with a generic `callTyped<N>()` whose argument and return types derive from per-tool Zod schemas, plus a test asserting that each `z.toJSONSchema` output deep-equals the server's `tools/list` `inputSchema`; (3) a Vitest suite at or above 85 percent coverage that mocks the transport, uses fake timers to verify exponential backoff on `-32000` errors and `AbortSignal.timeout` paths, and includes `expectTypeOf` type tests run under `vitest --typecheck`; (4) `docs/EVENT_LOOP.md` with a captured `--cpu-prof` profile showing a deliberately introduced `JSON.parse` stall, its fix via a worker thread, and before/after `monitorEventLoopDelay` p99 numbers; and (5) a Dockerfile plus a SIGTERM drain test proving zero failed requests during a rolling restart under k6, with `keepAliveTimeout`, drain deadline and `terminationGracePeriodSeconds` documented in one table. The README explains every design choice in terms a Python-first team can map to Pydantic, mypy, pip lockfiles and pytest."
 }

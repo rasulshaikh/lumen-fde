@@ -1,227 +1,218 @@
 {
  "i": 40,
- "topic": "MIT 6.824 selected lectures: Raft, linearizability, transactions",
- "track": "F. Distributed Systems and System Design",
+ "topic": "Warehouse layer: dbt, DuckDB, dimensional modelling",
+ "track": "E. Backend and Data",
  "month": 5,
- "hours": 8,
- "why": "Every customer environment you land in already runs consensus somewhere you did not choose: etcd under their Kubernetes control plane, ZooKeeper or KRaft under their Kafka, a MongoDB replica set, a Consul cluster, a CockroachDB or Spanner tier. When the platform team asks 'is it safe if we lose one node', 'why did the API server time out for 40 seconds', or 'why did two workers both think they held the lock', the FDE in the room has to answer from mechanism, not folklore, and then translate the answer into a flag change, a topology change, or a redesign of the customer's retry logic. The same vocabulary (quorum, commit, linearizable, stale read, blocking 2PC, idempotency across failover) is exactly what a Palantir, Databricks or Anthropic system-design loop probes, so the whiteboard fluency this topic builds is doing double duty.",
+ "hours": 6.0,
+ "why": "FDEs are routinely the person a customer asks for 'just a weekly report' out of the product database, and the naive answer - a cron job running SELECTs against the OLTP primary - is what pages their DBA at 03:00 and produces numbers that disagree with the invoice. A tested, documented dbt + DuckDB mart is the smallest thing that gives you a stable grain, history that survives source overwrites, a reconciliation you can show the customer, and a project that ports to their Snowflake/BigQuery/Databricks by swapping the adapter when they outgrow one box. Dimensional-modelling vocabulary (grain, SCD2, conformed dimensions, additivity) is also the shared language with the customer's data team, and Palantir/Databricks-style loops test it directly.",
  "prerequisites": [
-  "Topic 39 (DDIA and Kleppmann lectures): chapters 5 (replication), 7 (transactions) and 9 (consistency and consensus) read, so terms like quorum, leader-based replication, snapshot isolation and total order broadcast are already familiar",
-  "Topic 2 (Networking): what a partition really looks like on the wire (dropped or delayed packets, asymmetric reachability, a slow link that is not down), TCP retransmit and connection timeouts, and why 'the node is unreachable' is indistinguishable from 'the node is slow'",
-  "Topic 29 (PostgreSQL at depth): MVCC, READ COMMITTED vs REPEATABLE READ vs SERIALIZABLE, row locks, and what a transaction ID and xmin horizon are",
-  "Topic 1 (Linux internals): fsync/fdatasync semantics, why a write is not durable until the flush returns, and roughly what a flush costs on local NVMe vs a network block device",
-  "Topic 33 (Kafka): ISR, acks and min.insync.replicas, so the contrast between Kafka's data-plane replication and Raft-style consensus lands",
-  "Can read Go at the level of the Raft paper's pseudocode and the etcd/raft or hashicorp/raft README; the 6.824 lectures and the optional lab (Topic 41) assume it"
+  "SQL beyond SELECT: CTEs, window functions, multi-aggregate GROUP BY, joins with time-range predicates (Topic 29, PostgreSQL at depth)",
+  "DefenderMate's Postgres schema (tenants, users, conversations, messages, llm_calls, tool_calls, audit_log) and its RLS policies, because the extraction role must read across tenants (Topic 30, Data modelling for multi-tenant AI systems)",
+  "Python 3.11+ virtualenv hygiene and pinned requirements - dbt-core and dbt-duckdb are pip packages and version drift between them bites",
+  "YAML and Jinja2 basics: dbt projects are mostly YAML config and Jinja-templated SQL",
+  "Tests-as-assertions mindset from Topic 35 (Testing and contracts) - dbt tests are assertions over data, not code",
+  "Git branches plus a CI runner (GitHub Actions) for scheduling the nightly run and doing state-based builds"
  ],
  "subtopics": [
   {
-   "name": "Replicated state machines, split brain and why majorities",
-   "learn": "State the problem Raft solves: N servers each applying the same deterministic log in the same order so that any one can take over, under a crash-stop plus network-partition failure model (no Byzantine nodes, unbounded message delay, clocks not trusted for safety). Be able to show on a whiteboard why a naive primary-backup with a single 'view server' can split-brain when the network partitions, and why requiring a majority of 2f+1 servers for every decision guarantees any two decisions share at least one server and hence carry the other's history. Know the practical consequences: 3 nodes tolerate 1 failure, 5 tolerate 2, 4 tolerate the same as 3 but is slower, and an even-sized cluster is never a good trade. This is 6.824 lecture 'Fault Tolerance: Raft (1)' and section 5 of the paper.",
+   "name": "When a warehouse layer is the right call, and when DuckDB is the right warehouse",
+   "learn": "Know the three reasons to stop reporting from the OLTP primary: row-store scan cost (Postgres reads whole 8 KB heap pages to aggregate three columns; a columnar engine reads only those columns and skips row groups via min/max zone maps), lock and IO contention with the production write path, and the need for history the application overwrites or deletes. Place DuckDB on the spectrum: in-process, single-node, vectorised, zero infrastructure, comfortable from gigabytes to low terabytes on one box; versus a Postgres read replica (no new tech but still row-store) versus Snowflake/BigQuery/Databricks (multi-user concurrency, governance, per-query cost). State the customer-facing rule you will use: start with DuckDB + Parquet + dbt when there is one consumer and the data fits on a disk, because the dbt project moves to a cloud warehouse later by changing profiles.yml, not by rewriting SQL.",
+   "minutes": 15,
+   "resource": {
+    "label": "DuckDB - Why DuckDB",
+    "url": "https://duckdb.org/why_duckdb"
+   }
+  },
+  {
+   "name": "Kimball four-step design and declaring the grain",
+   "learn": "Apply the four steps to DefenderMate before writing a line of SQL: (1) pick the business process ('an LLM call was made', 'a conversation ran'), (2) declare the grain as a sentence - 'one row per llm_call', 'one row per tenant per day' - (3) identify dimensions as everything true at the moment of the event (tenant, user, model, date, tool), (4) identify facts as numeric measurements at that grain (input_tokens, output_tokens, cache_read_tokens, latency_ms, cost_usd). Recognise a mixed-grain fact table (conversation-level fields repeated on call-level rows) as the root cause of double counting in every downstream sum. Make the grain sentence the model's description: in YAML and enforce it with a unique test on the natural key or dbt_utils.unique_combination_of_columns, so a duplicated extract fails the build instead of inflating the email.",
    "minutes": 25,
    "resource": {
-    "label": "MIT 6.824 schedule (lecture videos and notes for Raft 1 and 2)",
-    "url": "https://pdos.csail.mit.edu/6.824/schedule.html"
+    "label": "Kimball Group - Four-Step Dimensional Design Process",
+    "url": "https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/four-4-step-design-process/"
    }
   },
   {
-   "name": "Terms, elections and the election restriction",
-   "learn": "Walk the state machine follower -> candidate -> leader with the exact RequestVote fields (term, candidateId, lastLogIndex, lastLogTerm) and reply (term, voteGranted), and be able to say what a server does on receiving any RPC with a higher term (adopt it, become follower, reset votedFor) or lower term (reject). Explain why election timeouts are randomised (paper uses 150-300 ms; etcd defaults heartbeat 100 ms / election 1000 ms), how a split vote resolves, and the requirement broadcastTime << electionTimeout << MTBF. Nail the election restriction: a voter grants only if the candidate's log is at least as up to date, comparing lastLogTerm first and lastLogIndex second, and be able to argue why this alone is what makes Leader Completeness hold. Step through the visualisation until you can predict every transition before clicking.",
-   "minutes": 35,
+   "name": "Fact table types and additivity: transaction, periodic snapshot, accumulating snapshot",
+   "learn": "Distinguish the three fact shapes and pick one per question: transaction facts (fct_llm_calls, one row per call, fully additive tokens and cost), periodic snapshots (fct_tenant_daily, one row per tenant per day whether or not anything happened - built by cross-joining a date spine to dim_tenant and zero-filling), and accumulating snapshots (one row per conversation with started_at, first_tool_call_at, resolved_at columns that get updated as milestones land). Classify every measure: additive (tokens, cost_usd), semi-additive (active_users - sums across tenants, not across days), non-additive (p95 latency, success ratio - never sum; store numerator and denominator, or recompute from the transaction grain). Understand why the weekly email must read the daily snapshot rather than re-aggregating transactions each time: stable, replayable numbers and explicit zero rows for silent tenants.",
+   "minutes": 20,
    "resource": {
-    "label": "The Secret Lives of Data - Raft interactive walkthrough",
-    "url": "https://thesecretlivesofdata.com/raft/"
+    "label": "Kimball Group - Periodic Snapshot Fact Tables",
+    "url": "https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/periodic-snapshot-fact-table/"
    }
   },
   {
-   "name": "AppendEntries, the consistency check and log repair",
-   "learn": "Know the AppendEntries fields (term, leaderId, prevLogIndex, prevLogTerm, entries[], leaderCommit) and the follower's algorithm: reject if the entry at prevLogIndex does not have prevLogTerm, otherwise delete any conflicting suffix and append. Explain the leader's per-follower nextIndex (initialised to lastLogIndex+1) and matchIndex (initialised to 0), how a rejection decrements nextIndex and retries, and the fast-backup optimisation from the 6.824 notes where the follower returns the conflicting term and the first index of that term (XTerm/XIndex/XLen) so the leader skips a whole term per round trip. Work every case of Figure 7 (a-f) by hand: for each follower, say what prevLogIndex the leader will settle on and which entries get truncated. Be able to state the Log Matching property and why a follower may never keep an entry the leader does not have.",
-   "minutes": 35,
+   "name": "Dimension design: surrogate keys, date dimension, conformed, role-playing, junk, degenerate, unknown member",
+   "learn": "Build dim_tenant, dim_user, dim_model, dim_date with a surrogate key (dbt_utils.generate_surrogate_key over natural key plus dbt_valid_from for versioned rows), keep the natural key alongside it, and seed an 'unknown' member (-1 / 'unknown') so a fact row never loses its join when a lookup fails. Date dimension: generate with dbt_utils.date_spine, key it as a YYYYMMDD integer, include iso_week, week_start_date, is_weekend and any fiscal columns the email needs; role-play it as started_date and resolved_date by joining twice with aliases. Know when to fold low-cardinality flags (finish_reason x is_tool_call x is_cached) into a junk dimension and when to leave conversation_id on the fact as a degenerate dimension. Denormalise hierarchies (tenant -> plan -> region) into the dimension row rather than snowflaking; dimensions are small, so redundancy is cheaper than the extra join.",
+   "minutes": 20,
    "resource": {
-    "label": "Raft extended paper (6.824 copy) - sections 5.3 and Figure 7",
-    "url": "https://pdos.csail.mit.edu/6.824/papers/raft-extended.pdf"
+    "label": "Microsoft Learn - Modeling dimension tables (surrogate keys, SCD, special dimensions, date dimension)",
+    "url": "https://learn.microsoft.com/en-us/fabric/data-warehouse/dimensional-modeling-dimension-tables"
    }
   },
   {
-   "name": "Commitment, Figure 8 and the five safety properties",
-   "learn": "Define commit precisely: the leader advances commitIndex to N only when a majority have matchIndex >= N and log[N].term == currentTerm; followers learn it via leaderCommit and apply entries up to it. Reproduce Figure 8 on a whiteboard from memory: a leader in term 2 replicates index 2 to a majority, crashes, a term-3 leader with a different index-2 entry overwrites it later, so counting replicas of a prior-term entry would have 'committed' something that gets deleted; hence prior-term entries are only committed indirectly when a current-term entry above them commits, which is why real implementations append a no-op entry on election. Recite and justify Election Safety, Leader Append-Only, Log Matching, Leader Completeness and State Machine Safety, and be able to say which mechanism enforces each.",
-   "minutes": 35,
-   "resource": {
-    "label": "In Search of an Understandable Consensus Algorithm (Raft paper, Figure 8 and section 5.4)",
-    "url": "https://raft.github.io/raft.pdf"
-   }
-  },
-  {
-   "name": "Figure 2 as an executable spec: what is persistent and when to fsync",
-   "learn": "Classify every variable in Figure 2: persistent (currentTerm, votedFor, log[]) versus volatile (commitIndex, lastApplied, and on leaders nextIndex[], matchIndex[]) and be able to explain the bug that appears if each persistent one is lost (two votes in one term, forgetting a granted vote, resurrecting a deleted entry). Know that persistence means fsync before replying to the RPC, which is why every Raft deployment's latency floor is the WAL fsync and why etcd exposes etcd_disk_wal_fsync_duration_seconds. Read the TLA+ spec alongside Figure 2 and map each action (Timeout, RequestVote, AppendEntries, BecomeLeader, ClientRequest, AdvanceCommitIndex) to the paper's rules; noticing that the spec has no clocks and no timeouts as safety inputs is the point.",
-   "minutes": 25,
-   "resource": {
-    "label": "ongardie/raft.tla - formal TLA+ specification of Raft",
-    "url": "https://github.com/ongardie/raft.tla"
-   }
-  },
-  {
-   "name": "Snapshots and log compaction",
-   "learn": "Explain why an unbounded log is fatal (restart replays forever, disk fills) and how snapshotting works: the service serialises its state at some applied index, Raft discards the log prefix and remembers lastIncludedIndex and lastIncludedTerm so the consistency check still works for the next AppendEntries; lagging followers receive InstallSnapshot (lastIncludedIndex, lastIncludedTerm, offset, data, done). In etcd terms: --snapshot-count (default 100000 entries) triggers a Raft snapshot, --max-snapshots and --max-wals (default 5 each) bound retention, while the separate MVCC history is bounded by --auto-compaction-mode=periodic|revision and --auto-compaction-retention plus etcdctl defrag to reclaim file space. Know that hitting --quota-backend-bytes (default 2 GiB, hard cap 8 GiB) raises the NOSPACE alarm and makes the cluster read-only until you compact, defrag and etcdctl alarm disarm.",
-   "minutes": 25,
-   "resource": {
-    "label": "etcd v3.5 operations guide - Maintenance (compaction, defragmentation, space quota, snapshots)",
-    "url": "https://etcd.io/docs/v3.5/op-guide/maintenance/"
-   }
-  },
-  {
-   "name": "Membership changes, learners and the quorum arithmetic trap",
-   "learn": "Explain why a naive switch from C_old to C_new can elect two leaders, and the two fixes: the paper's joint consensus (C_old,new) and the dissertation's simpler single-server-at-a-time change where any two adjacent configurations overlap in a majority. Know the operational hazards that follow: adding a fourth member to a 3-node cluster that already has one dead member drops you from quorum 2-of-3 with 2 healthy to quorum 3-of-4 with 2 healthy, an outage, which is why etcd enforces --strict-reconfig-check and why the rule is remove-then-add. Use etcdctl member add <name> --peer-urls=... --learner then etcdctl member promote so the new node catches up without counting toward quorum, and know that removing the current leader triggers a fresh election you should schedule for a quiet window.",
-   "minutes": 25,
-   "resource": {
-    "label": "etcd v3.5 operations guide - Runtime reconfiguration",
-    "url": "https://etcd.io/docs/v3.5/op-guide/runtime-configuration/"
-   }
-  },
-  {
-   "name": "Linearizability: definition and checking a history by hand",
-   "learn": "State the definition operationally: a history is linearizable if you can assign each operation a single point between its invocation and response such that the sequence of points is a legal sequential history of the object. Practise the 6.824 lecture method: draw the invocation/response intervals for concurrent reads and writes to one register, try to place the points, and either produce the order or exhibit the cycle that proves there is none (a read returning a value whose write started after the read completed, or two reads observing writes in opposite orders). Contrast with sequential consistency (no real-time constraint) and eventual consistency, and be able to say in one sentence why linearizability is the model that lets you ignore replication: it behaves like a single copy.",
+   "name": "Slowly changing dimensions: Type 1 vs Type 2 with dbt snapshots",
+   "learn": "Decide per attribute whether a change is Type 1 (overwrite: user email, display name) or Type 2 (new version: tenant plan tier, model list price). Implement Type 2 with dbt snapshots: strategy: timestamp with updated_at when the source timestamp is trustworthy, strategy: check with check_cols when it is not; understand dbt_valid_from / dbt_valid_to (NULL means current), hard_deletes: invalidate | new_record (1.9+) and dbt_valid_to_current so you can avoid the NULL-handling branch in joins. Snapshots are append-only and cannot be regenerated from source - back the snapshot table up before any --full-refresh, and never snapshot an already-transformed or ephemeral model. Join facts to the version in effect at event time: f.created_at >= d.dbt_valid_from AND f.created_at < coalesce(d.dbt_valid_to, '9999-12-31'), and test that every fact row matches exactly one version.",
    "minutes": 30,
    "resource": {
-    "label": "Jepsen - Linearizability (consistency models reference)",
-    "url": "https://jepsen.io/consistency/models/linearizable"
+    "label": "dbt docs - Add snapshots to your DAG",
+    "url": "https://docs.getdbt.com/docs/build/snapshots"
    }
   },
   {
-   "name": "Linearizable vs stale reads: ReadIndex, leader leases and the deposed-leader problem",
-   "learn": "Explain why a Raft leader cannot simply answer reads from local state: it may have been deposed by a partition and be serving values a new leader has already overwritten. Know the two remedies: ReadIndex (record commitIndex, confirm leadership with a heartbeat round to a majority, wait until lastApplied >= that index, then serve) and lease-based reads (serve within a lease shorter than the election timeout, which trades a clock-drift assumption for a network round trip). Map this to etcd: etcdctl get --consistency=l (default, ReadIndex) vs --consistency=s (serializable, served locally by any member, may be stale), and know which one your customer's Kubernetes clients and any custom config loaders are actually using. Know what etcd guarantees for a linearizable read after a linearizable write from another client, and what 'serializable' means in etcd's vocabulary versus SQL's.",
+   "name": "Extracting from Postgres into DuckDB without hurting production",
+   "learn": "INSTALL postgres; LOAD postgres; ATTACH 'dbname=defendermate host=... user=reporting' AS pg (TYPE postgres, READ_ONLY); then CREATE OR REPLACE TABLE raw.llm_calls AS SELECT * FROM pg.public.llm_calls WHERE updated_at > (SELECT max(updated_at) FROM raw.llm_calls) - INTERVAL 1 HOUR. Use postgres_query('pg', '...') to push a filter to the server when the extension would otherwise pull the whole table; know that pg_use_ctid_scan and pg_pages_per_task parallelise the scan and what that does to the source's IO. Store credentials with CREATE SECRET (TYPE postgres, ...), not inline DSNs. Extraction hygiene an FDE is judged on: dedicated read-only role with statement_timeout, read from a replica when one exists, watermark on updated_at plus a lookback window for late-committing transactions, add an _extracted_at column, and reconcile nightly counts per day against the source. RLS from Topic 30 means the reporting role needs BYPASSRLS or a policy granting every tenant, otherwise the extract silently returns a subset.",
+   "minutes": 25,
+   "resource": {
+    "label": "DuckDB docs - PostgreSQL extension (ATTACH, postgres_query, COPY, secrets)",
+    "url": "https://duckdb.org/docs/current/core_extensions/postgres/overview"
+   }
+  },
+  {
+   "name": "Parquet as the storage layer: COPY TO, hive partitioning, row groups, schema drift",
+   "learn": "Land raw extracts and published marts as Parquet: COPY (SELECT ...) TO 'lake/llm_calls' (FORMAT parquet, PARTITION_BY (event_date), COMPRESSION zstd, ROW_GROUP_SIZE 122880, OVERWRITE_OR_IGNORE). Read back with read_parquet('lake/llm_calls/*/*.parquet', hive_partitioning = true, union_by_name = true) and know partition pruning only happens when the WHERE clause is on the partition column. Sizing rules from the DuckDB performance guide: row groups of 100K-1M rows, files of 100 MB-10 GB, at least as many row groups as threads; per-tenant-per-hour partitions producing hundreds of thousands of tiny files is the classic mistake. Use parquet_metadata() and parquet_schema() to detect type drift between days (an INT64 column that became VARCHAR after an app deploy). Know dbt-duckdb's materialized='external' writes a model straight to Parquet using location and external_root from the profile.",
+   "minutes": 20,
+   "resource": {
+    "label": "DuckDB docs - Reading and Writing Parquet Files",
+    "url": "https://duckdb.org/docs/current/data/parquet/overview"
+   }
+  },
+  {
+   "name": "dbt + dbt-duckdb project wiring: profiles.yml, dbt_project.yml, ref/source, compiled SQL",
+   "learn": "profiles.yml: type: duckdb, path: warehouse.duckdb, extensions: [parquet, httpfs, postgres], settings: {memory_limit: '8GB', threads: 4}, attach: for a second DuckDB file or Postgres; understand that threads at the profile top level is dbt's model-level parallelism, distinct from DuckDB's own threads setting. dbt_project.yml: model-paths, a models: block with per-folder +materialized and +schema, vars:, on-run-start / on-run-end, require-dbt-version. ref() and source() are what build the DAG - a hardcoded table name is an invisible dependency that will run out of order. Read target/compiled/ and target/run/ to see the exact SQL DuckDB executed; use dbt compile --select model when debugging Jinja; dbt debug verifies the profile and connection; dbt deps installs packages.yml.",
+   "minutes": 20,
+   "resource": {
+    "label": "dbt docs - DuckDB setup (dbt-duckdb profile)",
+    "url": "https://docs.getdbt.com/docs/local/connect-data-platform/duckdb-setup"
+   }
+  },
+  {
+   "name": "Layering: staging, intermediate, marts, and choosing a materialization per layer",
+   "learn": "Staging (stg_pg__llm_calls): one model per source table, view materialization, rename/cast/no joins, the only layer allowed to call source(). Intermediate (int_calls_with_costs): ephemeral or view, where joins and business rules live. Marts (fct_llm_calls, fct_tenant_daily, dim_tenant): table or incremental, the only layer consumers may query, landing in a marts schema via +schema. Decide materialization by asking: how often is it read versus how expensive is it to rebuild, does anyone query it directly, and how many rows. Understand that ephemeral models are injected as CTEs so compiled SQL balloons and error line numbers become useless - use views in dev and tables in prod by branching on target.name. Know why one model per source table matters: when the customer renames a column you fix one file.",
+   "minutes": 20,
+   "resource": {
+    "label": "dbt docs - How we structure our dbt projects",
+    "url": "https://docs.getdbt.com/best-practices/how-we-structure/1-guide-overview"
+   }
+  },
+  {
+   "name": "Incremental models: unique_key, strategies, lookback windows, late-arriving rows",
+   "learn": "{{ config(materialized='incremental', unique_key='llm_call_id', incremental_strategy='delete+insert', on_schema_change='append_new_columns') }} with {% if is_incremental() %} WHERE updated_at > (SELECT max(updated_at) FROM {{ this }}) - INTERVAL 1 HOUR {% endif %}. Know what each strategy does on a duplicate key (append duplicates, delete+insert replaces the key set, merge upserts) and which ones dbt-duckdb supports. The lookback window is what saves you from long-running source transactions that commit with older timestamps; on_schema_change defaults to ignore, which silently drops new source columns. dbt run --full-refresh rebuilds from scratch - guard expensive models with full_refresh: false. For fct_tenant_daily, key on (tenant_sk, date_day) and recompute the trailing N days each night rather than only yesterday so late events are absorbed. Late-arriving dimensions: coalesce a failed surrogate-key lookup to the unknown member and re-resolve within the lookback window.",
    "minutes": 30,
    "resource": {
-    "label": "etcd v3.5 - API guarantees (linearizability, serializable reads, revisions)",
-    "url": "https://etcd.io/docs/v3.5/learning/api_guarantees/"
+    "label": "dbt docs - Configure incremental models",
+    "url": "https://docs.getdbt.com/docs/build/incremental-models"
    }
   },
   {
-   "name": "Client sessions, duplicate detection and exactly-once semantics",
-   "learn": "Work through the failure: client sends Put, leader commits it, leader crashes before replying, client retries to the new leader, the Put executes twice. Know the standard fix from Raft dissertation chapter 6: each client registers a session ID, tags requests with a monotonically increasing sequence number, and the state machine (not the Raft layer) keeps a per-client table of last-applied sequence and cached reply so a duplicate returns the cached result without re-executing; the table must live in the replicated state so it survives failover, and it needs an expiry policy the cluster agrees on. Translate this to FDE work: an idempotency key column plus unique index in Postgres, or a Redis SETNX with TTL (Topic 31), is the same idea and has the same expiry problem.",
-   "minutes": 25,
+   "name": "Jinja, macros and dbt_utils: surrogate keys, date spine, safe division, DRY logic",
+   "learn": "{{ }} renders a value, {% %} controls flow. Write a cents_to_usd(col) macro and a limit_in_dev() macro keyed on target.name. Use dbt_utils.generate_surrogate_key(['tenant_id', 'dbt_valid_from']) for versioned dimension keys, dbt_utils.date_spine(datepart='day', start_date=..., end_date=...) to build dim_date and the snapshot spine, dbt_utils.safe_divide(successes, attempts) for tool-success ratios that must not divide by zero, and dbt_utils.star(from=ref(...), except=[...]) to avoid hand-listing columns. Pin packages.yml versions and understand dispatch picks the adapter-specific implementation. Jinja runs at compile time: {{ run_started_at }} is fixed for the whole invocation while current_timestamp is evaluated per statement, which matters when you stamp _loaded_at on multiple models.",
+   "minutes": 20,
    "resource": {
-    "label": "Diego Ongaro - Consensus: Bridging Theory and Practice (Raft dissertation, ch. 6 client interaction)",
-    "url": "https://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf"
+    "label": "GitHub - dbt-labs/dbt-utils (macros and generic tests)",
+    "url": "https://github.com/dbt-labs/dbt-utils"
    }
   },
   {
-   "name": "ZooKeeper's weaker model: linearizable writes, FIFO client order, watches",
-   "learn": "Understand why ZooKeeper deliberately serves reads from any replica (throughput scales with followers) and what it promises instead of full linearizability: writes are linearizable and totally ordered by zxid, each client's operations execute in the order it issued them, and a read after your own write sees that write; a client that needs a fresh read calls sync() first. Know the primitives that make it a coordination service rather than a database: ephemeral znodes tied to the session (so a crashed lock holder releases the lock), sequential znodes for fair locks, one-shot watches, and the herd-effect fix of watching only your predecessor. Be able to describe the 'ready znode' pattern for atomic multi-key config updates and why it depends on FIFO client order.",
-   "minutes": 25,
+   "name": "Data tests: generic, singular, thresholds and stored failures",
+   "learn": "Generic tests in YAML: unique and not_null on every key, accepted_values on finish_reason (end_turn, max_tokens, tool_use, stop_sequence), relationships so every fact tenant_sk exists in dim_tenant. dbt_utils tests that catch real regressions: unique_combination_of_columns (the grain), accepted_range (cost_usd >= 0, latency_ms between 0 and 600000), not_null_proportion, equal_rowcount between stg and raw, recency (mart refreshed within 26 hours). Singular tests in tests/*.sql for cross-model reconciliation: sum of fct_tenant_daily tokens per day must equal sum of fct_llm_calls tokens for that day. Configure severity: warn, warn_if: '>0', error_if: '>100' so a handful of bad rows does not block the email while a flood does; store_failures: true writes failing rows to <schema>_dbt_test__audit so you can show the customer the exact offending rows. Remember dbt build skips children of a failing test.",
+   "minutes": 30,
    "resource": {
-    "label": "ZooKeeper Programmer's Guide - consistency guarantees, watches, znodes",
-    "url": "https://zookeeper.apache.org/doc/current/zookeeperProgrammers.html"
+    "label": "dbt docs - Add data tests to your DAG",
+    "url": "https://docs.getdbt.com/docs/build/data-tests"
    }
   },
   {
-   "name": "Timeouts, disks and leader flapping in a real etcd cluster",
-   "learn": "Diagnose the most common customer-cluster pathology: leader elections every few minutes with kube-apiserver logging 'etcdserver: request timed out'. Know the causal chain (slow fsync or network delays heartbeats -> followers time out -> election -> writes stall) and the metrics that separate the causes: etcd_disk_wal_fsync_duration_seconds p99 should be under 10 ms and etcd_disk_backend_commit_duration_seconds under 25 ms, etcd_network_peer_round_trip_time_seconds for network, etcd_server_leader_changes_seen_total for the symptom, plus log lines 'failed to send out heartbeat on time' and 'apply request took too long'. Know the tuning levers and their limits: --heartbeat-interval should be near the peer RTT, --election-timeout about 10x heartbeat and never above 50000 ms, etcd on its own disk (never a shared network volume behind a busy database), and etcdctl check perf to baseline before and after.",
-   "minutes": 25,
+   "name": "Unit tests and model contracts: pinning logic and schema",
+   "learn": "Unit tests (dbt 1.8+) mock inputs and assert outputs: unit_tests: - name: prices_apply_cache_discount, model: int_calls_with_costs, given: [{input: ref('stg_pg__llm_calls'), rows: [...]}, {input: ref('dim_model'), rows: [...]}], expect: {rows: [...]}. Aim them at the pricing formula, UTC-vs-tenant-local day bucketing, and the SCD2 join-window predicate; use overrides to pin is_incremental() and vars. Model contracts: config: contract: enforced: true plus columns: - name: tenant_sk, data_type: bigint, constraints: [{type: not_null}] make the build fail when the SELECT's output schema drifts, which is what protects the email template from a renamed or retyped column. Contracts require every column listed with a data_type and are checked at build time before the table is swapped in.",
+   "minutes": 20,
    "resource": {
-    "label": "etcd v3.5 - Tuning (heartbeat, election timeout, disk and network)",
-    "url": "https://etcd.io/docs/v3.5/tuning/"
+    "label": "dbt docs - Unit tests",
+    "url": "https://docs.getdbt.com/docs/build/unit-tests"
    }
   },
   {
-   "name": "Quorum loss and disaster recovery",
-   "learn": "Enumerate etcd's failure classes (minority loss: fine, elect if needed; leader loss: election within one election timeout; majority loss: read-only at best and unrecoverable without operator action) and know which one the customer is in from etcdctl endpoint status -w table and etcdctl endpoint health. Practise the recovery path: regular etcdctl snapshot save, then etcdutl snapshot restore <file> --name <m> --initial-cluster ... --initial-cluster-token ... --initial-advertise-peer-urls ... --data-dir <new>, which rewrites member and cluster IDs so the old members cannot rejoin, and understand that everything after the snapshot is lost. Know --force-new-cluster as the single-surviving-member last resort and why it is dangerous if another old member later comes back. Tie this to Topic 24 (HA and DR): the RPO for a Kubernetes control plane is your etcd snapshot cadence.",
-   "minutes": 25,
+   "name": "Source freshness and exposures: knowing the data is late, and who consumes it",
+   "learn": "Declare sources: with loaded_at_field: _extracted_at and freshness: warn_after: {count: 6, period: hour}, error_after: {count: 26, period: hour}; dbt source freshness writes target/sources.json and --select source_status:fresher+ builds only models whose sources actually moved. Add an exposures: entry (type: application, name: defendermate_weekly_email, owner:, url:, depends_on: [ref('fct_tenant_daily'), ref('dim_tenant')]) so the lineage graph ends at the customer email and dbt build --select +exposure:defendermate_weekly_email builds exactly that path. Treat the freshness thresholds as the mart's SLA contract with the customer and alert on them, not on 'the cron ran'.",
+   "minutes": 15,
    "resource": {
-    "label": "etcd v3.5 operations guide - Disaster recovery",
-    "url": "https://etcd.io/docs/v3.5/op-guide/recovery/"
+    "label": "dbt docs - Add sources to your DAG (incl. source freshness)",
+    "url": "https://docs.getdbt.com/docs/build/sources"
    }
   },
   {
-   "name": "Testing consistency: Porcupine, Jepsen and fault injection",
-   "learn": "Learn how a linearizability checker works so you can use one on a customer system: record every operation's invocation time, response time, inputs and outputs, define a sequential model (a register or key-value map with a step function), and let the checker search for a valid ordering; Porcupine is the Go checker the 6.824 labs use, Knossos and Elle are Jepsen's. Read one Jepsen analysis end to end (jepsen.io/analyses) and identify the nemesis used (partition, clock skew, process kill, pause), the claimed model, and the minimal history that violated it. Know the fault-injection toolkit you can run on a customer's staging cluster: docker pause or kill -STOP for stop-the-world, iptables DROP or docker network disconnect for partitions, tc netem for latency, and why a paused process is worse than a dead one.",
-   "minutes": 25,
+   "name": "Documentation and lineage: descriptions, doc blocks, catalog and manifest",
+   "learn": "Every mart column gets a description:; define conformed definitions once as {% docs tenant_sk %}...{% enddocs %} blocks and reference them with '{{ doc(\"tenant_sk\") }}' so the same column is not described three different ways. dbt docs generate writes catalog.json and manifest.json; dbt docs serve renders the searchable site and lineage DAG. Put the grain sentence, the freshness SLA and the owner in the model description rather than a wiki so they cannot drift from the code. Know manifest.json is machine-readable: it drives state:modified selection and you can turn it into a customer-facing data dictionary with a 30-line script.",
+   "minutes": 15,
    "resource": {
-    "label": "anishathalye/porcupine - linearizability checker used by the 6.824 labs",
-    "url": "https://github.com/anishathalye/porcupine"
+    "label": "dbt docs - About documentation",
+    "url": "https://docs.getdbt.com/docs/build/documentation"
    }
   },
   {
-   "name": "Two-phase commit and why it blocks",
-   "learn": "Draw 2PC precisely: coordinator sends PREPARE, each participant writes a prepare record (locks held, must survive crash) and votes, coordinator durably logs the decision then sends COMMIT/ABORT, participants ack. Identify the blocking window: participants that voted yes cannot unilaterally decide if the coordinator is unreachable, so they hold locks until it returns; contrast with Raft/Paxos where the decision is replicated and a new leader can finish it (Spanner's trick is to make the coordinator itself a Paxos group). Practise the Postgres mechanics: PREPARE TRANSACTION 'gid', COMMIT PREPARED / ROLLBACK PREPARED, max_prepared_transactions (default 0, i.e. disabled), and the pg_prepared_xacts view, and know that an orphaned prepared transaction is invisible in pg_stat_activity yet holds its row locks and pins the xmin horizon so VACUUM cannot advance.",
-   "minutes": 25,
+   "name": "dbt build and node selection: tags, graph operators, state and result selectors",
+   "learn": "dbt build runs seeds, snapshots, models and tests in DAG order and skips descendants of failures. Selection syntax: --select tag:nightly, path:models/marts, stg_pg__llm_calls+ (downstream), +fct_tenant_daily (upstream), @fct_tenant_daily (children plus their parents), --exclude. State-based CI: keep the last production manifest.json and run dbt build --select state:modified+ --state prod-artifacts/ so a PR builds only what changed; after a partial failure rerun only the broken path with --select result:error+ --state target-prev/; --defer resolves unbuilt refs to production. Know --fail-fast to stop on first error and --empty for a schema-only dry run.",
+   "minutes": 15,
    "resource": {
-    "label": "PostgreSQL docs - PREPARE TRANSACTION",
-    "url": "https://www.postgresql.org/docs/current/sql-prepare-transaction.html"
+    "label": "dbt docs - Node selection syntax overview",
+    "url": "https://docs.getdbt.com/reference/node-selection/syntax"
    }
   },
   {
-   "name": "Spanner: TrueTime, commit-wait and external consistency",
-   "learn": "Explain Spanner's architecture in FDE terms: data split into tablets, each replicated by its own Paxos group across zones, read-write transactions use 2PL for locks and 2PC across groups with a Paxos-replicated coordinator, and timestamps come from TrueTime, an API returning an interval [earliest, latest] bounded by GPS and atomic clocks. Nail commit-wait: a transaction is assigned timestamp s = TT.now().latest and the leader waits until TT.after(s) before releasing locks, so any transaction that starts after this one returns is guaranteed a larger timestamp, which yields external consistency (strict serializability); remove commit-wait and a later transaction could get an earlier timestamp and read-only transactions would observe an impossible order. Know why read-only transactions are lock-free (pick a timestamp, read the snapshot from any sufficiently up-to-date replica) and how Cloud Spanner exposes strong, bounded-staleness (max_staleness, min_read_timestamp) and exact-staleness (exact_staleness, read_timestamp) reads.",
-   "minutes": 25,
+   "name": "DuckDB analytical SQL for the mart: windows, QUALIFY, ASOF JOIN, PIVOT, list aggregates",
+   "learn": "Write the weekly-email queries idiomatically: lag(tokens, 7) OVER (PARTITION BY tenant_sk ORDER BY date_day) for week-over-week, sum(cost_usd) OVER (PARTITION BY tenant_sk ORDER BY date_day ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) for rolling 7-day, quantile_cont(latency_ms, 0.95) for p95, QUALIFY row_number() OVER (PARTITION BY tenant_id ORDER BY dbt_valid_from DESC) = 1 for current-version dedup without a subquery, ASOF JOIN dim_model_price p ON c.model = p.model AND c.created_at >= p.effective_from to attach the price in effect at call time, PIVOT fct_tenant_daily ON model_name USING sum(cost_usd), and list() / string_agg for the 'top 5 tools' line. Use GROUP BY ALL, SELECT * EXCLUDE (...), date_trunc('week', ...) and timezone(tz, ts) for tenant-local weeks. Confirm with EXPLAIN ANALYZE that filters push into the Parquet scan.",
+   "minutes": 20,
    "resource": {
-    "label": "Cloud Spanner docs - TrueTime and external consistency",
-    "url": "https://docs.cloud.google.com/spanner/docs/true-time-external-consistency"
+    "label": "DuckDB docs - Window Functions (incl. QUALIFY and frame clauses)",
+    "url": "https://duckdb.org/docs/current/sql/functions/window_functions"
    }
   },
   {
-   "name": "Isolation levels versus consistency models",
-   "learn": "Separate two axes that customers conflate: consistency models (linearizability) are about single operations on single objects across replicas and real time, while isolation levels (serializability) are about multi-object transactions on one logical database and say nothing about real time; strict serializability is both. Be able to give the classic anomaly per level with Postgres specifics: READ COMMITTED (default) allows non-repeatable reads, REPEATABLE READ is snapshot isolation and allows write skew (two doctors both going off-call), SERIALIZABLE uses SSI and aborts with SQLSTATE 40001 'could not serialize access', so every caller needs a retry loop. Then give the cross-system example: a Raft-backed key-value store is linearizable per key but not transactional across keys, and a single-node Postgres at SERIALIZABLE is serializable but its async read replica is neither.",
-   "minutes": 25,
+   "name": "DuckDB operability: memory limits, spilling, threads, single-writer concurrency, EXPLAIN ANALYZE",
+   "learn": "SET memory_limit = '6GB'; SET threads = 4; SET temp_directory = '/data/tmp'; SET max_temp_directory_size = '50GB'; SET preserve_insertion_order = false for large loads. Understand that hash joins, aggregates and sorts spill to temp_directory once memory_limit is hit, and that a missing or full temp directory is an OOM in disguise. Concurrency: one process may open a .duckdb file read-write; other processes may only attach with access_mode = 'READ_ONLY' and only if no writer holds it - so the nightly dbt job and the email renderer must not both open the same file read-write. Pattern: dbt writes warehouse.duckdb, then publish marts to Parquet or copy the file and atomically rename for readers. Threads within a process use MVCC and the second writer to the same row fails with a conflict error. Read EXPLAIN ANALYZE: estimated vs actual cardinality per operator, timings, and the accidental cross join that turns 4 minutes into 90.",
+   "minutes": 20,
    "resource": {
-    "label": "PostgreSQL docs - Transaction Isolation",
-    "url": "https://www.postgresql.org/docs/current/transaction-iso.html"
+    "label": "DuckDB docs - Tuning Workloads (performance guide)",
+    "url": "https://duckdb.org/docs/current/guides/performance/how_to_tune_workloads"
    }
   },
   {
-   "name": "Leases and fencing: leader election without owning a consensus library",
-   "learn": "Understand how Kubernetes components elect a leader without implementing Raft themselves: a coordination.k8s.io/v1 Lease object with holderIdentity, leaseDurationSeconds, acquireTime, renewTime and leaseTransitions, updated with optimistic concurrency against etcd (which is the actual consensus); client-go's defaults are LeaseDuration 15 s, RenewDeadline 10 s, RetryPeriod 2 s, and kube-controller-manager exposes them as --leader-elect-lease-duration and friends. Be able to explain why a lease is not a fence: a holder paused by GC or the hypervisor for longer than the lease can resume and act after a new holder exists, so any external side effect must carry a fencing token (etcd revision, ZooKeeper zxid, or a monotonically increasing epoch column) that the downstream store rejects if it is lower than the last one seen. Apply the same reasoning to any customer 'distributed lock' built on Redis SET NX PX.",
+   "name": "Nightly orchestration and the weekly-email consumer: scheduling, run_results.json, alerting, idempotency",
+   "learn": "A nightly run is: extract (DuckDB postgres ATTACH -> raw Parquet) -> dbt source freshness -> dbt build --select tag:nightly -> publish -> notify. Schedule with GitHub Actions on: schedule: cron: (know it runs on the default branch and can be delayed or dropped at high load) or a Temporal schedule from Topic 34 when you need retries and visibility; make every step idempotent so a 03:00 rerun is safe. Parse target/run_results.json: results[].status (success, error, fail, skipped, warn), failures, execution_time, adapter_response.rows_affected; post a summary to Slack and persist it to an ops.dbt_runs table via on-run-end. The weekly-email renderer (Python + Jinja2) opens the published DuckDB file with read_only=True or reads the Parquet marts, queries fct_tenant_daily for the trailing seven complete tenant-local days, and refuses to send when the recency test or freshness check failed - a late email beats a wrong one. Define the SLA explicitly: mart complete by 06:00 tenant-local, with freshness thresholds aligned to it.",
    "minutes": 25,
    "resource": {
-    "label": "Kubernetes docs - Leases (coordination.k8s.io)",
-    "url": "https://kubernetes.io/docs/concepts/architecture/leases/"
-   }
-  },
-  {
-   "name": "Consensus in the systems you will inherit: KRaft, MongoDB, CockroachDB",
-   "learn": "Build the Rosetta stone you will use on site. Kafka: KRaft replaces ZooKeeper with a Raft-style controller quorum (process.roles, controller.quorum.voters or the dynamic controller.quorum.bootstrap.servers, the __cluster_metadata log) that is pull-based rather than push-based, while data partitions still use ISR replication where durability depends on acks=all, min.insync.replicas>=2 and unclean.leader.election.enable=false, not on Raft. MongoDB: replica-set elections with electionTimeoutMillis (default 10000 ms) and member priority, writeConcern w:majority to avoid rollback of acknowledged writes after failover, readConcern majority vs linearizable (primary only, re-confirms leadership). CockroachDB: each range (default 512 MiB) is its own Raft group, a leaseholder serves reads without a Raft round, and clock uncertainty (--max-offset, default 500 ms) is handled with hybrid logical clocks instead of TrueTime. For each, be able to state what 'lost one node' and 'lost a majority' mean operationally.",
-   "minutes": 25,
-   "resource": {
-    "label": "Apache Kafka documentation - KRaft (section 6.9 and replication design)",
-    "url": "https://kafka.apache.org/documentation/#kraft"
-   }
-  },
-  {
-   "name": "Whiteboard rehearsal: the 15-minute Raft explanation",
-   "learn": "Script and rehearse the deliverable: (1) the problem and the majority argument, (2) normal-case election with RPC fields and randomised timeouts, (3) normal-case replication with prevLogIndex/prevLogTerm and commit, (4) a leader failure with a Figure 7-style divergence and the repair, (5) the Figure 8 trap and the current-term commit rule, (6) a one-minute coda on persistence, snapshots and linearizable reads. Use RaftScope on raft.github.io to stage each scenario, pause it, and practise narrating the exact state on screen without reading it, then redo the same scenario on a blank whiteboard. Time yourself; if any segment exceeds its budget, cut detail rather than speed up, because the interviewer will interrupt at the point they care about.",
-   "minutes": 25,
-   "resource": {
-    "label": "raft.github.io - Raft homepage with RaftScope interactive visualisation",
-    "url": "https://raft.github.io/"
+    "label": "dbt docs - Run results JSON artifact",
+    "url": "https://docs.getdbt.com/reference/artifacts/run-results-json"
    }
   }
  ],
  "outcomes": [
-  "You can draw a 5-node Raft cluster on a whiteboard and narrate election, replication and commit with the correct RPC fields and persistence points, including the Figure 8 case, in under 15 minutes with no notes and survive interruptions at any step",
-  "You can take any Figure 7-style log configuration and state, per server, whether it can win an election, what prevLogIndex the leader will settle on for each follower, and which entries will be truncated",
-  "You can decide by hand whether a short history of concurrent reads and writes is linearizable, and confirm it by feeding the same history to Porcupine with a register model",
-  "You can look at etcd metrics and logs from a customer cluster and attribute leader flapping to fsync latency, network RTT or misconfigured timeouts, naming the exact flag or infrastructure change that fixes it",
-  "You can explain when two-phase commit blocks, list orphaned prepared transactions in Postgres from pg_prepared_xacts, and articulate why Spanner's Paxos-replicated coordinator does not block",
-  "You can explain commit-wait and external consistency to a non-Google engineer and translate it into what a customer should expect from Cloud Spanner's strong versus stale reads",
-  "You can map the words quorum, leader, commit, linearizable and stale to their concrete equivalents in Kafka KRaft, MongoDB replica sets, CockroachDB ranges and Kubernetes Leases in a live customer conversation",
-  "You can spot an unsafe distributed lock or leader lease in a customer's code and propose a fencing-token design with a specific token source and enforcement point"
+  "You can write the grain of each fact table as a single sentence, encode it as a unique_combination_of_columns test, and demonstrate the build failing when a duplicated extract is loaded.",
+  "You can run dbt build on a fresh clone with only a Postgres DSN and end with fct_llm_calls, fct_tenant_daily, dim_tenant (SCD2), dim_model and dim_date materialised in DuckDB, every test passing, and dbt docs generate producing a lineage graph that terminates at the defendermate_weekly_email exposure.",
+  "You can change a tenant's plan tier in Postgres, run dbt snapshot, and show two versions in dim_tenant with correct dbt_valid_from/dbt_valid_to while historic calls remain attributed to the old tier.",
+  "You can insert an llm_call with a created_at three days in the past, rerun the incremental models without --full-refresh, and show the corrected fct_tenant_daily row for that day.",
+  "You can prove reconciliation to a customer: a singular test comparing per-day token sums between raw and fct_tenant_daily passes, and when it fails you can name the exact rows from the dbt_test__audit schema.",
+  "You can read EXPLAIN ANALYZE output on a query over hive-partitioned Parquet, state whether partition pruning and filter pushdown happened, and fix the layout or predicate so they do.",
+  "You can open run_results.json after a failed nightly run, identify the failed node and its skipped descendants, rerun only result:error+ with --state, and state whether the email is safe to send.",
+  "You can size DuckDB for a customer's box (memory_limit, threads, temp_directory), show a larger-than-memory aggregation completing by spilling, and explain the single-writer constraint to their ops team in two sentences."
  ],
  "failureModes": [
-  "etcd placed on a shared network volume alongside a busy database: WAL fsync p99 climbs past 10 ms, heartbeats are late, the cluster elects a new leader every few minutes and kube-apiserver returns 'etcdserver: request timed out' across the whole platform",
-  "Operator 'fixes' a 3-node cluster with one dead member by adding a replacement before removing the dead one: quorum goes from 2-of-3 to 3-of-4 with only 2 healthy, and the control plane goes read-only mid-incident",
-  "A config or leader-election loader reads etcd with --consistency=s (or ZooKeeper without sync()) and occasionally acts on a value the customer overwrote seconds earlier, producing two workers that both believe they own a shard",
-  "A JVM app using XA against Postgres crashes between PREPARE and COMMIT; the orphaned prepared transaction never shows up in pg_stat_activity but holds row locks for days and pins the xmin horizon until autovacuum warnings about wraparound appear",
-  "A client library retries a write after a leader change with no idempotency key, so the payment or Kafka publish executes twice; the team blames the database for 'duplicating data'",
-  "Kafka producers run with acks=1 or min.insync.replicas=1 plus unclean.leader.election.enable=true; a broker failover silently discards acknowledged messages and the customer's audit reconciliation fails weeks later",
-  "A worker holding a Redis or Lease-based lock is paused by a stop-the-world GC longer than the TTL, another worker acquires the lock, and both write to the downstream store because nothing checked a fencing token"
+  "The reporting role extracted from a Postgres database with RLS enabled but had no BYPASSRLS and no policy; the extract silently returned rows for one tenant, not_null tests passed on the tiny table, and every other customer received a weekly email reporting zero usage.",
+  "An incremental fact filtered on created_at > max(created_at) with no lookback; a batch committed by a long-running transaction with older timestamps never landed, and weekly totals came in 4 percent below the invoice, which the customer noticed first.",
+  "Someone ran dbt snapshot --full-refresh on dim_tenant after adding a column, wiping version history; every historic fact then joined to the current plan tier and three months of reports silently changed.",
+  "Parquet partitioned by tenant_id and hour produced 400k files of a few kilobytes; DuckDB spent longer opening files than scanning them and the nightly run grew from 4 minutes to 90 before anyone looked.",
+  "The email renderer opened warehouse.duckdb with the default read-write mode while dbt was writing; the lock conflict surfaced on Monday morning as 'email service down' and was debugged as a networking problem for two hours.",
+  "on_schema_change was left at the default ignore, so a new cache_read_tokens column added upstream never reached fct_llm_calls; cost_usd omitted cache discounts for six weeks until the customer disputed the bill.",
+  "A refactor changed latency from milliseconds to seconds; the accepted_range test with max_value 600000 still passed and there was no contract pinning the unit, so p95 latency in the email read 0.8 for a month and nobody trusted the report afterward."
  ],
  "interviewQuestions": [
-  "Whiteboard this: a 5-node Raft cluster, the term-3 leader has replicated index 7 to two followers and then crashes. Walk through the possible elections that follow, state in each case what happens to index 7, and explain precisely why Raft refuses to count replicas of prior-term entries when advancing commitIndex.",
-  "A customer's 3-node etcd cluster under Kubernetes shows a leader change every few minutes and intermittent API server timeouts. What do you check, in what order, what metrics and log lines do you expect to see for each hypothesis, and what would you change first?",
-  "Explain the difference between linearizability, serializability and strict serializability with one concrete anomaly each. Name a production system that is serializable but not linearizable and describe the customer-visible symptom.",
-  "A service reads its shard assignment from etcd using serializable reads and a customer reports that after a rebalance two instances occasionally process the same shard for a few seconds. Explain the mechanism and propose three fixes with their latency and availability trade-offs.",
-  "Design exactly-once processing for inbound webhooks in a service that runs three replicas behind a load balancer and restarts during deploys. Where does the deduplication state live, how does it survive failover, and how do you expire it without reintroducing duplicates?",
-  "Why does Spanner make committing transactions wait, what would break if you removed commit-wait, and how does a system without TrueTime such as CockroachDB approximate the same guarantee?",
-  "A customer wants to coordinate two databases with two-phase commit from their application server. Walk through what happens if the application server dies after both participants voted yes, then tell me when you would push back and what you would build instead."
+  "A customer wants a weekly usage-and-cost email per tenant from a Postgres OLTP database holding 200 million llm_call rows. Design the warehouse layer: which fact tables at which grain, which dimensions are SCD2, how you extract without hurting the primary, and what runs fine on a 16 GB box versus when you would move them to Snowflake or Databricks.",
+  "Explain the difference between a transaction fact and a periodic snapshot fact and why the weekly email should be built from the snapshot. What exactly goes wrong if you sum a p95 latency column across days, and how do you store it so the email is still right?",
+  "Your incremental model filters on updated_at > max(updated_at). Give me three concrete ways rows get lost or duplicated, and say which of unique_key, incremental strategy and a lookback window addresses each.",
+  "A tenant moved from 'pro' to 'enterprise' on March 3rd. Write the SQL that joins March calls to the plan in effect at call time using a dbt snapshot table, and tell me what breaks if dbt_valid_to is NULL for current rows and you forgot the coalesce.",
+  "dbt build failed at 03:14 on a relationships test between fct_llm_calls and dim_model. What do you look at in run_results.json and the stored-failures table, what are the two most likely root causes, and how do you decide whether the 07:00 customer email can still go out?",
+  "Why does DuckDB allow only one writer process, and how do you architect a nightly writer plus a daytime read service around that constraint? Separately, what is the difference between threads in profiles.yml and DuckDB's own threads setting?",
+  "A query over two years of hive-partitioned Parquet takes 40 seconds filtered on tenant_id but 400 milliseconds filtered on event_date. Explain why, and describe two different ways you would change the layout or the query so both are fast."
  ],
- "proofOfWork": "A public 'stale read lab' repository: a docker-compose file that stands up a 3-member etcd 3.5 cluster plus Prometheus, a small Go or Python driver that runs N concurrent clients issuing put/get against a handful of keys while recording invocation and response timestamps and values, and a fault script that pauses the current leader (docker pause, simulating a stop-the-world) and partitions one member (docker network disconnect) during the run. The driver is run twice, once with reads at --consistency=s and once at --consistency=l, and both histories are fed to Porcupine with a register model; the repository commits the two checker outputs (the serializable run fails with the minimal violating sub-history highlighted, the linearizable run passes), Grafana screenshots of etcd_server_leader_changes_seen_total and etcd_disk_wal_fsync_duration_seconds across the fault window, and a one-page README that names the exact Raft mechanism (ReadIndex) responsible for the difference, what the same misconfiguration looks like in a customer's Kubernetes or ZooKeeper setup, and the flag or code change an operator should make. As a bonus, include annotated RaftScope screenshots reproducing the Figure 8 scenario step by step."
+ "proofOfWork": "A reproducible customer-handover package for the DefenderMate warehouse, checked into the repo alongside the dbt project: a single make nightly target that, from a fresh clone plus a Postgres DSN, extracts to Parquet via the DuckDB postgres extension, runs dbt source freshness and dbt build --select tag:nightly, publishes the marts, and appends the parsed run_results.json to an ops.dbt_runs table; a recorded drift drill in which you change a tenant's plan tier and insert a back-dated llm_call in Postgres, rerun the pipeline, and show dim_tenant with two versions, the corrected fct_tenant_daily row, the singular reconciliation test passing, and dbt docs lineage terminating at the weekly-email exposure; and a one-page ops runbook stating the mart SLA, the DuckDB memory_limit/threads/temp_directory settings for the customer's box, the single-writer constraint and how the email service avoids it, and the exact rerun command (dbt build --select result:error+ --state ...) after a partial failure. Finish with a rendered weekly email for one sample tenant generated from the mart, showing week-over-week token, cost and p95 deltas."
 }

@@ -1,227 +1,227 @@
 {
-  "i": 41,
-  "topic": "MIT 6.824 Raft lab (optional deep dive)",
-  "track": "F. Distributed Systems and System Design",
-  "month": 5,
-  "hours": 20,
-  "why": "Reading the Raft paper makes you conversational; writing Raft and getting it past an adversarial tester makes you the person in the room who can say what a customer's etcd, Consul, CockroachDB or Kafka-KRaft cluster will actually do when a node's disk goes slow or a rack loses the network. FDEs get handed exactly these questions on-site — 'why did the API server freeze for 40 seconds', 'why did both workers hold the lock', 'is 4 nodes across 2 datacentres fine' — and the answers live in details you only internalise by hitting them: persist-before-reply, current-term-only commits, never truncating on a stale AppendEntries. It is also the strongest possible signal in a Palantir/Databricks/Anthropic loop that your distributed-systems knowledge is load-bearing rather than recited.",
-  "prerequisites": [
-    "Topic 40 (6.824 selected lectures): the Raft paper's Figure 2 read at least twice, plus the lecture notes on elections, log matching and the Figure 8 commit rule — this lab is the implementation of exactly that material, not an introduction to it",
-    "Topic 39 (DDIA): chapters 5, 8 and 9 — leader-based replication, the unreliability of clocks and networks, and linearizability, so you know what property the tester's checker is actually enforcing",
-    "Go at Tour-of-Go level: goroutines, channels, sync.Mutex, sync.Cond, structs and interfaces, slices and their aliasing behaviour. There is no Go topic in this plan, so budget 2-3 hours on the Tour plus Effective Go before hour one of the lab; the lab itself will not teach you Go",
-    "Topic 2 (Networking): what a partition looks like on the wire — dropped, delayed, reordered and duplicated packets, asymmetric reachability — because labrpc simulates precisely these and your code must be correct under all of them",
-    "Topic 1 (Linux internals): fsync/fdatasync semantics and rough costs on local NVMe versus EBS/NFS, since 'persist before you reply' is the single most expensive rule in Raft and the reason customers' consensus clusters flap",
-    "Topic 4 (Git): the lab is distributed as a git repo you `git pull` repeatedly, and you will want branches per part and `git bisect` when a passing test starts failing"
-  ],
-  "subtopics": [
-    {
-      "name": "Lab setup and a tour of the skeleton",
-      "learn": "Clone the 6.5840 repo, install a current Go toolchain, and run `make raft1` in `src` to watch every 3A test fail with 'expected one leader, got none' — that is your baseline. Read `src/raft1/raft.go` end to end before writing anything: `Make(peers, me, persister, applyCh)`, `Start(command) (index, term, isLeader)`, `GetState()`, the stub `ticker()` goroutine, and the example `sendRequestVote`/`RequestVote` pair. Then read `raftapi/raftapi.go` for the `ApplyMsg` fields and `tester1/persister.go` for `Save(raftstate, snapshot)`, `ReadRaftState()` and `ReadSnapshot()`. Know that peers may only communicate through labrpc — no shared variables, no files — and that the tester can delay, reorder, duplicate and drop every RPC.",
-      "minutes": 40,
-      "resource": {
-        "label": "6.5840 Lab 3: Raft — handout, Getting Started and 'The code'",
-        "url": "https://pdos.csail.mit.edu/6.824/labs/lab-raft1.html"
-      }
-    },
-    {
-      "name": "Figure 2 as an executable checklist",
-      "learn": "Transcribe Figure 2 of the extended paper into comments in raft.go and treat it as a spec you must satisfy line by line: persistent state (currentTerm, votedFor, log[]), volatile state (commitIndex, lastApplied), leader volatile state (nextIndex[] initialised to lastLogIndex+1, matchIndex[] to 0), the two RPC argument/reply structs, and the Rules for Servers. The rules that get skipped and cost days are: 'If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower' (applies to replies too, and must clear votedFor), and 'If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied]'. Write each rule as a named helper or an explicit branch so you can point at the line that implements it.",
-      "minutes": 55,
-      "resource": {
-        "label": "In Search of an Understandable Consensus Algorithm (extended) — Figure 2",
-        "url": "https://pdos.csail.mit.edu/6.824/papers/raft-extended.pdf"
-      }
-    },
-    {
-      "name": "Go concurrency primitives and the race detector",
-      "learn": "Be fluent in `sync.Mutex` with `defer rf.mu.Unlock()`, `sync.Cond` for the applier, and why `time.Sleep` in a loop is what the handout wants instead of `time.Timer`/`time.Ticker`. Understand the Go memory model well enough to know that an unsynchronised read of `rf.currentTerm` is a data race even if it 'looks atomic', and run everything with `go test -race` (the Makefile already builds with -race; graders run without it, so both must pass). Know that Go 1.22+ scopes loop variables per iteration, which kills the classic `for i := range rf.peers { go func(){ use i }() }` bug — but that capturing `rf.currentTerm` inside a goroutine still snapshots a value that may be stale by the time the RPC returns.",
-      "minutes": 55,
-      "resource": {
-        "label": "Go — Data Race Detector",
-        "url": "https://go.dev/doc/articles/race_detector"
-      }
-    },
-    {
-      "name": "The locking protocol, applied to raft.go",
-      "learn": "Internalise the course's five locking rules and decide, before you write code, exactly where the mutex is held. The rules: hold the lock for every access to shared state; hold it across a whole multi-step invariant update (e.g. incrementing currentTerm, setting votedFor = me, and resetting the election timer must be atomic); never hold it while sending an RPC, sleeping, or sending on a channel; after re-acquiring, re-check every assumption — currentTerm may have advanced and you may no longer be leader; and prefer one coarse lock over clever fine-grained locking for this codebase. The concrete pattern: lock, copy the args you need into local variables, unlock, call `peer.Call(...)`, re-lock, then guard the reply with `if rf.currentTerm != argsTerm || rf.state != Leader { return }`.",
-      "minutes": 45,
-      "resource": {
-        "label": "6.5840 — Advice on locking in the labs",
-        "url": "https://pdos.csail.mit.edu/6.824/labs/raft-locking.txt"
-      }
-    },
-    {
-      "name": "Goroutine structure: ticker, heartbeater, applier",
-      "learn": "Settle on the canonical structure before coding: one long-lived `ticker()` goroutine that sleeps ~10ms and starts an election when now-lastHeard exceeds a randomised timeout; one goroutine per election that fans out RequestVote to every peer in its own goroutine and counts votes; a leader loop that fires AppendEntries to each peer every heartbeat interval; and a dedicated applier goroutine that is the only thing that ever writes to applyCh. Know why the applier must be separate: sending on applyCh can block on the service, and if you do it while holding rf.mu the whole peer deadlocks. Every goroutine must exit when `rf.killed()` is true, or the test binary accumulates leaked goroutines across the suite.",
-      "minutes": 45,
-      "resource": {
-        "label": "6.5840 — Advice on structuring your Raft lab",
-        "url": "https://pdos.csail.mit.edu/6.824/labs/raft-structure.txt"
-      }
-    },
-    {
-      "name": "Part 3A: leader election and heartbeats",
-      "learn": "Implement RequestVote and empty-entry AppendEntries until TestInitialElection3A, TestReElection3A and TestManyElections3A pass. The vote handler: reject if args.Term < currentTerm; step down if args.Term > currentTerm; grant only if (votedFor == nil || votedFor == candidateId) AND the candidate's log is at least as up to date (compare lastLogTerm first, then lastLogIndex). The discipline that decides whether 3A is one hour or six: reset your election timer on exactly three events — granting a vote, receiving a valid AppendEntries from the current leader, and starting your own election — and on nothing else. Resetting on a rejected vote or a stale-term heartbeat is the most common 3A bug and it hides until TestManyElections3A.",
-      "minutes": 110,
-      "resource": {
-        "label": "6.5840 lecture notes — Raft part 1 (elections)",
-        "url": "https://pdos.csail.mit.edu/6.824/notes/l-raft.txt"
-      }
-    },
-    {
-      "name": "Timeout arithmetic, and the same arithmetic in etcd",
-      "learn": "Derive your constants rather than copying someone's: the tester caps heartbeats at 10 per second and demands a new leader within 5 seconds, so the paper's 150-300ms range is unusable — a heartbeat of ~100ms with an election timeout randomised over ~400-800ms (fresh random draw every time you reset) fits both constraints. Understand the invariant behind it, broadcastTime << electionTimeout << MTBF, and then map it to a real cluster: etcd defaults to --heartbeat-interval 100ms and --election-timeout 1000ms, recommends the 10x ratio, and recommends election-timeout be at least 5-10x the round-trip time between members — which is why a cross-region etcd with default flags flaps leaders under load.",
-      "minutes": 35,
-      "resource": {
-        "label": "etcd — Tuning (heartbeat interval and election timeout)",
-        "url": "https://etcd.io/docs/v3.5/tuning/"
-      }
-    },
-    {
-      "name": "Part 3B: Start(), AppendEntries and the log-matching check",
-      "learn": "Implement `Start()` (append locally, return index/term immediately, never block) and full AppendEntries until all ten 3B tests pass, including TestBackup3B. Follow the handout's advice to make the log 0-indexed with a dummy entry at index 0, term 0, so the first RPC can legally carry PrevLogIndex 0. The follower's five steps in order: reject on stale term; reject if there is no entry at prevLogIndex with prevLogTerm; on a conflict at an existing index delete that entry and everything after it; append only entries not already present; and set commitIndex = min(leaderCommit, index of last new entry). Step 3 and step 4 must be a single careful loop — truncating unconditionally is the bug that eats committed entries.",
-      "minutes": 140,
-      "resource": {
-        "label": "Ongaro, Consensus: Bridging Theory and Practice — §3.5 Log replication and the Log Matching Property",
-        "url": "https://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf"
-      }
-    },
-    {
-      "name": "Commit rules: majority matchIndex plus the current-term restriction",
-      "learn": "Implement the leader's advance rule exactly: find N > commitIndex such that a majority of matchIndex[i] >= N AND log[N].Term == rf.currentTerm, then set commitIndex = N. Be able to explain, from Figure 8, why dropping the term check lets a replicated-on-a-majority entry from an old term be overwritten later, breaking State Machine Safety. Pair it with the election restriction (5.4.1) and show why the two together give Leader Completeness: the restriction guarantees a new leader holds every entry committed under the old rule, and the term check guarantees nothing is called committed before that guarantee applies. Know the consequence for entries from prior terms: they commit indirectly, once any current-term entry above them commits.",
-      "minutes": 55,
-      "resource": {
-        "label": "6.5840 lecture notes — Raft part 2 (commit, persistence, snapshots)",
-        "url": "https://pdos.csail.mit.edu/6.824/notes/l-raft2.txt"
-      }
-    },
-    {
-      "name": "The applier goroutine and applyCh ordering",
-      "learn": "Write one applier that waits on a `sync.Cond` signalled whenever commitIndex advances, then, in a loop, copies the entries between lastApplied and commitIndex out under the lock, releases the lock, and sends them on applyCh. Guarantee the two invariants the tester checks: every peer applies the same command at the same index (a mismatch prints 'apply error' and fails the run), and indices arrive strictly in order with no gaps or repeats. Understand why `for i := lastApplied+1; i <= commitIndex; i++ { applyCh <- ApplyMsg{...rf.log[i]...} }` while holding the lock deadlocks, and why re-reading rf.log after re-acquiring the lock can read a trimmed log once 3D lands.",
-      "minutes": 45,
-      "resource": {
-        "label": "6.5840 lecture notes — lab 3 A+B Q&A: applier thread, condvar signalling and locking",
-        "url": "https://pdos.csail.mit.edu/6.824/notes/l-raft-QA.txt"
-      }
-    },
-    {
-      "name": "The catalogue of Figure 2 misreadings",
-      "learn": "Read the Students' Guide once you have 3B passing and audit your code against every item: don't reset the election timer on a stale-term AppendEntries; don't truncate the log just because entries were sent; don't return early from RequestVote without persisting; do step down on a higher term seen in a *reply*, and then ignore the rest of that reply; don't set matchIndex = nextIndex-1 from stale state — derive it from the args you sent (prevLogIndex + len(entries)); don't let a stale AppendEntries reply lower nextIndex twice. Each one you find here is a day you don't spend on TestFigure8Unreliable3C.",
-      "minutes": 45,
-      "resource": {
-        "label": "Students' Guide to Raft (Jon Gjengset)",
-        "url": "https://thesquareplanet.com/blog/students-guide-to-raft/"
-      }
-    },
-    {
-      "name": "Part 3C: persistence and 'persist before you reply'",
-      "learn": "Implement `persist()` and `readPersist()` with labgob, encoding exactly currentTerm, votedFor and log[] (plus the snapshot bookkeeping in 3D) into `persister.Save(state, nil)`. Know that gob only serialises exported fields — lowercase fields in your log-entry struct silently vanish and labgob will warn you — and that decoding into a value that was never encoded leaves it zeroed. The rule that makes 3C pass and makes real systems safe: call persist() before you send any RPC reply that depends on the changed state, so a crash immediately after replying can never let the restarted node vote twice in one term or forget an entry it acknowledged. Insert persist() calls at every mutation of the three persistent fields, then grep to prove no mutation is missed.",
-      "minutes": 85,
-      "resource": {
-        "label": "Go standard library — encoding/gob (exported fields, zero values)",
-        "url": "https://pkg.go.dev/encoding/gob"
-      }
-    },
-    {
-      "name": "Fast log backup and the Figure 8 tests",
-      "learn": "Decrementing nextIndex one entry per RPC round trip is too slow for TestBackup3B and the 3C churn tests, so implement the handout's rejection payload: XTerm (term of the conflicting entry), XIndex (index of the first entry with that term) and XLen (log length). Leader logic: if the leader has no entry with XTerm, nextIndex = XIndex; if it has XTerm, nextIndex = (index of its last entry with XTerm) + 1; if the follower's log is simply too short, nextIndex = XLen. Then grind TestFigure83C and TestFigure8Unreliable3C — these take ~50s each and are where a wrong commit rule, a missing persist, or election timeouts that are too tight surface as intermittent failures. Run them with `-count 10` before believing they pass.",
-      "minutes": 70,
-      "resource": {
-        "label": "etcd-io/raft — log.go, findConflictByTerm (production fast log backup)",
-        "url": "https://github.com/etcd-io/raft/blob/main/log.go"
-      }
-    },
-    {
-      "name": "Part 3D: log compaction, Snapshot() and InstallSnapshot",
-      "learn": "Rewrite the log to store only the tail after lastIncludedIndex, with every array access going through explicit index-conversion helpers — this refactor, not the RPC, is where 3D is won or lost. Implement `Snapshot(index, snapshot []byte)` (called on every peer, not just the leader; discard entries before index; persist state and snapshot together via `persister.Save(state, snapshot)`) and the InstallSnapshot RPC sent whenever nextIndex[i] <= lastIncludedIndex, in one shot with no Figure 13 offset splitting. Deliver the snapshot to the service through applyCh, never move the service backwards, and after restart make sure the first applyCh message is either a higher snapshot or the command immediately after the restored index. Discard trimmed entries so the GC can free them: reslicing keeps the old backing array alive, so copy into a fresh slice.",
-      "minutes": 140,
-      "resource": {
-        "label": "6.5840 — diagram of Raft interactions: Start, applyCh, Snapshot and InstallSnapshot",
-        "url": "https://pdos.csail.mit.edu/6.824/notes/raft_diagram.pdf"
-      }
-    },
-    {
-      "name": "Debugging distributed Go: annotations, timelines, repetition",
-      "learn": "Build a debugging rig on day one rather than day five: a `DPrintf` gated by an env var, every line stamped with peer id, term, state, commitIndex and lastApplied, plus `tester.Annotate(\"Server 0\", \"short\", \"details\")` calls so the tester's generated HTML timeline shows your events alongside its partitions, crashes and checks. Learn to read that timeline for the moment the invariant first breaks rather than the moment the test reports failure. Run failing tests in a loop — `go test -race -run 3C -count 20` piped to a file — because most Raft bugs appear in one run in twenty, and 'it passed once' is not evidence.",
-      "minutes": 65,
-      "resource": {
-        "label": "6.5840 — tester visualization of a failing run",
-        "url": "https://pdos.csail.mit.edu/6.824/labs/vis.html"
-      }
-    },
-    {
-      "name": "Performance budget: RPC counts, bytes, goroutines",
-      "learn": "Treat the tester's numbers as a performance spec, not decoration: each passing line reports elapsed time, peers, RPC count, RPC bytes and committed ops, and TestCount3B and TestRPCBytes3B fail outright on excess. The grader fails any submission where all of lab 3 exceeds 600 seconds or a single test exceeds 120; the reference solution is about 6 minutes without -race and 10 with. Hunt the usual causes of blowing the budget: loops that spin without sleeping or waiting on a cond, sending the entire log in every AppendEntries instead of the suffix from nextIndex, retrying an in-flight RPC before the previous one returns, and goroutines leaked per election. Use `go test -cpuprofile`/`-blockprofile` or a SIGQUIT goroutine dump when a run hangs.",
-      "minutes": 45,
-      "resource": {
-        "label": "Go — Diagnostics (profiling, tracing, goroutine dumps)",
-        "url": "https://go.dev/doc/diagnostics"
-      }
-    },
-    {
-      "name": "Linearizability and what Porcupine actually checks",
-      "learn": "Understand the layer above your Raft: the tester records a history of client operations with invocation and response intervals and asks whether some sequential ordering consistent with real time explains it — that is linearizability, and Porcupine is the checker that decides it (it writes an HTML visualisation on failure). Be able to say precisely what Raft gives you (a single totally ordered replicated log) and what it does not (linearizable *reads*, which need a log entry, a ReadIndex round trip, or a lease), and to read a Porcupine diagram to find the operation whose return value is impossible under every valid ordering.",
-      "minutes": 40,
-      "resource": {
-        "label": "Porcupine — linearizability checker for Go",
-        "url": "https://github.com/anishathalye/porcupine"
-      }
-    },
-    {
-      "name": "Section 8 client interaction: exactly-once and read paths",
-      "learn": "Read section 8 of the paper and design what lab 4 will need: clients tag every command with a clientId and a monotonically increasing seqNo, the state machine keeps a last-applied-seq table per client so a retried command after a leader change is deduplicated rather than applied twice, and that table is part of the snapshot. Know why a new leader commits a no-op entry from its own term at election time (to learn its true commitIndex before serving reads) and the three read strategies with their costs: put the read in the log (safe, one round trip of consensus), ReadIndex (confirm leadership with a heartbeat quorum, then read locally), or a leader lease (fastest, but correctness depends on bounded clock drift).",
-      "minutes": 45,
-      "resource": {
-        "label": "Raft extended paper — Section 8, Client interaction",
-        "url": "https://raft.github.io/raft.pdf"
-      }
-    },
-    {
-      "name": "From lab Raft to the consensus in a customer's stack",
-      "learn": "Close the loop by reading etcd's raft library README and mapping every lab concept onto a production knob: the `Node` interface and `Ready` struct that make persistence and message sending the application's job; PreVote and CheckQuorum, which stop a partitioned node from bumping the term and disrupting a healthy leader (your lab Raft has this bug by design); learners (non-voting members) for safe node replacement; ReadIndex for linearizable reads; and the WAL plus snapshot-count settings that decide restart time. Then look at the operational failure surface you will actually be paged for: losing quorum in a 3-node cluster, `etcdctl snapshot save` / restore, `--force-new-cluster`, and why fsync latency on the etcd disk shows up as apiserver timeouts.",
-      "minutes": 80,
-      "resource": {
-        "label": "etcd-io/raft — production Raft library README",
-        "url": "https://github.com/etcd-io/raft"
-      }
-    },
-    {
-      "name": "Quorum loss, recovery and cluster sizing for customers",
-      "learn": "Work the operational drill: for 2f+1 members you survive f failures, so 3 tolerates 1 and 5 tolerates 2, while 4 tolerates the same as 3 and is strictly slower — be able to shut down that 'let's add a fourth node for HA' request in one sentence. Walk etcd's documented failure modes: minority failure (self-heals when the member returns), majority failure (cluster is unavailable for writes and must be restored from a snapshot), and a partitioned member that returns with a higher term. Know the recovery sequence — stop members, `etcdutl snapshot restore` on each with a new cluster token, restart, verify with `etcdctl endpoint status --cluster` — and that a restore loses everything written after the snapshot, which is the number your customer actually needs to hear.",
-      "minutes": 45,
-      "resource": {
-        "label": "etcd — Failure modes and disaster recovery",
-        "url": "https://etcd.io/docs/v3.5/op-guide/failures/"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can run `make RUN=\"-run 3A\" raft1` through `-run 3D` and pass all of 3A, 3B, 3C and 3D with `-race`, repeated with `-count 10`, with the whole suite under the 600-second grading limit and no individual test over 120 seconds",
-    "You can point at the specific line in your raft.go that implements each numbered rule in Figure 2, including the two easily-skipped ones (step down on a higher term seen in a reply; apply while commitIndex > lastApplied)",
-    "You can reproduce the Figure 8 scenario on a whiteboard in under five minutes and state exactly which line of your commit-advance code prevents it",
-    "You can explain, without notes, the three and only three events that reset your election timer, and demonstrate a test that fails when you add a fourth",
-    "You can take a failing run's tester timeline plus your own annotated logs and name the first violated invariant and the peer that violated it, rather than the test that reported it",
-    "You can translate any lab constant into its production equivalent — heartbeat interval, election timeout, snapshot trigger, quorum size — and defend those values for a customer's cluster given their RTT and disk fsync latency",
-    "You can describe three implementations of a linearizable read (log entry, ReadIndex, leader lease), rank them by latency, and name the assumption each one can violate",
-    "You can diagnose an etcd cluster that has lost quorum and give the exact recovery sequence plus the data-loss window it implies"
-  ],
-  "failureModes": [
-    "Replying to a RequestVote or AppendEntries before persisting currentTerm/votedFor/log, so a crash-restart in the same term votes twice or forgets an acknowledged entry — in the lab it is an intermittent 3C failure, in production it is two leaders writing divergent history",
-    "Truncating the follower's log on every AppendEntries instead of only at a genuine conflict, so a delayed or duplicated RPC deletes entries that were already committed and the peers diverge — the tester calls this 'apply error', a customer calls it lost writes",
-    "Advancing commitIndex by counting replicas without checking log[N].Term == currentTerm, which commits a previous-term entry that a later leader can legally overwrite (Figure 8) — silent, rare, and only reproducible under partitions",
-    "Holding rf.mu across a peer.Call or an applyCh send, which deadlocks the peer; the cluster keeps electing leaders that never make progress, and the production analogue is an etcd member that answers heartbeats but stalls every write",
-    "Election timeouts tuned too aggressively for the environment — a node whose fsync latency spikes (EBS burst credits exhausted, noisy-neighbour NVMe) misses heartbeats, terms climb, and the cluster flaps leaders every few seconds while the apiserver above it times out",
-    "Log compaction that reslices instead of copying, so trimmed entries stay reachable and never get freed; memory grows for days until the process is OOM-killed, mirroring an etcd cluster that hits its DB quota, raises a NOSPACE alarm and goes read-only",
-    "Retrying a client command against a new leader without a clientId/seqNo dedup table, so an operation that timed out is applied twice — harmless for an idempotent Put, corrupting for an increment, a debit, or an append"
-  ],
-  "interviewQuestions": [
-    "Walk me through why a Raft leader may not mark an entry from a previous term committed just because it is stored on a majority. Draw the Figure 8 sequence and tell me what your code does instead.",
-    "Exactly where in the protocol must state hit stable storage before you reply, and what concretely breaks if you reply first? Now estimate the write throughput ceiling that rule imposes given a 6ms fsync.",
-    "A customer's five-node etcd behind their Kubernetes control plane is electing a new leader every couple of minutes and apiserver p99 latency has gone from 20ms to 2s. What do you look at, in what order, and which of heartbeat-interval, election-timeout, snapshot-count, disk or network do you expect to be the cause?",
-    "Give me three ways to serve a linearizable read from a Raft cluster, in order of increasing latency, and tell me the specific failure each one can exhibit.",
-    "A client issues a write, gets no response, and retries against a different node that is now leader. How do you guarantee the command applies exactly once, and where does that dedup state have to live so it survives a snapshot and a restart?",
-    "The customer's platform team wants to go from three to four members 'for more redundancy' across two datacentres. What do you tell them, and what would you propose instead?",
-    "How do snapshots interact with AppendEntries and the applyCh contract? What invariants must hold about the order and indices of messages the service sees after a follower installs a snapshot?"
-  ],
-  "proofOfWork": "Beyond the passing test suite, build a fault-injection harness and a written failure atlas on top of your own implementation. Add a debug build flag that lets you deliberately break one invariant at a time — persist after reply instead of before, drop the current-term check in the commit rule, truncate the log unconditionally on AppendEntries, reset the election timer on stale-term RPCs, remove the election restriction from RequestVote — then, for each mutation, run the suite with `-count 20` and record which tests fail, at what rate, and what the first divergence looks like in the tester timeline. Write it up as a short document (kept private since it contains lab code, or published with the solution stripped to diagrams and log excerpts) where each entry has the broken invariant, the safety property it violates from the paper, the observed symptom, the failure rate across twenty runs, and the equivalent production symptom in etcd or Consul — leader flapping, apiserver timeouts, a stale read, a double-applied command. That document is both the artifact that proves you understand Raft as a set of enforced invariants rather than a pile of RPCs, and the thing you can hand an interviewer or a customer's platform team when they ask why a consensus tuning change is risky."
+ "i": 41,
+ "topic": "React and Next.js for FDE demos and internal tools",
+ "track": "E. Backend and Data",
+ "month": 5,
+ "hours": 8,
+ "why": "The customer never sees your FastAPI service, your Temporal workflows or your eval harness; they see a screen, and in week two of every engagement someone asks 'can you put a UI on that so the ops team can use it'. An FDE who can stand up a typed, authenticated, streaming Next.js front end over their own API in an afternoon turns a backend demo into a pilot the customer can click through, and can also read and fix the customer's existing Next.js code (most enterprise platform teams already run it). Take-homes at Palantir, Anthropic and Databricks routinely include a small UI, and the difference between a screen that streams tokens through the customer's Nginx and one that freezes for eight seconds is exactly the kind of production detail this topic drills.",
+ "prerequisites": [
+  "TypeScript at the level of topic 28 (TypeScript and Node for FDEs): generics, discriminated unions, `satisfies`, async iteration, ESM vs CJS, `tsc --noEmit` in CI",
+  "A running DefenderMate backend from topics 26, 27 and 32: a token or OIDC login endpoint, at least one JSON list/detail endpoint, and an SSE endpoint relaying Claude's event stream",
+  "HTTP mechanics from topics 2 and 32: cookies and SameSite, CORS preflight, chunked transfer encoding, the SSE frame format, and where reverse proxies buffer",
+  "Auth from topic 27: verifying an RS256 JWT against a JWKS URL, refresh-token rotation, tenant claims, CSRF and why httpOnly cookies beat localStorage",
+  "Docker multi-stage builds and non-root images from topic 6, plus an Nginx or ALB in the path from topics 13 and 16 so streaming can be tested realistically",
+  "Node 20.9+ and pnpm or npm installed; working HTML/CSS basics (semantic elements, native form controls, flex and grid)"
+ ],
+ "subtopics": [
+  {
+   "name": "React rendering model: state ownership, derived values, keys",
+   "learn": "Walk through render -> commit -> browser paint and be able to say, for any screen in an internal tool (run list, run detail, streaming answer pane), which component owns each piece of state and which values are derived and must not live in `useState`. Practise 'lifting state up' and 'colocating state' on the DefenderMate run list: filter text lives in the list component, the selected run ID lives in the parent, the streaming buffer lives next to the reader. Know why `key` must be a stable identity (run ID, never array index) for lists that reorder or stream in, and what breaks when it is not: preserved input state on the wrong row, lost focus, remounted children.",
+   "minutes": 20,
+   "resource": {
+    "label": "react.dev - Thinking in React",
+    "url": "https://react.dev/learn/thinking-in-react"
+   }
+  },
+  {
+   "name": "Effects only for external systems: subscriptions, aborts, StrictMode double-invoke",
+   "learn": "Adopt the rule that `useEffect` exists to synchronise with something outside React (an EventSource, a WebSocket, a timer, the DOM) and never to compute derived data or respond to a prop change. Write the canonical fetch-in-effect correctly once: create an `AbortController`, pass `signal`, return a cleanup that aborts, and watch `StrictMode` mount-unmount-mount in dev prove your cleanup works. Understand the race where two rapid selections resolve out of order and how the abort or an `ignore` flag in cleanup fixes it. Know when `useSyncExternalStore` replaces an effect-plus-state pair for external stores.",
+   "minutes": 20,
+   "resource": {
+    "label": "react.dev - You Might Not Need an Effect",
+    "url": "https://react.dev/learn/you-might-not-need-an-effect"
+   }
+  },
+  {
+   "name": "Server and Client Components: what the boundary actually is",
+   "learn": "Internalise that `'use client'` marks a module boundary, not a place where code 'runs only in the browser': everything imported from a client module is bundled to the browser and still server-rendered to HTML once. Server Components can be async, read `cookies()`/`headers()`, hold secrets, and never re-render; props crossing the boundary must be serialisable (plain objects, arrays, Date, Map, Set, Promises, Server Functions; no class instances, no event handlers). Master the composition pattern: a client `<Tabs>` receives server-rendered `children`, so interactivity does not force data fetching into the browser. Add `import 'server-only'` to every module that touches tokens or the FastAPI base URL so a client import fails at build time rather than leaking at runtime, and check the Network tab to see what the RSC payload actually contains.",
+   "minutes": 35,
+   "resource": {
+    "label": "Next.js docs - Server and Client Components",
+    "url": "https://nextjs.org/docs/app/getting-started/server-and-client-components"
+   }
+  },
+  {
+   "name": "App Router file conventions: layouts, pages, dynamic segments, async params",
+   "learn": "Know exactly what each file does: `layout.tsx` (persists across navigations, does not re-render, cannot read `searchParams`), `page.tsx`, `loading.tsx` (an automatic Suspense boundary), `error.tsx`, `not-found.tsx`, `route.ts`, and route groups `(admin)` for grouping without a URL segment. Since Next 15 `params` and `searchParams` are Promises: `const { id } = await params` in `app/runs/[id]/page.tsx`, with the generated `PageProps<'/runs/[id]'>` type from `next typegen` giving you typed segments. Build the shell for DefenderMate: `app/(app)/layout.tsx` with nav and auth check, `app/(app)/runs/page.tsx`, `app/(app)/runs/[id]/page.tsx`, `app/login/page.tsx`, and use `<Link>` prefetching plus `useRouter().refresh()` deliberately, not by accident.",
+   "minutes": 20,
+   "resource": {
+    "label": "Next.js docs - Layouts and Pages",
+    "url": "https://nextjs.org/docs/app/getting-started/layouts-and-pages"
+   }
+  },
+  {
+   "name": "Fetching from FastAPI inside Server Components: auth forwarding, parallelism, typed responses",
+   "learn": "Fetch DefenderMate from the server with the session cookie translated into `Authorization: Bearer` inside a `server-only` API client, and know that Next's `fetch` default is 'auto no cache' (request-time unless you opt in with `cache: 'force-cache'` or `next: { revalidate, tags }`). Avoid waterfalls: start independent requests before awaiting (`const runsP = getRuns(); const statsP = getStats(); const [runs, stats] = await Promise.all([runsP, statsP])`), and use the preload pattern for data a child needs. Throw on `!res.ok` with the status and a redacted body so `error.tsx` catches it. Generate response types from the FastAPI OpenAPI document (`openapi-typescript`) so a schema change in topic 35's contract tests also fails `tsc` here; never hand-write the run model twice.",
+   "minutes": 35,
+   "resource": {
+    "label": "Next.js docs - Fetching Data",
+    "url": "https://nextjs.org/docs/app/getting-started/fetching-data"
+   }
+  },
+  {
+   "name": "Streaming the page: Suspense boundaries, loading.tsx, and use()",
+   "learn": "Understand that the App Router streams one HTTP response: the shell renders immediately and each `<Suspense fallback>` island is filled in as its promise resolves, in the same response body, so headers (including redirects and cookies) cannot be changed after the first flush. Place boundaries where latency actually differs: the run header is fast, the Claude-generated summary is slow, so wrap only the summary. Pass a promise from a Server Component to a Client Component and unwrap it with `use(promise)` when the client needs to own the pending state. Size fallbacks to the final content to avoid layout shift, and test with a throttled FastAPI endpoint (`await asyncio.sleep(3)`) to see the streaming order in the Network waterfall.",
+   "minutes": 25,
+   "resource": {
+    "label": "react.dev - <Suspense>",
+    "url": "https://react.dev/reference/react/Suspense"
+   }
+  },
+  {
+   "name": "Cache Components: use cache, cacheLife, cacheTag, updateTag",
+   "learn": "Learn the Next 16 model: with `cacheComponents: true` in `next.config.ts`, nothing is cached unless you say so and any request-time data (`cookies()`, `headers()`, `searchParams`, uncached `fetch`) must sit under a Suspense boundary or the build fails with an 'uncached data accessed outside Suspense' error. Mark a function or component with `'use cache'`, set its lifetime with `cacheLife('minutes' | 'hours' | 'days' | 'max')` or a custom profile, label it with `cacheTag('runs')`, and after a mutation call `updateTag('runs')` (read-your-own-writes in the same request) or `revalidateTag('runs', 'max')` for stale-while-revalidate. Use `connection()` when you need to force request-time rendering without reading a dynamic API. Know which of the DefenderMate screens should be cached at all: reference data yes, a tenant's run list no.",
+   "minutes": 30,
+   "resource": {
+    "label": "Next.js docs - Caching and Revalidating (Cache Components)",
+    "url": "https://nextjs.org/docs/app/getting-started/caching"
+   }
+  },
+  {
+   "name": "Route Handlers as the backend-for-frontend, including streaming pass-through",
+   "learn": "Write `app/api/runs/[id]/stream/route.ts` exporting `GET(request: NextRequest, ctx: RouteContext<'/api/runs/[id]/stream'>)` that reads the session cookie, calls FastAPI with `Authorization: Bearer`, and returns `new Response(upstream.body, { headers })` with `Content-Type: text/event-stream`, `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no`. Set `export const dynamic = 'force-dynamic'`, `runtime = 'nodejs'` and `maxDuration` appropriately. Pass `request.signal` to the upstream `fetch` and verify with FastAPI logs that closing the tab stops the Claude generation within a second; if your Next version does not propagate the abort, wrap the upstream in a `ReadableStream` whose `cancel()` aborts an `AbortController`. Know why the BFF exists at all: the browser never holds the API token, CORS disappears, and the customer's SSO cookie stays first-party.",
+   "minutes": 35,
+   "resource": {
+    "label": "Next.js docs - Backend for Frontend guide",
+    "url": "https://nextjs.org/docs/app/guides/backend-for-frontend"
+   }
+  },
+  {
+   "name": "Consuming the token stream in a Client Component without melting the UI",
+   "learn": "Read the Route Handler stream with `fetch` plus `res.body.pipeThrough(new TextDecoderStream()).getReader()` and parse SSE frames yourself: split on blank lines, carry partial lines across chunks in a buffer, dispatch on `event:` (DefenderMate relays Claude's `content_block_delta`, `message_stop`, error events from topic 32) and parse `data:` as JSON. Tie an `AbortController` to both component unmount and a Stop button. Do not `setState` per token: append to a ref and flush at most once per animation frame or via `startTransition`, or the 40 re-renders per second stall typing in the input. Know why `EventSource` is a poor fit here (GET only, no custom headers, but cookie auth does work) and when its automatic reconnect with `Last-Event-ID` is still worth it.",
+   "minutes": 35,
+   "resource": {
+    "label": "MDN - Using readable streams",
+    "url": "https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Using_readable_streams"
+   }
+  },
+  {
+   "name": "Forms with Server Functions, Zod 4 validation, useActionState and useOptimistic",
+   "learn": "Write `'use server'` functions that receive `FormData`, parse it with Zod 4 (`schema.safeParse(Object.fromEntries(formData))`, `z.flattenError` for field errors) and return a `{ errors, values }` state object; wire it with `useActionState(action, initialState)` to get `[state, formAction, isPending]` and render field errors next to inputs. Prove progressive enhancement by disabling JavaScript: the form still submits and the errors still render because the action is a plain POST. Use `useFormStatus()` in a child submit button, `useOptimistic` to add the new run to the list instantly and roll back on failure, and `redirect()` after success (never inside try/catch: it throws). Call `updateTag`/`revalidateTag` in the action so the list is fresh on the next render.",
+   "minutes": 35,
+   "resource": {
+    "label": "Next.js docs - Forms guide",
+    "url": "https://nextjs.org/docs/app/guides/forms"
+   }
+  },
+  {
+   "name": "Server Functions are public POST endpoints: authorisation, arguments, CSRF, size limits",
+   "learn": "Treat every Server Function as an unauthenticated HTTP endpoint identified by an action ID visible in the Network tab: authorise inside the function (`const session = await verifySession()`), validate every argument (the client can send anything), and never trust that 'only admins see the button'. Know that closure-captured values are encrypted with a build-time key and that multi-replica deployments need `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` set consistently or actions fail after a rolling deploy. Configure `serverActions.allowedOrigins` when a reverse proxy makes `Origin` differ from `Host` (Next's built-in CSRF check compares them), and `serverActions.bodySizeLimit` (default 1 MB) before a file-upload form silently 413s in the customer's environment.",
+   "minutes": 20,
+   "resource": {
+    "label": "Next.js docs - serverActions config (allowedOrigins, bodySizeLimit)",
+    "url": "https://nextjs.org/docs/app/api-reference/config/next-config-js/serverActions"
+   }
+  },
+  {
+   "name": "Auth: session cookie, Data Access Layer, JWKS verification against FastAPI",
+   "learn": "Implement login as a Server Function that posts credentials (or completes the OIDC code exchange from topic 27) to FastAPI, then `(await cookies()).set('session', token, { httpOnly: true, secure: true, sameSite: 'lax', path: '/', expires })`; cookies can only be set in Server Functions and Route Handlers, not in Server Components. Build a `server-only` Data Access Layer with `verifySession()` wrapped in React `cache()` so it runs once per request, verifying the JWT with `jose` (`jwtVerify` against `createRemoteJWKSet(new URL(issuer + '/.well-known/jwks.json'))`, checking `iss`, `aud`, `exp` and the tenant claim) and returning a DTO with only the fields the UI needs. Every data function calls the DAL; layouts are not a security boundary because they do not re-render on navigation. Handle refresh-token rotation and logout (`cookies().delete`) and confirm a tampered cookie yields a redirect to `/login`, never a stack trace.",
+   "minutes": 40,
+   "resource": {
+    "label": "Next.js docs - Authentication guide",
+    "url": "https://nextjs.org/docs/app/guides/authentication"
+   }
+  },
+  {
+   "name": "proxy.ts (formerly middleware): matchers, optimistic redirects, request headers",
+   "learn": "Write `proxy.ts` at the project root exporting `default function proxy(request: NextRequest)` with `export const config = { matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'] }` so it skips static assets. In Next 16 it runs on the Node.js runtime by default but still executes on every matched request before the cache, so keep it cheap: check cookie presence for an optimistic redirect to `/login`, stamp `x-request-id` and tenant headers onto the request with `NextResponse.next({ request: { headers } })`, and rewrite for A/B or maintenance pages. Do not verify JWTs or call databases here; the DAL is the real check. Know the middleware-to-proxy migration so you can read customer codebases on either name.",
+   "minutes": 25,
+   "resource": {
+    "label": "Next.js docs - proxy.ts file convention",
+    "url": "https://nextjs.org/docs/app/api-reference/file-conventions/proxy"
+   }
+  },
+  {
+   "name": "Error boundaries, digests, not-found, and redaction in production",
+   "learn": "`error.tsx` must be a Client Component receiving `{ error: Error & { digest?: string }, reset: () => void }`; in production Next redacts server error messages and ships only a `digest`, which you must log server-side to correlate. `global-error.tsx` replaces the root layout and must render `<html>` and `<body>` itself. Call `notFound()` for a missing run so the segment's `not-found.tsx` renders with a 404. Errors thrown after streaming has started become inline error boundaries, not HTTP 500s, so monitor them via `instrumentation.ts` `onRequestError(err, request, context)` rather than status codes. Put a 'copy digest' button in your error UI so a customer screenshot is enough to find the log line.",
+   "minutes": 25,
+   "resource": {
+    "label": "Next.js docs - Error Handling",
+    "url": "https://nextjs.org/docs/app/getting-started/error-handling"
+   }
+  },
+  {
+   "name": "OpenTelemetry from Next.js into your FastAPI traces",
+   "learn": "Add `instrumentation.ts` with `export function register()` that calls `registerOTel({ serviceName: 'defendermate-ui' })` from `@vercel/otel` (or a manual `NodeSDK` guarded by `process.env.NEXT_RUNTIME === 'nodejs'`), export to the same collector as topic 21, and read Next's built-in spans: `BaseServer.handleRequest`, `AppRender.getBodyResult`, `AppRouteRouteHandlers.runHandler`, `AppRender.fetch`. Confirm `traceparent` is propagated on the server-side `fetch` to FastAPI so one trace spans page render, BFF hop and Claude call; set `NEXT_OTEL_VERBOSE=1` when you need per-component spans. Implement `onRequestError` to record the digest, route, and `renderSource` on the active span so a digest-to-trace lookup is one query.",
+   "minutes": 20,
+   "resource": {
+    "label": "Next.js docs - OpenTelemetry guide",
+    "url": "https://nextjs.org/docs/app/guides/open-telemetry"
+   }
+  },
+  {
+   "name": "Internal-tool UI kit: Tailwind v4, shadcn/ui, TanStack Table, accessibility",
+   "learn": "Do not design a component library on a customer's clock: `npx shadcn@latest init` then `add button input table dialog form` copies accessible components (over Radix or Base UI primitives) into `components/ui` that you own and can edit. Tailwind v4 is CSS-first (`@import \"tailwindcss\"` and `@theme {}` tokens, no `tailwind.config.js` by default); use the `cn()` helper for conditional classes. Build the runs table with TanStack Table `useReactTable({ data, columns, getCoreRowModel, manualPagination: true, pageCount })` driven by `searchParams` (`?page=2&sort=created_at.desc`) so every view is a shareable URL and pagination happens in FastAPI, not the browser. Keep native `<label htmlFor>`, focus rings and `aria-live=\"polite\"` on the streaming pane; load heavy widgets (charts, code editors) with `next/dynamic` and check `@next/bundle-analyzer` before the demo.",
+   "minutes": 30,
+   "resource": {
+    "label": "shadcn/ui docs",
+    "url": "https://ui.shadcn.com/docs"
+   }
+  },
+  {
+   "name": "TanStack Query where it earns its place: polling, mutations, hydration",
+   "learn": "Use TanStack Query v5 only for client-owned data: polling a running agent with `useQuery({ queryKey: ['run', id], queryFn, refetchInterval: (q) => q.state.data?.status === 'running' ? 1000 : false })`, `useMutation` with `onSuccess: () => queryClient.invalidateQueries({ queryKey: ['runs'] })`, and `staleTime` tuned so navigation does not refetch. Prefetch on the server with `queryClient.prefetchQuery` and hand it to the client via `<HydrationBoundary state={dehydrate(queryClient)}>` so there is no double fetch after hydration. Create the `QueryClient` per request on the server (an `isServer` check in a `getQueryClient()` helper) and once per browser on the client via `useState(() => new QueryClient())`; a module-level client on the server leaks one user's cache to the next request.",
+   "minutes": 25,
+   "resource": {
+    "label": "TanStack Query docs - Advanced Server Rendering (App Router)",
+    "url": "https://tanstack.com/query/latest/docs/framework/react/guides/advanced-ssr"
+   }
+  },
+  {
+   "name": "Hydration mismatches: dates, locales, window checks, extensions",
+   "learn": "Know the causes cold: `new Date().toLocaleString()` rendered on a UTC server and a local-time client, `Math.random()` or `crypto.randomUUID()` in render, `typeof window !== 'undefined'` branches that change output, invalid HTML nesting (`<div>` inside `<p>`), and browser extensions that mutate the DOM before hydration. Fixes: render timestamps with a fixed timezone or format them in a Client Component after mount, use `useId()` for IDs, `useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)` for client-only values like `matchMedia`, and `suppressHydrationWarning` only on the single text node that legitimately differs. Understand that a mismatch makes React 19 throw away the server HTML and re-render on the client, so the page 'works' but pays full client-render cost and floods the console the customer's security team is watching.",
+   "minutes": 20,
+   "resource": {
+    "label": "react.dev - hydrateRoot (hydration errors)",
+    "url": "https://react.dev/reference/react-dom/client/hydrateRoot"
+   }
+  },
+  {
+   "name": "Shipping to a customer VPC: runtime env, standalone Docker, Nginx, skew",
+   "learn": "Understand that `NEXT_PUBLIC_*` is inlined at `next build`, so one image cannot carry different API URLs per environment; read environment-specific values on the server only (in the DAL or a Route Handler) and pass what the browser needs as props. Build with `output: 'standalone'`: a multi-stage Dockerfile that copies `.next/standalone`, `.next/static` and `public`, runs `node server.js` as a non-root user with `HOSTNAME=0.0.0.0` and `PORT`, and installs `sharp` for image optimisation. In front of Nginx, send `X-Accel-Buffering: no` (via `headers()` in `next.config.ts` or on the streaming response) and know that `next start`'s built-in `compress` can buffer SSE, so set `compress: false` and compress at the proxy. Set `deploymentId` so clients holding old HTML during a rolling deploy do not hit `ChunkLoadError`, and configure a shared `cacheHandler` (Redis, topic 31) when you run more than one replica with cached segments.",
+   "minutes": 35,
+   "resource": {
+    "label": "Next.js docs - Self-Hosting guide",
+    "url": "https://nextjs.org/docs/app/guides/self-hosting"
+   }
+  },
+  {
+   "name": "Testing the UI: Playwright e2e with storageState, Vitest for client components, build as a gate",
+   "learn": "Write Playwright tests that log in once in a setup project and reuse `storageState`, then assert the real behaviours: the runs table renders rows from a seeded FastAPI, the stream pane accumulates text (`await expect(page.getByTestId('answer')).toContainText('...', { timeout: 30_000 })`), Stop cancels the request, and the form shows field errors with `javaScriptEnabled: false`. Use Vitest plus Testing Library for pure Client Components only; Next documents that async Server Components are not supported by Vitest, so cover them end to end. Make `tsc --noEmit`, `next typegen` and `next build` the CI gate and read the build route table (static vs dynamic markers) as a review artifact; run the Playwright suite against the built container, not `next dev`.",
+   "minutes": 20,
+   "resource": {
+    "label": "Next.js docs - Testing with Playwright",
+    "url": "https://nextjs.org/docs/app/guides/testing/playwright"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can scaffold a Next 16 App Router app and, in under two hours, ship a typed list/detail UI over an existing FastAPI service with server-side fetching, a `loading.tsx` skeleton and an `error.tsx` boundary, with `next build` passing type-check and showing each route's static/dynamic marker.",
+  "You can draw the server/client boundary for a given screen on a whiteboard, naming which components are Server Components, which are `'use client'`, exactly what crosses the boundary as props, and where the secret-bearing fetch runs, and justify each choice in one sentence.",
+  "You can stream Claude output from DefenderMate through a Route Handler to a Client Component with a working Stop button, show in FastAPI logs that the upstream generation stops within one second of abort, and demonstrate it working behind a default-config Nginx after adding the documented headers.",
+  "You can implement login as a Server Function that sets an httpOnly, secure, SameSite=Lax session cookie, gate every data fetch through a `server-only` Data Access Layer that verifies the JWT with `jose` against FastAPI's JWKS, and show that a missing cookie redirects and a tampered cookie yields a clean redirect, never a stack trace or a digest.",
+  "You can validate a form with Zod 4 on the server via `useActionState`, render field-level errors with JavaScript disabled, and show `useOptimistic` updating the list before the server responds and rolling back on failure.",
+  "You can explain the Cache Components model and demonstrate `'use cache'` plus `cacheTag` plus `updateTag` fixing a stale dashboard after a mutation, and reproduce the build error you get when request-time data is read outside a Suspense boundary.",
+  "You can build one standalone Docker image that runs unchanged in staging and prod with no `NEXT_PUBLIC_` environment leakage, runs as non-root, and passes a Playwright smoke test executed against the container in CI.",
+  "You can take an `error.digest` from a customer screenshot, find the matching `onRequestError` log line, and follow the propagated `traceparent` into the FastAPI span in the trace backend."
+ ],
+ "failureModes": [
+  "The customer's Nginx (and `next start`'s own gzip layer) buffered the SSE stream so the whole answer appeared after eight seconds; the demo looked broken until `X-Accel-Buffering: no` was sent and `compress: false` moved compression to the proxy.",
+  "`NEXT_PUBLIC_API_URL` was baked into the image at build time pointing at staging; the production demo silently showed staging data, and the 'fix' of rebuilding per environment destroyed the one-image-everywhere reproducibility the customer's platform team required.",
+  "An admin 'delete tenant' Server Function had no authorisation inside the function because 'only admins see the button'; anyone who copied the action ID from the Network tab could POST it, and it was found in the customer's pentest.",
+  "A dashboard showed yesterday's numbers because the fetch sat inside `'use cache'` with `cacheLife('days')` and the mutation only called `revalidatePath`, which never touched the tag; the customer concluded the ingestion pipeline was down.",
+  "`new Date().toLocaleString()` rendered in server UTC and client local time caused a hydration mismatch on every page; React discarded the SSR tree and re-rendered client-side, adding a visible flash and a wall of console errors that the customer's security reviewer logged as a finding.",
+  "A rolling deploy without `deploymentId` left open tabs requesting chunk hashes that no longer existed, so every user in the customer's morning stand-up hit `ChunkLoadError` at once and the FDE was paged from the meeting.",
+  "A module-level `new QueryClient()` imported by a Server Component was shared across requests on one pod, so user A briefly saw user B's cached run list; it passed every test because the e2e suite ran a single user."
+ ],
+ "interviewQuestions": [
+  "Draw the request lifecycle for an authenticated dashboard page in the App Router: browser, proxy.ts, layout, page, Data Access Layer, FastAPI, RSC payload. Where does the JWT live at each hop, and where exactly do you enforce that a user only sees their own tenant's runs, and why not in the layout?",
+  "A customer says streaming works on the engineer's laptop but in their Kubernetes cluster the answer appears all at once after eight seconds. Walk me through localising the buffering hop across the Client Component, the Route Handler, `next start`, the ingress and the FastAPI pod, and the specific change at each.",
+  "For a run-monitoring screen, when do you fetch in a Server Component versus a Route Handler versus TanStack Query in a Client Component versus a Server Function? Defend the split and explain how you avoid a double fetch after hydration.",
+  "Explain what `'use client'` actually does to a module graph. A colleague added it to the root layout to fix a `useState` error and the bundle tripled. What happened, and how do you restructure with the composition pattern?",
+  "Design forms for an internal tool at a customer whose corporate proxy sometimes strips JavaScript and enforces a strict CSP: progressive enhancement, validation, error display, optimistic updates, and the CSRF story for Server Functions behind a reverse proxy where `Origin` and `Host` differ.",
+  "We ship one Docker image to five customer environments with different API URLs and SSO issuers. How do you configure a Next.js app at runtime without rebuilding, what breaks if you rely on `NEXT_PUBLIC_`, and how do you keep Server Functions working across replicas and deploys?",
+  "After a deploy, 5 percent of users see 'Application error: a server-side exception has occurred' with a digest. Walk me from that digest to root cause, and tell me what you would add so the next incident is self-explanatory from a single customer screenshot."
+ ],
+ "proofOfWork": "A recorded ten-minute 'customer demo' plus a public repo that a platform team could clone and run. The repo contains the Next 16 app over DefenderMate built as a standalone, non-root Docker image behind an Nginx container with default settings; a one-page architecture diagram in the README marking the server/client boundary, the session-cookie auth flow through the Data Access Layer, and the streaming path from Claude to the browser; a `docs/streaming-drill.md` with before/after HAR captures showing the buffered stream and the fix (headers and `compress: false`); a `docs/runtime-config.md` proving the same image digest runs against two different FastAPI base URLs and issuers without rebuilding; a Playwright suite (login via `storageState`, table pagination via URL, stream with Stop asserting the FastAPI log line for the aborted generation, form validation with `javaScriptEnabled: false`) running in GitHub Actions against the built container; and a `docs/digest-to-trace.md` walkthrough with screenshots going from an `error.digest` in the UI to the `onRequestError` log entry to the trace in the collector that includes the FastAPI span, so a customer support engineer could repeat the lookup unaided."
 }

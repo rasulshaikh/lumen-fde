@@ -1,191 +1,227 @@
 {
-  "i": 54,
-  "topic": "LLM observability: traces, cost, latency, datasets",
-  "track": "H. AI in Production",
-  "month": 7,
-  "hours": 6,
-  "why": "When a customer says 'the assistant gave a wrong answer at about 3pm yesterday' or 'finance says this thing cost eleven thousand dollars last month', an FDE either opens a trace and answers in ninety seconds or spends two days reconstructing the incident from application logs that never captured the prompt. LLM observability is the difference between debugging a non-deterministic system with evidence and debugging it with opinions, and it is the only mechanism that turns real production failures into a growing eval dataset instead of a growing list of complaints. It is also how you defend a deployment commercially: cost per tenant, p95 latency by prompt version, and refusal rate are the numbers that decide renewal, and nobody else on the account team can produce them.",
-  "prerequisites": [
-    "Observability: OpenTelemetry, Prometheus, Grafana (topic 21) - spans, span context, the collector, OTLP exporters, and why a trace id is not a log line.",
-    "FastAPI in production (topic 26) - lifespan hooks, dependency injection, background tasks and worker processes, because that is where you install the tracer and where you must flush it before shutdown.",
-    "SRE fundamentals: SLIs, SLOs, error budgets (topic 20) - you will define availability, latency and cost SLIs for an LLM feature, not just stare at dashboards.",
-    "LLM fundamentals and prompt engineering as code (topics 45, 46) - tokenisation, context windows, streaming, prompt versioning; a trace without a prompt version attached is barely a trace.",
-    "Agents and RAG at depth (topics 48, 49) - the shape of the thing you are instrumenting is nested: retriever spans, tool calls, retries, sub-agents.",
-    "Docker Compose and enough Postgres/ClickHouse literacy (topics 5, 29) to stand up and reason about a self-hosted Langfuse deployment inside a customer VPC."
-  ],
-  "subtopics": [
-    {
-      "name": "The data model: trace, observation, and the ids you join on",
-      "learn": "Learn the object graph cold: a trace holds many observations; observations nest by parent id and carry a type - event, span, generation, agent, tool, chain, retriever, embedding, evaluator, guardrail. Only generation and embedding carry usage and cost. Trace ids are 32 hex chars, observation ids 16 hex, matching W3C trace-context, which is exactly why joining to your OTel backend is possible at all. Be able to draw, for one Kaupex request, which node is a span, which is a generation, and which fields (input, output, metadata, level, statusMessage) you would need to reproduce the bug without asking the customer anything.",
-      "minutes": 20,
-      "resource": {
-        "label": "Langfuse docs - Observability core concepts / data model",
-        "url": "https://langfuse.com/docs/observability/data-model"
-      }
-    },
-    {
-      "name": "Instrumenting the application: decorators, context managers, and flush",
-      "learn": "Instrument three ways and know when each is right: the `@observe()` decorator for whole functions, `start_as_current_observation(as_type=...)` for explicit blocks, and framework/provider auto-instrumentation for the model client. Set `as_type=\"tool\"`, `\"retriever\"`, `\"generation\"` deliberately - the UI's agent graph and every later filter depend on it. The failure that bites everyone: the SDK batches and exports asynchronously, so short-lived processes (Lambda, Celery task, CLI, a `pytest` run) lose traces unless you call `langfuse.flush()` or shut the client down in a FastAPI lifespan handler. Verify with `auth_check()` at startup rather than discovering a bad `LANGFUSE_HOST` in production.",
-      "minutes": 25,
-      "resource": {
-        "label": "Langfuse docs - SDK instrumentation",
-        "url": "https://langfuse.com/docs/observability/sdk/instrumentation"
-      }
-    },
-    {
-      "name": "Wiring LLM traces into the existing OTel pipeline",
-      "learn": "Langfuse receives OTLP on `/api/public/otel`; set `OTEL_EXPORTER_OTLP_ENDPOINT` to the region host (`cloud.langfuse.com`, `us.`, `jp.`, `hipaa.`, or your self-hosted origin) and pass basic-auth public/secret keys via `OTEL_EXPORTER_OTLP_HEADERS`. Decide the topology up front: export from the app directly, or fan out from an OpenTelemetry Collector so the same spans reach both Tempo/Datadog and Langfuse. Know the collector-side pieces you will actually touch - `otlp` receiver, `batch` processor, multiple exporters in one pipeline - and that per-signal endpoint overrides exist because most enterprises already own the metrics path.",
-      "minutes": 25,
-      "resource": {
-        "label": "Langfuse docs - OpenTelemetry (OTLP) integration",
-        "url": "https://langfuse.com/integrations/native/opentelemetry"
-      }
-    },
-    {
-      "name": "Joining the LLM trace to the service trace",
-      "learn": "This is the depth target: one id from the customer's ingress to the model call. Propagate W3C `traceparent` (`00-<32 hex trace-id>-<16 hex span-id>-<flags>`) across service hops so the LLM spans land in the same trace, and use `get_current_trace_id()` / `get_current_observation_id()` to stamp the id into your own application logs and into the API response header you hand support. Use `create_trace_id(seed=...)` to derive a deterministic id from an external key (ticket id, DefenderMate scan id) so a customer's reference number resolves straight to a trace. Test the failure case: a queue hop or a `httpx` client without the propagator silently starts a fresh trace, and you get two orphan traces instead of one.",
-      "minutes": 25,
-      "resource": {
-        "label": "Langfuse docs - Trace IDs and distributed tracing",
-        "url": "https://langfuse.com/docs/observability/features/trace-ids-and-distributed-tracing"
-      }
-    },
-    {
-      "name": "OTel GenAI semantic conventions - naming attributes so they survive a vendor swap",
-      "learn": "Use the standard attribute names rather than inventing your own: `gen_ai.system`, `gen_ai.operation.name`, `gen_ai.request.model`, `gen_ai.request.temperature`, `gen_ai.request.max_tokens`, `gen_ai.response.model`, `gen_ai.response.finish_reasons`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`. Know that the conventions are still experimental and moved to their own repository, that prompt/completion content is captured under opt-in content-capture settings precisely because it is sensitive, and that span names follow `{operation} {model}`. The payoff is portability: when the customer's platform team standardises on Datadog LLM Observability or Grafana next year, conforming attributes migrate and bespoke `my_app.llm_tokens` does not.",
-      "minutes": 20,
-      "resource": {
-        "label": "OpenTelemetry - GenAI semantic conventions repository",
-        "url": "https://github.com/open-telemetry/semantic-conventions-genai"
-      }
-    },
-    {
-      "name": "Cost attribution: ingested vs inferred, usage types, custom models",
-      "learn": "Understand the precedence rule: values you ingest from the provider response win; otherwise Langfuse infers usage with a tokenizer and cost by matching the `model` string to a model definition with a price per usage type. Usage types are not just input/output - `cache_creation_input_tokens`, `cache_read_input_tokens`, `reasoning`, `audio` all price differently, and dropping them makes prompt-caching savings invisible. Register custom model definitions (regex match, unit prices, start date) for self-hosted, fine-tuned or Bedrock-renamed models, and know that a price change applies from its effective date rather than retroactively. Streaming responses are the classic silent failure: usage arrives in the terminal chunk, and if you close the span first, cost silently reads zero.",
-      "minutes": 30,
-      "resource": {
-        "label": "Langfuse docs - Token and cost tracking",
-        "url": "https://langfuse.com/docs/observability/features/token-and-cost-tracking"
-      }
-    },
-    {
-      "name": "Latency decomposition: TTFT, self-time, retries, queueing",
-      "learn": "A generation span's wall time is not model latency. Decompose it into time-to-first-token (record it explicitly - it is the number that governs perceived speed for a streamed UI), inter-token latency, and total; then compute self-time (span duration minus children) to separate your orchestration overhead from provider time. Represent SDK retries as sibling spans with the HTTP status and `retry-after` in attributes, or you will see one 40-second call instead of three 429s and a success. Always report p50/p95/p99 rather than mean - LLM latency distributions are fat-tailed and the mean hides the tail the customer is complaining about.",
-      "minutes": 30,
-      "resource": {
-        "label": "OpenTelemetry docs - Traces (spans, attributes, events)",
-        "url": "https://opentelemetry.io/docs/concepts/signals/traces/"
-      }
-    },
-    {
-      "name": "The dimensions that make traces queryable: sessions, users, tags, environments, release",
-      "learn": "Set `session_id` for a multi-turn conversation, `user_id` for the end user, `tags` for tenant/feature/model-tier, and `environment` to keep staging out of the production cost chart. Stamp `release` (git sha) and prompt `version` on every trace so a latency regression can be attributed to a deploy in one filter. Design this like a cardinality-conscious metrics label set: tenant slug yes, raw email no, request uuid never as a tag. The test of a good scheme is that you can answer 'cost per tenant per day for the last 30 days, excluding staging' without writing any code.",
-      "minutes": 25,
-      "resource": {
-        "label": "Langfuse docs - Sessions",
-        "url": "https://langfuse.com/docs/observability/features/sessions"
-      }
-    },
-    {
-      "name": "Linking prompt versions to traces",
-      "learn": "Attach the managed prompt object to the generation so every trace records which prompt version produced it, then compare cost, latency and scores across versions in one view. This is what makes 'we changed the system prompt on Tuesday' a testable claim rather than a hypothesis. Know the operational detail that the client caches prompts with a TTL and falls back to the last cached version when the control plane is unreachable, so a prompt-management outage degrades to stale-but-working rather than down.",
-      "minutes": 15,
-      "resource": {
-        "label": "Langfuse docs - Link prompts to traces",
-        "url": "https://langfuse.com/docs/prompt-management/features/link-to-traces"
-      }
-    },
-    {
-      "name": "Scores: attaching quality and feedback signals to traces",
-      "learn": "A score references exactly one of trace, observation, session or dataset run, and is numeric, categorical, boolean or text, optionally bound to a ScoreConfig that enforces range and allowed categories. Wire three sources: explicit user feedback (thumbs, correction), implicit signals (did the user re-ask, did they copy the answer, did the tool call succeed), and automated evaluators. Sending scores from the browser needs the trace id returned to the client, which is the practical reason you surfaced it in step four. Without a ScoreConfig you get 'helpfulness' scored 1-5 by one service and 0-1 by another, and every aggregate afterwards is garbage.",
-      "minutes": 25,
-      "resource": {
-        "label": "Langfuse docs - Scores data model",
-        "url": "https://langfuse.com/docs/evaluation/scores/data-model"
-      }
-    },
-    {
-      "name": "Online evaluation and human review queues on sampled production traces",
-      "learn": "Configure an LLM-as-a-judge evaluator to run on a filtered slice of live traces (for example: only Kaupex traces tagged `tier=enterprise`, sampled at 10%) with variable mappings from trace input/output into the judge prompt, and know that the judge itself costs tokens and needs its own model connection and budget. Route low-scoring or flagged traces into an annotation queue so a human reviewer labels them and their verdict becomes the ground truth your automated judge is calibrated against. Track judge-versus-human agreement explicitly - an uncalibrated judge is a confident random number generator that will make you ship a regression.",
-      "minutes": 25,
-      "resource": {
-        "label": "Langfuse docs - LLM-as-a-judge evaluation",
-        "url": "https://langfuse.com/docs/evaluation/evaluation-methods/llm-as-a-judge"
-      }
-    },
-    {
-      "name": "Datasets built from production traces, and runs linked back to them",
-      "learn": "Close the loop: when a trace is wrong, promote it to a dataset item in one action, capturing input, the expected output you wrote after diagnosis, and metadata (tenant, model, prompt version). Run experiments over the dataset so each item execution produces its own trace linked to the dataset run, letting you diff run A vs run B item by item rather than comparing two aggregate percentages. Keep dataset items versioned and immutable-by-convention, and split into a working set and a held-out set so you do not tune against the same fifty examples forever. The measure of a healthy deployment is that the dataset grows every week from real incidents.",
-      "minutes": 25,
-      "resource": {
-        "label": "Langfuse docs - Datasets",
-        "url": "https://langfuse.com/docs/evaluation/experiments/datasets"
-      }
-    },
-    {
-      "name": "Sampling, batching, and the overhead budget",
-      "learn": "Sampling is client-side and trace-level: set `LANGFUSE_SAMPLE_RATE` or the `sample_rate` constructor arg between 0 and 1, and if a trace is dropped every observation and score under it is dropped too - consistent, but it means you cannot sample at 0.1 and still expect complete cost totals, so keep usage aggregates on a separate always-on path. Know the export machinery you will have to debug: an in-process queue, a batch worker, `flush_at`/`flush_interval` style tuning, and what happens when the queue fills (drops, not blocks - which is the behaviour you want on the request path). Measure the added p95 on your own endpoint before and after instrumentation and state the number; 'observability is free' is not an answer a platform team accepts.",
-      "minutes": 25,
-      "resource": {
-        "label": "Langfuse docs - Sampling",
-        "url": "https://langfuse.com/docs/observability/features/sampling"
-      }
-    },
-    {
-      "name": "PII, masking and retention - the answer to the security review",
-      "learn": "Prompt and completion payloads are the most sensitive data in the system, so masking runs before export: the modern hook patches raw OpenTelemetry span attributes at export time (deleting or rewriting things like `gen_ai.prompt.*` content), while the legacy `mask` callback only covers data set through the SDK's own APIs - know which one covers third-party instrumentation, because that is where leaks happen. Combine regex/entity redaction with structural rules (never trace raw file bytes, hash identifiers, keep tenant id but drop names), and set project-level retention in days so trace payloads expire on a schedule you can point at in a DPA. Assume you will be asked 'where does this data live and for how long' in week one of an enterprise deployment.",
-      "minutes": 25,
-      "resource": {
-        "label": "Langfuse docs - Masking sensitive LLM data",
-        "url": "https://langfuse.com/docs/observability/features/masking"
-      }
-    },
-    {
-      "name": "Dashboards, the Metrics API, and alerts that page someone",
-      "learn": "Build custom dashboards over the trace store, then learn the programmatic path: `GET /api/public/v2/metrics` takes a view, dimensions, metrics, filters and time granularity and returns aggregated cost, tokens, volume, latency and scores as JSON - that is how you produce a weekly cost-per-tenant report or feed a chargeback spreadsheet without exporting rows. Define real SLIs for the feature (availability = non-error traces, latency = p95 TTFT, quality = judge score above threshold, cost = USD per successful answer) and wire threshold alerts plus spend alerts to Slack or a webhook. An alert that nobody owns is a dashboard; make each one name the runbook step.",
-      "minutes": 25,
-      "resource": {
-        "label": "Langfuse docs - Custom dashboards",
-        "url": "https://langfuse.com/docs/metrics/features/custom-dashboards"
-      }
-    },
-    {
-      "name": "Self-hosting inside the customer's boundary",
-      "learn": "Most regulated customers will not send prompts to a vendor cloud, so be able to stand the stack up yourself: the web/worker containers plus Postgres (transactional), ClickHouse (traces, observations, scores), Redis/Valkey (queue and cache) and S3-compatible blob storage for large payloads and events. Know the environment variables that matter (`DATABASE_URL`, `CLICKHOUSE_URL`, `REDIS_CONNECTION_STRING`, `LANGFUSE_S3_EVENT_UPLOAD_*`, `NEXTAUTH_URL`, the encryption and salt secrets), that the worker is what actually ingests, and the sizing consequence: ClickHouse is the component that grows, so retention and sampling are capacity decisions. Practise the ninety-second version of this for a customer architect: what runs where, what leaves the VPC (nothing), and how backups and upgrades work.",
-      "minutes": 25,
-      "resource": {
-        "label": "Langfuse self-hosting guide",
-        "url": "https://langfuse.com/self-hosting"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can take a single request id from a Kaupex API response and open one trace that shows the HTTP span, retrieval span, every model generation with its prompt version, token usage, USD cost and TTFT, and the tool calls in between - with no gap where the LLM call is an opaque 8-second block.",
-    "You can state cost per tenant per day and cost per successful answer for a deployment, pulled from the Metrics API rather than a provider invoice, and explain the difference between the two numbers.",
-    "You can show p50/p95/p99 latency broken down into time-to-first-token, provider time and your own orchestration self-time, and name which of the three you would attack first for a given complaint.",
-    "You can turn a customer-reported bad answer into a dataset item with an expected output in under five minutes, then re-run the dataset and show per-item pass/fail against the previous run.",
-    "You can demonstrate masking working end to end: a trace containing a synthetic national-ID string in the prompt arrives at the backend with that field redacted, including for spans produced by third-party auto-instrumentation.",
-    "You can quantify instrumentation overhead: measured p95 delta on your endpoint with tracing on versus off, plus the trace volume and storage growth per 1,000 requests at your chosen sample rate.",
-    "You can stand up a self-hosted Langfuse (web, worker, Postgres, ClickHouse, Redis, S3-compatible storage) from scratch and point your app at it by changing only environment variables.",
-    "You can define and defend four SLIs for one LLM feature with alert thresholds and, for each, the runbook step the alert triggers."
-  ],
-  "failureModes": [
-    "Tracing is added to the request path but never flushed in the worker or Lambda, so the exact background jobs that fail at 3am are the ones with no traces, and the incident is reconstructed from nothing.",
-    "The customer's gateway strips or regenerates `traceparent` at the ingress, so every LLM trace is an orphan with no parent service span, and the join you promised in the design review quietly does not exist.",
-    "Streaming responses close the generation span before the final usage chunk arrives, so token counts and cost read zero for the entire streaming code path and the cost dashboard understates real spend by half.",
-    "A model is deployed under a custom or fine-tuned name that matches no price definition, so its cost silently records as zero, and the miss is discovered when finance compares the dashboard to the provider invoice.",
-    "Raw prompts containing customer PII are shipped to a vendor-hosted trace store before anyone reviews it, turning a debugging win into a data-processing incident and a contract escalation.",
-    "Sampling is set to 0.05 to control storage and then someone builds the monthly chargeback report off sampled traces, so one tenant is billed twenty times more or less than they used.",
-    "`user_id` is populated with a raw email address and `tags` with a per-request uuid, so the store's cardinality explodes, filters time out, and the dashboards become unusable exactly when traffic gets interesting."
-  ],
-  "interviewQuestions": [
-    "A customer says one specific answer from your assistant was wrong yesterday afternoon. Walk me through, minute by minute, how you go from that sentence to a root cause, and tell me exactly which fields you need to have captured in advance for that path to work.",
-    "Design end-to-end tracing for an agent running in a customer VPC where the platform team already runs an OpenTelemetry Collector into Datadog, and legal will not allow prompt text to leave the VPC. What ships where, what is redacted, and where does the trace id come from?",
-    "Your LLM cost dashboard says $4,100 for the month and the provider invoice says $9,800. List the causes you would check, in the order you would check them, and how you would confirm each one.",
-    "You have a p95 latency SLO of 4 seconds and you are at 6.5. The generation span averages 5.2 seconds. How do you decide whether the fix is a smaller model, streaming, caching, retry tuning, or your own orchestration code - and what does the trace need to show for you to decide with evidence?",
-    "Explain how you would sample traces at high volume without breaking cost reporting, quality monitoring, or incident debugging. What do you sample, what do you never sample, and where do the aggregates come from?",
-    "Argue for or against using an LLM judge on live production traffic to a customer who is worried about both cost and correctness. What would you measure to prove the judge is trustworthy, and what would make you turn it off?",
-    "Two weeks after go-live, quality has visibly drifted but nothing was deployed. What in your observability setup lets you distinguish a provider-side model change, an input-distribution change, and a retrieval regression - and what would you have had to instrument on day one?"
-  ],
-  "proofOfWork": "Ship an 'LLM trace forensics kit' as a small repository plus a five-minute recorded walkthrough over Kaupex and DefenderMate. The repo contains a single instrumentation module both apps import (tracer setup, propagation, masking hook, sampling config, `as_type` conventions, prompt-version stamping) and a `tracectl` CLI with three commands: `tracectl explain <trace_id>` printing the span tree with per-span self-time, TTFT, tokens by usage type and USD cost; `tracectl cost --group-by tenant --since 30d` calling the Metrics API to produce the chargeback table; and `tracectl promote <trace_id>` turning a bad production trace into a dataset item with an expected output. Include a `load/` script that drives synthetic traffic with deliberate faults - a 429 storm, a streaming call that returns usage only in the final chunk, a request with an unpriced custom model name, and a prompt containing a synthetic national ID - and a `FINDINGS.md` recording, with screenshots, what each fault looked like in the trace before and after the fix, the measured p95 overhead of instrumentation on and off, and the storage growth per 1,000 traces. Finish with a one-page `SLO.md` defining availability, p95 TTFT, judge-score and cost-per-answer SLIs with thresholds, the alert wired to each, and the runbook step it triggers - so the artifact reads as an operable system a customer's platform team could adopt, not a screenshot of a demo dashboard."
+ "i": 54,
+ "topic": "Fine-tuning vs prompting: LoRA, PEFT, when not to",
+ "track": "G. AI Engineering",
+ "month": 6,
+ "hours": 8,
+ "why": "Fine-tuning is the most expensive wrong answer an FDE can give in a scoping call: it converts a two-week prompt-and-retrieval engagement into a six-month labelling programme, and the customer's ML-curious VP will usually ask for it by name in the first hour. Your job is to be the person who can say 'here is the measurement showing prompting already clears your bar, and here is the number that would change my mind' — which is only credible if you have actually shipped a LoRA run and can talk about masking, rank, and adapter serving without hand-waving. And when a tune genuinely is the right call — a rigid output format, a domain the tokenizer mangles, or a cost target only a small tuned model hits — you have to be able to build it, evaluate it against the baseline, and own the retraining tail you just sold.",
+ "prerequisites": [
+  "Topic 46 (prompt engineering as code): a versioned prompt, a structured-output schema, and a regression set you can re-run with one command — the tune has to beat that exact artefact, not a vibe.",
+  "Topic 49 (RAG at depth): enough retrieval fluency to rule out 'the right chunk was never in context' before you propose changing weights, since most 'the model doesn't know our domain' complaints are retrieval bugs.",
+  "Topic 45 (LLM fundamentals): tokenizers and chat templates, the attention projections (q_proj/k_proj/v_proj/o_proj) and MLP blocks (gate/up/down_proj), and precision formats — fp32, bf16, fp16, int8, int4.",
+  "Working PyTorch-adjacent Python: `transformers`, `datasets`, a Colab or single-GPU runtime, `nvidia-smi`, and the ability to read a CUDA OOM traceback and know which of batch size, sequence length, or model size to cut.",
+  "Supervised ML evaluation basics: entity-level train/val/test splits, precision/recall/F1, confusion matrices, class imbalance, overfitting, and bootstrap confidence intervals — you cannot write the memo without them.",
+  "A real labelled dataset from a customer-like domain (200+ examples minimum, 1000+ preferred) and permission to use it; without labels this topic degenerates into a tutorial you cannot generalise from."
+ ],
+ "subtopics": [
+  {
+   "name": "The gate: three questions that decide fine-tune vs prompt",
+   "learn": "Internalise the decision gate so you can run it live in a scoping call. Fine-tuning reliably changes behaviour — output format adherence, tone, a task-specific decision boundary, and cost/latency by letting a smaller model do a narrow job. It does not reliably add knowledge: facts baked into weights are lossy, unverifiable, un-citable, and can only be updated by retraining, which is why retrieval owns that job. The three questions: is the failure a knowledge gap or a behaviour gap; can you get 500+ correct input/output pairs that match production traffic; and is there a measured baseline with a stated delta the tune must beat. Any 'no' means stop and say so out loud.",
+   "minutes": 25,
+   "resource": {
+    "label": "OpenAI Platform docs - Fine-tuning guide",
+    "url": "https://developers.openai.com/api/docs/guides/model-optimization"
+   }
+  },
+  {
+   "name": "Baseline discipline: the control you are required to beat",
+   "learn": "Before any training, freeze a baseline and make it reproducible by script: best prompted configuration (few-shot examples, output schema, retrieval on/off) scored on a held-out set of 100+ labelled customer examples, with per-class metrics, a confidence interval, measured p50/p95 latency, and cost per 1000 calls. Record the prompt hash, the model ID including snapshot, temperature, and the eval commit SHA. Learn that most 'the model isn't good enough' claims collapse here: a tighter JSON schema, eight nearest-neighbour-selected few-shot examples, or fixing chunk boundaries usually moves the number further than a LoRA will. If you cannot re-run the baseline with one command, you do not have a baseline and you are not allowed to fine-tune yet.",
+   "minutes": 25,
+   "resource": {
+    "label": "scikit-learn - Metrics and scoring: quantifying the quality of predictions",
+    "url": "https://scikit-learn.org/stable/modules/model_evaluation.html"
+   }
+  },
+  {
+   "name": "Full fine-tuning memory arithmetic, and why PEFT exists",
+   "learn": "Derive on paper why full fine-tuning is usually off the table. Per parameter you pay roughly 2 bytes (bf16 weights) + 2 (gradients) + 4+4 (Adam first and second moments in fp32) + 4 (fp32 master weights) which is about 16 bytes/param before activations — so a 7B model wants roughly 112 GB and an 8B roughly 128 GB, and activation memory on top scales with batch x seq_len x layers. Know the levers that soften but do not change the conclusion — gradient checkpointing trades about 30% extra compute for activation memory, gradient accumulation trades wall-clock for effective batch, ZeRO/FSDP shards across GPUs — and the one that does change it: freeze the base so gradients and optimizer states exist only for a tiny trainable subset.",
+   "minutes": 25,
+   "resource": {
+    "label": "Hugging Face Transformers - GPU training methods and memory optimization",
+    "url": "https://huggingface.co/docs/transformers/v5.15.1/optimization_overview"
+   }
+  },
+  {
+   "name": "LoRA mechanism: h = Wx + (alpha/r)·B(Ax)",
+   "learn": "Be able to derive LoRA on a whiteboard from memory. For a frozen weight W of shape (d, k) you learn a low-rank update dW = B·A with A of shape (r, k) initialised Gaussian and B of shape (d, r) initialised to zeros, so dW = 0 at step 0 and training starts exactly at the base model's behaviour. Forward is h = Wx + (alpha/r)·B(Ax); only A and B get gradients, so optimizer state is O(r·(d+k)) instead of O(d·k) — typically 0.1-1% of parameters trainable. Know the three consequences that matter commercially: the adapter is tens of megabytes, it can be merged so inference latency is unchanged, and one base model can host many adapters. Read the paper's ablations on which matrices to adapt and on how little rank is actually needed.",
+   "minutes": 35,
+   "resource": {
+    "label": "LoRA: Low-Rank Adaptation of Large Language Models (arXiv 2106.09685)",
+    "url": "https://arxiv.org/abs/2106.09685"
+   }
+  },
+  {
+   "name": "LoraConfig field by field, and what each one breaks",
+   "learn": "Know every field you will set and its failure mode. `r` (8-64 typical; higher rank means more capacity and more overfitting on small data). `lora_alpha` (the update is scaled by alpha/r, so alpha = 2r is a common convention and changing r without changing alpha silently changes the effective learning rate). `target_modules` — attention-only `[\"q_proj\",\"k_proj\",\"v_proj\",\"o_proj\"]` versus adding the MLP `[\"gate_proj\",\"up_proj\",\"down_proj\"]`, where MLP targeting is usually what buys format adherence, with `\"all-linear\"` as the lazy default. `lora_dropout`, `bias`, `task_type` (`CAUSAL_LM` vs `SEQ_CLS`; the wrong value quietly drops the head), and `modules_to_save` (required for a new classification head or resized embeddings, otherwise you save an adapter that cannot reproduce your own eval).",
+   "minutes": 35,
+   "resource": {
+    "label": "Hugging Face PEFT - LoRA API reference (LoraConfig)",
+    "url": "https://huggingface.co/docs/peft/package_reference/lora"
+   }
+  },
+  {
+   "name": "PEFT wiring: wrap, verify, save, hot-swap",
+   "learn": "Get the mechanics into muscle memory: `get_peft_model(model, LoraConfig(...))` then immediately `print_trainable_parameters()` and sanity-check the ratio. If it reports 100% you have not frozen anything; if it reports 0.00% your `target_modules` matched nothing — that is the number one silent failure in this topic and it produces a perfectly plausible loss curve. Know that `save_pretrained()` writes only the adapter, `PeftModel.from_pretrained(base, adapter_dir)` reloads it, and `add_adapter`/`set_adapter`/the `disable_adapter()` context manager let you A/B base versus tuned behaviour inside a single process — which is the fastest way to produce the comparison your memo needs.",
+   "minutes": 25,
+   "resource": {
+    "label": "Hugging Face PEFT - Quicktour",
+    "url": "https://huggingface.co/docs/peft/quicktour"
+   }
+  },
+  {
+   "name": "QLoRA: 4-bit frozen base, 16-bit adapters",
+   "learn": "Understand exactly what QLoRA changes and what it costs. The frozen base is quantized to 4-bit NF4, a datatype chosen to be information-theoretically well matched to normally-distributed weights; LoRA adapters stay in bf16; blocks are dequantized on the fly during forward and backward. Add double quantization (quantizing the quantization constants, saving roughly 0.37 bits/param) and paged optimizers to survive the memory spikes that otherwise OOM mid-epoch. The trade you must be able to state: a 7B tune fits in roughly 10 GB and a 13B in roughly 16 GB, at roughly 30-50% slower steps, and the quantized base is a training-time device — serving precision is a separate decision you make later.",
+   "minutes": 30,
+   "resource": {
+    "label": "QLoRA: Efficient Finetuning of Quantized LLMs (arXiv 2305.14314)",
+    "url": "https://arxiv.org/abs/2305.14314"
+   }
+  },
+  {
+   "name": "Quantized training in practice, and its failure signatures",
+   "learn": "Configure it for real: `BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type=\"nf4\", bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_use_double_quant=True)`, then `prepare_model_for_kbit_training()` to upcast layer norms, enable gradient checkpointing, and disable `use_cache`. Learn the signatures so you diagnose in minutes not hours: NaN loss from fp16 compute dtype with a high learning rate (prefer bf16 where the GPU supports it); loss flat at a constant because nothing is trainable; and a completed run whose adapter cannot be merged because the base was loaded in 4-bit and `merge_and_unload()` was called without reloading the base at full precision.",
+   "minutes": 25,
+   "resource": {
+    "label": "Hugging Face PEFT - Quantization developer guide",
+    "url": "https://huggingface.co/docs/peft/developer_guides/quantization"
+   }
+  },
+  {
+   "name": "The rest of the PEFT family and when LoRA is the wrong pick",
+   "learn": "Know the alternatives well enough not to reach for LoRA reflexively. IA3 learns rescaling vectors on key, value and feed-forward activations with far fewer parameters than LoRA and is strong for few-shot classification. Prompt tuning, prefix tuning and P-tuning learn soft tokens prepended to the input — they consume context window, cannot be merged into weights, and are usually weaker at format control. DoRA decomposes the update into magnitude and direction and tends to beat LoRA at low rank for extra step time. And know the boundary: for single-label classification with clean labels, none of these should be your answer — a fine-tuned encoder wins on every axis you will be asked about.",
+   "minutes": 20,
+   "resource": {
+    "label": "Hugging Face PEFT - IA3 reference",
+    "url": "https://huggingface.co/docs/peft/package_reference/ia3"
+   }
+  },
+  {
+   "name": "Dataset construction: chat template, loss masking, EOS",
+   "learn": "This is where tunes actually fail, not in the optimizer. Use the model's own template via `tokenizer.apply_chat_template(messages, tokenize=False)` — a template mismatch between training and serving is the single most common cause of a tuned model that is worse than the base in production while looking fine offline. Mask the prompt so loss is computed only over completion tokens (TRL's completion-only collator / `completion_only_loss`), otherwise you are training the model to generate the user's turns. Verify EOS is appended and not masked to -100, or generations never terminate and run to `max_tokens`. Decode a batch after collation and read it with your own eyes before launching the run.",
+   "minutes": 40,
+   "resource": {
+    "label": "Hugging Face Transformers - Chat templates",
+    "url": "https://huggingface.co/docs/transformers/chat_templating"
+   }
+  },
+  {
+   "name": "Dataset formats and splitting without leakage",
+   "learn": "Know the two shapes TRL accepts — prompt/completion pairs and conversational `messages` lists — and that the template is applied automatically for conversational data but not for raw text, which is a quiet source of double-templating. Split by customer entity (document, account, ticket thread, author) rather than by row: near-duplicate rows straddling the split is why a tune reports +12 points offline and zero online. Deduplicate first with normalised-text hashing or MinHash. Decide packing versus padding deliberately — packing concatenates samples for throughput but bleeds one example into the next unless boundaries are respected. Hold the test set back and do not look at it until the memo.",
+   "minutes": 25,
+   "resource": {
+    "label": "Hugging Face TRL - Dataset formats and types",
+    "url": "https://huggingface.co/docs/trl/dataset_formats"
+   }
+  },
+  {
+   "name": "The SFT run: the SFTConfig knobs that actually matter",
+   "learn": "Configure `SFTTrainer`/`SFTConfig` with intent: `learning_rate` of 1e-4 to 2e-4 for LoRA (10-100x higher than full fine-tuning — carrying over a 2e-5 habit produces a run that barely moves), `num_train_epochs` of 1-3 (under 2k examples, three epochs is usually already overfitting), `per_device_train_batch_size` x `gradient_accumulation_steps` as your effective batch, `lr_scheduler_type=\"cosine\"` with `warmup_ratio` around 0.03, `max_length` chosen from an actual token-length histogram because silent truncation deletes your labels, `bf16=True`, `gradient_checkpointing=True`, `eval_strategy=\"steps\"`, and a fixed `seed`. Always smoke-test with 32 examples and `max_steps=5` before spending GPU budget.",
+   "minutes": 35,
+   "resource": {
+    "label": "Hugging Face TRL - SFT Trainer",
+    "url": "https://huggingface.co/docs/trl/sft_trainer"
+   }
+  },
+  {
+   "name": "Reading the run: overfitting, forgetting, PEFT-specific bugs",
+   "learn": "Watch train and eval loss together. Eval loss rising while train loss falls is overfitting — keep `load_best_model_at_end` with an explicit `metric_for_best_model` and ship the earlier checkpoint. Loss flat from step 0 means nothing is learning: check trainable parameters are non-zero, the learning rate is non-zero, and the labels are not all -100. Regression on tasks outside the tuning distribution is catastrophic forgetting; measure it deliberately with a general-capability holdout and mitigate with lower rank, fewer epochs, or mixing in 10-20% general data. Learn the PEFT-specific gotchas from the troubleshooting guide: unmatched target modules, adapter/base dtype mismatch, and a tokenizer not saved alongside the adapter.",
+   "minutes": 30,
+   "resource": {
+    "label": "Hugging Face PEFT - Troubleshooting",
+    "url": "https://huggingface.co/docs/peft/developer_guides/troubleshooting"
+   }
+  },
+  {
+   "name": "Evaluating the tune against the baseline honestly",
+   "learn": "Score baseline and tune with the same script on the same untouched test set, reporting the same things: task metric, per-class breakdown, confusion matrix, format-validity rate, refusal rate, p95 latency, and cost per 1000 calls. Attach uncertainty — at n=200 a three-point difference is inside the noise, so use a bootstrap CI or a paired test (McNemar for paired binary outcomes) before you claim a win. Explicitly look for what regressed rather than only what improved, including behaviour on out-of-distribution inputs. Write down, before you see the result, the delta that would justify the ongoing cost; deciding afterwards is how teams talk themselves into shipping noise.",
+   "minutes": 35,
+   "resource": {
+    "label": "scikit-learn - Metrics and scoring",
+    "url": "https://scikit-learn.org/stable/modules/model_evaluation.html"
+   }
+  },
+  {
+   "name": "The adapter artefact: what you are actually shipping",
+   "learn": "Open the output directory and know every file. `adapter_config.json` carries `base_model_name_or_path`, `r`, `lora_alpha`, `target_modules` and `peft_type` — this is your reproducibility record and it belongs in version control. `adapter_model.safetensors` holds the A and B matrices keyed by module path, typically tens of megabytes. Know that the adapter is meaningless without the exact base checkpoint, so pin the base by commit revision rather than a moving tag; that the tokenizer must be saved next to it; and that safetensors is preferred over `.bin` because loading a pickle from an untrusted source executes arbitrary code — which matters the moment adapters cross a customer boundary.",
+   "minutes": 20,
+   "resource": {
+    "label": "Hugging Face PEFT - PEFT checkpoint format",
+    "url": "https://huggingface.co/docs/peft/developer_guides/checkpoint"
+   }
+  },
+  {
+   "name": "Serving: merged weights versus runtime adapters",
+   "learn": "Know both deployment shapes and their trade-offs cold. `merge_and_unload()` folds (alpha/r)·BA into W, giving zero added inference latency and an ordinary model artefact — at the cost of a full-size checkpoint per variant, no hot-swap, and precision loss if you merge into a quantized base. Alternatively serve adapters at runtime: vLLM with `--enable-lora`, `--max-loras`, `--max-lora-rank`, and a per-request `LoRARequest`, which lets a single GPU serve many per-tenant adapters at a modest throughput cost. Know what bites: `max_lora_rank` must be at least your `r`, the server must support the modules you targeted, and throughput degrades as distinct adapters per batch increases.",
+   "minutes": 30,
+   "resource": {
+    "label": "vLLM docs - LoRA Adapters",
+    "url": "https://docs.vllm.ai/en/latest/features/lora/"
+   }
+  },
+  {
+   "name": "Managed fine-tuning on hosted APIs: what you trade away",
+   "learn": "Know the hosted path end to end: upload JSONL, pick a base, wait for a job, receive a tuned model ID, then pay a training fee plus usually a premium per-token inference rate and sometimes an hourly hosting charge for a provisioned custom model. Be precise about what you give up: you cannot inspect or export the adapter, you cannot move it to another provider or on-prem, the base can be deprecated out from under you and force a retrain, and the customer's training data leaves their boundary — which is frequently the entire reason a regulated buyer says no. Know when it still wins: no GPU operations, no serving to run, and a compliance story the vendor already owns.",
+   "minutes": 20,
+   "resource": {
+    "label": "Amazon Bedrock User Guide - Customize your model",
+    "url": "https://docs.aws.amazon.com/bedrock/latest/userguide/custom-models.html"
+   }
+  },
+  {
+   "name": "The cheaper thing that usually wins the bake-off",
+   "learn": "Before recommending a generative fine-tune, cost the alternatives on the identical eval set. (a) A fine-tuned encoder classifier in the 100-400M parameter range trains in minutes and serves in single-digit milliseconds on CPU-class hardware. (b) Frozen embeddings plus logistic regression gives calibrated probabilities and a threshold you can tune to the customer's precision/recall trade-off — which is what an ops team actually wants. (c) SetFit reaches strong accuracy with 8-64 examples per class, which matters when labels are the constraint. (d) Distillation: use the frontier model to label 10k examples, then train the small one. For classification these routinely match a LoRA'd 7B at one to two orders of magnitude less inference cost — which is the memo you were asked to write.",
+   "minutes": 30,
+   "resource": {
+    "label": "Hugging Face SetFit documentation",
+    "url": "https://huggingface.co/docs/setfit/index"
+   }
+  },
+  {
+   "name": "Total cost of ownership and the retraining tail",
+   "learn": "Build the cost model the memo lives or dies on. One-off: labelling hours x loaded rate, GPU-hours x price, engineer-days for the pipeline and eval. Recurring: inference cost delta versus baseline x projected monthly volume, adapter hosting or provisioned throughput, and periodic eval runs. Then the tail nobody budgets: every base-model upgrade invalidates the adapter, every schema or policy change invalidates the training data, and drift forces a re-label plus retrain roughly quarterly. Compare that against the prompted baseline's cost curve, which improves for free every time a vendor ships a cheaper or better model. State a break-even monthly volume explicitly and put it in the memo as a number.",
+   "minutes": 20,
+   "resource": {
+    "label": "Google Cloud - Introduction to tuning (Vertex AI generative AI)",
+    "url": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/tuning"
+   }
+  },
+  {
+   "name": "Governance: data rights, PII, licences, model cards",
+   "learn": "Settle these before a single byte of customer data becomes a gradient. Confirm the contract permits training on the data and states who owns the resulting weights. Strip or pseudonymise PII and know that memorisation is real, so an adapter trained on one tenant's data must never serve another tenant. Check the base model licence — Llama's community licence, Gemma's terms of use, and Apache-2.0 differ materially on redistribution, naming, and acceptable use, and merged weights are a derivative work. Then ship a model card: base model plus pinned revision, data provenance and date range, eval numbers with the test-set definition, known failure modes, and the trigger that forces retraining.",
+   "minutes": 20,
+   "resource": {
+    "label": "Hugging Face Hub - Model Cards",
+    "url": "https://huggingface.co/docs/hub/model-cards"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can run the fine-tune-versus-prompt gate live in a scoping call and produce, within ten minutes, a written recommendation plus the specific measurement that would reverse it.",
+  "You can execute a QLoRA supervised fine-tune of a 7B-class model on a single free-tier GPU end to end — chat-template formatting, completion-only loss masking, SFTConfig, checkpoint selection — and reload the adapter in a fresh process to reproduce your eval scores exactly.",
+  "You can read a LoraConfig and state its trainable-parameter percentage, approximate memory footprint, and overfitting risk, and explain what changing r without changing lora_alpha does to the effective update.",
+  "You can produce a four-arm comparison table — prompted baseline, few-shot plus schema, LoRA, encoder classifier — on one untouched test set with task metric, confidence interval, p95 latency, and cost per 1000 calls.",
+  "You can detect catastrophic forgetting using an explicit off-distribution holdout, quantify it, and name the mitigation you chose and why you rejected the others.",
+  "You can deploy the same adapter both ways — merged into base weights and hot-loaded at runtime under vLLM — and state the throughput, latency, and operational trade-off for a multi-tenant customer.",
+  "You can write a one-page decision memo recommending against fine-tuning, with a break-even monthly volume and a named trigger for revisiting, and defend it to a stakeholder who arrived asking for a custom model.",
+  "You can list, unprompted, the contractual, PII, tenancy, and licence questions that must be answered before customer data is used for training."
+ ],
+ "failureModes": [
+  "Training with a chat template that does not match the one the serving stack applies at inference, so the tuned model underperforms the base in production while the offline eval looks like a clean win.",
+  "Computing loss over prompt tokens as well as completions — producing a model that cheerfully generates the user's next turn — or masking out EOS so generations never terminate and every request runs to max_tokens.",
+  "Splitting the dataset by row when the customer's corpus is full of near-duplicate tickets and boilerplate documents, reporting a double-digit offline gain that evaporates entirely on live traffic.",
+  "`target_modules` silently matching nothing (or the wrong `task_type` dropping the head), so four GPU-hours and a plausible loss curve later you ship the unchanged base model under a new name.",
+  "Fine-tuning to inject facts — product catalogue, policy numbers, org chart — producing confident, uncitable, un-updatable errors that retrieval would have solved and that now require a full retrain to correct.",
+  "Shipping a per-customer adapter without pinning the base-model revision, then losing the ability to reproduce, re-merge, or re-serve the tuned behaviour after the base is upgraded or deprecated.",
+  "Serving a tenant-specific adapter trained on PII from a shared multi-tenant endpoint, creating a cross-tenant leakage path through memorisation that surfaces in the customer's first security review."
+ ],
+ "interviewQuestions": [
+  "A customer's head of data opens with 'our domain is special, we need a model fine-tuned on our 40 million support tickets.' Run your discovery on the spot: what do you ask, what do you measure in week one, and what would have to be true for you to agree?",
+  "Derive LoRA at the whiteboard. Then tell me precisely what changes in the GPU memory profile versus full fine-tuning, why the alpha-over-r scaling term appears in the forward pass, and what happens to inference latency after merging.",
+  "Your LoRA'd model scores 91% on the held-out set against 86% for the prompted baseline, on 200 examples. The customer wants to ship on Friday. What do you say, and what do you do before Friday?",
+  "A tuned model that passed eval is performing worse than the base model in production. Give me your ordered debugging plan and say what evidence would move you from one hypothesis to the next.",
+  "Design the deployment for 40 enterprise tenants who each want the assistant tuned on their own style guide, under a fixed two-GPU budget. Where do adapters live, how does a request route to the right one, and what breaks first as tenants grow?",
+  "When would you put a 300M-parameter encoder in front of a customer instead of a fine-tuned 8B generative model, and how would you prove it to a buyer who has an LLM line item to spend?",
+  "The customer's legal team asks whether a fine-tuned model can leak one client's data to another. Answer mechanistically first, then tell me what you would change in the architecture and what you would be willing to commit to in the contract."
+ ],
+ "proofOfWork": "Build a public repo, `lora-or-not`, that is a single reproducible bake-off rather than a notebook. It takes one real labelled dataset of roughly 1000 examples from a customer-like domain, splits it by entity (not by row) after MinHash deduplication, and runs four arms through one shared eval harness: (1) the prompted baseline with a pinned prompt hash and model snapshot, (2) few-shot plus strict output schema, (3) a QLoRA SFT of a 7B-class open-weights model, and (4) a cheap discriminative arm — embeddings plus logistic regression, or a fine-tuned encoder. `RESULTS.md` reports every arm on the same untouched test set with task metric, bootstrap 95% CI, McNemar p-value against the baseline, format-validity rate, p95 latency, and cost per 1000 calls, plus a break-even monthly volume where the tune's inference savings repay its build cost. Add three things that make it a senior artefact rather than a tutorial: an ablation sweeping `r` in {4, 8, 16, 64} and attention-only versus attention-plus-MLP `target_modules`, with the trainable-parameter count and eval delta for each; a catastrophic-forgetting holdout of 50 off-distribution tasks scored before and after tuning; and a `serving/` benchmark comparing `merge_and_unload()` against vLLM runtime adapters at 1, 4, and 16 concurrent distinct adapters. Finally commit a `FAILURES.md` where you deliberately reproduce two of this topic's classic bugs — a chat-template mismatch between training and serving, and a `target_modules` list that matches nothing — with the loss curves, `print_trainable_parameters()` output, and eval scores each one produces, so you can recognise them from the symptom alone in front of a customer. Ship a `MODEL_CARD.md` for the adapter with the pinned base revision, data provenance, eval numbers, and retraining trigger."
 }

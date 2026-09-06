@@ -1,209 +1,191 @@
 {
  "i": 59,
- "topic": "Cost and latency engineering: prompt caching, batching, smaller models",
+ "topic": "LLM observability: traces, cost, latency, datasets",
  "track": "H. AI in Production",
  "month": 7,
  "hours": 6,
- "why": "The moment an AI deployment leaves pilot, the customer's finance team gets an invoice and their users get a spinner, and both land on the FDE. Nobody renews a system that costs $4 per ticket and takes eleven seconds to first token, and 'use a cheaper model' is not an answer you can give without evidence that quality held. This topic is the difference between an FDE who says 'we could try Haiku' and one who walks into the QBR with a table showing 62% lower cost per resolved ticket, p95 first-token down from 4.1s to 900ms, and an eval delta of -0.6 points inside the noise band.",
+ "why": "When a customer says 'the assistant gave a wrong answer at about 3pm yesterday' or 'finance says this thing cost eleven thousand dollars last month', an FDE either opens a trace and answers in ninety seconds or spends two days reconstructing the incident from application logs that never captured the prompt. LLM observability is the difference between debugging a non-deterministic system with evidence and debugging it with opinions, and it is the only mechanism that turns real production failures into a growing eval dataset instead of a growing list of complaints. It is also how you defend a deployment commercially: cost per tenant, p95 latency by prompt version, and refusal rate are the numbers that decide renewal, and nobody else on the account team can produce them.",
  "prerequisites": [
-  "LLM fundamentals (topic 45): tokenisation, context windows, and the fact that output tokens are priced roughly 5x input tokens - the whole cost model collapses if you reason in 'characters' or 'requests'.",
-  "Evals as infrastructure (topic 53): a versioned eval set with per-category breakdowns and a CI gate, because every cost reduction in this topic is only shippable if you can prove the quality delta is inside the noise band.",
-  "LLM observability (topic 54): per-request spans carrying model id, token counts and latency, so you have the before half of the before/after table without retrofitting instrumentation under time pressure.",
-  "Model gateway, routing, fallbacks, canaries (topic 55): the LiteLLM proxy in front of the Kaupex stack is where routing rules and per-tenant budgets actually get enforced, not in application code.",
-  "Production Python (topics 25 and 26): asyncio fan-out with bounded concurrency, connection reuse, exponential backoff with jitter, and resumable jobs - batch backfills are a job-scheduling problem before they are an LLM problem.",
-  "Basic statistics literacy: paired comparison on the same items, and enough sense of confidence intervals to know that a 1-point move on 80 eval questions is noise while a 9-point move is a result."
+  "Observability: OpenTelemetry, Prometheus, Grafana (topic 21) - spans, span context, the collector, OTLP exporters, and why a trace id is not a log line.",
+  "FastAPI in production (topic 26) - lifespan hooks, dependency injection, background tasks and worker processes, because that is where you install the tracer and where you must flush it before shutdown.",
+  "SRE fundamentals: SLIs, SLOs, error budgets (topic 20) - you will define availability, latency and cost SLIs for an LLM feature, not just stare at dashboards.",
+  "LLM fundamentals and prompt engineering as code (topics 45, 46) - tokenisation, context windows, streaming, prompt versioning; a trace without a prompt version attached is barely a trace.",
+  "Agents and RAG at depth (topics 48, 49) - the shape of the thing you are instrumenting is nested: retriever spans, tool calls, retries, sub-agents.",
+  "Docker Compose and enough Postgres/ClickHouse literacy (topics 5, 29) to stand up and reason about a self-hosted Langfuse deployment inside a customer VPC."
  ],
  "subtopics": [
   {
-   "name": "Instrument the ledger before you change one line of prompt",
-   "learn": "Write every request to a `llm_calls` table with request_id, tenant_id, feature, model, input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, ttft_ms, total_ms, stop_reason, and a prompt_version hash. Derive cost in a single pure function `cost(model, usage) -> Decimal` fed by a checked-in price table, never by hard-coded constants sprinkled through the code. Reconcile that derived number weekly against the Usage and Cost Admin API (`/v1/organizations/usage_report/messages` and `/v1/organizations/cost_report`, Admin key required, workspace-scoped keys will not work); if your ledger and the invoice disagree by more than a couple of percent you are missing a call path. Optimising without this table means you will 'save 40%' and be unable to prove it.",
+   "name": "The data model: trace, observation, and the ids you join on",
+   "learn": "Learn the object graph cold: a trace holds many observations; observations nest by parent id and carry a type - event, span, generation, agent, tool, chain, retriever, embedding, evaluator, guardrail. Only generation and embedding carry usage and cost. Trace ids are 32 hex chars, observation ids 16 hex, matching W3C trace-context, which is exactly why joining to your OTel backend is possible at all. Be able to draw, for one Kaupex request, which node is a span, which is a generation, and which fields (input, output, metadata, level, statusMessage) you would need to reproduce the bug without asking the customer anything.",
+   "minutes": 20,
+   "resource": {
+    "label": "Langfuse docs - Observability core concepts / data model",
+    "url": "https://langfuse.com/docs/observability/data-model"
+   }
+  },
+  {
+   "name": "Instrumenting the application: decorators, context managers, and flush",
+   "learn": "Instrument three ways and know when each is right: the `@observe()` decorator for whole functions, `start_as_current_observation(as_type=...)` for explicit blocks, and framework/provider auto-instrumentation for the model client. Set `as_type=\"tool\"`, `\"retriever\"`, `\"generation\"` deliberately - the UI's agent graph and every later filter depend on it. The failure that bites everyone: the SDK batches and exports asynchronously, so short-lived processes (Lambda, Celery task, CLI, a `pytest` run) lose traces unless you call `langfuse.flush()` or shut the client down in a FastAPI lifespan handler. Verify with `auth_check()` at startup rather than discovering a bad `LANGFUSE_HOST` in production.",
    "minutes": 25,
    "resource": {
-    "label": "Claude Docs - Usage and Cost Admin API",
-    "url": "https://platform.claude.com/docs/en/manage-claude/usage-cost-api"
+    "label": "Langfuse docs - SDK instrumentation",
+    "url": "https://langfuse.com/docs/observability/sdk/instrumentation"
    }
   },
   {
-   "name": "Token accounting and pre-flight estimation",
-   "learn": "Use `POST /v1/messages/count_tokens` with the exact same `model`, `system`, `tools` and `messages` you intend to send, so a large retrieval payload is priced before it is spent and can be rejected at the door rather than blowing a per-request budget. Internalise the asymmetry: output tokens cost about 5x input tokens on every current Claude model, so a 400-token answer can outweigh a 6,000-token context, and 'trim the system prompt' is usually the wrong first move. Know that `usage.input_tokens` in a cached response excludes cached tokens - total input is `cache_read_input_tokens + cache_creation_input_tokens + input_tokens` - and that summing only `input_tokens` will silently under-report your spend by an order of magnitude once caching is on.",
+   "name": "Wiring LLM traces into the existing OTel pipeline",
+   "learn": "Langfuse receives OTLP on `/api/public/otel`; set `OTEL_EXPORTER_OTLP_ENDPOINT` to the region host (`cloud.langfuse.com`, `us.`, `jp.`, `hipaa.`, or your self-hosted origin) and pass basic-auth public/secret keys via `OTEL_EXPORTER_OTLP_HEADERS`. Decide the topology up front: export from the app directly, or fan out from an OpenTelemetry Collector so the same spans reach both Tempo/Datadog and Langfuse. Know the collector-side pieces you will actually touch - `otlp` receiver, `batch` processor, multiple exporters in one pipeline - and that per-signal endpoint overrides exist because most enterprises already own the metrics path.",
+   "minutes": 25,
+   "resource": {
+    "label": "Langfuse docs - OpenTelemetry (OTLP) integration",
+    "url": "https://langfuse.com/integrations/native/opentelemetry"
+   }
+  },
+  {
+   "name": "Joining the LLM trace to the service trace",
+   "learn": "This is the depth target: one id from the customer's ingress to the model call. Propagate W3C `traceparent` (`00-<32 hex trace-id>-<16 hex span-id>-<flags>`) across service hops so the LLM spans land in the same trace, and use `get_current_trace_id()` / `get_current_observation_id()` to stamp the id into your own application logs and into the API response header you hand support. Use `create_trace_id(seed=...)` to derive a deterministic id from an external key (ticket id, DefenderMate scan id) so a customer's reference number resolves straight to a trace. Test the failure case: a queue hop or a `httpx` client without the propagator silently starts a fresh trace, and you get two orphan traces instead of one.",
+   "minutes": 25,
+   "resource": {
+    "label": "Langfuse docs - Trace IDs and distributed tracing",
+    "url": "https://langfuse.com/docs/observability/features/trace-ids-and-distributed-tracing"
+   }
+  },
+  {
+   "name": "OTel GenAI semantic conventions - naming attributes so they survive a vendor swap",
+   "learn": "Use the standard attribute names rather than inventing your own: `gen_ai.system`, `gen_ai.operation.name`, `gen_ai.request.model`, `gen_ai.request.temperature`, `gen_ai.request.max_tokens`, `gen_ai.response.model`, `gen_ai.response.finish_reasons`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`. Know that the conventions are still experimental and moved to their own repository, that prompt/completion content is captured under opt-in content-capture settings precisely because it is sensitive, and that span names follow `{operation} {model}`. The payoff is portability: when the customer's platform team standardises on Datadog LLM Observability or Grafana next year, conforming attributes migrate and bespoke `my_app.llm_tokens` does not.",
    "minutes": 20,
    "resource": {
-    "label": "Claude Docs - Token counting",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+    "label": "OpenTelemetry - GenAI semantic conventions repository",
+    "url": "https://github.com/open-telemetry/semantic-conventions-genai"
    }
   },
   {
-   "name": "Decompose latency: TTFT, TPOT, and everything that is not the model",
-   "learn": "Split end-to-end latency into queue/network time, time to first token (dominated by prefill over the whole prompt), inter-token latency multiplied by output length (decode), and your own post-processing. Learn to read the shape: a TTFT that scales with prompt size is a prefill problem (cache it, shrink it), a total time that scales with answer length is a decode problem (cap `max_tokens`, lower effort, shorten the output contract), and flat overhead is your infrastructure (TLS handshakes per call, cold Lambda, a synchronous retrieval hop). Measure at the client with a monotonic clock around the streaming iterator, recording the timestamp of the first `content_block_delta`, not the completed response.",
-   "minutes": 20,
-   "resource": {
-    "label": "High Performance Browser Networking - Primer on Latency and Bandwidth",
-    "url": "https://hpbn.co/primer-on-latency-and-bandwidth/"
-   }
-  },
-  {
-   "name": "Percentiles that survive review",
-   "learn": "Report p50/p95/p99 from histogram buckets, never from averaging pre-aggregated percentiles across pods - averaging quantiles is arithmetically meaningless and is the fastest way to lose credibility with a customer's SRE. Choose bucket boundaries that actually straddle your SLO (for TTFT: 100ms, 250ms, 500ms, 1s, 2s, 5s, 10s) because a p95 computed from three coarse buckets is a linear interpolation, not a measurement. Slice by feature and by tenant before you slice by nothing: a single p95 across a fast classifier and a slow summariser hides both. Always publish n alongside the percentile - a p99 over 200 requests is two data points.",
-   "minutes": 20,
-   "resource": {
-    "label": "Prometheus Docs - Histograms and summaries",
-    "url": "https://prometheus.io/docs/practices/histograms/"
-   }
-  },
-  {
-   "name": "Prompt caching mechanics: cache_control, minimums, TTL, usage fields",
-   "learn": "Mark a content block with `\"cache_control\": {\"type\": \"ephemeral\"}` to cache the entire prefix up to and including that block; the default lifetime is 5 minutes, refreshed for free on every hit, and measured from the start of the request that writes or reads it - a 4-minute streamed response burns 4 of those 5 minutes. Know that the minimum cacheable prefix is model-dependent (512 tokens on Opus 5, 1,024 on Sonnet 5 and Opus 4.8, 4,096 on Haiku 4.5) and that a shorter prefix silently does nothing: no error, no cache. Verify every time by asserting on `usage.cache_creation_input_tokens` and `usage.cache_read_input_tokens` - if both are 0 the block was never cached, which is the single most common reason a 'caching rollout' produces zero savings.",
+   "name": "Cost attribution: ingested vs inferred, usage types, custom models",
+   "learn": "Understand the precedence rule: values you ingest from the provider response win; otherwise Langfuse infers usage with a tokenizer and cost by matching the `model` string to a model definition with a price per usage type. Usage types are not just input/output - `cache_creation_input_tokens`, `cache_read_input_tokens`, `reasoning`, `audio` all price differently, and dropping them makes prompt-caching savings invisible. Register custom model definitions (regex match, unit prices, start date) for self-hosted, fine-tuned or Bedrock-renamed models, and know that a price change applies from its effective date rather than retroactively. Streaming responses are the classic silent failure: usage arrives in the terminal chunk, and if you close the span first, cost silently reads zero.",
    "minutes": 30,
    "resource": {
-    "label": "Claude Docs - Prompt caching",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+    "label": "Langfuse docs - Token and cost tracking",
+    "url": "https://langfuse.com/docs/observability/features/token-and-cost-tracking"
    }
   },
   {
-   "name": "Prompt layout for hit rate, and the invalidation table",
-   "learn": "The cache key is the literal prefix in the order `tools` -> `system` -> `messages`, matched byte-for-byte, so anything that varies per request (a timestamp, the user's name, a request id, a shuffled retrieval list) must live after your last breakpoint or your hit rate is zero. Memorise the invalidation rules that bite: editing any tool definition (name, description, or schema) invalidates the whole cache; toggling web search or citations invalidates system and messages; changing `tool_choice` or adding/removing an image anywhere invalidates messages; changing thinking config or `output_config.effort` invalidates message blocks. You get at most 4 explicit breakpoints (top-level automatic caching consumes one of the 4, and a 5th returns a 400) - spend them on boundaries between content of genuinely different change frequency: tools, static instructions, retrieved corpus, conversation tail.",
-   "minutes": 25,
-   "resource": {
-    "label": "Claude Docs - Tool use with prompt caching",
-    "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching"
-   }
-  },
-  {
-   "name": "Multi-turn incremental caching, 1-hour TTL, and pre-warming",
-   "learn": "For growing conversations, put `cache_control` at the top level of the request body (automatic caching) so the breakpoint tracks the last cacheable block as turns accumulate, or place explicit breakpoints yourself when different sections change at different rates. Reach for `{\"type\": \"ephemeral\", \"ttl\": \"1h\"}` when the gap between turns exceeds five minutes - it doubles the write price (2x base input versus 1.25x) so it only pays off when the prefix is large and reuse is certain; when mixing TTLs, the 1-hour entries must appear before any 5-minute entries in the prompt. Pre-warm before a burst with a `max_tokens: 0` request whose breakpoint sits on the last block shared with real traffic (not on the placeholder user message) and with identical thinking and effort settings, otherwise you pay for a cache entry your production traffic never hits.",
-   "minutes": 25,
-   "resource": {
-    "label": "Claude Docs - Prompt caching (automatic caching, TTL, pre-warming)",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
-   }
-  },
-  {
-   "name": "Cache break-even arithmetic, and when caching loses money",
-   "learn": "Write the formula down and keep it in the repo: with a prefix of N tokens, a write costs 1.25N (or 2N at 1h) and each hit costs 0.1N against a baseline of N per request, so k requests within the TTL cost `1.25N + 0.1N(k-1)` cached versus `kN` uncached - break-even is just above k = 1.2 for the 5-minute cache and roughly k = 2.2 for the 1-hour cache. Then apply the real-world discount: your actual saving is `hit_rate` times the theoretical maximum, and hit rate is what your prompt layout and traffic shape determine. Compute the two numbers that decide whether to bother: cached prefix as a fraction of total input tokens, and input cost as a fraction of total cost - if 80% of your spend is output tokens, a perfect cache changes almost nothing and you are optimising the wrong half of the bill.",
-   "minutes": 20,
-   "resource": {
-    "label": "Claude Docs - Pricing",
-    "url": "https://platform.claude.com/docs/en/about-claude/pricing"
-   }
-  },
-  {
-   "name": "The Message Batches API and what it actually guarantees",
-   "learn": "`POST /v1/messages/batches` takes up to 100,000 requests or 256 MB, whichever comes first, at 50% of standard prices, with most batches finishing inside an hour but a hard 24-hour expiry - results become available when all requests complete or at 24 hours, whichever is first. Poll `processing_status` until it flips from `in_progress` to `ended`, then stream the `.jsonl` from `results_url` rather than downloading it whole. Each result carries a per-request type of `succeeded`, `errored`, `canceled` or `expired`, and you are not billed for canceled or expired requests - which also means a job that quietly expires produces a silent gap in your output, not an error. Note that `max_tokens: 0` is rejected inside a batch, so cache pre-warming is not a batch trick.",
+   "name": "Latency decomposition: TTFT, self-time, retries, queueing",
+   "learn": "A generation span's wall time is not model latency. Decompose it into time-to-first-token (record it explicitly - it is the number that governs perceived speed for a streamed UI), inter-token latency, and total; then compute self-time (span duration minus children) to separate your orchestration overhead from provider time. Represent SDK retries as sibling spans with the HTTP status and `retry-after` in attributes, or you will see one 40-second call instead of three 429s and a success. Always report p50/p95/p99 rather than mean - LLM latency distributions are fat-tailed and the mean hides the tail the customer is complaining about.",
    "minutes": 30,
    "resource": {
-    "label": "Claude Docs - Batch processing",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/batch-processing"
+    "label": "OpenTelemetry docs - Traces (spans, attributes, events)",
+    "url": "https://opentelemetry.io/docs/concepts/signals/traces/"
    }
   },
   {
-   "name": "Designing batch jobs that are resumable and reconcilable",
-   "learn": "Make `custom_id` a deterministic function of your domain key (it must match `^[a-zA-Z0-9_-]{1,64}$`), for example `sha1(tenant:doc_id:prompt_version)[:32]`, so the same input never gets processed twice and results join back to your rows without an ordering assumption - batch results are not returned in submission order. Persist the batch id, the submitted key set, and a per-key status the moment you submit, then reconcile submitted-versus-returned after `ended` and requeue `expired` and retryable `errored` entries in the next batch. Triage workloads honestly: evals, backfills, bulk classification, document enrichment and nightly summarisation are batchable; anything a human is waiting on is not, and 'we'll batch the chat endpoint' is how you turn a latency complaint into an outage.",
-   "minutes": 20,
-   "resource": {
-    "label": "Claude API Reference - Create a Message Batch",
-    "url": "https://platform.claude.com/docs/en/api/messages/batches/create"
-   }
-  },
-  {
-   "name": "Model tiering and cascade routing",
-   "learn": "Stop treating the model as a global constant. Classify each call site by what it actually demands - extraction, classification and routing usually hold on the small model; multi-step reasoning, ambiguous synthesis and code generation usually do not - and set the model per call site behind the gateway, not in scattered application code. Implement a cascade where the small model runs first and escalation is triggered by a machine-checkable signal (schema validation failure, a refusal, a self-reported confidence field, a retrieval-support check), then compute the blended cost: `p_escalate` above roughly 0.35 usually makes the cascade more expensive and slower than just calling the big model once. Measure escalation rate per category, because a cascade with a 70% escalation rate on legal questions is a cascade you should turn off for legal questions only.",
+   "name": "The dimensions that make traces queryable: sessions, users, tags, environments, release",
+   "learn": "Set `session_id` for a multi-turn conversation, `user_id` for the end user, `tags` for tenant/feature/model-tier, and `environment` to keep staging out of the production cost chart. Stamp `release` (git sha) and prompt `version` on every trace so a latency regression can be attributed to a deploy in one filter. Design this like a cardinality-conscious metrics label set: tenant slug yes, raw email no, request uuid never as a tag. The test of a good scheme is that you can answer 'cost per tenant per day for the last 30 days, excluding staging' without writing any code.",
    "minutes": 25,
    "resource": {
-    "label": "Claude Docs - Models overview",
-    "url": "https://platform.claude.com/docs/en/models/overview"
+    "label": "Langfuse docs - Sessions",
+    "url": "https://langfuse.com/docs/observability/features/sessions"
    }
   },
   {
-   "name": "Output-token discipline: max_tokens, effort, stop conditions",
-   "learn": "Since output is the expensive half, attack it directly: set `max_tokens` to a real ceiling rather than the model maximum, use `output_config.effort` (low/medium/high on supported models) to cut how many tokens Claude spends before answering, and use `stop_sequences` where the output has a hard terminator. Alarm on `stop_reason == \"max_tokens\"` - a truncated answer is a paid failure and, if you retry it, you paid twice for one wrong answer. Instruct for brevity in the contract, not in adjectives: 'answer in at most 3 bullets, no preamble, no restatement of the question' reliably outperforms 'be concise'. Critically, changing effort or thinking config invalidates cached message blocks, so an effort experiment and a caching rollout must not ship in the same change or you will not know which one moved the number.",
+   "name": "Linking prompt versions to traces",
+   "learn": "Attach the managed prompt object to the generation so every trace records which prompt version produced it, then compare cost, latency and scores across versions in one view. This is what makes 'we changed the system prompt on Tuesday' a testable claim rather than a hypothesis. Know the operational detail that the client caches prompts with a TTL and falls back to the last cached version when the control plane is unreachable, so a prompt-management outage degrades to stale-but-working rather than down.",
+   "minutes": 15,
+   "resource": {
+    "label": "Langfuse docs - Link prompts to traces",
+    "url": "https://langfuse.com/docs/prompt-management/features/link-to-traces"
+   }
+  },
+  {
+   "name": "Scores: attaching quality and feedback signals to traces",
+   "learn": "A score references exactly one of trace, observation, session or dataset run, and is numeric, categorical, boolean or text, optionally bound to a ScoreConfig that enforces range and allowed categories. Wire three sources: explicit user feedback (thumbs, correction), implicit signals (did the user re-ask, did they copy the answer, did the tool call succeed), and automated evaluators. Sending scores from the browser needs the trace id returned to the client, which is the practical reason you surfaced it in step four. Without a ScoreConfig you get 'helpfulness' scored 1-5 by one service and 0-1 by another, and every aggregate afterwards is garbage.",
    "minutes": 25,
    "resource": {
-    "label": "Claude Docs - Effort",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/effort"
+    "label": "Langfuse docs - Scores data model",
+    "url": "https://langfuse.com/docs/evaluation/scores/data-model"
    }
   },
   {
-   "name": "Structured output as a cost lever",
-   "learn": "Prose answers pay for connective tissue you then throw away with a regex. Constrain the response to a schema - structured outputs or a tool schema with `tool_choice` forcing a single tool - so the model emits only the fields you consume, which typically removes 30-60% of output tokens on extraction and classification work while simultaneously removing your parsing failure mode. Design the schema for cheapness as well as correctness: enums instead of free text, short field names, no 'explanation' field unless a human actually reads it, and no repetition of input back into the output. Remember the caching interaction from the invalidation table: tool definitions sit at the very front of the cache prefix, so a one-word tweak to a tool description invalidates every cache entry you have.",
-   "minutes": 20,
-   "resource": {
-    "label": "Claude Docs - Structured outputs",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/structured-outputs"
-   }
-  },
-  {
-   "name": "Streaming: fixing perceived latency without fixing latency",
-   "learn": "Set `\"stream\": true` and consume the SSE event sequence (`message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`, `message_delta`, `message_stop`); read final token counts from the `message_delta` event's `usage`, and note that `message_start` already carries input and cache token counts so you can log cost before generation finishes. Streaming does not reduce total time or cost by a single token - it converts an 8-second blank screen into 700ms to first word, which is the metric users actually complain about. Know where it breaks: buffering proxies and some CDN configurations coalesce the stream and hand you the whole body at the end, so verify TTFT through the real ingress and not against localhost, and know that long non-streaming requests are also the ones most likely to hit gateway idle timeouts.",
-   "minutes": 20,
-   "resource": {
-    "label": "Claude Docs - Streaming Messages",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/streaming"
-   }
-  },
-  {
-   "name": "Context compaction: stop paying to resend history",
-   "learn": "Long agent loops re-send every prior tool result on every turn, so cost grows quadratically in turn count even before quality degrades. Apply, in order: clear or truncate stale tool results (context editing), summarise older turns into a compact state block, cap retrieved chunks by a token budget rather than a fixed k, and drop raw payloads that the model has already extracted from. Every one of these edits rewrites the prompt prefix and therefore invalidates the message cache from the edit point forward - so compact at deliberate checkpoints (say, every N turns) rather than continuously, and measure the combined effect, because naive per-turn pruning can cost more in cache misses than it saves in tokens.",
+   "name": "Online evaluation and human review queues on sampled production traces",
+   "learn": "Configure an LLM-as-a-judge evaluator to run on a filtered slice of live traces (for example: only Kaupex traces tagged `tier=enterprise`, sampled at 10%) with variable mappings from trace input/output into the judge prompt, and know that the judge itself costs tokens and needs its own model connection and budget. Route low-scoring or flagged traces into an annotation queue so a human reviewer labels them and their verdict becomes the ground truth your automated judge is calibrated against. Track judge-versus-human agreement explicitly - an uncalibrated judge is a confident random number generator that will make you ship a regression.",
    "minutes": 25,
    "resource": {
-    "label": "Claude Docs - Context editing",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/context-editing"
+    "label": "Langfuse docs - LLM-as-a-judge evaluation",
+    "url": "https://langfuse.com/docs/evaluation/evaluation-methods/llm-as-a-judge"
    }
   },
   {
-   "name": "Concurrency, rate limits, and the throughput ceiling",
-   "learn": "Limits are enforced per model class as RPM, ITPM and OTPM using a continuously-replenishing token bucket, so a burst of 200 parallel calls fails differently than the same volume spread over a minute. On a 429, honour the `retry-after` header and back off with jitter; steer proactively off `anthropic-ratelimit-input-tokens-remaining` and `anthropic-ratelimit-output-tokens-remaining` rather than waiting to be rejected. Two traps worth memorising: the spend-cap 429 carries no `retry-after` and will never succeed on retry until the next billing period, so your SDK's automatic retries will burn your entire timeout budget on a certainty; and a cache entry only becomes available once the first response has begun, so fanning out 50 identical-prefix requests at t=0 pays 50 cache writes instead of 1 write plus 49 reads.",
+   "name": "Datasets built from production traces, and runs linked back to them",
+   "learn": "Close the loop: when a trace is wrong, promote it to a dataset item in one action, capturing input, the expected output you wrote after diagnosis, and metadata (tenant, model, prompt version). Run experiments over the dataset so each item execution produces its own trace linked to the dataset run, letting you diff run A vs run B item by item rather than comparing two aggregate percentages. Keep dataset items versioned and immutable-by-convention, and split into a working set and a held-out set so you do not tune against the same fifty examples forever. The measure of a healthy deployment is that the dataset grows every week from real incidents.",
    "minutes": 25,
    "resource": {
-    "label": "Claude API Reference - Rate limits",
-    "url": "https://platform.claude.com/docs/en/api/rate-limits"
+    "label": "Langfuse docs - Datasets",
+    "url": "https://langfuse.com/docs/evaluation/experiments/datasets"
    }
   },
   {
-   "name": "The non-regression gate for a model downgrade",
-   "learn": "A downgrade is only shippable with a paired comparison: same eval items, same prompts, same temperature, incumbent versus candidate, reported per category rather than as one mean. Define the acceptance band before you run it (for example: overall within 2 points, no single category down more than 5 points, zero regressions on the safety and refusal subsets) so you cannot rationalise afterwards. Expect prompts to be model-specific - a prompt tuned on the large model often needs more explicit structure and few-shot examples on the small one, and 'Haiku failed' frequently means 'we did not re-tune the prompt'. Wire the comparison into CI as a job that fails the PR and attaches the before/after table, so the cost saving cannot silently decay when someone edits the prompt three weeks later.",
+   "name": "Sampling, batching, and the overhead budget",
+   "learn": "Sampling is client-side and trace-level: set `LANGFUSE_SAMPLE_RATE` or the `sample_rate` constructor arg between 0 and 1, and if a trace is dropped every observation and score under it is dropped too - consistent, but it means you cannot sample at 0.1 and still expect complete cost totals, so keep usage aggregates on a separate always-on path. Know the export machinery you will have to debug: an in-process queue, a batch worker, `flush_at`/`flush_interval` style tuning, and what happens when the queue fills (drops, not blocks - which is the behaviour you want on the request path). Measure the added p95 on your own endpoint before and after instrumentation and state the number; 'observability is free' is not an answer a platform team accepts.",
    "minutes": 25,
    "resource": {
-    "label": "Claude Docs - Using the Evaluation Tool",
-    "url": "https://platform.claude.com/docs/en/test-and-evaluate/develop-tests"
+    "label": "Langfuse docs - Sampling",
+    "url": "https://langfuse.com/docs/observability/features/sampling"
    }
   },
   {
-   "name": "Unit economics and the customer-facing number",
-   "learn": "Customers do not budget in tokens; they budget in units of work. Define the denominator with them - cost per resolved ticket, per compiled task, per document processed, per seat per month - and report cost per unit plus p95 latency as the two headline numbers, with token counts as supporting detail. Set the same shape as an SLO with an error budget (for example: p95 TTFT under 1.5s, cost per compiled task under $0.08) so a regression is an alert rather than a surprise on the invoice, and enforce per-tenant budget caps at the gateway with a graceful degrade path (downgrade the model, disable enrichment) instead of a hard failure. Always attach the quality delta to the cost delta in the same table: a saving reported without an eval number reads as a risk, not a win.",
-   "minutes": 20,
+   "name": "PII, masking and retention - the answer to the security review",
+   "learn": "Prompt and completion payloads are the most sensitive data in the system, so masking runs before export: the modern hook patches raw OpenTelemetry span attributes at export time (deleting or rewriting things like `gen_ai.prompt.*` content), while the legacy `mask` callback only covers data set through the SDK's own APIs - know which one covers third-party instrumentation, because that is where leaks happen. Combine regex/entity redaction with structural rules (never trace raw file bytes, hash identifiers, keep tenant id but drop names), and set project-level retention in days so trace payloads expire on a schedule you can point at in a DPA. Assume you will be asked 'where does this data live and for how long' in week one of an enterprise deployment.",
+   "minutes": 25,
    "resource": {
-    "label": "Google SRE Workbook - Implementing SLOs",
-    "url": "https://sre.google/workbook/implementing-slos/"
+    "label": "Langfuse docs - Masking sensitive LLM data",
+    "url": "https://langfuse.com/docs/observability/features/masking"
+   }
+  },
+  {
+   "name": "Dashboards, the Metrics API, and alerts that page someone",
+   "learn": "Build custom dashboards over the trace store, then learn the programmatic path: `GET /api/public/v2/metrics` takes a view, dimensions, metrics, filters and time granularity and returns aggregated cost, tokens, volume, latency and scores as JSON - that is how you produce a weekly cost-per-tenant report or feed a chargeback spreadsheet without exporting rows. Define real SLIs for the feature (availability = non-error traces, latency = p95 TTFT, quality = judge score above threshold, cost = USD per successful answer) and wire threshold alerts plus spend alerts to Slack or a webhook. An alert that nobody owns is a dashboard; make each one name the runbook step.",
+   "minutes": 25,
+   "resource": {
+    "label": "Langfuse docs - Custom dashboards",
+    "url": "https://langfuse.com/docs/metrics/features/custom-dashboards"
+   }
+  },
+  {
+   "name": "Self-hosting inside the customer's boundary",
+   "learn": "Most regulated customers will not send prompts to a vendor cloud, so be able to stand the stack up yourself: the web/worker containers plus Postgres (transactional), ClickHouse (traces, observations, scores), Redis/Valkey (queue and cache) and S3-compatible blob storage for large payloads and events. Know the environment variables that matter (`DATABASE_URL`, `CLICKHOUSE_URL`, `REDIS_CONNECTION_STRING`, `LANGFUSE_S3_EVENT_UPLOAD_*`, `NEXTAUTH_URL`, the encryption and salt secrets), that the worker is what actually ingests, and the sizing consequence: ClickHouse is the component that grows, so retention and sampling are capacity decisions. Practise the ninety-second version of this for a customer architect: what runs where, what leaves the VPC (nothing), and how backups and upgrades work.",
+   "minutes": 25,
+   "resource": {
+    "label": "Langfuse self-hosting guide",
+    "url": "https://langfuse.com/self-hosting"
    }
   }
  ],
  "outcomes": [
-  "You can produce a per-feature cost breakdown for a running system from your own `llm_calls` ledger and reconcile it to within 2% of the Usage and Cost Admin API figures for the same period.",
-  "You can raise the prompt cache hit rate on a real workload above 80% and prove it from `cache_read_input_tokens / (cache_read_input_tokens + cache_creation_input_tokens + input_tokens)`, not from an assumption that caching is on.",
-  "You can state the caching break-even from memory (1.25x write, 0.1x read, so roughly 1.2 reuses within the 5-minute TTL; 2x write, so roughly 2.2 reuses at 1h) and decide whether a given call site should be cached at all.",
-  "You can convert an offline workload to the Message Batches API with deterministic `custom_id`s, reconcile submitted against returned keys, requeue `expired` and `errored` entries, and show the 50% price reduction as a line in the ledger.",
-  "You can cut Kaupex model spend by at least 30% with the eval delta inside a pre-declared acceptance band, and name which change produced which fraction of the saving.",
-  "You can look at a latency histogram and say within five minutes whether the bottleneck is prefill, decode, or your own infrastructure, and name the specific lever for each.",
-  "You can debug a caching rollout that produced zero savings by checking, in order: prefix below the model minimum, per-request content ahead of the breakpoint, a tool-definition or effort change invalidating the prefix, and parallel cold-start fan-out.",
-  "You can present a one-page before/after table to a customer stakeholder with cost per unit of work, p50/p95 latency, eval score by category, and sample size, and defend every cell."
+  "You can take a single request id from a Kaupex API response and open one trace that shows the HTTP span, retrieval span, every model generation with its prompt version, token usage, USD cost and TTFT, and the tool calls in between - with no gap where the LLM call is an opaque 8-second block.",
+  "You can state cost per tenant per day and cost per successful answer for a deployment, pulled from the Metrics API rather than a provider invoice, and explain the difference between the two numbers.",
+  "You can show p50/p95/p99 latency broken down into time-to-first-token, provider time and your own orchestration self-time, and name which of the three you would attack first for a given complaint.",
+  "You can turn a customer-reported bad answer into a dataset item with an expected output in under five minutes, then re-run the dataset and show per-item pass/fail against the previous run.",
+  "You can demonstrate masking working end to end: a trace containing a synthetic national-ID string in the prompt arrives at the backend with that field redacted, including for spans produced by third-party auto-instrumentation.",
+  "You can quantify instrumentation overhead: measured p95 delta on your endpoint with tracing on versus off, plus the trace volume and storage growth per 1,000 requests at your chosen sample rate.",
+  "You can stand up a self-hosted Langfuse (web, worker, Postgres, ClickHouse, Redis, S3-compatible storage) from scratch and point your app at it by changing only environment variables.",
+  "You can define and defend four SLIs for one LLM feature with alert thresholds and, for each, the runbook step the alert triggers."
  ],
  "failureModes": [
-  "A request id, a `datetime.now()` stamp, or the user's name is interpolated into the system prompt ahead of the cache breakpoint, so every request writes a fresh cache entry and the 'caching optimisation' raises the bill by 25%.",
-  "The cached prefix is 700 tokens against a model with a 1,024-token minimum, so caching silently no-ops with no error returned, and nobody notices for a month because the code never asserts on `cache_read_input_tokens`.",
-  "Someone fixes a typo in a tool description, which invalidates the entire cache prefix for every tenant at once, and the resulting stampede of cache writes shows up as a cost spike that gets blamed on traffic growth.",
-  "A latency experiment toggles `output_config.effort` or thinking config per request, which invalidates message-block caches, so the effort A/B test and the caching rollout silently cancel each other out and the team concludes caching does not work.",
-  "A nightly batch backfill hits the 24-hour expiry, the `expired` results are never reconciled against the submitted key set, and a few thousand documents are permanently missing from the index with no error anywhere in the logs.",
-  "The service hits its monthly spend cap and returns 429s with no `retry-after`; the SDK's automatic retries hammer a certainty, requests pile up behind the retry budget, and a billing limit presents as a full outage.",
-  "The team downgrades to a smaller model on the strength of a 60-question aggregate score, and the regression that only existed in the 8-question refusal subset ships to production as a compliance incident."
+  "Tracing is added to the request path but never flushed in the worker or Lambda, so the exact background jobs that fail at 3am are the ones with no traces, and the incident is reconstructed from nothing.",
+  "The customer's gateway strips or regenerates `traceparent` at the ingress, so every LLM trace is an orphan with no parent service span, and the join you promised in the design review quietly does not exist.",
+  "Streaming responses close the generation span before the final usage chunk arrives, so token counts and cost read zero for the entire streaming code path and the cost dashboard understates real spend by half.",
+  "A model is deployed under a custom or fine-tuned name that matches no price definition, so its cost silently records as zero, and the miss is discovered when finance compares the dashboard to the provider invoice.",
+  "Raw prompts containing customer PII are shipped to a vendor-hosted trace store before anyone reviews it, turning a debugging win into a data-processing incident and a contract escalation.",
+  "Sampling is set to 0.05 to control storage and then someone builds the monthly chargeback report off sampled traces, so one tenant is billed twenty times more or less than they used.",
+  "`user_id` is populated with a raw email address and `tags` with a per-request uuid, so the store's cardinality explodes, filters time out, and the dashboards become unusable exactly when traffic gets interesting."
  ],
  "interviewQuestions": [
-  "A customer's monthly bill for your assistant tripled with flat request volume. Walk me through your diagnosis in order, and tell me what data you need in place beforehand for that diagnosis to take minutes instead of a week.",
-  "Explain prompt caching to their platform architect: what is the cache key, what invalidates it, what does it cost to write versus read, and at what reuse count does it stop being worth doing?",
-  "Design the request path for a support assistant with a 40,000-token policy corpus, 2,000 tenants, and a p95 TTFT budget of 1.5 seconds. Where do your cache breakpoints go, what is cached per tenant versus shared, and what happens at 09:00 when every tenant arrives cold at once?",
-  "You want to move from the large model to the small one to save 60%. What exactly do you run before you propose it, what is your acceptance band, and what do you tell the customer if the small model is 3 points worse overall but 9 points worse on multi-hop questions?",
-  "When is a cascade (small model first, escalate on failure) more expensive than just calling the large model, and how would you compute the escalation-rate threshold for a specific workload?",
-  "You enabled caching and the bill did not move. Give me the five things you check, in the order you check them, and the exact field you look at for each.",
-  "Which parts of this pipeline would you move to the Batch API, which would you refuse to move, and what breaks operationally when a batch expires at 24 hours instead of completing?"
+  "A customer says one specific answer from your assistant was wrong yesterday afternoon. Walk me through, minute by minute, how you go from that sentence to a root cause, and tell me exactly which fields you need to have captured in advance for that path to work.",
+  "Design end-to-end tracing for an agent running in a customer VPC where the platform team already runs an OpenTelemetry Collector into Datadog, and legal will not allow prompt text to leave the VPC. What ships where, what is redacted, and where does the trace id come from?",
+  "Your LLM cost dashboard says $4,100 for the month and the provider invoice says $9,800. List the causes you would check, in the order you would check them, and how you would confirm each one.",
+  "You have a p95 latency SLO of 4 seconds and you are at 6.5. The generation span averages 5.2 seconds. How do you decide whether the fix is a smaller model, streaming, caching, retry tuning, or your own orchestration code - and what does the trace need to show for you to decide with evidence?",
+  "Explain how you would sample traces at high volume without breaking cost reporting, quality monitoring, or incident debugging. What do you sample, what do you never sample, and where do the aggregates come from?",
+  "Argue for or against using an LLM judge on live production traffic to a customer who is worried about both cost and correctness. What would you measure to prove the judge is trustworthy, and what would make you turn it off?",
+  "Two weeks after go-live, quality has visibly drifted but nothing was deployed. What in your observability setup lets you distinguish a provider-side model change, an input-distribution change, and a retrieval regression - and what would you have had to instrument on day one?"
  ],
- "proofOfWork": "Build `llm-cost-lab`: a small repository that runs one fixed workload from the Kaupex Task Compiler under six named configurations - baseline, caching only, caching plus structured output, small model only, cascade with escalation, and batch for the offline half - through a single `make bench CONFIG=<name>` entrypoint that writes every call to a SQLite ledger and emits a generated markdown report. The report must contain one row per configuration with columns for cost per unit of work, total input/cache-write/cache-read/output tokens, cache hit rate, p50 and p95 TTFT, p95 end-to-end latency, eval score overall and by category, escalation rate where applicable, and n - every cell traceable to a stored run_id. Include three things that prove you measured rather than assumed: a plot of cost per request against cache hit rate as the inter-request gap sweeps past the 5-minute TTL boundary; a break-even chart for 5-minute versus 1-hour TTL as a function of reuse count for your actual prefix size; and a deliberate negative result documented in the README, such as a configuration where caching or cascading cost more, with the arithmetic explaining why. Add a CI job that fails the build if cost per unit rises more than 10% or any eval category drops more than 5 points, plus a two-page COST-REVIEW.md written for a non-engineer stakeholder that leads with cost per resolved unit and the quality delta, not with tokens."
+ "proofOfWork": "Ship an 'LLM trace forensics kit' as a small repository plus a five-minute recorded walkthrough over Kaupex and DefenderMate. The repo contains a single instrumentation module both apps import (tracer setup, propagation, masking hook, sampling config, `as_type` conventions, prompt-version stamping) and a `tracectl` CLI with three commands: `tracectl explain <trace_id>` printing the span tree with per-span self-time, TTFT, tokens by usage type and USD cost; `tracectl cost --group-by tenant --since 30d` calling the Metrics API to produce the chargeback table; and `tracectl promote <trace_id>` turning a bad production trace into a dataset item with an expected output. Include a `load/` script that drives synthetic traffic with deliberate faults - a 429 storm, a streaming call that returns usage only in the final chunk, a request with an unpriced custom model name, and a prompt containing a synthetic national ID - and a `FINDINGS.md` recording, with screenshots, what each fault looked like in the trace before and after the fix, the measured p95 overhead of instrumentation on and off, and the storage growth per 1,000 traces. Finish with a one-page `SLO.md` defining availability, p95 TTFT, judge-score and cost-per-answer SLIs with thresholds, the alert wired to each, and the runbook step it triggers - so the artifact reads as an operable system a customer's platform team could adopt, not a screenshot of a demo dashboard."
 }

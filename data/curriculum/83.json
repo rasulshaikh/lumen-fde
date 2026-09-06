@@ -1,191 +1,210 @@
 {
  "i": 83,
- "topic": "Application pipeline: apply in waves, run three or four loops in parallel",
- "track": "L. Portfolio, Positioning, Pipeline",
- "month": 6,
- "hours": 6,
- "why": "An FDE job search is structurally identical to the job itself: a portfolio of accounts at different stages, each with a different stakeholder, each moving at a speed you do not control, all needing to be sequenced so decisions land when you need them to. Run serially, a search produces one decision every eight weeks and zero leverage; run as an instrumented pipeline with three or four loops converging, it produces two offers in the same fortnight and a real choice. The same instincts a hiring manager is testing - do you keep every thread alive with an owner and a due date, do you force a decision instead of waiting, do you tell the truth when timelines collide - are exactly the ones this topic drills, which is why running your own pipeline badly is itself a signal.",
+ "topic": "Decomposition drills (ten)",
+ "track": "K. Interview Loop and Mocks",
+ "month": 9,
+ "hours": 10,
+ "why": "The decomposition round maps one-to-one onto day one of a real deployment: a customer says a single sentence like 'we want AI to reduce claim denials' and you have to return a plan someone can staff, budget, sequence and kill. FDE loops use this round specifically to catch the engineer who starts drawing architecture ninety seconds in, because that engineer builds the wrong thing confidently and burns a quarter of a customer's patience doing it. Ten timed reps is what converts the framework from something you can describe into something you can execute while a stranger interrupts you, halves your timeline, and takes away production data access.",
  "prerequisites": [
-  "Three public case studies live with a single index link you can paste into any application (topic 80) - the pipeline moves at the speed of your artifacts, and you cannot tailor what does not exist.",
-  "The Hermes write-up published and a LinkedIn profile that reads as FDE rather than generic backend (topic 81), because inbound recruiter flow is a channel you will measure and it only exists if the profile does.",
-  "A 40-company target list with tiering, named referral paths and warm-intro routes already researched (topic 82). This topic consumes that list; it does not build it.",
-  "Enough technical readiness to survive a first-round screen in your two strongest areas today. Requisition cooldowns are 6-12 months at most large companies, so a wave sent before you can pass a screen spends a company you cannot get back.",
-  "Working comfort with a spreadsheet or a checked-in CSV as a system of record: formulas or a 60-line script, conditional formatting or a diff, and a scheduled job that emails you a digest.",
-  "An interview-ready environment and calendar hygiene - a quiet room, tested screen share and audio, and a calendar where your own blocks are real events rather than intentions."
+  "Discovery technique from topic 66 - separating the stated ask from the real problem, and knowing who the decision owner is.",
+  "The engagement document set from topic 67: site survey, PRD-lite, SOW and ADR shapes, so the drill write-up has somewhere real to land.",
+  "System design vocabulary from topics 42 and 43 - queues, caching, retrieval, batching - so decomposition can name components without hand-waving.",
+  "Evals-as-infrastructure from topic 53: what an eval set costs to build, who labels it, and what an acceptance threshold looks like.",
+  "SLO and error-budget literacy from topic 20, so 'production ready' means numbers rather than vibes.",
+  "Compliance ground truth from topic 64 (SOC 2, GDPR, HIPAA) and domain context from topic 71 (fintech ops, healthcare intake, procurement, logistics).",
+  "At least one delivered engagement of your own - the Lumen FDE deployment - to mine for reference-class durations."
  ],
  "subtopics": [
   {
-   "name": "Model the search as a pipeline with explicit states and WIP limits",
-   "learn": "Draw the state machine before you open a spreadsheet: sourced, applied, recruiter screen, hiring-manager screen, technical round(s), full loop, team match, offer, decision - plus the terminal states reject, withdrew, ghosted and paused. Every state gets an owner (me or them), an expected dwell time, and a next-action-by date; a company with no next action is not in your pipeline, it is a memory. Set the work-in-progress limit deliberately: 3-4 companies in loop stages (technical onward) at once, because past four your prep time per loop drops below what actually wins rounds, plus 10-14 in the earlier feeding stages. WIP is the control variable you tune every Friday, not something that happens to you.",
+   "name": "Read the round: what the 30 minutes actually scores",
+   "learn": "Treat this as a rubric, not a conversation. Interviewers mark five things roughly independently: did you constrain the problem before proposing anything, is the breakdown collectively exhaustive with no orphaned work, does every piece carry a number and a confidence, is the order risk-first, and did you re-plan correctly when they injected a constraint. Write those five lines on a card and keep it visible for all ten drills - you are graded against the same card every time. Learn the dominant anti-signal explicitly: boxes and arrows inside the first two minutes reads as 'will build the wrong thing fast', and nothing in the remaining 28 minutes fully recovers it.",
    "minutes": 20,
    "resource": {
-    "label": "Atlassian Agile Coach - Kanban (boards, work-in-progress limits, flow)",
-    "url": "https://www.atlassian.com/agile/kanban"
+    "label": "Exponent - Forward Deployed Engineer interview guide",
+    "url": "https://www.tryexponent.com/blog/forward-deployed-engineer-interview-the-definitive-2026-guide-fde"
    }
   },
   {
-   "name": "Funnel math: the six conversion ratios and your own baselines",
-   "learn": "Instrument six ratios and compute each per channel and per wave: application to recruiter response, response to HM screen, screen to technical, technical to full loop, loop to offer, offer to accept. Know the shape of realistic numbers so you can tell a bad process from bad luck - a strong senior profile applying cold sees roughly 5-15% response, a warm referral pushes that first number to 40-60% and moves the loop-to-offer number almost not at all, which is precisely why referrals matter and precisely why they are not a substitute for readiness. Then back-solve: two offers inside one two-week window implies roughly 6-10 loops, which implies 25-40 real applications with a referral mix, not 200 portal submissions. Write the baseline down before wave one so wave two is a comparison rather than a feeling.",
-   "minutes": 25,
-   "resource": {
-    "label": "Google SRE Book - Service Level Objectives (choosing indicators and targets)",
-    "url": "https://sre.google/sre-book/service-level-objectives/"
-   }
-  },
-  {
-   "name": "Wave sizing with Little's Law: how many applications must be in flight",
-   "learn": "L equals lambda times W. Cycle time W from application to decision is 4-8 weeks at most companies and 8-12 at Palantir-class loops with team matching and a hiring committee. If you want L equals 4 concurrent loops and W is 6 weeks, loops must start at 4/6, about 0.67 per week; at a 25% application-to-loop conversion that is roughly 2.7 applications per week sustained - about 11-12 per two-week wave, forever, not once. Do this arithmetic explicitly, because the non-obvious consequence is that the pipeline you can negotiate with in week 10 was determined by what you sent in week 2. You cannot fix a thin pipeline in the week an offer lands, and every week you skip a wave shows up as an empty slot forty days later.",
-   "minutes": 25,
-   "resource": {
-    "label": "Little's Law (queueing relation between WIP, throughput and cycle time)",
-    "url": "https://en.wikipedia.org/wiki/Little%27s_law"
-   }
-  },
-  {
-   "name": "Tracker schema: fields, states, and the one-row-per-application invariant",
-   "learn": "Design the schema once, with the fields that make the weekly review mechanical: company, req_url, req_id, tier, wave, channel (referral, recruiter_inbound, hm_direct, portal), referrer_name, date_applied, stage, stage_entered_at, next_action, next_action_due, owner (me or them), last_contact_at, recruiter_name, recruiter_email, interviewers, artifact_sent, level_target, comp_band_published, comp_anchor_given (boolean), expected_decision_date, outcome, reject_stage, reject_reason_code, notes_url. Enforce three invariants: one row per application, never one per company; stage_entered_at is rewritten on every transition so dwell time per stage is computable at the end; and any row where owner is me and next_action_due is in the past is a defect, not a to-do. Add reject_reason_code as a controlled vocabulary now (prep_gap, communication, scope_mismatch, level_mismatch, headcount_frozen, unknown) - free-text reasons are unanalysable in week ten.",
+   "name": "The five-minute clarification protocol",
+   "learn": "Build a fixed question set you can run cold and finish inside five of the thirty minutes, grouped so you never wander: (a) who is the user and what do they do today, step by step, without your system; (b) what decision or action changes if this works, and who makes it; (c) what does success look like numerically, by when; (d) what data exists, where does it live, who approves access; (e) what is out of scope, what is politically untouchable, what has already been tried and failed; (f) hard constraints - on-prem vs cloud, PII, latency, budget, how many people you get. Practise a three-question compression for terse interviewers: current manual process, the decision it feeds, the metric that must move. Every question must be one whose answer changes your plan; if you cannot name the branch it opens, cut it.",
    "minutes": 30,
    "resource": {
-    "label": "GitHub Docs - Planning and tracking with Projects (custom fields, views, automation)",
-    "url": "https://docs.github.com/en/issues/planning-and-tracking-with-projects"
+    "label": "system-design-primer - outline use cases, constraints and assumptions",
+    "url": "https://github.com/donnemartin/system-design-primer"
    }
   },
   {
-   "name": "Build it and automate the digest so you never have to check the tracker",
-   "learn": "Whatever the substrate, the rule is that the tracker pushes to you. In Sheets: conditional formatting turning next_action_due red when it is less than TODAY(), a stage histogram and the six ratios computed with COUNTIFS or a single QUERY, a weekly snapshot tab appended by a time-driven Apps Script trigger so you can chart stage counts over time, and a daily 08:00 MailApp.sendEmail digest listing overdue actions plus every row where owner is them and last_contact_at is more than seven days old. If you prefer git: a CSV in the repo, a 60-line Python script producing the same digest, and a cron or GitHub Action running it. Build it in one sitting and then stop building it - a tracker you are still improving in week six is a procrastination artifact.",
+   "name": "From 'we want AI' to a falsifiable outcome metric with a baseline",
+   "learn": "Convert the ask into one sentence shaped as: move <metric> from <baseline> to <target> for <population> by <date>, measured by <instrument>. Force a baseline out of the interviewer even as a rough estimate - a plan with no baseline cannot be judged, and 'we don't measure that today' is itself workstream one. Separate the model metric (extraction F1, precision@k, recall at a fixed alert volume) from the business metric (analyst minutes per case, denial rate, on-time delivery) and state the transfer function you are assuming between them, because that unstated assumption is where these engagements actually die. Always name the non-ML baseline you would ship first - a SQL rule, a sorted work queue, a regex - and what it would plausibly score.",
    "minutes": 25,
    "resource": {
-    "label": "Google Apps Script - Extending Google Sheets (triggers, custom functions)",
-    "url": "https://developers.google.com/apps-script/guides/sheets"
+    "label": "Google - Introduction to Machine Learning Problem Framing",
+    "url": "https://developers.google.com/machine-learning/problem-framing"
    }
   },
   {
-   "name": "Tier the 40 companies and assign waves so wave one is calibration",
-   "learn": "Split the target list from topic 82 into A (you would sign inside 48 hours), B (strong, right level and comp required) and C (fine, mainly loop practice and a floor offer). Then invert the instinct everyone has: wave one is roughly 60% C, 30% B, 10% A. Three reasons, all mechanical - your first three loops are objectively your worst, rejections carry a 6-12 month requisition cooldown at most large companies, and a live C-tier offer is the cheapest negotiating leverage that exists. For every row record the target level and the published or market band for that level and location so tier is a decision you can defend, not a vibe; a company whose band tops out below your floor belongs in C or off the list entirely.",
+   "name": "Data reality check before any architecture",
+   "learn": "Interrogate the data on six axes and say them as a table: system of record, grain (one row equals what, exactly), volume and growth, freshness and arrival latency, quality (null rates, duplicates, late-arriving corrections, free text vs coded fields), and access path (CDC, nightly extract, read replica, vendor API with a rate limit - and who signs off). Ask for one real example row and the row count; those two answers move a plan more than any architecture choice. Name the classic traps out loud so the interviewer knows you have hit them: no join key between the two systems, no history because the source table is mutated in place, labels that only exist post-hoc, and a 'warehouse' that turns out to be a folder of CSV drops.",
+   "minutes": 25,
+   "resource": {
+    "label": "Microsoft Learn - Team Data Science Process overview",
+    "url": "https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ai/plan"
+   }
+  },
+  {
+   "name": "MECE workstreams and the 100% rule",
+   "learn": "Decompose into five to seven workstreams that are mutually exclusive and collectively exhaustive, and enforce the work-breakdown 100% rule: children sum to the parent, no more and no less. The default deployment spine is access and environment, data ingestion and contracts, core logic or model, workflow and interface integration, evaluation and monitoring, rollout and handoff - plus one explicitly named customer-side stream holding everything you cannot do yourself. Test each node twice: can it be assigned to a single owner, and does it produce something a human can look at? A node with no demoable output is a task, not a workstream. Then state the excluded set out loud - what you are deliberately not doing is scored as hard as what you are.",
+   "minutes": 25,
+   "resource": {
+    "label": "Work breakdown structure - the 100% rule",
+    "url": "https://en.wikipedia.org/wiki/Work_breakdown_structure"
+   }
+  },
+  {
+   "name": "Environment and access: the customer-side critical path",
+   "learn": "The estimate that kills FDE plans is not model quality, it is getting a network route and a credential. Enumerate it every drill: VPC peering or PrivateLink or VPN, SSO/OIDC integration, an identity with the right role (IRSA, workload identity, a service account someone must approve), egress rules and proxy allow-lists, whether outbound calls to a hosted model API are permitted at all, security review and vendor onboarding, and a DPA or BAA. Size these in calendar weeks, not engineering days, and attach a named customer-side owner to each. State the parallel mitigation: synthetic or sampled data in your own environment so code gets written while approvals are pending.",
+   "minutes": 25,
+   "resource": {
+    "label": "AWS Well-Architected Framework",
+    "url": "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html"
+   }
+  },
+  {
+   "name": "Thin vertical slice first: the walking skeleton",
+   "learn": "Sequence so the first deliverable crosses every layer end to end for one narrow case - one source, one entity type, one user, one endpoint or screen, deployed where it will actually live - instead of completing any layer. The slice's job is to falsify integration assumptions, not to be accurate: can you read the source at the required grain, run inside their network, write back into the system of record, and get a human to look at the output. Say what it proves and what it deliberately does not. The anti-pattern to name: three weeks of pipeline work before anyone sees a result, discovered in week four to have been joined on a key that is not unique.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google Cloud - MLOps: continuous delivery and automation pipelines",
+    "url": "https://docs.cloud.google.com/architecture/mlops-continuous-delivery-and-automation-pipelines-in-machine-learning"
+   }
+  },
+  {
+   "name": "Sizing: appetite, reference classes, three-point estimates",
+   "learn": "Every workstream gets a number with its method attached. Prefer fixed-time-variable-scope appetite ('two weeks, and here is what fits in it') over open-ended estimates; use reference-class forecasting where you have history ('the last three ingestion integrations took 6, 9 and 4 days'); use three-point estimates (expected roughly (O + 4M + P) / 6) only where you can actually defend the pessimistic case. Quote ranges with a confidence level, never bare single numbers, and state the multiplier you apply for a first-time customer environment and say why. Keep a rabbit-hole list and a circuit breaker: work that blows past its appetite gets cut, not extended.",
+   "minutes": 25,
+   "resource": {
+    "label": "Shape Up, Chapter 3: Set Boundaries - appetite as fixed time, variable scope",
+    "url": "https://basecamp.com/shapeup/1.2-chapter-03"
+   }
+  },
+  {
+   "name": "Dependency graph, critical path, and parallelism you can actually buy",
+   "learn": "Draw the workstreams as a DAG with every edge labelled by what actually blocks - data access, a schema decision, a customer sign-off - then trace the longest path and say it out loud, because that path, not the sum of the work, is the delivery date. Separate hard technical dependencies from convenient ordering; most edges in a first-draft plan are the latter and can be cut with a mock, a stub, or a contract agreed up front. Then answer the question the interviewer is about to ask: what does a second engineer buy you? If the critical path is a three-week security review, the honest answer is 'nothing', and saying so is a strong senior signal.",
+   "minutes": 25,
+   "resource": {
+    "label": "Critical path method",
+    "url": "https://en.wikipedia.org/wiki/Critical_path_method"
+   }
+  },
+  {
+   "name": "Risk-first ordering: spikes, kill criteria, pre-mortem",
+   "learn": "List the assumptions the plan rests on, tag each with impact-if-wrong and cost-to-check, and schedule the cheapest checks on the highest-impact assumptions into week one as timeboxed spikes with a written exit question. Attach kill criteria to the engagement itself - 'if extraction F1 on 200 held-out documents is under 0.85 by week four, we stop and recommend the rules-based path' - because volunteering the conditions under which you would tell a customer to stop is the most senior move available in this round. Run a two-minute pre-mortem before presenting: assume it is six months later and this failed, name the three likeliest causes, and fold one mitigation for each into the sequence.",
+   "minutes": 25,
+   "resource": {
+    "label": "NIST AI Risk Management Framework",
+    "url": "https://www.nist.gov/itl/ai-risk-management-framework"
+   }
+  },
+  {
+   "name": "Success criteria, acceptance tests, and the pilot-to-production exit",
+   "learn": "Define done at three levels and never conflate them. Demo: a scripted path that works on chosen data. Pilot: a numeric threshold on a held-out set plus an operational bar - p95 latency, uptime, human-review rate, cost per case. Production handoff: runbook, an on-call owner, alerts on the SLIs, a defined process for prompt or model updates, and a named person at the customer who owns it after you leave. Write acceptance criteria as testable statements naming the population and the measurement window, and say who does the measuring and where the number is visible. A pilot whose numbers only you can produce gets re-litigated in every steering meeting.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google SRE Book - The Evolving SRE Engagement Model (PRR)",
+    "url": "https://sre.google/sre-book/evolving-sre-engagement-model/"
+   }
+  },
+  {
+   "name": "Delivery mechanics: the 30-minute clock and the artifacts you leave on the board",
+   "learn": "Fix a time budget and rehearse against a visible timer: 5 minutes clarify, 3 restate and get explicit agreement, 8 decompose, 5 size and sequence, 5 risks and cut list, 4 held back for their curveball. Produce exactly three artifacts - a one-line problem statement, a workstream table with owner, size and confidence, and a phase timeline with a named milestone per phase - plus at most one system-context sketch at a single level of abstraction. Narrate your reasoning continuously and check in twice ('does that split match how your team is organised?'). Announce the restate step explicitly; getting agreement on the problem before proposing a solution is the exact behaviour being tested.",
    "minutes": 20,
    "resource": {
-    "label": "Levels.fyi - Software Engineer compensation in the United States (bands by level, company and location)",
-    "url": "https://www.levels.fyi/t/software-engineer/locations/united-states"
+    "label": "C4 model - one level of abstraction per diagram",
+    "url": "https://c4model.com/"
    }
   },
   {
-   "name": "Channel strategy and the reality of what a recruiter actually sees",
-   "learn": "Rank the channels by conversion and use them in order: internal referral, warm recruiter or inbound, direct hiring-manager contact, cold portal. Understand what the portal really is - your application lands in an ATS list view where a recruiter sees your name, current title, sometimes one screening-question answer, and decides in seconds; the top third of page one of the resume and the screening answers are therefore the entire product. Two sequencing rules that people get backwards: get the referral in flight before or with the portal submission, because a referral attached to an application that is already sitting in the pile is materially weaker than a referral-sourced application; and apply inside 72 hours of a requisition going live, since review is roughly first-in-first-seen and pipelines close early. Never hold two open applications at one company simultaneously - it reads as spraying.",
-   "minutes": 25,
+   "name": "The write-up template and a 10-point self-scoring rubric",
+   "learn": "Standardise a two-page template you fill in within ten minutes of every drill: prompt verbatim, questions asked with the answers you were given or invented, restated problem, assumption register, workstream table (name, owner, size range, confidence), dependency DAG, phase plan with milestones, risks with mitigations and kill criteria, what you would cut at half the time, and what you got wrong. Append a 10-point rubric - clarified before proposing, baseline stated, MECE with an exclusion list, access path sized in weeks, thin slice first, critical path named, ranges with confidence, kill criteria present, cut list present, time budget held - and score yourself out of 10 in the same file. The score trend across ten drills is the deliverable; no single write-up is.",
+   "minutes": 20,
    "resource": {
-    "label": "Greenhouse Support - Application review stage (what the recruiter sees per application, the referral priority queue, advance or reject)",
-    "url": "https://support.greenhouse.io/hc/en-us/articles/4401963991707-Application-review-stage"
+    "label": "Architecture Decision Records - context / decision / consequences",
+    "url": "https://adr.github.io/"
    }
   },
   {
-   "name": "Referral engineering: the forwardable blurb and the ask that converts",
-   "learn": "Write a five-to-six-line blurb in the third person that your contact can paste into Slack with zero editing: who you are, the one number that proves the claim, the specific requisition link, and one sentence on why this company. Make the ask binary and cheap - 'would you be comfortable forwarding this to whoever owns the FDE req? Completely fine if not' - because the open-ended 'can you refer me' silently asks them to write the blurb, which is why it fails. For second-degree paths ask for an introduction to a named person, never a general introduction. Then run the follow-through that determines whether wave three still has referrals available: report back within five business days regardless of outcome, and cap yourself at two asks per contact per quarter. Log referrer_name on the row so the thank-you is scheduled, not remembered.",
+   "name": "Drills 1-3: regulated data, where compliance is on the critical path",
+   "learn": "Three timed drills, each written up immediately: (1) a health payer wants to cut avoidable 30-day readmissions using claims plus an EHR feed; (2) a bank wants to cut false positives in AML transaction-monitoring alerts without missing true hits; (3) a state agency wants faster benefits eligibility decisions from scanned documents. For each, force the specific gates into the plan as sized calendar dependencies: BAA and minimum-necessary access, de-identified vs identified data, explainability for an adverse decision, immutable audit logging, data residency, and whether regulation requires a human decision-maker in the loop regardless of model quality. Notice where phase one is correctly not a model at all, but a labelled dataset plus a measurement of the current human baseline.",
+   "minutes": 85,
+   "resource": {
+    "label": "HHS - HIPAA for Professionals",
+    "url": "https://www.hhs.gov/hipaa/for-professionals/index.html"
+   }
+  },
+  {
+   "name": "Drills 4-6: physical operations and telemetry",
+   "learn": "Three drills where the constraint is the physical world: (4) predictive maintenance across a fleet of industrial machines with intermittent sensor uplink; (5) daily route planning for 200 vehicles with delivery time windows and driver-hours rules; (6) a manufacturer wants one inventory view across three ERPs after an acquisition. Practise identifying when the problem is optimisation or entity resolution rather than ML - for (5), say 'capacitated VRP with time windows, a solver not a model' - and decompose around edge and offline constraints, clock skew, duplicate and missing telemetry, backfill of late data, and the fact that a dispatcher will override any answer that cannot explain itself. Size the change-management workstream; in ops deployments it is usually larger than the engineering one.",
+   "minutes": 85,
+   "resource": {
+    "label": "Google OR-Tools - Vehicle Routing Problem with Time Windows",
+    "url": "https://developers.google.com/optimization/routing/vrptw"
+   }
+  },
+  {
+   "name": "Drills 7-8: LLM-shaped scopes where the customer has picked the technology",
+   "learn": "Two drills: (7) 'deflect 40% of support tickets with an AI assistant' over a stale help centre plus a five-year Zendesk archive; (8) extract 30 fields from 12 contract templates into their CLM. Decompose to the eval set first - how many labelled examples, sampled from where, labelled by whom, at what per-field acceptance threshold - then corpus and retrieval quality, then the human-in-the-loop and escalation path, then a stated cost and p95 latency budget per request, then the ticket-taxonomy work nobody volunteers for. Name the metric trap out loud: deflection measured as 'no follow-up ticket' scores abandoned, angry users as successes, so define the counter-metric (CSAT on deflected sessions, escalation rate) in the same breath.",
+   "minutes": 55,
+   "resource": {
+    "label": "Hamel Husain - Your AI Product Needs Evals",
+    "url": "https://hamel.dev/blog/posts/evals/"
+   }
+  },
+  {
+   "name": "Drills 9-10: adversarial and under-specified scopes, plus the mid-drill curveball",
+   "learn": "Two drills that are wrong as asked: (9) 'migrate this 12-year-old undocumented Java monolith off the mainframe in six months' - practise strangler-fig decomposition, seam identification, and proposing a read-only shadow phase that runs both systems and diffs outputs before any cutover; (10) an executive asks for a real-time dashboard when the actual problem is that two departments disagree on the definition of an active customer - practise redirecting to the definition and the decision owner without telling the sponsor they were wrong. In both, have someone inject a curveball at minute 18 (timeline halved, production data access revoked, a competitor already failed at this) and re-sequence out loud, naming what you drop and which risk you are now knowingly accepting.",
+   "minutes": 55,
+   "resource": {
+    "label": "Martin Fowler - Strangler Fig Application",
+    "url": "https://martinfowler.com/bliki/StranglerFigApplication.html"
+   }
+  },
+  {
+   "name": "Regrade, calibrate, and extract your three repeated failures",
+   "learn": "After all ten, re-score drills 1-5 against the rubric as it stood at the end rather than the one you started with, and diff each early plan against how you would write it now. Build a personal reference-class table from the set - the sizes you assigned to ingestion, environment access, eval-set creation - and check those against real durations from your own delivered work; most people under-size access approvals and labelled-data creation by two to four times. Write the three patterns that recur (jumped to architecture, no baseline, no kill criteria) as three sentences on a card and re-read it in the sixty seconds before every real interview.",
    "minutes": 30,
    "resource": {
-    "label": "Fred Wilson (AVC) - The Double Opt-In Introduction (the forwardable ask and introductions to a named person)",
-    "url": "https://avc.com/2009/11/the-double-optin-introduction/"
-   }
-  },
-  {
-   "name": "Sourcing live requisitions beyond LinkedIn, and the seven title variants",
-   "learn": "LinkedIn misses a large fraction of FDE-shaped roles, and the title is not stable. Every wave, search all of: Forward Deployed Engineer, Forward Deployed Software Engineer, Solutions Engineer, Field Engineer, Deployment Strategist, Applied AI Engineer, and Technical Account Manager where the requisition is genuinely technical. Source from the monthly Hacker News Who Is Hiring thread, YC's startup job board, and company career pages directly - many boards expose a public JSON endpoint you can diff weekly with a short script so new requisitions surface the day they post rather than the week you happen to look. Freshness beats volume: a two-day-old requisition converts several times better than the same one at three weeks.",
-   "minutes": 15,
-   "resource": {
-    "label": "Greenhouse Job Board API - unauthenticated JSON endpoints for a company's live requisitions (diff weekly for new postings)",
-    "url": "https://docs.greenhouse.io/job-board.html"
-   }
-  },
-  {
-   "name": "Per-application tailoring inside a hard twenty-minute box",
-   "learn": "Three artifacts, one timebox, no exceptions. Resume: maintain two or three master variants (data and infrastructure heavy, AI-application heavy, customer-facing delivery heavy) and pick one - change only the summary line and the bullet ordering, never rewrite per company, because per-company rewriting is where searches die at eight applications a month. Proof link: point at the single case study whose framing matches the requisition's top stated requirement, not at your whole portfolio. Note: exactly three sentences - their requirement in their words, the artifact that proves it, and one line about their product that could not be pasted into another company's application. Twenty minutes end to end; if you cannot hit that, the artifacts are wrong rather than the process.",
-   "minutes": 25,
-   "resource": {
-    "label": "GitHub Docs - Writing on GitHub (READMEs, links, formatting for proof artifacts)",
-    "url": "https://docs.github.com/en/get-started/writing-on-github"
-   }
-  },
-  {
-   "name": "Backward-planning the convergence so offers land in one two-week window",
-   "learn": "Pick a target decision date D and work backwards with real durations: offer paperwork and team match 5-10 business days, loop start to onsite 3-5 weeks, application to loop start 1-3 weeks. So a slow large-company process you want at offer stage on D must be applied to around D minus 8 weeks, while a fast startup is D minus 4. That asymmetry is the whole reason waves are staggered rather than simultaneous - you deliberately start the slowest loops first and the fastest last so the decisions arrive together. When one company runs ahead, do not stall it; stalling reads as disinterest and recruiters notice. Accelerate the others instead, with the honest line 'I have a process concluding on the 14th and would love to have your decision by then - what can I do to help you get there', which routinely moves final rounds forward by one to two weeks.",
-   "minutes": 30,
-   "resource": {
-    "label": "GAO Schedule Assessment Guide (GAO-16-89G) - critical path, activity durations, backward planning and schedule acceleration",
-    "url": "https://www.gao.gov/products/gao-16-89g"
-   }
-  },
-  {
-   "name": "Scheduling mechanics, timezone discipline and the energy budget",
-   "learn": "Parallel loops fail on logistics far more often than on ability, so make the rules hard: at most one loop-stage interview per day and three per week, never two full onsites in the same week, a 90-minute prep block scheduled before every technical round and a 20-minute write-up immediately after while it is fresh (that write-up is the input to your postmortems). Publish two fixed interview windows per day to recruiters rather than opening your whole calendar, and use a scheduling link only when they ask for one. Always confirm times in the other party's timezone in writing and put the IANA zone in the invite - a US-Pacific loop coordinated from IST across a daylight-saving boundary is exactly where a missed round happens. Thirty-minute buffer after every interview, no exceptions.",
-   "minutes": 20,
-   "resource": {
-    "label": "Google Calendar API - events, time zones and scheduling",
-    "url": "https://developers.google.com/workspace/calendar/api/guides/overview"
-   }
-  },
-  {
-   "name": "Recruiter comms protocol: the six messages you will send forty times",
-   "learn": "Write them once, personalise only the first sentence. (1) Referral follow-up to the recruiter naming the referrer. (2) Screen prep reply confirming logistics and asking two real questions about the team's deployment work. (3) Day-7 status nudge that carries new information so there is a reason to reply. (4) The compensation deflection: 'I'd rather understand the role and level first - I'm sure you have a band for this level, what is it?' and, if pressed a second time, a range anchored on published market data for that level and location with your number at the top of it. Never state a number first, never disclose current compensation, and set comp_anchor_given to TRUE the moment you slip so you can see the damage later. (5) Post-loop note adding one substantive point you would have made with five more minutes. (6) The acceleration email when another process is converging.",
-   "minutes": 25,
-   "resource": {
-    "label": "Patrick McKenzie - Salary Negotiation: Make More Money, Be More Valued (never give a number first, and the exact deflection scripts)",
-    "url": "https://www.kalzumeus.com/2012/01/23/salary-negotiation/"
-   }
-  },
-  {
-   "name": "Offer stage: exploding deadlines, extension asks, running finalists honestly",
-   "learn": "The moment offer one lands, execute in order. Be genuinely enthusiastic and accept or decline nothing on the call. Get everything in writing: base, bonus target, sign-on, equity as a unit count plus strike, vesting schedule, cliff and refresh policy, level, start date and remote or travel policy. Ask for the decision deadline and, if it is under seven days, ask once with a reason - 'I have two processes concluding the week of the 14th, can we make the deadline the 16th?' - which most companies grant, and a company that flatly refuses has told you something useful about how it treats people. Same day, email every other live company with a true statement: you have an offer, here is the date, they are a top choice, can the process be accelerated. Absolute rules: never invent an offer or a number, never negotiate against yourself, and never tell anyone you have an offer before it is in writing.",
-   "minutes": 25,
-   "resource": {
-    "label": "Haseeb Qureshi - Ten Rules for Negotiating a Job Offer",
-    "url": "https://haseebq.com/my-ten-rules-for-negotiating-a-job-offer/"
-   }
-  },
-  {
-   "name": "Offer evaluation: normalising comp, equity mechanics, and a pre-committed matrix",
-   "learn": "Normalise before comparing: base plus expected bonus plus annualised equity valued at both the current preferred or 409A price and a conservative haircut, plus sign-on amortised over two years - then subtract the things that are really compensation, especially travel expectations, which for an FDE role at 30% is a genuine cost. For private equity, know the mechanics that decide whether the number means anything: ISO versus NSO versus double-trigger RSU, strike against current 409A, the standard 90-day post-termination exercise window and whether the company extends it, the liquidation preference stack sitting above common, and expected dilution across future rounds. Then score against a weighted matrix over six to eight criteria you committed to in writing BEFORE any offer arrived - learning rate, customer exposure, manager, product conviction, comp, travel, remote policy, runway - so the shiniest offer cannot quietly rewrite your priorities.",
-   "minutes": 25,
-   "resource": {
-    "label": "The Open Guide to Equity Compensation (jlevy/og-equity-compensation)",
-    "url": "https://github.com/jlevy/og-equity-compensation"
-   }
-  },
-  {
-   "name": "The Friday review and the blameless rejection postmortem",
-   "learn": "Thirty minutes, same slot every week, five steps in order: recompute the six ratios and the stage histogram from the snapshot tab; send a nudge for every row where owner is them and last_contact_at is over seven days; clear or kill every overdue next_action; size the next wave from the funnel math rather than enthusiasm; and write a postmortem for every loss. The postmortem is structured and blameless - stage, reason_code from the controlled vocabulary, the single moment it turned, and the one drill you will run before the next loop of that type. Expect 30-40% to land in reason_code unknown and accept that; what is not acceptable is a rejection with no row updated. After three waves the histogram of reason codes tells you what to study, which is a far better signal than any generic prep list.",
-   "minutes": 20,
-   "resource": {
-    "label": "Google SRE Book - Postmortem Culture: Learning from Failure",
-    "url": "https://sre.google/sre-book/postmortem-culture/"
+    "label": "Reference class forecasting",
+    "url": "https://en.wikipedia.org/wiki/Reference_class_forecasting"
    }
   }
  ],
  "outcomes": [
-  "You can state your six funnel conversion rates from your own tracker, broken out by channel and by wave, and back-solve the size of the next wave from a target of two offers in one two-week window.",
-  "You can show a tracker in which every open row has an owner, a next action and a due date, and no row has gone untouched for more than seven days across a full four-week stretch.",
-  "You can sustain three to four loops simultaneously for a month without missing or double-booking a round, with a scheduled prep block before and a written debrief after every technical interview.",
-  "You can send a referral request a busy contact can act on in under sixty seconds, and report your referral acceptance rate across at least fifteen asks.",
-  "You can deflect the compensation question twice in a recruiter screen without giving a number, then produce the published band for that level and location on request.",
-  "You can, on the day a first offer lands, get it in writing with all eight terms, ask for a deadline extension with a reason, and send acceleration emails to every other live company before end of day.",
-  "You can compare two offers on a normalised total-compensation basis including equity mechanics, score them on a matrix you committed to before either arrived, and defend the choice in five sentences.",
-  "You can produce a postmortem for every rejection with a controlled reason code and a linked remediation drill, and name the two codes that dominate your losses."
+  "You can run a 30-minute decomposition cold on an unseen prompt: five minutes of clarifying questions, a restated problem you get explicit agreement on, five to seven MECE workstreams with owners, sized ranges, a sequenced phase plan and stated risks - holding the time budget to within two minutes, on video.",
+  "You can turn any vague ask into one sentence containing a metric, a baseline, a target, a population, a date and the instrument that measures it, and name the non-ML baseline you would ship first.",
+  "You can enumerate the customer-side access path (network route, identity and role, egress policy, security review, DPA or BAA) unprompted, size it in calendar weeks, and attach a named owner to each item.",
+  "You can draw the workstream DAG, state the critical path, and correctly answer whether adding a second engineer moves the delivery date.",
+  "You can attach kill criteria to your own plan - the threshold, the dataset it is measured on, and the week it is evaluated - and say the sentence in which you would recommend stopping.",
+  "You can absorb a mid-drill constraint change (timeline halved, production data revoked) and re-sequence out loud, naming what you cut and which risk you now accept.",
+  "You can quote every size as a range with a stated method (appetite, reference class, or three-point) and defend the pessimistic end when challenged.",
+  "You have ten written drill records self-scored against a fixed 10-point rubric with a visible upward trend, plus a first-versus-last diff on one repeated prompt."
  ],
  "failureModes": [
-  "You apply to your three dream companies in week one, get rejected on a rusty systems round, and burn requisitions carrying a 6-12 month cooldown - so the only companies you actually wanted are closed exactly when you finally get sharp.",
-  "You answer the recruiter's compensation question with a number in the first ten minutes, and every subsequent conversation negotiates down from an anchor you set 25% below the published band.",
-  "Wave one lands four onsites in the same week; by Thursday you are on four hours of sleep and you fail the one loop that mattered for reasons that have nothing to do with your ability.",
-  "The tracker goes stale in week three, two companies quietly stop replying, and you find out the requisitions closed only when you eventually check - the classic silent failure of an uninstrumented pipeline.",
-  "Your offers arrive six weeks apart, so you have no parallelism at all and accept a five-day exploding offer with zero leverage while the two loops you actually wanted are still at round two.",
-  "You imply a competing offer that does not exist, the recruiter checks with a counterpart in a small market where everyone knows everyone, and you lose both processes plus the referral network that fed them.",
-  "You spend your warm introductions in month six on loops you are not yet ready for, convert none of them, and cannot re-spend that social capital for a year because the same contacts now have a data point on you."
+  "You start drawing architecture in the first two minutes, the interviewer writes 'proposed before understanding', and the remaining 28 minutes of good work do not overturn it.",
+  "The plan carries no baseline, so 'reduce denials by 20%' is unfalsifiable and the pilot ends in a meeting where the customer and you quote different numbers from different queries.",
+  "Access and security review are a footnote rather than a workstream, so the model sits finished on your laptop for six weeks waiting on a VPC peering approval nobody was chasing.",
+  "The decomposition is layer-by-layer - all ingestion, then all modelling, then all UI - so the first end-to-end result lands in week six and reveals the join key is not unique.",
+  "Every workstream is a single-point estimate with no range or confidence, so the first slipped date reads as incompetence instead of the uncertainty you had already priced in.",
+  "You accept the customer's stated solution ('we need a dashboard', 'we need a fine-tuned model') as the problem, deliver it exactly to spec, and it goes unused because the real blocker was a disputed definition or an absent decision owner.",
+  "The plan has no cut list, so when the timeline is halved mid-engagement the customer chooses what to drop and drops the evaluation, leaving you unable to prove the thing worked."
  ],
  "interviewQuestions": [
-  "You are running three customer deployments at once and all three escalate in the same week. Walk me through how you decide what gets your Tuesday, and what you actually say to the two customers who do not get it.",
-  "Design the tracking system a four-person deployment team would use to run forty concurrent accounts through a seven-stage onboarding funnel. What is the schema, what is the weekly ritual, and what alert fires when an account is stuck?",
-  "A customer onboarding funnel used to convert 30% of pilots to production and now converts 8%. You have stage-entry timestamps for 200 accounts and nothing else. How do you find out what changed, and what would you need to be sure?",
-  "Tell me about a time you forced a decision out of a stakeholder who kept slipping the date. What was the exact sentence you used, and what would you have done if they had said no?",
-  "A customer asks for a price before you have scoped the work, and pushes twice. What do you say the first time, what do you say the second time, and what does giving them a number too early cost you later?",
-  "Where else are you in process, and when do you need to decide? Give me your literal answer - then tell me why you phrased it that way.",
-  "You have a signed offer with a Friday deadline and your first-choice company is two rounds behind. Walk me through what you do in order, and what you say to each side."
+  "A hospital network's COO tells you: 'we want to use AI to reduce patient no-shows.' You have thirty minutes. Go.",
+  "You are four weeks into a ten-week deployment and the customer's security team just confirmed that no hosted model API is reachable from their network. Re-plan out loud: what changes, what gets cut, and what do you tell the sponsor tomorrow morning?",
+  "Size the data-ingestion workstream for a customer you have never worked with before. Give me a number, tell me how you got it, and defend the pessimistic end.",
+  "You have two engineers and eight weeks. Show me the phase plan, then tell me which phases a second engineer actually shortens and which ones they do not.",
+  "How do you decide the very first thing you build in an engagement? Give me an example where the obvious first thing turned out to be wrong.",
+  "What would make you recommend that a customer stop this project? Be specific: which metric, measured on which dataset, in which week.",
+  "The customer's data science team already has a model they say is 92% accurate and they want you to 'just productionise it'. Decompose that."
  ],
- "proofOfWork": "Beyond the weekly-updated tracker, publish a short, fully anonymised search-telemetry report - a repository or single page called pipeline-report containing the data and the code that produced it, with company names replaced by tier and industry so nothing is indiscreet. It ships the raw export (one row per application with wave, tier, channel, stage-entry timestamps, outcome and reason code), a ~100-line Python or Apps Script analysis that computes the six conversion ratios overall and split by channel and wave, median and p90 dwell time per stage, cycle time from application to decision, and a small-multiples chart of stage counts over time built from the weekly snapshots. On top of the numbers, three pieces of writing: a cohort comparison showing what changed between wave one and wave three and which specific intervention moved which ratio (for example referral share rising from 20% to 60% and what it did to response rate versus loop-to-offer rate, which is the honest and slightly deflating finding most people never measure); a reason-code histogram across every rejection with the two dominant codes named and the drills you ran against them; and a one-page convergence timeline showing planned versus actual dates for each loop, annotated with every acceleration email you sent and whether it moved the date. The artifact proves three things at once that are hard to fake - that you instrument a system you own, that you reason about a funnel with real numbers instead of anecdotes, and that you can write about your own failures with reason codes rather than excuses. It is also a legitimate answer to 'tell me about a system you built and measured' in a loop where every other candidate reaches for a work project they cannot show."
+ "proofOfWork": "Beyond the ten drill write-ups, publish a decomposition kit as a public repo that another engineer could pick up and run in an afternoon: the two-page drill template, the 10-point rubric, a clarification question bank grouped by the six axes with a note on which branch each question opens, and a calibrated reference-class table listing the durations you assigned to environment access, ingestion, eval-set creation, integration and handoff, with the real durations from your own delivered engagements next to them and the multiplier between the two. Include all ten completed drills as filled-in instances of the template with the honest self-scores visible, plus a regrade pass in which drills one through five are re-scored against the final rubric and the diff is written up in a short 'what I was systematically wrong about' note. Anchor it with one unedited 30-minute video of a drill run against a live opponent who injects a curveball at minute 18 - timeline halved or production data revoked - showing the timer, the board artifacts and you changing the plan out loud, plus the write-up produced within ten minutes of the recording ending. The kit proves the process is repeatable and calibrated, not that a single plan happened to be good."
 }

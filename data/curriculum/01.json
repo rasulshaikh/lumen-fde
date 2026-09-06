@@ -1,217 +1,217 @@
 {
-  "i": 1,
-  "topic": "Linux internals: processes, systemd, permissions, filesystems, packaging",
-  "track": "A. Linux, Networking, Shell",
-  "month": 1,
-  "hours": 8.0,
-  "why": "An FDE is the person standing in the customer's VPC at 6pm when the model-serving box stops answering, and the fix is almost never in the Python. It is a systemd unit that hit its start-limit, a service account that cannot read the TLS key, a deleted log file still pinned open by a process, or an OOM kill nobody noticed because Restart=always hid it. Being able to read /proc, journald and the cgroup tree directly, and to explain the exact chain from power-on to a socket accepting traffic, is what lets you debug on a locked-down customer host with no APM, no root shell to the container runtime, and a nervous platform team watching.",
-  "prerequisites": [
-    "Comfortable in a shell: pipes, redirection, exit codes, job control (Ctrl-Z, bg, fg, &), and reading man pages — topic 0 'Shell mastery and scripting'",
-    "Basic SSH usage with key-based auth, and a Hetzner (or any) VPS you can root and rebuild freely",
-    "Understanding of what a process, a file descriptor and a socket are at the C-API level (open/read/write/close, fork/exec) even if you have never written C",
-    "Python 3.11+ with venv and pip, and a small HTTP app (FastAPI/uvicorn or http.server) to use as the guinea-pig service",
-    "Enough of TCP/HTTP to know what 'listening on 0.0.0.0:8000' means; the deeper networking material is topic 2, so do not block on it"
-  ],
-  "subtopics": [
-    {
-      "name": "Boot chain: firmware to PID 1 to your service",
-      "learn": "Trace the full path on your VPS: UEFI/BIOS loads GRUB from the ESP, GRUB loads vmlinuz plus initramfs and passes the kernel command line (read it with `cat /proc/cmdline`; note `root=UUID=...`, `ro`, `console=`), the initramfs mounts the real root and does switch_root, then the kernel execs /sbin/init which is systemd. Then systemd walks default.target -> multi-user.target -> your unit. Use `systemd-analyze`, `systemd-analyze blame`, `systemd-analyze critical-chain your.service`, and `journalctl -b -1 -p err` to see the previous boot's failures. Know why a wrong root= UUID or a missing virtio module in the initramfs drops you into emergency.target with no network.",
-      "minutes": 30,
-      "resource": {
-        "label": "bootup(7) — systemd boot process man page",
-        "url": "https://man7.org/linux/man-pages/man7/bootup.7.html"
-      }
-    },
-    {
-      "name": "systemd units, targets and the dependency graph",
-      "learn": "Understand unit search path precedence (/etc/systemd/system overrides /run/systemd/system overrides /usr/lib/systemd/system) and drop-in overrides in foo.service.d/*.conf via `systemctl edit`. Distinguish ordering (After=, Before=) from requirement (Wants=, Requires=, BindsTo=, PartOf=) and why After=network-online.target without Wants=network-online.target does nothing. Know WantedBy=multi-user.target in [Install], what `systemctl enable` actually does (creates a symlink in .wants/), and that `systemctl daemon-reload` is required after any unit edit. Inspect with `systemctl cat`, `systemctl show -p`, `systemctl list-dependencies --reverse`, `systemd-analyze verify unit.service`.",
-      "minutes": 35,
-      "resource": {
-        "label": "systemd.unit(5) — unit file syntax, dependencies, search paths",
-        "url": "https://man7.org/linux/man-pages/man5/systemd.unit.5.html"
-      }
-    },
-    {
-      "name": "Writing a production service unit: Type=, Restart=, timeouts",
-      "learn": "Choose Type= correctly: simple (fires 'started' immediately), exec (waits for execve to succeed, so a bad ExecStart path fails loudly), notify (process calls sd_notify READY=1, the only way systemd knows you are actually serving), forking (legacy daemons, needs PIDFile=), oneshot (with RemainAfterExit=). Configure Restart=on-failure vs always, RestartSec=, and the start-rate limiter (StartLimitIntervalSec=, StartLimitBurst=) that produces the 'start request repeated too quickly' failure. Set TimeoutStartSec=, TimeoutStopSec=, KillMode=mixed vs control-group, KillSignal=, and ExecReload=/bin/kill -HUP $MAINPID. Use ExecStartPre= for migrations and WatchdogSec= with periodic WATCHDOG=1 notifications for hang detection.",
-      "minutes": 40,
-      "resource": {
-        "label": "systemd.service(5) — service unit options",
-        "url": "https://man7.org/linux/man-pages/man5/systemd.service.5.html"
-      }
-    },
-    {
-      "name": "Sandboxing the service with systemd.exec directives",
-      "learn": "Run as a dedicated account with User=/Group= (or DynamicUser=yes for stateless services), and lock down with NoNewPrivileges=yes, ProtectSystem=strict, ProtectHome=yes, PrivateTmp=yes, PrivateDevices=yes, ProtectKernelTunables=yes, RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX, SystemCallFilter=@system-service, and CapabilityBoundingSet= with AmbientCapabilities=CAP_NET_BIND_SERVICE to bind :443 without root. Under ProtectSystem=strict the whole tree is read-only, so declare StateDirectory=, LogsDirectory=, RuntimeDirectory=, CacheDirectory= (systemd creates and chowns them) or ReadWritePaths=. Score your unit with `systemd-analyze security your.service` and get it below 3.0. Know that MemoryDenyWriteExecute=yes breaks some JIT/ffi libraries and how to spot the EPERM in strace.",
-      "minutes": 35,
-      "resource": {
-        "label": "systemd.exec(5) — execution environment and sandboxing options",
-        "url": "https://man7.org/linux/man-pages/man5/systemd.exec.5.html"
-      }
-    },
-    {
-      "name": "cgroups v2 resource control from systemd",
-      "learn": "Set MemoryMax= (hard, triggers cgroup OOM), MemoryHigh= (throttle first), CPUQuota=200%, CPUWeight=, TasksMax=, IOWeight= in the [Service] section and see them land in the unified hierarchy under /sys/fs/cgroup/system.slice/your.service/ (memory.max, cpu.max, pids.max). Read memory.current, memory.events (the oom_kill counter is your OOM evidence), cpu.stat (nr_throttled), and pids.current. Use `systemd-cgls` and `systemd-cgtop` to see the tree live, and `systemctl set-property --runtime` to change limits without restart. Know the default TasksMax (often 15% of pid_max, around 4915) silently kills thread-heavy Python workers with 'Resource temporarily unavailable'.",
-      "minutes": 30,
-      "resource": {
-        "label": "systemd.resource-control(5) — cgroup settings on units",
-        "url": "https://man7.org/linux/man-pages/man5/systemd.resource-control.5.html"
-      }
-    },
-    {
-      "name": "journald: querying, persistence, rate limits",
-      "learn": "Master the query flags: `journalctl -u app -f`, `-b`, `-b -1`, `-p err..alert`, `--since '-15m'`, `-k` (kernel ring buffer), `_PID=`, `_SYSTEMD_UNIT=`, `-o json-pretty` for structured fields, `--disk-usage`, `--vacuum-size=1G`. Make the journal survive reboots with Storage=persistent in /etc/systemd/journald.conf (or by creating /var/log/journal) and understand RateLimitIntervalSec=/RateLimitBurst= which silently drop bursty logs with a single 'Suppressed N messages' line. For Python set Environment=PYTHONUNBUFFERED=1 or stdout is block-buffered and your logs arrive minutes late or not at all on crash; use SyslogIdentifier= to make -t filtering work.",
-      "minutes": 25,
-      "resource": {
-        "label": "journalctl(1) — journal query and maintenance",
-        "url": "https://man7.org/linux/man-pages/man1/journalctl.1.html"
-      }
-    },
-    {
-      "name": "Process lifecycle: fork/exec, exit status, zombies, reaping",
-      "learn": "Walk fork -> execve -> _exit -> parent wait4 and how the 8-bit exit status is encoded (systemd shows 'status=1/FAILURE' vs 'signal=KILL'; a shell reports 128+signum). Understand a zombie is an exited child whose parent has not called wait(): it holds only a PID slot, cannot be killed, and accumulates until pid_max is exhausted. Orphans reparent to PID 1 or the nearest PR_SET_CHILD_SUBREAPER. Read `ps -eo pid,ppid,stat,wchan:20,etime,cmd` and the STAT letters (R S D Z T, plus s for session leader, l for multithreaded, + foreground). Use `pstree -p -s PID` to see ancestry. Know why a service that daemonises with a double fork loses systemd's main-PID tracking unless Type=forking and PIDFile= are set.",
-      "minutes": 30,
-      "resource": {
-        "label": "wait(2) — wait for process state change; zombie semantics",
-        "url": "https://man7.org/linux/man-pages/man2/wait.2.html"
-      }
-    },
-    {
-      "name": "Signals and graceful shutdown under systemd",
-      "learn": "Know the default dispositions and meanings of SIGTERM, SIGKILL (uncatchable), SIGHUP (reload convention), SIGINT, SIGUSR1/2, SIGPIPE and SIGCHLD. Trace systemd's stop sequence: KillSignal (SIGTERM) to the control group, wait TimeoutStopSec (default 90s), then SIGKILL; FinalKillSignal and SendSIGHUP=. Implement a handler in Python (`signal.signal(SIGTERM, ...)` or `loop.add_signal_handler`) that stops accepting, drains in-flight requests and exits 0. Understand signal masks (SigBlk/SigIgn in /proc/PID/status) and the classic bug: `ExecStart=/bin/sh -c 'python app.py'` means SIGTERM hits sh, which does not forward it; fix with `exec` or by removing the shell. Use `systemctl kill -s SIGUSR1 app` to poke a live process.",
-      "minutes": 25,
-      "resource": {
-        "label": "signal(7) — overview of signals, dispositions, delivery",
-        "url": "https://man7.org/linux/man-pages/man7/signal.7.html"
-      }
-    },
-    {
-      "name": "Diagnosing a stuck process from /proc",
-      "learn": "Be able to triage a hung PID with nothing but /proc: /proc/PID/status (State, Threads, VmRSS, SigBlk, voluntary_ctxt_switches — if not changing, the process is not being scheduled), /proc/PID/wchan and /proc/PID/stack (root only; the kernel function it is sleeping in — an NFS or io_schedule frame means D state, uninterruptible, kill -9 will not work), /proc/PID/fd and fdinfo (what it is blocked on; compare count against /proc/PID/limits), /proc/PID/task/*/stat for per-thread state, /proc/PID/io (is it still doing I/O?), /proc/PID/cwd and /proc/PID/exe (a '(deleted)' suffix means the binary was replaced under it), /proc/PID/environ and /proc/PID/cgroup. Confirm with `strace -f -tt -p PID` (a blocked futex vs read vs connect tells you the layer) and `py-spy dump --pid PID` for the Python stack. Note /proc/loadavg counts D-state tasks, so 'high load, idle CPU' means I/O or NFS.",
-      "minutes": 45,
-      "resource": {
-        "label": "proc(5) — the /proc filesystem, per-process files",
-        "url": "https://man7.org/linux/man-pages/man5/proc.5.html"
-      }
-    },
-    {
-      "name": "Memory accounting and the OOM killer",
-      "learn": "Read /proc/meminfo correctly: MemAvailable, not MemFree, is what matters, and page cache counted as 'used' is reclaimable. Distinguish VSZ, RSS and PSS (/proc/PID/smaps_rollup) and why RSS overcounts shared libraries across gunicorn workers. Understand vm.overcommit_memory (0 heuristic, 1 always, 2 strict with vm.overcommit_ratio) and vm.swappiness. Know the two OOM killers: the global one (evidence in `journalctl -k` as 'Out of memory: Killed process', victim chosen by oom_score which you shape with OOMScoreAdjust= or /proc/PID/oom_score_adj) and the cgroup one from MemoryMax= (evidence in memory.events oom_kill). Configure OOMPolicy= so one killed worker takes the whole unit down and gets a clean Restart= rather than limping.",
-      "minutes": 30,
-      "resource": {
-        "label": "Kernel docs: /proc/sys/vm tunables (overcommit, swappiness, oom)",
-        "url": "https://www.kernel.org/doc/html/latest/admin-guide/sysctl/vm.html"
-      }
-    },
-    {
-      "name": "Users, groups, sudo and service accounts",
-      "learn": "Read /etc/passwd, /etc/shadow and /etc/group; know the system UID range (<1000, from /etc/login.defs) and create a locked service account with `useradd --system --no-create-home --home-dir /var/lib/app --shell /usr/sbin/nologin app`. Understand primary vs supplementary groups (`id`, `getent group`, `usermod -aG`, and why new group membership needs a re-login or `newgrp`). Write sudo rules in /etc/sudoers.d/ via `visudo -f`, scope NOPASSWD to exact commands (`deploy ALL=(root) NOPASSWD: /bin/systemctl restart app.service`), and audit with `sudo -l -U user`. Know that membership in docker, disk or adm is root-equivalent, and that `PermitRootLogin no` plus `PasswordAuthentication no` in sshd_config is the first hardening step on any customer VPS.",
-      "minutes": 25,
-      "resource": {
-        "label": "sudoers(5) — sudo policy syntax and defaults",
-        "url": "https://man7.org/linux/man-pages/man5/sudoers.5.html"
-      }
-    },
-    {
-      "name": "Permissions, special bits, umask, ACLs and capabilities",
-      "learn": "Go beyond rwx/octal: x on a directory means traverse, r means list; setgid on a directory (chmod 2775) makes new files inherit the group, sticky (1777 on /tmp) stops deleting others' files, setuid binaries are how passwd and sudo work (`find / -perm -4000`). Understand umask (022 vs 027, and UMask= in the unit, since systemd ignores the shell's). Use `stat`, `getfacl`, `setfacl -m u:app:r-- /etc/app/cert.pem`, default ACLs on directories (`setfacl -d`), and `chattr +i`/`lsattr` for immutable files. Know Linux capabilities as the alternative to root: `setcap cap_net_bind_service=+ep` on a binary versus AmbientCapabilities= in the unit, and why file capabilities are lost on copy and on Python interpreters (they are on the interpreter, not the script).",
-      "minutes": 35,
-      "resource": {
-        "label": "capabilities(7) — Linux capability model and list",
-        "url": "https://man7.org/linux/man-pages/man7/capabilities.7.html"
-      }
-    },
-    {
-      "name": "Filesystem layout, block devices, mounts and fstab",
-      "learn": "Know the FHS well enough to place things correctly: /etc for config, /var/lib/app for state, /var/log for logs, /run (tmpfs) for PID files and sockets, /opt/app or /usr/local for your code, /srv for served data. Inspect storage with `lsblk -f`, `blkid`, `findmnt`, `df -hT`, `df -i`. Read and write fstab: UUID= or PARTUUID= (never /dev/sdX), fs type, options (defaults, noatime, nofail, x-systemd.automount, x-systemd.device-timeout=), dump and pass fields, and understand systemd-fstab-generator turns each line into a .mount unit. Practise attaching a Hetzner volume, `mkfs.ext4 -L data`, mounting it with nofail, and growing it online with `resize2fs` (or `xfs_growfs`). Know that a missing nofail on a detached volume drops the box into emergency mode at boot.",
-      "minutes": 30,
-      "resource": {
-        "label": "fstab(5) — static filesystem table fields and options",
-        "url": "https://man7.org/linux/man-pages/man5/fstab.5.html"
-      }
-    },
-    {
-      "name": "Inodes, links, deleted-but-open files, disk-full forensics",
-      "learn": "Understand that a filename is a directory entry pointing at an inode, so hard links share the inode (`ln`, `stat -c '%i %h'`), symlinks are separate inodes holding a path (`readlink -f`), and rm only decrements the link count — the blocks are freed when the last reference, including open file descriptors, goes away. This is why df says 100% while du says 60%: find the culprit with `find /proc/*/fd -lname '*(deleted)' 2>/dev/null` or `lsof +L1`, and free space by truncating (`: > /proc/PID/fd/N`) or restarting the process. Never rm a live log; truncate it or use logrotate with copytruncate. Check inode exhaustion with `df -i` (millions of session files or mail spool), reserved blocks with `tune2fs -l | grep Reserved`, and locate usage fast with `du -xsh --max-depth=1 / | sort -h`.",
-      "minutes": 25,
-      "resource": {
-        "label": "inode(7) — file inode fields, link counts, timestamps",
-        "url": "https://man7.org/linux/man-pages/man7/inode.7.html"
-      }
-    },
-    {
-      "name": "Packaging: apt/dpkg, repositories, pinning, unattended upgrades",
-      "learn": "Separate the layers: dpkg installs .deb files and tracks state in /var/lib/dpkg/status (`dpkg -l`, `dpkg -L pkg`, `dpkg -S /path/to/file`, `dpkg -i`), apt resolves dependencies from indices (`apt update` refreshes indices only; `apt upgrade` vs `apt full-upgrade`; `apt-cache policy pkg` shows candidate and pin). Add third-party repos the modern way: deb822 files in /etc/apt/sources.list.d/*.sources with Signed-By: pointing at a keyring in /etc/apt/keyrings (apt-key is dead), and pin with /etc/apt/preferences.d/ so a vendor repo cannot replace libc. Hold with `apt-mark hold`, run non-interactively with `DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::=--force-confold`, and configure unattended-upgrades for security-only with a reboot window. Know the dpkg lock (/var/lib/dpkg/lock-frontend) and how a stuck unattended-upgrades run blocks your deploy.",
-      "minutes": 30,
-      "resource": {
-        "label": "Debian Administrator's Handbook — Maintenance and Updates: The APT Tools",
-        "url": "https://www.debian.org/doc/manuals/debian-handbook/apt.en.html"
-      }
-    },
-    {
-      "name": "Deploying the Python service: venv, lockfile, systemd, secrets",
-      "learn": "Never pip install into the system interpreter (PEP 668 'externally-managed-environment' exists for a reason; apt owns /usr/lib/python3). Build an isolated tree: `python3 -m venv /opt/app/venv`, install from a pinned requirements file (`pip install --require-hashes -r requirements.txt`, or a uv/pip-tools lock), and point ExecStart at /opt/app/venv/bin/python -m app or venv/bin/uvicorn directly, with WorkingDirectory= and Environment=PYTHONUNBUFFERED=1. Load config from EnvironmentFile=/etc/app/env owned root:app mode 0640, and pass real secrets with LoadCredential=api_key:/etc/credstore/api_key (read from $CREDENTIALS_DIRECTORY, never visible in `systemctl show-environment` or /proc/PID/environ). Deploy atomically: install into a new release directory, flip a symlink, `systemctl restart`, because pip-upgrading in place under a running process produces ImportError mid-request.",
-      "minutes": 40,
-      "resource": {
-        "label": "Python docs: venv — creation of virtual environments",
-        "url": "https://docs.python.org/3/library/venv.html"
-      }
-    },
-    {
-      "name": "Dynamic linking, PATH and the 'works in my shell, dies under systemd' class",
-      "learn": "Understand that systemd starts services with a minimal environment (PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin, no HOME unless User= is set, no LANG), so anything that worked in your login shell because of ~/.bashrc will fail; compare with `systemctl show-environment` and `cat /proc/PID/environ | tr '\\0' '\\n'`. Debug shared-library failures with `ldd /opt/app/venv/bin/python`, `objdump -p binary | grep NEEDED`, /etc/ld.so.conf.d/ plus `ldconfig -p`, and LD_LIBRARY_PATH via Environment= (not exported in the unit's shell, because there is no shell). Know that Python wheels are tagged manylinux_2_28 etc. against a glibc version (`ldd --version`), which is why a wheel built on Ubuntu 24.04 will not load on a customer's RHEL 8 box ('GLIBC_2.34 not found').",
-      "minutes": 20,
-      "resource": {
-        "label": "ld.so(8) — dynamic linker search order and environment",
-        "url": "https://man7.org/linux/man-pages/man8/ld.so.8.html"
-      }
-    },
-    {
-      "name": "Kernel tunables and per-process limits",
-      "learn": "Persist kernel parameters in /etc/sysctl.d/99-app.conf and apply with `sysctl --system`; know the ones that bite services: fs.file-max, fs.inotify.max_user_watches (uvicorn --reload, file watchers), net.core.somaxconn (accept backlog cap), net.ipv4.ip_local_port_range, vm.max_map_count (Elasticsearch, some ML runtimes), kernel.pid_max. Separate these from per-process rlimits: /etc/security/limits.conf only applies to PAM logins, so for a systemd service you must set LimitNOFILE=65536, LimitNPROC=, LimitCORE= in the unit and verify with `cat /proc/PID/limits` or `prlimit --pid PID`. Recognise EMFILE ('Too many open files') and 'Cannot allocate memory' from RLIMIT_NPROC as limit failures, not bugs.",
-      "minutes": 20,
-      "resource": {
-        "label": "sysctl.d(5) — persistent kernel parameter configuration",
-        "url": "https://man7.org/linux/man-pages/man5/sysctl.d.5.html"
-      }
-    },
-    {
-      "name": "systemd timers instead of cron",
-      "learn": "Pair a oneshot .service with a .timer using OnCalendar= (`systemd-analyze calendar 'Mon..Fri *-*-* 02:00'` to validate), Persistent=true so a missed run fires at next boot, RandomizedDelaySec= to avoid thundering herds, and OnBootSec=/OnUnitActiveSec= for monotonic schedules. Inspect with `systemctl list-timers --all` and see output in the journal with the same -u filter as any service, with the unit's User=, sandboxing and resource limits applied — none of which cron gives you. Use `systemd-run --on-active=30s --unit=oneoff /path/cmd` for ad-hoc scheduled jobs on a customer box you must not leave cron entries on.",
-      "minutes": 15,
-      "resource": {
-        "label": "systemd.timer(5) — timer unit configuration",
-        "url": "https://man7.org/linux/man-pages/man5/systemd.timer.5.html"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can narrate, without notes, the boot-to-traffic chain on your VPS from GRUB through initramfs, systemd targets and unit activation to the socket accept, and back each step with a command that shows it (`/proc/cmdline`, `systemd-analyze critical-chain`, `ss -ltnp`).",
-    "You can write a systemd unit for a Python HTTP service that scores under 3.0 on `systemd-analyze security`, runs as a non-root account, binds :443 via AmbientCapabilities, survives SIGTERM with a graceful drain, and restarts on failure without tripping the start-rate limiter.",
-    "Given only a PID on a host you have never seen, you can determine within five minutes whether it is CPU-bound, blocked on I/O in D state, waiting on a futex/socket, a zombie, or stopped, using /proc/PID/{status,wchan,stack,fd,task} and strace, and say which of those kill -9 will not fix.",
-    "You can prove an OOM kill happened, name the victim and the killer (global vs cgroup) from `journalctl -k` and memory.events, and explain which MemoryMax/OOMScoreAdjust/OOMPolicy change would have altered the outcome.",
-    "You can resolve a 'disk 100% full but du disagrees' incident by locating deleted-but-open files via /proc/*/fd and truncating through the fd, and explain to the customer why rm did not free space.",
-    "You can add a vendor apt repository with a deb822 .sources file, Signed-By keyring and a pin so it cannot upgrade core packages, and run the install non-interactively in a script that does not hang on a dpkg lock or a debconf prompt.",
-    "You can list at least six differences between the environment of a login shell and a systemd service (PATH, HOME, umask, rlimits, cgroup, capabilities) and diagnose 'works in my shell, fails under systemd' from `systemctl show-environment` and /proc/PID/environ.",
-    "You can move a stateful directory to a newly attached cloud volume with an fstab entry that uses UUID= and nofail, grow it online, and reboot with confidence that a detached volume will not block boot."
-  ],
-  "failureModes": [
-    "A service is deployed with Restart=always and MemoryMax=; it OOMs every 40 seconds and restarts, so health checks flap green and nobody notices for a week until memory.events shows oom_kill in the thousands.",
-    "ExecStart wraps the app in `/bin/sh -c`, so on `systemctl stop` SIGTERM reaches sh and is never forwarded; after TimeoutStopSec the whole cgroup gets SIGKILL and in-flight customer requests are dropped on every deploy.",
-    "Logs are rotated with rm plus a new file; the process keeps the deleted inode open, /var fills to 100%, df and du disagree by 40 GB, and the on-call engineer expands the volume instead of truncating the fd.",
-    "A vendor repo (NVIDIA, Docker, a database) is added with no pin; `apt upgrade` pulls a newer libssl or systemd from it, and the customer's compliance-scanned baseline drifts with no change record.",
-    "The unit says After=network.target but not network-online.target, so on cold boot the app starts before DHCP finishes, fails DNS on its first outbound call, exits 1, and the start-rate limiter leaves it dead until someone runs `systemctl reset-failed`.",
-    "TLS key is 0600 root:root and the service runs as User=app; it worked in testing because the engineer ran it with sudo. On the first real reboot the service fails with EACCES and the cert path looks correct to everyone reading the config.",
-    "A process on a customer host is in D state on a hung NFS mount; the team spends two hours running kill -9 and restarting the service before checking /proc/PID/wchan, which would have pointed at the storage team in thirty seconds."
-  ],
-  "interviewQuestions": [
-    "Walk me through everything that happens between the moment a Hetzner VM is powered on and the moment a systemd-managed Python service accepts its first TCP connection. Where in that chain would a missing initramfs driver, a bad fstab entry, and a wrong ExecStart path each fail, and how would the symptoms differ?",
-    "A customer says their inference service is 'hung'. You have SSH as a non-root user with sudo, no APM, and one PID. Show me, command by command, how you decide within five minutes whether it is deadlocked in userspace, blocked in the kernel, out of file descriptors, or being CPU-throttled by its cgroup.",
-    "Design the systemd unit for a FastAPI service that needs to bind port 443, write to /var/lib/app, read a secret API key, and restart on crashes but not mask a config error. Justify every directive, and tell me which ones you would remove on a customer host running an older systemd.",
-    "df reports the root filesystem at 100% but du of / sums to 60%. Explain the mechanism, find the culprit without rebooting, and free the space without losing the process. What would you change in the deployment so it does not recur?",
-    "Explain the difference between the kernel OOM killer and a cgroup memory.max kill, how you would prove which one fired from logs and sysfs, and how OOMScoreAdjust, MemoryHigh and OOMPolicy each change the outcome for a multi-worker gunicorn service.",
-    "A deploy script that works when run by hand hangs forever when run from CI over SSH on a customer box. List the most likely causes in the apt/dpkg layer and in the environment differences, and describe how you would make the script idempotent and non-interactive.",
-    "You need to hand a customer's platform team a service they can operate without you. What do you put in the unit file, the journal configuration, and the sudoers rules so that a junior engineer can restart, read logs, and roll back safely without being able to become root?"
-  ],
-  "proofOfWork": "A public repository containing a reproducible bring-up of the hardened VPS as a single idempotent shell script (or Ansible playbook) plus a 'break/fix' lab: five scripted faults you inject on the box (a D-state simulation via a FUSE or NFS hang, a deleted-but-open log filling the disk, a zombie storm from a broken subprocess handler, an OOM under MemoryMax with Restart=always masking it, and a start-rate-limit failure from an After= without Wants= ordering bug) each paired with a screencast-free written transcript of the exact commands you ran, the /proc, journalctl and cgroup evidence you collected, the root cause, and the one-line fix. The README ends with the unit file's `systemd-analyze security` output under 3.0 and a table of every systemd directive used and why it is there."
+ "i": 1,
+ "topic": "Linux internals: processes, systemd, permissions, filesystems, packaging",
+ "track": "A. Linux, Networking, Shell",
+ "month": 1,
+ "hours": 8.0,
+ "why": "An FDE is the person standing in the customer's VPC at 6pm when the model-serving box stops answering, and the fix is almost never in the Python. It is a systemd unit that hit its start-limit, a service account that cannot read the TLS key, a deleted log file still pinned open by a process, or an OOM kill nobody noticed because Restart=always hid it. Being able to read /proc, journald and the cgroup tree directly, and to explain the exact chain from power-on to a socket accepting traffic, is what lets you debug on a locked-down customer host with no APM, no root shell to the container runtime, and a nervous platform team watching.",
+ "prerequisites": [
+  "Comfortable in a shell: pipes, redirection, exit codes, job control (Ctrl-Z, bg, fg, &), and reading man pages — topic 0 'Shell mastery and scripting'",
+  "Basic SSH usage with key-based auth, and a Hetzner (or any) VPS you can root and rebuild freely",
+  "Understanding of what a process, a file descriptor and a socket are at the C-API level (open/read/write/close, fork/exec) even if you have never written C",
+  "Python 3.11+ with venv and pip, and a small HTTP app (FastAPI/uvicorn or http.server) to use as the guinea-pig service",
+  "Enough of TCP/HTTP to know what 'listening on 0.0.0.0:8000' means; the deeper networking material is topic 2, so do not block on it"
+ ],
+ "subtopics": [
+  {
+   "name": "Boot chain: firmware to PID 1 to your service",
+   "learn": "Trace the full path on your VPS: UEFI/BIOS loads GRUB from the ESP, GRUB loads vmlinuz plus initramfs and passes the kernel command line (read it with `cat /proc/cmdline`; note `root=UUID=...`, `ro`, `console=`), the initramfs mounts the real root and does switch_root, then the kernel execs /sbin/init which is systemd. Then systemd walks default.target -> multi-user.target -> your unit. Use `systemd-analyze`, `systemd-analyze blame`, `systemd-analyze critical-chain your.service`, and `journalctl -b -1 -p err` to see the previous boot's failures. Know why a wrong root= UUID or a missing virtio module in the initramfs drops you into emergency.target with no network.",
+   "minutes": 30,
+   "resource": {
+    "label": "bootup(7) — systemd boot process man page",
+    "url": "https://man7.org/linux/man-pages/man7/bootup.7.html"
+   }
+  },
+  {
+   "name": "systemd units, targets and the dependency graph",
+   "learn": "Understand unit search path precedence (/etc/systemd/system overrides /run/systemd/system overrides /usr/lib/systemd/system) and drop-in overrides in foo.service.d/*.conf via `systemctl edit`. Distinguish ordering (After=, Before=) from requirement (Wants=, Requires=, BindsTo=, PartOf=) and why After=network-online.target without Wants=network-online.target does nothing. Know WantedBy=multi-user.target in [Install], what `systemctl enable` actually does (creates a symlink in .wants/), and that `systemctl daemon-reload` is required after any unit edit. Inspect with `systemctl cat`, `systemctl show -p`, `systemctl list-dependencies --reverse`, `systemd-analyze verify unit.service`.",
+   "minutes": 35,
+   "resource": {
+    "label": "systemd.unit(5) — unit file syntax, dependencies, search paths",
+    "url": "https://man7.org/linux/man-pages/man5/systemd.unit.5.html"
+   }
+  },
+  {
+   "name": "Writing a production service unit: Type=, Restart=, timeouts",
+   "learn": "Choose Type= correctly: simple (fires 'started' immediately), exec (waits for execve to succeed, so a bad ExecStart path fails loudly), notify (process calls sd_notify READY=1, the only way systemd knows you are actually serving), forking (legacy daemons, needs PIDFile=), oneshot (with RemainAfterExit=). Configure Restart=on-failure vs always, RestartSec=, and the start-rate limiter (StartLimitIntervalSec=, StartLimitBurst=) that produces the 'start request repeated too quickly' failure. Set TimeoutStartSec=, TimeoutStopSec=, KillMode=mixed vs control-group, KillSignal=, and ExecReload=/bin/kill -HUP $MAINPID. Use ExecStartPre= for migrations and WatchdogSec= with periodic WATCHDOG=1 notifications for hang detection.",
+   "minutes": 40,
+   "resource": {
+    "label": "systemd.service(5) — service unit options",
+    "url": "https://man7.org/linux/man-pages/man5/systemd.service.5.html"
+   }
+  },
+  {
+   "name": "Sandboxing the service with systemd.exec directives",
+   "learn": "Run as a dedicated account with User=/Group= (or DynamicUser=yes for stateless services), and lock down with NoNewPrivileges=yes, ProtectSystem=strict, ProtectHome=yes, PrivateTmp=yes, PrivateDevices=yes, ProtectKernelTunables=yes, RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX, SystemCallFilter=@system-service, and CapabilityBoundingSet= with AmbientCapabilities=CAP_NET_BIND_SERVICE to bind :443 without root. Under ProtectSystem=strict the whole tree is read-only, so declare StateDirectory=, LogsDirectory=, RuntimeDirectory=, CacheDirectory= (systemd creates and chowns them) or ReadWritePaths=. Score your unit with `systemd-analyze security your.service` and get it below 3.0. Know that MemoryDenyWriteExecute=yes breaks some JIT/ffi libraries and how to spot the EPERM in strace.",
+   "minutes": 35,
+   "resource": {
+    "label": "systemd.exec(5) — execution environment and sandboxing options",
+    "url": "https://man7.org/linux/man-pages/man5/systemd.exec.5.html"
+   }
+  },
+  {
+   "name": "cgroups v2 resource control from systemd",
+   "learn": "Set MemoryMax= (hard, triggers cgroup OOM), MemoryHigh= (throttle first), CPUQuota=200%, CPUWeight=, TasksMax=, IOWeight= in the [Service] section and see them land in the unified hierarchy under /sys/fs/cgroup/system.slice/your.service/ (memory.max, cpu.max, pids.max). Read memory.current, memory.events (the oom_kill counter is your OOM evidence), cpu.stat (nr_throttled), and pids.current. Use `systemd-cgls` and `systemd-cgtop` to see the tree live, and `systemctl set-property --runtime` to change limits without restart. Know the default TasksMax (often 15% of pid_max, around 4915) silently kills thread-heavy Python workers with 'Resource temporarily unavailable'.",
+   "minutes": 30,
+   "resource": {
+    "label": "systemd.resource-control(5) — cgroup settings on units",
+    "url": "https://man7.org/linux/man-pages/man5/systemd.resource-control.5.html"
+   }
+  },
+  {
+   "name": "journald: querying, persistence, rate limits",
+   "learn": "Master the query flags: `journalctl -u app -f`, `-b`, `-b -1`, `-p err..alert`, `--since '-15m'`, `-k` (kernel ring buffer), `_PID=`, `_SYSTEMD_UNIT=`, `-o json-pretty` for structured fields, `--disk-usage`, `--vacuum-size=1G`. Make the journal survive reboots with Storage=persistent in /etc/systemd/journald.conf (or by creating /var/log/journal) and understand RateLimitIntervalSec=/RateLimitBurst= which silently drop bursty logs with a single 'Suppressed N messages' line. For Python set Environment=PYTHONUNBUFFERED=1 or stdout is block-buffered and your logs arrive minutes late or not at all on crash; use SyslogIdentifier= to make -t filtering work.",
+   "minutes": 25,
+   "resource": {
+    "label": "journalctl(1) — journal query and maintenance",
+    "url": "https://man7.org/linux/man-pages/man1/journalctl.1.html"
+   }
+  },
+  {
+   "name": "Process lifecycle: fork/exec, exit status, zombies, reaping",
+   "learn": "Walk fork -> execve -> _exit -> parent wait4 and how the 8-bit exit status is encoded (systemd shows 'status=1/FAILURE' vs 'signal=KILL'; a shell reports 128+signum). Understand a zombie is an exited child whose parent has not called wait(): it holds only a PID slot, cannot be killed, and accumulates until pid_max is exhausted. Orphans reparent to PID 1 or the nearest PR_SET_CHILD_SUBREAPER. Read `ps -eo pid,ppid,stat,wchan:20,etime,cmd` and the STAT letters (R S D Z T, plus s for session leader, l for multithreaded, + foreground). Use `pstree -p -s PID` to see ancestry. Know why a service that daemonises with a double fork loses systemd's main-PID tracking unless Type=forking and PIDFile= are set.",
+   "minutes": 30,
+   "resource": {
+    "label": "wait(2) — wait for process state change; zombie semantics",
+    "url": "https://man7.org/linux/man-pages/man2/wait.2.html"
+   }
+  },
+  {
+   "name": "Signals and graceful shutdown under systemd",
+   "learn": "Know the default dispositions and meanings of SIGTERM, SIGKILL (uncatchable), SIGHUP (reload convention), SIGINT, SIGUSR1/2, SIGPIPE and SIGCHLD. Trace systemd's stop sequence: KillSignal (SIGTERM) to the control group, wait TimeoutStopSec (default 90s), then SIGKILL; FinalKillSignal and SendSIGHUP=. Implement a handler in Python (`signal.signal(SIGTERM, ...)` or `loop.add_signal_handler`) that stops accepting, drains in-flight requests and exits 0. Understand signal masks (SigBlk/SigIgn in /proc/PID/status) and the classic bug: `ExecStart=/bin/sh -c 'python app.py'` means SIGTERM hits sh, which does not forward it; fix with `exec` or by removing the shell. Use `systemctl kill -s SIGUSR1 app` to poke a live process.",
+   "minutes": 25,
+   "resource": {
+    "label": "signal(7) — overview of signals, dispositions, delivery",
+    "url": "https://man7.org/linux/man-pages/man7/signal.7.html"
+   }
+  },
+  {
+   "name": "Diagnosing a stuck process from /proc",
+   "learn": "Be able to triage a hung PID with nothing but /proc: /proc/PID/status (State, Threads, VmRSS, SigBlk, voluntary_ctxt_switches — if not changing, the process is not being scheduled), /proc/PID/wchan and /proc/PID/stack (root only; the kernel function it is sleeping in — an NFS or io_schedule frame means D state, uninterruptible, kill -9 will not work), /proc/PID/fd and fdinfo (what it is blocked on; compare count against /proc/PID/limits), /proc/PID/task/*/stat for per-thread state, /proc/PID/io (is it still doing I/O?), /proc/PID/cwd and /proc/PID/exe (a '(deleted)' suffix means the binary was replaced under it), /proc/PID/environ and /proc/PID/cgroup. Confirm with `strace -f -tt -p PID` (a blocked futex vs read vs connect tells you the layer) and `py-spy dump --pid PID` for the Python stack. Note /proc/loadavg counts D-state tasks, so 'high load, idle CPU' means I/O or NFS.",
+   "minutes": 45,
+   "resource": {
+    "label": "proc(5) — the /proc filesystem, per-process files",
+    "url": "https://man7.org/linux/man-pages/man5/proc.5.html"
+   }
+  },
+  {
+   "name": "Memory accounting and the OOM killer",
+   "learn": "Read /proc/meminfo correctly: MemAvailable, not MemFree, is what matters, and page cache counted as 'used' is reclaimable. Distinguish VSZ, RSS and PSS (/proc/PID/smaps_rollup) and why RSS overcounts shared libraries across gunicorn workers. Understand vm.overcommit_memory (0 heuristic, 1 always, 2 strict with vm.overcommit_ratio) and vm.swappiness. Know the two OOM killers: the global one (evidence in `journalctl -k` as 'Out of memory: Killed process', victim chosen by oom_score which you shape with OOMScoreAdjust= or /proc/PID/oom_score_adj) and the cgroup one from MemoryMax= (evidence in memory.events oom_kill). Configure OOMPolicy= so one killed worker takes the whole unit down and gets a clean Restart= rather than limping.",
+   "minutes": 30,
+   "resource": {
+    "label": "Kernel docs: /proc/sys/vm tunables (overcommit, swappiness, oom)",
+    "url": "https://www.kernel.org/doc/html/latest/admin-guide/sysctl/vm.html"
+   }
+  },
+  {
+   "name": "Users, groups, sudo and service accounts",
+   "learn": "Read /etc/passwd, /etc/shadow and /etc/group; know the system UID range (<1000, from /etc/login.defs) and create a locked service account with `useradd --system --no-create-home --home-dir /var/lib/app --shell /usr/sbin/nologin app`. Understand primary vs supplementary groups (`id`, `getent group`, `usermod -aG`, and why new group membership needs a re-login or `newgrp`). Write sudo rules in /etc/sudoers.d/ via `visudo -f`, scope NOPASSWD to exact commands (`deploy ALL=(root) NOPASSWD: /bin/systemctl restart app.service`), and audit with `sudo -l -U user`. Know that membership in docker, disk or adm is root-equivalent, and that `PermitRootLogin no` plus `PasswordAuthentication no` in sshd_config is the first hardening step on any customer VPS.",
+   "minutes": 25,
+   "resource": {
+    "label": "sudoers(5) — sudo policy syntax and defaults",
+    "url": "https://man7.org/linux/man-pages/man5/sudoers.5.html"
+   }
+  },
+  {
+   "name": "Permissions, special bits, umask, ACLs and capabilities",
+   "learn": "Go beyond rwx/octal: x on a directory means traverse, r means list; setgid on a directory (chmod 2775) makes new files inherit the group, sticky (1777 on /tmp) stops deleting others' files, setuid binaries are how passwd and sudo work (`find / -perm -4000`). Understand umask (022 vs 027, and UMask= in the unit, since systemd ignores the shell's). Use `stat`, `getfacl`, `setfacl -m u:app:r-- /etc/app/cert.pem`, default ACLs on directories (`setfacl -d`), and `chattr +i`/`lsattr` for immutable files. Know Linux capabilities as the alternative to root: `setcap cap_net_bind_service=+ep` on a binary versus AmbientCapabilities= in the unit, and why file capabilities are lost on copy and on Python interpreters (they are on the interpreter, not the script).",
+   "minutes": 35,
+   "resource": {
+    "label": "capabilities(7) — Linux capability model and list",
+    "url": "https://man7.org/linux/man-pages/man7/capabilities.7.html"
+   }
+  },
+  {
+   "name": "Filesystem layout, block devices, mounts and fstab",
+   "learn": "Know the FHS well enough to place things correctly: /etc for config, /var/lib/app for state, /var/log for logs, /run (tmpfs) for PID files and sockets, /opt/app or /usr/local for your code, /srv for served data. Inspect storage with `lsblk -f`, `blkid`, `findmnt`, `df -hT`, `df -i`. Read and write fstab: UUID= or PARTUUID= (never /dev/sdX), fs type, options (defaults, noatime, nofail, x-systemd.automount, x-systemd.device-timeout=), dump and pass fields, and understand systemd-fstab-generator turns each line into a .mount unit. Practise attaching a Hetzner volume, `mkfs.ext4 -L data`, mounting it with nofail, and growing it online with `resize2fs` (or `xfs_growfs`). Know that a missing nofail on a detached volume drops the box into emergency mode at boot.",
+   "minutes": 30,
+   "resource": {
+    "label": "fstab(5) — static filesystem table fields and options",
+    "url": "https://man7.org/linux/man-pages/man5/fstab.5.html"
+   }
+  },
+  {
+   "name": "Inodes, links, deleted-but-open files, disk-full forensics",
+   "learn": "Understand that a filename is a directory entry pointing at an inode, so hard links share the inode (`ln`, `stat -c '%i %h'`), symlinks are separate inodes holding a path (`readlink -f`), and rm only decrements the link count — the blocks are freed when the last reference, including open file descriptors, goes away. This is why df says 100% while du says 60%: find the culprit with `find /proc/*/fd -lname '*(deleted)' 2>/dev/null` or `lsof +L1`, and free space by truncating (`: > /proc/PID/fd/N`) or restarting the process. Never rm a live log; truncate it or use logrotate with copytruncate. Check inode exhaustion with `df -i` (millions of session files or mail spool), reserved blocks with `tune2fs -l | grep Reserved`, and locate usage fast with `du -xsh --max-depth=1 / | sort -h`.",
+   "minutes": 25,
+   "resource": {
+    "label": "inode(7) — file inode fields, link counts, timestamps",
+    "url": "https://man7.org/linux/man-pages/man7/inode.7.html"
+   }
+  },
+  {
+   "name": "Packaging: apt/dpkg, repositories, pinning, unattended upgrades",
+   "learn": "Separate the layers: dpkg installs .deb files and tracks state in /var/lib/dpkg/status (`dpkg -l`, `dpkg -L pkg`, `dpkg -S /path/to/file`, `dpkg -i`), apt resolves dependencies from indices (`apt update` refreshes indices only; `apt upgrade` vs `apt full-upgrade`; `apt-cache policy pkg` shows candidate and pin). Add third-party repos the modern way: deb822 files in /etc/apt/sources.list.d/*.sources with Signed-By: pointing at a keyring in /etc/apt/keyrings (apt-key is dead), and pin with /etc/apt/preferences.d/ so a vendor repo cannot replace libc. Hold with `apt-mark hold`, run non-interactively with `DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::=--force-confold`, and configure unattended-upgrades for security-only with a reboot window. Know the dpkg lock (/var/lib/dpkg/lock-frontend) and how a stuck unattended-upgrades run blocks your deploy.",
+   "minutes": 30,
+   "resource": {
+    "label": "Debian Administrator's Handbook — Maintenance and Updates: The APT Tools",
+    "url": "https://www.debian.org/doc/manuals/debian-handbook/apt.en.html"
+   }
+  },
+  {
+   "name": "Deploying the Python service: venv, lockfile, systemd, secrets",
+   "learn": "Never pip install into the system interpreter (PEP 668 'externally-managed-environment' exists for a reason; apt owns /usr/lib/python3). Build an isolated tree: `python3 -m venv /opt/app/venv`, install from a pinned requirements file (`pip install --require-hashes -r requirements.txt`, or a uv/pip-tools lock), and point ExecStart at /opt/app/venv/bin/python -m app or venv/bin/uvicorn directly, with WorkingDirectory= and Environment=PYTHONUNBUFFERED=1. Load config from EnvironmentFile=/etc/app/env owned root:app mode 0640, and pass real secrets with LoadCredential=api_key:/etc/credstore/api_key (read from $CREDENTIALS_DIRECTORY, never visible in `systemctl show-environment` or /proc/PID/environ). Deploy atomically: install into a new release directory, flip a symlink, `systemctl restart`, because pip-upgrading in place under a running process produces ImportError mid-request.",
+   "minutes": 40,
+   "resource": {
+    "label": "Python docs: venv — creation of virtual environments",
+    "url": "https://docs.python.org/3/library/venv.html"
+   }
+  },
+  {
+   "name": "Dynamic linking, PATH and the 'works in my shell, dies under systemd' class",
+   "learn": "Understand that systemd starts services with a minimal environment (PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin, no HOME unless User= is set, no LANG), so anything that worked in your login shell because of ~/.bashrc will fail; compare with `systemctl show-environment` and `cat /proc/PID/environ | tr '\\0' '\\n'`. Debug shared-library failures with `ldd /opt/app/venv/bin/python`, `objdump -p binary | grep NEEDED`, /etc/ld.so.conf.d/ plus `ldconfig -p`, and LD_LIBRARY_PATH via Environment= (not exported in the unit's shell, because there is no shell). Know that Python wheels are tagged manylinux_2_28 etc. against a glibc version (`ldd --version`), which is why a wheel built on Ubuntu 24.04 will not load on a customer's RHEL 8 box ('GLIBC_2.34 not found').",
+   "minutes": 20,
+   "resource": {
+    "label": "ld.so(8) — dynamic linker search order and environment",
+    "url": "https://man7.org/linux/man-pages/man8/ld.so.8.html"
+   }
+  },
+  {
+   "name": "Kernel tunables and per-process limits",
+   "learn": "Persist kernel parameters in /etc/sysctl.d/99-app.conf and apply with `sysctl --system`; know the ones that bite services: fs.file-max, fs.inotify.max_user_watches (uvicorn --reload, file watchers), net.core.somaxconn (accept backlog cap), net.ipv4.ip_local_port_range, vm.max_map_count (Elasticsearch, some ML runtimes), kernel.pid_max. Separate these from per-process rlimits: /etc/security/limits.conf only applies to PAM logins, so for a systemd service you must set LimitNOFILE=65536, LimitNPROC=, LimitCORE= in the unit and verify with `cat /proc/PID/limits` or `prlimit --pid PID`. Recognise EMFILE ('Too many open files') and 'Cannot allocate memory' from RLIMIT_NPROC as limit failures, not bugs.",
+   "minutes": 20,
+   "resource": {
+    "label": "sysctl.d(5) — persistent kernel parameter configuration",
+    "url": "https://man7.org/linux/man-pages/man5/sysctl.d.5.html"
+   }
+  },
+  {
+   "name": "systemd timers instead of cron",
+   "learn": "Pair a oneshot .service with a .timer using OnCalendar= (`systemd-analyze calendar 'Mon..Fri *-*-* 02:00'` to validate), Persistent=true so a missed run fires at next boot, RandomizedDelaySec= to avoid thundering herds, and OnBootSec=/OnUnitActiveSec= for monotonic schedules. Inspect with `systemctl list-timers --all` and see output in the journal with the same -u filter as any service, with the unit's User=, sandboxing and resource limits applied — none of which cron gives you. Use `systemd-run --on-active=30s --unit=oneoff /path/cmd` for ad-hoc scheduled jobs on a customer box you must not leave cron entries on.",
+   "minutes": 15,
+   "resource": {
+    "label": "systemd.timer(5) — timer unit configuration",
+    "url": "https://man7.org/linux/man-pages/man5/systemd.timer.5.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can narrate, without notes, the boot-to-traffic chain on your VPS from GRUB through initramfs, systemd targets and unit activation to the socket accept, and back each step with a command that shows it (`/proc/cmdline`, `systemd-analyze critical-chain`, `ss -ltnp`).",
+  "You can write a systemd unit for a Python HTTP service that scores under 3.0 on `systemd-analyze security`, runs as a non-root account, binds :443 via AmbientCapabilities, survives SIGTERM with a graceful drain, and restarts on failure without tripping the start-rate limiter.",
+  "Given only a PID on a host you have never seen, you can determine within five minutes whether it is CPU-bound, blocked on I/O in D state, waiting on a futex/socket, a zombie, or stopped, using /proc/PID/{status,wchan,stack,fd,task} and strace, and say which of those kill -9 will not fix.",
+  "You can prove an OOM kill happened, name the victim and the killer (global vs cgroup) from `journalctl -k` and memory.events, and explain which MemoryMax/OOMScoreAdjust/OOMPolicy change would have altered the outcome.",
+  "You can resolve a 'disk 100% full but du disagrees' incident by locating deleted-but-open files via /proc/*/fd and truncating through the fd, and explain to the customer why rm did not free space.",
+  "You can add a vendor apt repository with a deb822 .sources file, Signed-By keyring and a pin so it cannot upgrade core packages, and run the install non-interactively in a script that does not hang on a dpkg lock or a debconf prompt.",
+  "You can list at least six differences between the environment of a login shell and a systemd service (PATH, HOME, umask, rlimits, cgroup, capabilities) and diagnose 'works in my shell, fails under systemd' from `systemctl show-environment` and /proc/PID/environ.",
+  "You can move a stateful directory to a newly attached cloud volume with an fstab entry that uses UUID= and nofail, grow it online, and reboot with confidence that a detached volume will not block boot."
+ ],
+ "failureModes": [
+  "A service is deployed with Restart=always and MemoryMax=; it OOMs every 40 seconds and restarts, so health checks flap green and nobody notices for a week until memory.events shows oom_kill in the thousands.",
+  "ExecStart wraps the app in `/bin/sh -c`, so on `systemctl stop` SIGTERM reaches sh and is never forwarded; after TimeoutStopSec the whole cgroup gets SIGKILL and in-flight customer requests are dropped on every deploy.",
+  "Logs are rotated with rm plus a new file; the process keeps the deleted inode open, /var fills to 100%, df and du disagree by 40 GB, and the on-call engineer expands the volume instead of truncating the fd.",
+  "A vendor repo (NVIDIA, Docker, a database) is added with no pin; `apt upgrade` pulls a newer libssl or systemd from it, and the customer's compliance-scanned baseline drifts with no change record.",
+  "The unit says After=network.target but not network-online.target, so on cold boot the app starts before DHCP finishes, fails DNS on its first outbound call, exits 1, and the start-rate limiter leaves it dead until someone runs `systemctl reset-failed`.",
+  "TLS key is 0600 root:root and the service runs as User=app; it worked in testing because the engineer ran it with sudo. On the first real reboot the service fails with EACCES and the cert path looks correct to everyone reading the config.",
+  "A process on a customer host is in D state on a hung NFS mount; the team spends two hours running kill -9 and restarting the service before checking /proc/PID/wchan, which would have pointed at the storage team in thirty seconds."
+ ],
+ "interviewQuestions": [
+  "Walk me through everything that happens between the moment a Hetzner VM is powered on and the moment a systemd-managed Python service accepts its first TCP connection. Where in that chain would a missing initramfs driver, a bad fstab entry, and a wrong ExecStart path each fail, and how would the symptoms differ?",
+  "A customer says their inference service is 'hung'. You have SSH as a non-root user with sudo, no APM, and one PID. Show me, command by command, how you decide within five minutes whether it is deadlocked in userspace, blocked in the kernel, out of file descriptors, or being CPU-throttled by its cgroup.",
+  "Design the systemd unit for a FastAPI service that needs to bind port 443, write to /var/lib/app, read a secret API key, and restart on crashes but not mask a config error. Justify every directive, and tell me which ones you would remove on a customer host running an older systemd.",
+  "df reports the root filesystem at 100% but du of / sums to 60%. Explain the mechanism, find the culprit without rebooting, and free the space without losing the process. What would you change in the deployment so it does not recur?",
+  "Explain the difference between the kernel OOM killer and a cgroup memory.max kill, how you would prove which one fired from logs and sysfs, and how OOMScoreAdjust, MemoryHigh and OOMPolicy each change the outcome for a multi-worker gunicorn service.",
+  "A deploy script that works when run by hand hangs forever when run from CI over SSH on a customer box. List the most likely causes in the apt/dpkg layer and in the environment differences, and describe how you would make the script idempotent and non-interactive.",
+  "You need to hand a customer's platform team a service they can operate without you. What do you put in the unit file, the journal configuration, and the sudoers rules so that a junior engineer can restart, read logs, and roll back safely without being able to become root?"
+ ],
+ "proofOfWork": "A public repository containing a reproducible bring-up of the hardened VPS as a single idempotent shell script (or Ansible playbook) plus a 'break/fix' lab: five scripted faults you inject on the box (a D-state simulation via a FUSE or NFS hang, a deleted-but-open log filling the disk, a zombie storm from a broken subprocess handler, an OOM under MemoryMax with Restart=always masking it, and a start-rate-limit failure from an After= without Wants= ordering bug) each paired with a screencast-free written transcript of the exact commands you ran, the /proc, journalctl and cgroup evidence you collected, the root cause, and the one-line fix. The README ends with the unit file's `systemd-analyze security` output under 3.0 and a table of every systemd directive used and why it is there."
 }

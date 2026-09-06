@@ -1,199 +1,199 @@
 {
-  "i": 4,
-  "topic": "Git at depth: rebase, bisect, reflog, hooks, monorepo hygiene",
-  "track": "A. Linux, Networking, Shell",
-  "month": 1,
-  "hours": 3.0,
-  "why": "An FDE lands in a customer's repo on day one, often a multi-year monorepo with conventions nobody documented, and is expected to ship a clean, reviewable change the same week without breaking their history. When a customer says 'this worked last Tuesday', bisect and log archaeology turn a vague complaint into a single culprit commit in minutes, which is the difference between a credible engineer and a guest. And when a teammate force-pushes over your branch at 6pm before a demo, reflog recovery is what keeps the demo on schedule.",
-  "prerequisites": [
-    "Shell fluency from 'Shell mastery and scripting' (topic 0): pipes, exit codes, writing a 10-line bash script that returns 0 or 1",
-    "Filesystem permissions and executable bits from 'Linux internals' (topic 1), since hooks are plain executables under .git/hooks",
-    "Basic Git: clone, branch, commit, push, pull, resolving a simple merge conflict in an editor",
-    "Knowing what a SHA-1/SHA-256 content hash is and why identical content hashes identically",
-    "A local project with a lint and test command you can run in under a minute (Dokeo is the target for the hook deliverable)"
-  ],
-  "subtopics": [
-    {
-      "name": "Object model: blobs, trees, commits, refs",
-      "learn": "Understand that Git is a content-addressed store: `git hash-object -w file` writes a blob, `git cat-file -t <sha>` and `git cat-file -p <sha>` show type and contents, and a commit is a pointer to a tree plus parent SHAs plus author/committer metadata. Know that a branch is a 41-byte file under `.git/refs/heads/` (or a line in `.git/packed-refs`) and `HEAD` is a symref to it. Be able to explain why 'rewriting history' never mutates objects, it creates new ones and moves refs, which is exactly why reflog recovery works until `git gc` prunes unreachable objects.",
-      "minutes": 15,
-      "resource": {
-        "label": "Pro Git 10.2: Git Internals - Git Objects",
-        "url": "https://git-scm.com/book/en/v2/Git-Internals-Git-Objects"
-      }
-    },
-    {
-      "name": "The three trees: reset, restore, switch, checkout",
-      "learn": "Model every command as moving HEAD, the index, or the working tree. `git reset --soft <c>` moves only HEAD, `--mixed` (default) also resets the index, `--hard` also overwrites the working tree and is the only one that destroys uncommitted work. Use `git restore --staged <path>` to unstage, `git restore <path>` to discard, `git restore --source=<c> <path>` to pull one file from history, and `git switch -c` / `git switch --detach` instead of the overloaded `checkout`. Be able to predict the exact state of all three trees after each command without running it.",
-      "minutes": 10,
-      "resource": {
-        "label": "Pro Git 7.7: Reset Demystified",
-        "url": "https://git-scm.com/book/en/v2/Git-Tools-Reset-Demystified"
-      }
-    },
-    {
-      "name": "Revision syntax and log archaeology",
-      "learn": "Master the selectors you need to talk about history precisely: `HEAD~2` (second ancestor via first parent) vs `HEAD^2` (second parent of a merge), `A..B` (reachable from B not A) vs `A...B` (symmetric difference), `@{upstream}`, `main@{2.days.ago}`, `:/regex`. Then find things: `git log -S'string' --oneline` (pickaxe: commits that changed the count of a string), `-G'regex'` (commits whose diff matches), `-L :funcname:path` (history of one function), `--first-parent` on a merge-heavy main, `--follow` across renames, and `git blame -w -C -C -C` to see through whitespace and code movement. Know that `git log --all --oneline --graph --decorate` is the first command to run in an unfamiliar repo.",
-      "minutes": 12,
-      "resource": {
-        "label": "git-scm.com: gitrevisions manual",
-        "url": "https://git-scm.com/docs/gitrevisions"
-      }
-    },
-    {
-      "name": "Interactive rebase: the full instruction set",
-      "learn": "Run `git rebase -i <base>` and use every verb with intent: pick, reword, edit (stop to split or amend), squash (merge messages), fixup (discard message), drop, `exec <cmd>` (run tests after every commit to guarantee each is green), `break`, and `label`/`reset`/`merge` under `--rebase-merges`. Adopt the fixup workflow: `git commit --fixup=<sha>` then `git rebase -i --autosquash <base>`, with `rebase.autosquash=true` and `rebase.autostash=true` in config. Use `--onto <newbase> <oldbase> <branch>` to transplant a range, and `--update-refs` (Git 2.38+) so stacked branches move together. Know `--continue`, `--skip`, `--abort`, and that `ORIG_HEAD` holds where you started.",
-      "minutes": 18,
-      "resource": {
-        "label": "git-scm.com: git-rebase manual",
-        "url": "https://git-scm.com/docs/git-rebase"
-      }
-    },
-    {
-      "name": "Conflict resolution mechanics, zdiff3, rerere",
-      "learn": "Set `merge.conflictStyle=zdiff3` so conflict hunks show the common ancestor, which is what makes a 3-way conflict legible. Know that `--ours`/`--theirs` flip meaning during a rebase (ours = the branch being rebased onto, theirs = your commit being replayed) and use `git checkout --ours <path>` / `--theirs <path>` only when you have reasoned about that. Enable `rerere.enabled=true` so Git records each hunk resolution and replays it automatically when the same conflict recurs across a long rebase or repeated integration merges; inspect with `git rerere status` and `git rerere diff`. Use `git diff --base` and `git log --merge` to see only the commits that touch the conflicted paths.",
-      "minutes": 12,
-      "resource": {
-        "label": "Pro Git 7.8: Advanced Merging",
-        "url": "https://git-scm.com/book/en/v2/Git-Tools-Advanced-Merging"
-      }
-    },
-    {
-      "name": "Force-pushing without destroying teammates' work",
-      "learn": "Never type `git push --force` on a shared remote. `--force-with-lease` refuses the push if the remote ref has moved since your last fetch, and `--force-with-lease=<ref>:<expected-sha>` pins the exact SHA you believe is there. Pair it with `--force-if-includes` (Git 2.30+) to close the hole where a background `git fetch` (IDE, prompt plugin) silently updated your tracking ref so the lease passes even though you never saw the new commits. On the server side know `receive.denyNonFastForwards` and `receive.denyDeletes`, and that branch protection is what enforces this for the whole team, not etiquette.",
-      "minutes": 8,
-      "resource": {
-        "label": "git-scm.com: git-push manual (--force-with-lease, --force-if-includes)",
-        "url": "https://git-scm.com/docs/git-push"
-      }
-    },
-    {
-      "name": "Reflog and data recovery",
-      "learn": "`git reflog` (alias for `git reflog show HEAD`) lists every position HEAD occupied; `git reflog show <branch>` does the same per branch, and `git reflog show --date=iso` puts real timestamps on it. Recover a deleted branch with `git branch restored HEAD@{n}` or a bad `reset --hard` with `git reset --hard HEAD@{1}`. Know the expiry knobs: `gc.reflogExpire` (90 days) and `gc.reflogExpireUnreachable` (30 days), and that a fresh clone has no reflog, so on a server or CI runner you reach for `git fsck --lost-found` or `git fsck --unreachable --no-reflogs` to list dangling commits and then `git show` them. Recover a dropped stash the same way, since stashes are commits with a two- or three-parent structure.",
-      "minutes": 15,
-      "resource": {
-        "label": "Pro Git 10.7: Maintenance and Data Recovery",
-        "url": "https://git-scm.com/book/en/v2/Git-Internals-Maintenance-and-Data-Recovery"
-      }
-    },
-    {
-      "name": "Bisect: automated regression hunting",
-      "learn": "Start with `git bisect start <bad> <good>` (you can pass multiple good commits) and hand off to `git bisect run ./check.sh`; the script must exit 0 for good, 1-127 for bad, and exactly 125 to mark a commit untestable so bisect skips it (use this when the build fails for unrelated reasons). Use `--first-parent` on a merge-heavy main so you bisect merges, not every feature-branch commit, and `--term-old=fast --term-new=slow` when hunting a performance change rather than a bug. Write the check script to be hermetic: build from scratch, run one targeted test, never depend on files bisect will overwrite. Save `git bisect log > bisect.log` before `git bisect reset` so you can `git bisect replay` if you misjudged a step. Expect log2(N) iterations, so 4000 commits is 12 checks.",
-      "minutes": 16,
-      "resource": {
-        "label": "git-scm.com: git-bisect manual",
-        "url": "https://git-scm.com/docs/git-bisect"
-      }
-    },
-    {
-      "name": "Hook lifecycle: client-side and server-side",
-      "learn": "Know which hook fires when and what it receives: pre-commit (no args, exit non-zero aborts), prepare-commit-msg and commit-msg (path to message file), pre-push (remote name and URL as args, ref tuples `<local ref> <local sha> <remote ref> <remote sha>` on stdin), post-checkout and post-merge (for dependency re-install), and on the server pre-receive/update/post-receive. Hooks live in `.git/hooks/`, are not versioned, and must be executable, so a team ships them via `core.hooksPath=.githooks` set by a bootstrap script or via the pre-commit framework. Understand that `--no-verify` bypasses client hooks, so anything that must be enforced belongs in CI or a server-side hook, and that a hook slower than a few seconds will be bypassed by the whole team within a week.",
-      "minutes": 13,
-      "resource": {
-        "label": "git-scm.com: githooks manual",
-        "url": "https://git-scm.com/docs/githooks"
-      }
-    },
-    {
-      "name": "pre-commit framework for Dokeo",
-      "learn": "Author `.pre-commit-config.yaml` with `repos:` entries pinned by `rev:`, each with `hooks: - id:`; use `repo: local` with `language: system` and `entry: make lint` for project-native tools. Install with `pre-commit install --hook-type pre-commit --hook-type pre-push` so fast lint runs on staged files at commit time and the test suite runs at push time via `stages: [pre-push]`. Scope with `files:` and `exclude:` regexes and `types: [python]`, run everything once with `pre-commit run --all-files`, and bump pins with `pre-commit autoupdate`. Run the same `pre-commit run --all-files` in CI so the hook is a convenience and CI is the enforcement, never the reverse.",
-      "minutes": 15,
-      "resource": {
-        "label": "pre-commit.com: framework documentation",
-        "url": "https://pre-commit.com/"
-      }
-    },
-    {
-      "name": "Atomic commits and reviewable series",
-      "learn": "Stage by hunk with `git add -p` (y/n/s to split/e to edit the hunk), so each commit is one logical change that builds and passes tests on its own; use `rebase -i` with `exec make test` to prove it. Write messages as `<type>(<scope>): <imperative summary>` under 72 chars per Conventional Commits, with a body that explains why and what alternatives were rejected, since the diff already says what. Use `git commit --amend --no-edit` for the last commit and `--fixup` for older ones. Before re-requesting review on a rebased branch, run `git range-diff <old-base>..<old-tip> <new-base>..<new-tip>` and paste the summary so reviewers see only what changed between the two versions of the series.",
-      "minutes": 12,
-      "resource": {
-        "label": "Conventional Commits v1.0.0 specification",
-        "url": "https://www.conventionalcommits.org/en/v1.0.0/"
-      }
-    },
-    {
-      "name": "Commit signing with SSH keys",
-      "learn": "Configure `gpg.format=ssh`, `user.signingkey=~/.ssh/id_ed25519.pub`, `commit.gpgsign=true`, and `tag.gpgsign=true` so every commit carries a signature without a GPG keyring. Verify locally with `git log --show-signature` or `git verify-commit <sha>`, which needs `gpg.ssh.allowedSignersFile` pointing at a file of `email ssh-ed25519 AAAA...` lines. Understand that signing proves the committer identity, not code safety, and that customer environments with branch protection requiring signed commits will reject an unsigned rebase, so this must be set up before the first push, not after. This feeds the provenance chain in topic 18 (CI/CD and supply chain).",
-      "minutes": 8,
-      "resource": {
-        "label": "Pro Git 7.4: Signing Your Work",
-        "url": "https://git-scm.com/book/en/v2/Git-Tools-Signing-Your-Work"
-      }
-    },
-    {
-      "name": "Purging secrets and large files from history",
-      "learn": "Use `git filter-repo` (not the deprecated `filter-branch`): `git filter-repo --path config/prod.env --invert-paths` removes a file from every commit, `--replace-text expressions.txt` scrubs strings (one `literal:AKIA...==>REDACTED` per line), and `--strip-blobs-bigger-than 10M` drops accidentally committed binaries. Know that filter-repo requires a fresh clone, rewrites every SHA after the first touched commit, and that every collaborator must re-clone or hard-reset because their old refs will reintroduce the objects on the next push. Treat any leaked credential as compromised regardless: rotate it first, then rewrite history, because forks, CI caches, and reviewer clones still hold the blob.",
-      "minutes": 13,
-      "resource": {
-        "label": "git-filter-repo official repository and README",
-        "url": "https://github.com/newren/git-filter-repo"
-      }
-    },
-    {
-      "name": "Working at monorepo scale: partial clone, sparse checkout, worktrees",
-      "learn": "Clone a 20 GB monorepo without the blobs using `git clone --filter=blob:none <url>` (blobs fetched lazily on checkout) or `--filter=tree:0` for CI that only needs one commit, and use `--depth 1` only when you will never need history. Then `git sparse-checkout init --cone && git sparse-checkout set services/billing libs/common` so the working tree holds only your directories; `--cone` mode is the fast path because it matches whole directories, not arbitrary patterns. Use `git worktree add ../hotfix main` to check out a second branch alongside your feature work without stashing, `git worktree list` and `git worktree prune` to manage them, and `git maintenance start` to schedule background `prefetch`, `commit-graph`, and `incremental-repack` so `git status` and `git log` stay fast.",
-      "minutes": 13,
-      "resource": {
-        "label": "git-scm.com: git-sparse-checkout manual",
-        "url": "https://git-scm.com/docs/git-sparse-checkout"
-      }
-    },
-    {
-      "name": "gitattributes and gitignore that survive a mixed OS team",
-      "learn": "Commit a `.gitattributes` with `* text=auto eol=lf` so CRLF from Windows contributors never lands in the repo, `*.png binary`, `*.lock -diff` and `merge=ours` or `merge=union` for generated files and changelogs that conflict on every rebase, and `linguist-generated=true` so GitHub collapses generated diffs. Use `export-ignore` so `git archive` skips test fixtures, and `filter=lfs diff=lfs merge=lfs -text` is what `git lfs track` writes for large binaries. For `.gitignore`, know the precedence chain (`.gitignore` per directory, `.git/info/exclude` for local-only, `core.excludesFile` for global) and use `git check-ignore -v <path>` to find which rule is hiding a file that a customer swears they added.",
-      "minutes": 10,
-      "resource": {
-        "label": "git-scm.com: gitattributes manual",
-        "url": "https://git-scm.com/docs/gitattributes"
-      }
-    },
-    {
-      "name": "Branch protection, CODEOWNERS, and merge queues",
-      "learn": "Configure protected branches to require pull request reviews, dismiss stale approvals on new pushes, require status checks to pass with `Require branches to be up to date`, require linear history (forces squash or rebase merges), require signed commits, and restrict who can push. Write a `CODEOWNERS` file in `.github/` (or repo root or `docs/`) with path patterns like `/services/billing/ @org/billing-team` where the last matching line wins, so reviews auto-route and `Require review from Code Owners` blocks merges without a domain owner. Understand why a merge queue exists: with required up-to-date branches, N concurrent PRs each trigger a rebase-and-retest storm, and the queue batches them into a single tested sequence.",
-      "minutes": 10,
-      "resource": {
-        "label": "GitHub Docs: About code owners",
-        "url": "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners"
-      }
-    },
-    {
-      "name": "Submodules vs subtrees vs vendoring",
-      "learn": "A submodule is a gitlink entry in the parent tree pointing to a fixed SHA plus a `.gitmodules` URL mapping; `git clone --recurse-submodules` or `git submodule update --init --recursive` populates it, and `submodule.recurse=true` makes `pull` and `checkout` follow. Know the failure surface: the submodule sits in detached HEAD, a forgotten `--recursive` in CI yields an empty directory, and bumping the pinned SHA is a commit in the parent that reviewers routinely miss. Compare with `git subtree add --prefix=vendor/lib <url> main --squash`, which copies content into the parent history with no extra clone step, and with plain vendoring plus a `VENDORED_FROM` file; be able to recommend one given the customer's CI and update cadence.",
-      "minutes": 10,
-      "resource": {
-        "label": "Pro Git 7.11: Submodules",
-        "url": "https://git-scm.com/book/en/v2/Git-Tools-Submodules"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can recover a branch deleted by `git branch -D` or a commit lost to `git reset --hard` within two minutes using reflog, and within five using `git fsck --lost-found` on a clone with no reflog.",
-    "You can take a 4000-commit repo with a known-good tag and a failing test and produce the exact culprit commit via `git bisect run` with a hermetic script, handling untestable commits with exit 125.",
-    "You can turn a 15-commit branch with WIP messages into a 4-commit series where every commit builds and passes tests, proven by `rebase -i` with `exec`, and show the reviewer a `range-diff` of what changed since their last review.",
-    "You can resolve a rebase conflict across multiple replayed commits using zdiff3 hunks and explain correctly which side `--ours` refers to during a rebase.",
-    "You can install a pre-commit and pre-push hook on Dokeo via `.pre-commit-config.yaml` that lints staged files in under 3 seconds and runs the test suite on push, with the same config run in CI.",
-    "You can remove a leaked credential from every commit of a repo with `git filter-repo`, write the collaborator re-clone instructions, and state why rotating the secret is still mandatory.",
-    "You can set up a sparse cone checkout of two directories from a partial clone of a monorepo and add a second worktree for a hotfix without disturbing the feature branch.",
-    "You can force-push a rebased branch with `--force-with-lease --force-if-includes` and explain the exact race each flag closes."
-  ],
-  "failureModes": [
-    "A teammate runs `git push --force` on a shared feature branch after an IDE auto-fetched, silently dropping two days of a colleague's commits; nobody notices until the demo build lacks the feature.",
-    "The pre-commit hook grows to run the full 4-minute test suite, so the team commits with `--no-verify` by habit and the hook becomes theatre while CI stays red half the day.",
-    "A `.env` with production database credentials is committed and then 'deleted' in the next commit; six months later a contractor's clone is compromised and the still-valid credential in history is used.",
-    "A CI pipeline clones with `--depth 1`, then a release script runs `git describe --tags` and produces garbage versions because the tag is outside the shallow history.",
-    "Submodules pinned to a SHA that was force-pushed away on the upstream repo; `git submodule update` fails with 'fatal: reference is not a tree' on every fresh clone and blocks all deploys.",
-    "Windows contributors commit CRLF files with no `.gitattributes`, so every rebase touching those files shows the whole file as a conflict and a 3-line change becomes an unreadable 800-line diff.",
-    "Someone bisects on a merge-heavy main without `--first-parent`, lands on a mid-feature-branch commit that never built on its own, and reports a false culprit that sends the team investigating the wrong service for a day."
-  ],
-  "interviewQuestions": [
-    "A customer's on-call engineer says a nightly job started failing 'sometime in the last three weeks' and there are about 900 commits on main. Walk me through exactly how you find the culprit, including how you handle commits that do not build.",
-    "Explain what `git reset --hard HEAD~3` actually does to HEAD, the index, and the working tree, and then tell me how you would recover if you ran it by mistake on a branch that was never pushed.",
-    "During a rebase you see a conflict hunk and decide to keep 'your' change. Which of `--ours` and `--theirs` do you use and why is that the opposite of what you would use during a merge?",
-    "Design the Git-side guardrails for a 40-engineer monorepo: what goes in client hooks, what goes in CI, what goes in branch protection, and how do you keep the hooks from being bypassed?",
-    "A production API key was committed to a repo with 30 forks and a 2-year history. What do you do in the first 10 minutes, what do you do in the first day, and what can you never fully undo?",
-    "Why does `--force-with-lease` still lose data in some setups, and what flag closes that gap? Describe the exact sequence of events that produces the data loss.",
-    "A customer's CI clones a 15 GB monorepo from scratch on every run and it takes 9 minutes before tests start. Which clone and checkout flags do you reach for, and what does each one trade away?"
-  ],
-  "proofOfWork": "A public repository named `git-forensics-lab` containing a scripted, reproducible incident set: (1) a `make break` target that generates a 500-commit synthetic history with a planted regression, a planted non-building range, and a leaked fake credential, and (2) a `RUNBOOK.md` plus `scripts/` that walk through recovering a deleted branch via reflog, locating the regression via `git bisect run` with a hermetic checker that returns 125 on the non-building range, scrubbing the credential via `git filter-repo --replace-text` with the collaborator re-clone notice, and demonstrating a `--force-with-lease` rejection versus a `--force-if-includes` rejection. Every step is asserted by a `make verify` target so a reviewer can clone the repo and watch the whole recovery pass in under five minutes; the README links the Dokeo `.pre-commit-config.yaml` and the CI job that runs the same hooks."
+ "i": 4,
+ "topic": "Git at depth: rebase, bisect, reflog, hooks, monorepo hygiene",
+ "track": "A. Linux, Networking, Shell",
+ "month": 1,
+ "hours": 3.0,
+ "why": "An FDE lands in a customer's repo on day one, often a multi-year monorepo with conventions nobody documented, and is expected to ship a clean, reviewable change the same week without breaking their history. When a customer says 'this worked last Tuesday', bisect and log archaeology turn a vague complaint into a single culprit commit in minutes, which is the difference between a credible engineer and a guest. And when a teammate force-pushes over your branch at 6pm before a demo, reflog recovery is what keeps the demo on schedule.",
+ "prerequisites": [
+  "Shell fluency from 'Shell mastery and scripting' (topic 0): pipes, exit codes, writing a 10-line bash script that returns 0 or 1",
+  "Filesystem permissions and executable bits from 'Linux internals' (topic 1), since hooks are plain executables under .git/hooks",
+  "Basic Git: clone, branch, commit, push, pull, resolving a simple merge conflict in an editor",
+  "Knowing what a SHA-1/SHA-256 content hash is and why identical content hashes identically",
+  "A local project with a lint and test command you can run in under a minute (Dokeo is the target for the hook deliverable)"
+ ],
+ "subtopics": [
+  {
+   "name": "Object model: blobs, trees, commits, refs",
+   "learn": "Understand that Git is a content-addressed store: `git hash-object -w file` writes a blob, `git cat-file -t <sha>` and `git cat-file -p <sha>` show type and contents, and a commit is a pointer to a tree plus parent SHAs plus author/committer metadata. Know that a branch is a 41-byte file under `.git/refs/heads/` (or a line in `.git/packed-refs`) and `HEAD` is a symref to it. Be able to explain why 'rewriting history' never mutates objects, it creates new ones and moves refs, which is exactly why reflog recovery works until `git gc` prunes unreachable objects.",
+   "minutes": 15,
+   "resource": {
+    "label": "Pro Git 10.2: Git Internals - Git Objects",
+    "url": "https://git-scm.com/book/en/v2/Git-Internals-Git-Objects"
+   }
+  },
+  {
+   "name": "The three trees: reset, restore, switch, checkout",
+   "learn": "Model every command as moving HEAD, the index, or the working tree. `git reset --soft <c>` moves only HEAD, `--mixed` (default) also resets the index, `--hard` also overwrites the working tree and is the only one that destroys uncommitted work. Use `git restore --staged <path>` to unstage, `git restore <path>` to discard, `git restore --source=<c> <path>` to pull one file from history, and `git switch -c` / `git switch --detach` instead of the overloaded `checkout`. Be able to predict the exact state of all three trees after each command without running it.",
+   "minutes": 10,
+   "resource": {
+    "label": "Pro Git 7.7: Reset Demystified",
+    "url": "https://git-scm.com/book/en/v2/Git-Tools-Reset-Demystified"
+   }
+  },
+  {
+   "name": "Revision syntax and log archaeology",
+   "learn": "Master the selectors you need to talk about history precisely: `HEAD~2` (second ancestor via first parent) vs `HEAD^2` (second parent of a merge), `A..B` (reachable from B not A) vs `A...B` (symmetric difference), `@{upstream}`, `main@{2.days.ago}`, `:/regex`. Then find things: `git log -S'string' --oneline` (pickaxe: commits that changed the count of a string), `-G'regex'` (commits whose diff matches), `-L :funcname:path` (history of one function), `--first-parent` on a merge-heavy main, `--follow` across renames, and `git blame -w -C -C -C` to see through whitespace and code movement. Know that `git log --all --oneline --graph --decorate` is the first command to run in an unfamiliar repo.",
+   "minutes": 12,
+   "resource": {
+    "label": "git-scm.com: gitrevisions manual",
+    "url": "https://git-scm.com/docs/gitrevisions"
+   }
+  },
+  {
+   "name": "Interactive rebase: the full instruction set",
+   "learn": "Run `git rebase -i <base>` and use every verb with intent: pick, reword, edit (stop to split or amend), squash (merge messages), fixup (discard message), drop, `exec <cmd>` (run tests after every commit to guarantee each is green), `break`, and `label`/`reset`/`merge` under `--rebase-merges`. Adopt the fixup workflow: `git commit --fixup=<sha>` then `git rebase -i --autosquash <base>`, with `rebase.autosquash=true` and `rebase.autostash=true` in config. Use `--onto <newbase> <oldbase> <branch>` to transplant a range, and `--update-refs` (Git 2.38+) so stacked branches move together. Know `--continue`, `--skip`, `--abort`, and that `ORIG_HEAD` holds where you started.",
+   "minutes": 18,
+   "resource": {
+    "label": "git-scm.com: git-rebase manual",
+    "url": "https://git-scm.com/docs/git-rebase"
+   }
+  },
+  {
+   "name": "Conflict resolution mechanics, zdiff3, rerere",
+   "learn": "Set `merge.conflictStyle=zdiff3` so conflict hunks show the common ancestor, which is what makes a 3-way conflict legible. Know that `--ours`/`--theirs` flip meaning during a rebase (ours = the branch being rebased onto, theirs = your commit being replayed) and use `git checkout --ours <path>` / `--theirs <path>` only when you have reasoned about that. Enable `rerere.enabled=true` so Git records each hunk resolution and replays it automatically when the same conflict recurs across a long rebase or repeated integration merges; inspect with `git rerere status` and `git rerere diff`. Use `git diff --base` and `git log --merge` to see only the commits that touch the conflicted paths.",
+   "minutes": 12,
+   "resource": {
+    "label": "Pro Git 7.8: Advanced Merging",
+    "url": "https://git-scm.com/book/en/v2/Git-Tools-Advanced-Merging"
+   }
+  },
+  {
+   "name": "Force-pushing without destroying teammates' work",
+   "learn": "Never type `git push --force` on a shared remote. `--force-with-lease` refuses the push if the remote ref has moved since your last fetch, and `--force-with-lease=<ref>:<expected-sha>` pins the exact SHA you believe is there. Pair it with `--force-if-includes` (Git 2.30+) to close the hole where a background `git fetch` (IDE, prompt plugin) silently updated your tracking ref so the lease passes even though you never saw the new commits. On the server side know `receive.denyNonFastForwards` and `receive.denyDeletes`, and that branch protection is what enforces this for the whole team, not etiquette.",
+   "minutes": 8,
+   "resource": {
+    "label": "git-scm.com: git-push manual (--force-with-lease, --force-if-includes)",
+    "url": "https://git-scm.com/docs/git-push"
+   }
+  },
+  {
+   "name": "Reflog and data recovery",
+   "learn": "`git reflog` (alias for `git reflog show HEAD`) lists every position HEAD occupied; `git reflog show <branch>` does the same per branch, and `git reflog show --date=iso` puts real timestamps on it. Recover a deleted branch with `git branch restored HEAD@{n}` or a bad `reset --hard` with `git reset --hard HEAD@{1}`. Know the expiry knobs: `gc.reflogExpire` (90 days) and `gc.reflogExpireUnreachable` (30 days), and that a fresh clone has no reflog, so on a server or CI runner you reach for `git fsck --lost-found` or `git fsck --unreachable --no-reflogs` to list dangling commits and then `git show` them. Recover a dropped stash the same way, since stashes are commits with a two- or three-parent structure.",
+   "minutes": 15,
+   "resource": {
+    "label": "Pro Git 10.7: Maintenance and Data Recovery",
+    "url": "https://git-scm.com/book/en/v2/Git-Internals-Maintenance-and-Data-Recovery"
+   }
+  },
+  {
+   "name": "Bisect: automated regression hunting",
+   "learn": "Start with `git bisect start <bad> <good>` (you can pass multiple good commits) and hand off to `git bisect run ./check.sh`; the script must exit 0 for good, 1-127 for bad, and exactly 125 to mark a commit untestable so bisect skips it (use this when the build fails for unrelated reasons). Use `--first-parent` on a merge-heavy main so you bisect merges, not every feature-branch commit, and `--term-old=fast --term-new=slow` when hunting a performance change rather than a bug. Write the check script to be hermetic: build from scratch, run one targeted test, never depend on files bisect will overwrite. Save `git bisect log > bisect.log` before `git bisect reset` so you can `git bisect replay` if you misjudged a step. Expect log2(N) iterations, so 4000 commits is 12 checks.",
+   "minutes": 16,
+   "resource": {
+    "label": "git-scm.com: git-bisect manual",
+    "url": "https://git-scm.com/docs/git-bisect"
+   }
+  },
+  {
+   "name": "Hook lifecycle: client-side and server-side",
+   "learn": "Know which hook fires when and what it receives: pre-commit (no args, exit non-zero aborts), prepare-commit-msg and commit-msg (path to message file), pre-push (remote name and URL as args, ref tuples `<local ref> <local sha> <remote ref> <remote sha>` on stdin), post-checkout and post-merge (for dependency re-install), and on the server pre-receive/update/post-receive. Hooks live in `.git/hooks/`, are not versioned, and must be executable, so a team ships them via `core.hooksPath=.githooks` set by a bootstrap script or via the pre-commit framework. Understand that `--no-verify` bypasses client hooks, so anything that must be enforced belongs in CI or a server-side hook, and that a hook slower than a few seconds will be bypassed by the whole team within a week.",
+   "minutes": 13,
+   "resource": {
+    "label": "git-scm.com: githooks manual",
+    "url": "https://git-scm.com/docs/githooks"
+   }
+  },
+  {
+   "name": "pre-commit framework for Dokeo",
+   "learn": "Author `.pre-commit-config.yaml` with `repos:` entries pinned by `rev:`, each with `hooks: - id:`; use `repo: local` with `language: system` and `entry: make lint` for project-native tools. Install with `pre-commit install --hook-type pre-commit --hook-type pre-push` so fast lint runs on staged files at commit time and the test suite runs at push time via `stages: [pre-push]`. Scope with `files:` and `exclude:` regexes and `types: [python]`, run everything once with `pre-commit run --all-files`, and bump pins with `pre-commit autoupdate`. Run the same `pre-commit run --all-files` in CI so the hook is a convenience and CI is the enforcement, never the reverse.",
+   "minutes": 15,
+   "resource": {
+    "label": "pre-commit.com: framework documentation",
+    "url": "https://pre-commit.com/"
+   }
+  },
+  {
+   "name": "Atomic commits and reviewable series",
+   "learn": "Stage by hunk with `git add -p` (y/n/s to split/e to edit the hunk), so each commit is one logical change that builds and passes tests on its own; use `rebase -i` with `exec make test` to prove it. Write messages as `<type>(<scope>): <imperative summary>` under 72 chars per Conventional Commits, with a body that explains why and what alternatives were rejected, since the diff already says what. Use `git commit --amend --no-edit` for the last commit and `--fixup` for older ones. Before re-requesting review on a rebased branch, run `git range-diff <old-base>..<old-tip> <new-base>..<new-tip>` and paste the summary so reviewers see only what changed between the two versions of the series.",
+   "minutes": 12,
+   "resource": {
+    "label": "Conventional Commits v1.0.0 specification",
+    "url": "https://www.conventionalcommits.org/en/v1.0.0/"
+   }
+  },
+  {
+   "name": "Commit signing with SSH keys",
+   "learn": "Configure `gpg.format=ssh`, `user.signingkey=~/.ssh/id_ed25519.pub`, `commit.gpgsign=true`, and `tag.gpgsign=true` so every commit carries a signature without a GPG keyring. Verify locally with `git log --show-signature` or `git verify-commit <sha>`, which needs `gpg.ssh.allowedSignersFile` pointing at a file of `email ssh-ed25519 AAAA...` lines. Understand that signing proves the committer identity, not code safety, and that customer environments with branch protection requiring signed commits will reject an unsigned rebase, so this must be set up before the first push, not after. This feeds the provenance chain in topic 18 (CI/CD and supply chain).",
+   "minutes": 8,
+   "resource": {
+    "label": "Pro Git 7.4: Signing Your Work",
+    "url": "https://git-scm.com/book/en/v2/Git-Tools-Signing-Your-Work"
+   }
+  },
+  {
+   "name": "Purging secrets and large files from history",
+   "learn": "Use `git filter-repo` (not the deprecated `filter-branch`): `git filter-repo --path config/prod.env --invert-paths` removes a file from every commit, `--replace-text expressions.txt` scrubs strings (one `literal:AKIA...==>REDACTED` per line), and `--strip-blobs-bigger-than 10M` drops accidentally committed binaries. Know that filter-repo requires a fresh clone, rewrites every SHA after the first touched commit, and that every collaborator must re-clone or hard-reset because their old refs will reintroduce the objects on the next push. Treat any leaked credential as compromised regardless: rotate it first, then rewrite history, because forks, CI caches, and reviewer clones still hold the blob.",
+   "minutes": 13,
+   "resource": {
+    "label": "git-filter-repo official repository and README",
+    "url": "https://github.com/newren/git-filter-repo"
+   }
+  },
+  {
+   "name": "Working at monorepo scale: partial clone, sparse checkout, worktrees",
+   "learn": "Clone a 20 GB monorepo without the blobs using `git clone --filter=blob:none <url>` (blobs fetched lazily on checkout) or `--filter=tree:0` for CI that only needs one commit, and use `--depth 1` only when you will never need history. Then `git sparse-checkout init --cone && git sparse-checkout set services/billing libs/common` so the working tree holds only your directories; `--cone` mode is the fast path because it matches whole directories, not arbitrary patterns. Use `git worktree add ../hotfix main` to check out a second branch alongside your feature work without stashing, `git worktree list` and `git worktree prune` to manage them, and `git maintenance start` to schedule background `prefetch`, `commit-graph`, and `incremental-repack` so `git status` and `git log` stay fast.",
+   "minutes": 13,
+   "resource": {
+    "label": "git-scm.com: git-sparse-checkout manual",
+    "url": "https://git-scm.com/docs/git-sparse-checkout"
+   }
+  },
+  {
+   "name": "gitattributes and gitignore that survive a mixed OS team",
+   "learn": "Commit a `.gitattributes` with `* text=auto eol=lf` so CRLF from Windows contributors never lands in the repo, `*.png binary`, `*.lock -diff` and `merge=ours` or `merge=union` for generated files and changelogs that conflict on every rebase, and `linguist-generated=true` so GitHub collapses generated diffs. Use `export-ignore` so `git archive` skips test fixtures, and `filter=lfs diff=lfs merge=lfs -text` is what `git lfs track` writes for large binaries. For `.gitignore`, know the precedence chain (`.gitignore` per directory, `.git/info/exclude` for local-only, `core.excludesFile` for global) and use `git check-ignore -v <path>` to find which rule is hiding a file that a customer swears they added.",
+   "minutes": 10,
+   "resource": {
+    "label": "git-scm.com: gitattributes manual",
+    "url": "https://git-scm.com/docs/gitattributes"
+   }
+  },
+  {
+   "name": "Branch protection, CODEOWNERS, and merge queues",
+   "learn": "Configure protected branches to require pull request reviews, dismiss stale approvals on new pushes, require status checks to pass with `Require branches to be up to date`, require linear history (forces squash or rebase merges), require signed commits, and restrict who can push. Write a `CODEOWNERS` file in `.github/` (or repo root or `docs/`) with path patterns like `/services/billing/ @org/billing-team` where the last matching line wins, so reviews auto-route and `Require review from Code Owners` blocks merges without a domain owner. Understand why a merge queue exists: with required up-to-date branches, N concurrent PRs each trigger a rebase-and-retest storm, and the queue batches them into a single tested sequence.",
+   "minutes": 10,
+   "resource": {
+    "label": "GitHub Docs: About code owners",
+    "url": "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners"
+   }
+  },
+  {
+   "name": "Submodules vs subtrees vs vendoring",
+   "learn": "A submodule is a gitlink entry in the parent tree pointing to a fixed SHA plus a `.gitmodules` URL mapping; `git clone --recurse-submodules` or `git submodule update --init --recursive` populates it, and `submodule.recurse=true` makes `pull` and `checkout` follow. Know the failure surface: the submodule sits in detached HEAD, a forgotten `--recursive` in CI yields an empty directory, and bumping the pinned SHA is a commit in the parent that reviewers routinely miss. Compare with `git subtree add --prefix=vendor/lib <url> main --squash`, which copies content into the parent history with no extra clone step, and with plain vendoring plus a `VENDORED_FROM` file; be able to recommend one given the customer's CI and update cadence.",
+   "minutes": 10,
+   "resource": {
+    "label": "Pro Git 7.11: Submodules",
+    "url": "https://git-scm.com/book/en/v2/Git-Tools-Submodules"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can recover a branch deleted by `git branch -D` or a commit lost to `git reset --hard` within two minutes using reflog, and within five using `git fsck --lost-found` on a clone with no reflog.",
+  "You can take a 4000-commit repo with a known-good tag and a failing test and produce the exact culprit commit via `git bisect run` with a hermetic script, handling untestable commits with exit 125.",
+  "You can turn a 15-commit branch with WIP messages into a 4-commit series where every commit builds and passes tests, proven by `rebase -i` with `exec`, and show the reviewer a `range-diff` of what changed since their last review.",
+  "You can resolve a rebase conflict across multiple replayed commits using zdiff3 hunks and explain correctly which side `--ours` refers to during a rebase.",
+  "You can install a pre-commit and pre-push hook on Dokeo via `.pre-commit-config.yaml` that lints staged files in under 3 seconds and runs the test suite on push, with the same config run in CI.",
+  "You can remove a leaked credential from every commit of a repo with `git filter-repo`, write the collaborator re-clone instructions, and state why rotating the secret is still mandatory.",
+  "You can set up a sparse cone checkout of two directories from a partial clone of a monorepo and add a second worktree for a hotfix without disturbing the feature branch.",
+  "You can force-push a rebased branch with `--force-with-lease --force-if-includes` and explain the exact race each flag closes."
+ ],
+ "failureModes": [
+  "A teammate runs `git push --force` on a shared feature branch after an IDE auto-fetched, silently dropping two days of a colleague's commits; nobody notices until the demo build lacks the feature.",
+  "The pre-commit hook grows to run the full 4-minute test suite, so the team commits with `--no-verify` by habit and the hook becomes theatre while CI stays red half the day.",
+  "A `.env` with production database credentials is committed and then 'deleted' in the next commit; six months later a contractor's clone is compromised and the still-valid credential in history is used.",
+  "A CI pipeline clones with `--depth 1`, then a release script runs `git describe --tags` and produces garbage versions because the tag is outside the shallow history.",
+  "Submodules pinned to a SHA that was force-pushed away on the upstream repo; `git submodule update` fails with 'fatal: reference is not a tree' on every fresh clone and blocks all deploys.",
+  "Windows contributors commit CRLF files with no `.gitattributes`, so every rebase touching those files shows the whole file as a conflict and a 3-line change becomes an unreadable 800-line diff.",
+  "Someone bisects on a merge-heavy main without `--first-parent`, lands on a mid-feature-branch commit that never built on its own, and reports a false culprit that sends the team investigating the wrong service for a day."
+ ],
+ "interviewQuestions": [
+  "A customer's on-call engineer says a nightly job started failing 'sometime in the last three weeks' and there are about 900 commits on main. Walk me through exactly how you find the culprit, including how you handle commits that do not build.",
+  "Explain what `git reset --hard HEAD~3` actually does to HEAD, the index, and the working tree, and then tell me how you would recover if you ran it by mistake on a branch that was never pushed.",
+  "During a rebase you see a conflict hunk and decide to keep 'your' change. Which of `--ours` and `--theirs` do you use and why is that the opposite of what you would use during a merge?",
+  "Design the Git-side guardrails for a 40-engineer monorepo: what goes in client hooks, what goes in CI, what goes in branch protection, and how do you keep the hooks from being bypassed?",
+  "A production API key was committed to a repo with 30 forks and a 2-year history. What do you do in the first 10 minutes, what do you do in the first day, and what can you never fully undo?",
+  "Why does `--force-with-lease` still lose data in some setups, and what flag closes that gap? Describe the exact sequence of events that produces the data loss.",
+  "A customer's CI clones a 15 GB monorepo from scratch on every run and it takes 9 minutes before tests start. Which clone and checkout flags do you reach for, and what does each one trade away?"
+ ],
+ "proofOfWork": "A public repository named `git-forensics-lab` containing a scripted, reproducible incident set: (1) a `make break` target that generates a 500-commit synthetic history with a planted regression, a planted non-building range, and a leaked fake credential, and (2) a `RUNBOOK.md` plus `scripts/` that walk through recovering a deleted branch via reflog, locating the regression via `git bisect run` with a hermetic checker that returns 125 on the non-building range, scrubbing the credential via `git filter-repo --replace-text` with the collaborator re-clone notice, and demonstrating a `--force-with-lease` rejection versus a `--force-if-includes` rejection. Every step is asserted by a `make verify` target so a reviewer can clone the repo and watch the whole recovery pass in under five minutes; the README links the Dokeo `.pre-commit-config.yaml` and the CI job that runs the same hooks."
 }

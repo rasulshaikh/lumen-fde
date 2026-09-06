@@ -1,200 +1,227 @@
 {
  "i": 77,
- "topic": "Coding drills: data manipulation and AI-assisted production builds",
- "track": "K. Interview Loop and Mocks",
- "month": 9,
- "hours": 8,
- "why": "The FDE coding round is not a LeetCode round - it is a simulation of the thing you do on day three of an engagement: a customer hands you a CSV export or read access to a schema nobody documented, and you have to produce a defensible number while someone watches. Databricks, Palantir and Anthropic-style loops score two axes at once - can you actually manipulate data under time pressure, and can you keep a human in the loop while you do it - which means silence is scored as failure even when the code is right. The AI-assisted half is now standard because the job is now standard: you will build customer code with an assistant in the room, and the interviewer is watching whether you review what it wrote or paste it and hope.",
+ "topic": "Domain fluency: fintech ops, healthcare intake, procurement, logistics",
+ "track": "J. FDE Craft and Communication",
+ "month": 8,
+ "hours": 6,
+ "why": "An FDE gets roughly fifteen minutes inside a customer's operation to prove they understand the business before the conversation collapses into a feature demo, and the proof is not enthusiasm - it is vocabulary, an accurate workflow map, and knowing which data you are not allowed to look at. These four domains cover the bulk of enterprise AI deployments, and each has a hard regulatory edge (PCI, HIPAA, SOX, ITAR) where a wrong default is not a bug but a reportable disclosure or an audit finding that kills the renewal. Knowing exactly who signs off is what converts a working prototype into a deployment, because in all four domains the approval, not the model, is the thing standing between you and production.",
  "prerequisites": [
-  "Python you can type without a tutorial open: comprehensions, dict/set idioms, collections.Counter and defaultdict, itertools.groupby, dataclasses, and the csv/json/datetime standard-library modules - the working level assumed by topic 25 (Production Python architecture).",
-  "PostgreSQL at the depth of topic 29: window functions, CTEs, EXPLAIN ANALYZE, join algorithms, and NULL semantics. You should already know why NOT IN with a nullable subquery returns nothing.",
-  "pytest fluency from topic 35 - fixtures, parametrize, tmp_path - because in the AI-assisted drills the test is the thing you write first and the thing the interviewer will ask you to run.",
-  "The AI engineering working set: structured outputs and tool schemas (topic 47), evals as infrastructure (topic 53), and provider fluency across the Anthropic and OpenAI SDKs (topic 60) - the 45-minute builds assume you can call a model with a strict schema without reading docs.",
-  "The take-home scaffolding and recording rig from topic 74: a clone-and-go repo template, OBS or QuickTime configured, and a habit of one-take recordings.",
-  "Demo and narration craft from topic 68 - talking over a screen share for ten minutes without filler, and stating a trade-off in one sentence."
+  "Discovery: finding the real problem (topic 66) - the question set and the listening discipline; this topic supplies the domain-specific ammunition that makes those questions land.",
+  "Compliance: SOC 2, GDPR, HIPAA, PCI (topic 64) - the control vocabulary, what a BAA and a DPA are, and the difference between a control and its evidence; here you apply it to four concrete operational domains.",
+  "Data modelling for multi-tenant AI systems (topic 30): PII handling, row-level security, encryption boundaries and audit trails - the mechanics behind every 'this data may not move' rule you are about to write.",
+  "Agents: workflows vs agents and human-in-the-loop (topic 48) plus guardrails and prompt injection (topic 51) - you need a real model of what an agent can be allowed to propose versus execute before you can draw the autonomy line per domain.",
+  "Engagement documents (topic 67) - the one-pagers here are engagement artifacts, so you need the site-survey and design-doc muscle already built.",
+  "SQL and Postgres at depth (topic 29) plus Temporal (topic 34): idempotency, exactly-once illusions, sagas and compensating actions - money movement and claim submission are the canonical cases."
  ],
  "subtopics": [
   {
-   "name": "Reverse-engineer the actual coding bar and write the self-grade rubric",
-   "learn": "Before drilling, decide what you are drilling for. Read the published FDE loop structures and note the pattern: a 45-60 minute data-manipulation round (pandas or SQL on a provided dataset, easy-to-medium difficulty, hard time limit) plus an increasingly common AI-assisted build round where an assistant is allowed and reviewing its output is part of the test. Write a five-axis rubric you will score every recording against: correctness of the final number, correctness of the method (did you validate the join, or just merge and move on), time discipline (first correct partial answer before minute 15), narration continuity (longest silence in seconds), and recovery (what you did when you were wrong). Grade two of your own past sessions against it first; if you cannot make the rubric discriminate, it is too vague to improve against.",
-   "minutes": 20,
+   "name": "The three-artifact method, fixed before you learn any domain",
+   "learn": "Lock the template first so all four domains produce comparable output. Per domain you will produce: three workflows drawn as swimlanes with one actor per lane, a named trigger, the systems of record touched at each step, and the two or three points where the process actually stalls; a data-never-move table listing each restricted data class with the specific rule that forbids it and the four boundaries it may not cross (leaving the customer network, entering a model prompt, landing in a log or trace attribute, entering an eval fixture); and a sign-off matrix of decision class, human role, threshold that triggers them, and the evidence their approval leaves behind. Learn just enough BPMN vocabulary - pool, lane, task, exclusive versus parallel gateway, message versus timer start event - that a customer's process owner can read your map and correct it, which is the entire point.",
+   "minutes": 15,
    "resource": {
-    "label": "Exponent - Databricks Forward Deployed Engineer interview guide",
-    "url": "https://www.tryexponent.com/guides/databricks-forward-deployed-engineer-interview"
+    "label": "OMG BPMN 2.0 specification",
+    "url": "https://www.omg.org/spec/BPMN/2.0/"
    }
   },
   {
-   "name": "Continuous narration protocol: never go silent for more than fifteen seconds",
-   "learn": "Narration is a mechanical skill and it degrades exactly when you need it - the moment you hit a bug. Drill four fixed phrases until they are automatic: (1) restate the ask and the output shape - 'you want one row per customer per month with revenue and refund rate, I will produce a DataFrame with those four columns'; (2) announce before you type - 'I'm going to check dtypes and null counts before I aggregate, because if amount came in as object the sum will silently concatenate'; (3) name the assumption out loud with its falsifier - 'I'm assuming order_id is unique; if the merge inflates row count I'm wrong and I'll dedupe on the max updated_at'; (4) narrate the failure without apologising - 'that returned 1.2 million rows, more than either input, so this is a fan-out on a non-unique key; I'll check value_counts on the join key'. Practise the hardest case explicitly: keep talking while reading a traceback. Set a rule that any silence over fifteen seconds must be filled with 'let me say what I'm looking at' and then read the error aloud.",
-   "minutes": 30,
+   "name": "Classifying the data before you touch any of it",
+   "learn": "Fix the legal spine that runs under all four domains: Article 4 personal data, Article 9 special categories (health, biometric, union membership) which captures most healthcare payloads, Article 6 lawful basis, Article 28 processor duties and the requirement to act only on documented instructions, Articles 44-49 on transfers, Article 30 records of processing, and Article 22 on solely automated decisions with legal or similarly significant effects - the article that makes 'the agent decides and acts' a legal question rather than a product preference. Turn this into an engineering artifact: a column-level tag set (identifier, financial account, clinical, contractual price, export-controlled) with a per-class rule for network egress, embedding, prompt inclusion, trace attributes and retention. Write it before the first data-sharing call, not after.",
+   "minutes": 15,
    "resource": {
-    "label": "Exercism - Python track (timed practice exercises)",
-    "url": "https://exercism.org/tracks/python"
+    "label": "Regulation (EU) 2016/679 (GDPR), consolidated text",
+    "url": "https://eur-lex.europa.eu/eli/reg/2016/679/oj"
    }
   },
   {
-   "name": "Build the drill rig: fixture datasets, timer, one-take recording, grade sheet",
-   "learn": "Assemble the harness once so no drill costs setup time. Curate three real, messy CSV corpora from your own exports (bank or payments transactions, a CRM or email-tool export, and a log or event stream) at 50k-2M rows, each with genuine defects: mixed date formats, thousands separators in numeric columns, trailing whitespace in keys, duplicated rows with different updated_at, and a column that is 40% null. Load the same data into a local Postgres via docker compose so every question can be asked in both pandas and SQL. Set up a visible countdown timer in the recorded frame, a scratch notebook template with the first cell already doing df.info(), df.isna().sum() and df.head(), and a GRADES.md table with one row per drill and columns for the five rubric axes plus longest-silence seconds. Record at 1080p with a large terminal font - unreadable text makes the tape useless for review.",
-   "minutes": 20,
-   "resource": {
-    "label": "OBS Studio (open-source screen recording)",
-    "url": "https://obsproject.com/"
-   }
-  },
-  {
-   "name": "pandas operation vocabulary you must type cold, no lookup",
-   "learn": "Rehearse the ~15 operations that cover the overwhelming majority of interview data manipulation until muscle memory: groupby().agg() with named aggregations (df.groupby(['a','b']).agg(rev=('amount','sum'), n=('id','nunique')).reset_index()), transform for group-broadcast columns, merge with explicit how and validate='one_to_many', concat with ignore_index, pivot_table with aggfunc and fill_value versus melt for long form, sort_values with ascending as a list, drop_duplicates(subset=..., keep='last') after a sort, assign for chained derivation, query and boolean masks with parentheses around each condition, loc-based assignment to avoid SettingWithCopyWarning, nlargest/rank(method='dense'), cut and qcut for bucketing, and value_counts(dropna=False). Know the two idioms for 'top N per group' - sort_values then groupby().head(n), and rank over a transform - and which one is faster. Drill by writing each from a blank cell against your fixture data and checking the shape of the result before looking at the values.",
-   "minutes": 35,
-   "resource": {
-    "label": "pandas User Guide - Group by: split-apply-combine",
-    "url": "https://pandas.pydata.org/docs/user_guide/groupby.html"
-   }
-  },
-  {
-   "name": "Dirty-data reflexes: dtypes, missing-value semantics, and parsing",
-   "learn": "The interview dataset is dirty on purpose, and the score is decided in the first three minutes. Build a fixed opening move: df.info(), df.isna().sum(), df.nunique(), df.describe(include='all'), and df.duplicated().sum(). Then know the specific traps and their fixes - an object-dtype numeric column from thousands separators or currency symbols (pd.to_numeric(s.str.replace(r'[^0-9.\\-]','',regex=True), errors='coerce') and count the coerced NaNs, do not hide them); mixed date formats (pd.to_datetime(..., format='mixed', errors='coerce') or explicit format plus a fallback pass, and never trust dayfirst inference); float NaN versus pd.NA versus None and why NaN != NaN breaks equality filters; integer columns that become float64 the moment a null appears, and Int64 nullable dtype as the fix; whitespace and case in join keys (str.strip().str.lower()) which is the single most common silent zero-match cause; and category dtype for memory when a key column has 20 distinct values over 2M rows. Say the null count out loud every time you coerce - interviewers are listening for whether you noticed you destroyed data.",
-   "minutes": 30,
-   "resource": {
-    "label": "pandas User Guide - Working with missing data",
-    "url": "https://pandas.pydata.org/docs/user_guide/missing_data.html"
-   }
-  },
-  {
-   "name": "SQL window functions under time pressure",
-   "learn": "Window functions are the single highest-yield SQL topic in FDE loops because they are how every 'compare each row to its group' question is answered. Get fluent enough to write without hesitation: ROW_NUMBER/RANK/DENSE_RANK with PARTITION BY ... ORDER BY and know exactly how they differ on ties; LAG/LEAD with the offset and default arguments for period-over-period deltas; SUM(...) OVER (PARTITION BY x ORDER BY d ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) for rolling windows, and the critical distinction between ROWS and RANGE frames when the order key has duplicates; FIRST_VALUE/LAST_VALUE and why LAST_VALUE needs an explicit frame to do what you meant; NTILE for bucketing; and named windows via the WINDOW clause when three expressions share a frame. Know the ordering rule that WHERE cannot reference a window result, so top-N-per-group needs a CTE or subquery in Postgres - and that Snowflake and Databricks give you QUALIFY instead. Drill by writing the same 'second-highest order per customer' query three ways.",
-   "minutes": 30,
-   "resource": {
-    "label": "PostgreSQL - Window Functions (function reference)",
-    "url": "https://www.postgresql.org/docs/current/functions-window.html"
-   }
-  },
-  {
-   "name": "Join semantics, NULL traps, and aggregation correctness in SQL",
-   "learn": "Most wrong answers in a SQL round are join or NULL bugs, not syntax. Internalise: LEFT JOIN plus a filter on the right table's column in WHERE silently becomes an INNER JOIN (the predicate must move into the ON clause); a join on a non-unique key fans out rows and inflates every downstream SUM, so the reflex is to check counts before and after and use COUNT(DISTINCT id) or pre-aggregate the many-side in a CTE; NOT IN with a subquery containing a single NULL returns zero rows while NOT EXISTS does the right thing; COUNT(col) skips NULLs but COUNT(*) does not; AVG ignores NULLs so a mean over a partially-null column is over a different denominator than you think; and integer division truncates unless you cast. Know COALESCE versus NULLIF, FILTER (WHERE ...) on aggregates as the clean alternative to CASE-inside-SUM, and DISTINCT ON as the Postgres shortcut for per-group latest. Practise stating the invariant before running: 'this should return exactly one row per customer per month; I will assert that with a GROUP BY HAVING COUNT(*) > 1 check.'",
+   "name": "Fintech: the rails, and what 'paid' actually means",
+   "learn": "For each rail know three things: who carries the risk, when finality occurs, and whether it is reversible. ACH moves in batches between an ODFI and an RDFI with SEC codes (PPD, CCD, WEB), same-day windows, and return codes that arrive after the fact - R01 insufficient funds within days, R10/R07 unauthorised within a sixty calendar-day consumer window, so an ACH 'success' is not final for two months. Fedwire is real-time gross settlement and effectively irrevocable; RTP and FedNow are instant, 24/7 and irrevocable, which flips every fraud control from detect-and-reverse to prevent-before-send. Cards run authorisation (hold, auth code, AVS and CVV results) then capture, clearing and settlement funding at T+1 or T+2 - an authorisation is not money. Learn the ISO 20022 families you will see in files: pain.001 initiation, pacs.008 interbank transfer, camt.053 end-of-day statement, camt.052 intraday, camt.054 notification, plus legacy MT940. Any workflow that says 'payment complete' must name which of these events it means.",
    "minutes": 25,
    "resource": {
-    "label": "PostgreSQL - Table Expressions (joins, ON vs WHERE, lateral)",
-    "url": "https://www.postgresql.org/docs/current/queries-table-expressions.html"
+    "label": "ISO 20022 catalogue of message definitions (pain, pacs and camt payment message sets)",
+    "url": "https://www.iso20022.org/iso-20022-message-definitions"
    }
   },
   {
-   "name": "AI-assisted build: rules of engagement and review discipline",
-   "learn": "In the assistant-allowed round the assistant is not the subject - your control loop is. Fix a protocol before the drills: state the plan and the file layout out loud before prompting; prompt in units small enough to review in under a minute (one function, one endpoint, one test file) rather than 'build the whole thing'; read every generated diff line by line out loud, naming what you accept and what you reject and why; write or at least specify the tests yourself so the assistant cannot grade its own homework; and never paste code you cannot explain. Know the specific things assistants get wrong that you must catch on sight: invented library functions and kwargs, silent except: pass, off-by-one in slicing and date ranges, timezone-naive datetimes mixed with aware ones, no pagination on a list endpoint, secrets or absolute paths hardcoded, and tests that assert the implementation rather than the behaviour. Practise saying 'I'm rejecting this because...' - the sentence the interviewer is waiting for.",
-   "minutes": 30,
-   "resource": {
-    "label": "Claude Developer Platform documentation",
-    "url": "https://platform.claude.com/docs/en/home"
-   }
-  },
-  {
-   "name": "Drill 1 (25 min, recorded): messy transaction CSV to a reconciled monthly metric",
-   "learn": "Timed pandas drill on the payments corpus. Task: produce monthly net revenue per customer segment from a raw export where amount has currency symbols, dates come in two formats, refunds appear as separate negative rows with a matching original_transaction_id, and roughly 3% of rows are exact duplicates from a re-export. Requirements you must hit inside 25 minutes: profile first and say the row count and null counts aloud; dedupe explicitly with a stated key; coerce numerics and report how many values failed to parse; produce one row per (segment, month) with revenue, refund_amount, refund_rate and transaction count; and finish with a reconciliation - the sum of your output must equal the sum of the cleaned input, asserted in code, not eyeballed. Score yourself on whether you had a defensible partial answer by minute 15.",
-   "minutes": 30,
-   "resource": {
-    "label": "pandas User Guide - IO tools (read_csv parsing options, dtypes, parse_dates)",
-    "url": "https://pandas.pydata.org/docs/user_guide/io.html"
-   }
-  },
-  {
-   "name": "Drill 2 (25 min, recorded): multi-table join with fan-out you must catch",
-   "learn": "Timed pandas drill designed so the naive answer is wrong. Given orders, order_items, customers and a customers_history table with one row per attribute change, compute revenue per customer tier as of the order date. The traps: joining customers_history without an as-of condition multiplies every order by the number of history rows; order_items has a many relationship to orders so a naive merge inflates order-level totals; and a few customer_ids exist in orders but not customers. Do it correctly with merge(..., validate='m:1') to make the fan-out raise instead of silently corrupting, an explicit pre-aggregation of order_items before joining up, and pd.merge_asof for the point-in-time tier lookup with by= and direction='backward'. Narrate the row-count check after every merge - 'orders was 84,102 rows, after the merge it is 84,102, good' - because that sentence is what a senior reviewer is listening for.",
-   "minutes": 30,
-   "resource": {
-    "label": "pandas User Guide - Merge, join, concatenate and compare",
-    "url": "https://pandas.pydata.org/docs/user_guide/merging.html"
-   }
-  },
-  {
-   "name": "Drill 3 (25 min, recorded): event stream sessionisation and rolling windows",
-   "learn": "Timed pandas drill on the event corpus. Task: from raw timestamped events, define sessions with a 30-minute inactivity gap per user, then report median session length, events per session, and a 7-day rolling count of active users. The mechanics you must execute cleanly: sort by user and timestamp, compute the gap with groupby('user_id')['ts'].diff(), build session ids with (gap > pd.Timedelta('30min')).groupby(level).cumsum(), aggregate per session, then resample('D') and rolling('7D') on a DatetimeIndex. Handle the real complications out loud: timestamps arriving as UTC strings that must be tz-localised before comparison (mixing naive and aware raises), days with zero events that must appear as zeros rather than be dropped by groupby, and a user whose clock is skewed producing a negative diff. Report medians and p95, not means.",
-   "minutes": 30,
-   "resource": {
-    "label": "pandas User Guide - Time series and date functionality",
-    "url": "https://pandas.pydata.org/docs/user_guide/timeseries.html"
-   }
-  },
-  {
-   "name": "Drill 4 (30 min, recorded): SQL window analytics on an undocumented schema",
-   "learn": "Timed SQL drill against your local Postgres with the schema shown but not explained - the realistic customer situation. Answer four escalating questions in one session: monthly revenue with month-over-month percent change using LAG; each customer's second-largest order using ROW_NUMBER in a CTE; a 28-day trailing average of daily orders with an explicit ROWS frame; and each customer's rank within their segment by lifetime value with ties handled by DENSE_RANK. Constraints that make it real: you must first orient yourself out loud by querying the catalog (information_schema.columns, plus a quick COUNT(*) and a five-row sample per table) rather than assuming, and every query must be preceded by a one-sentence statement of the expected grain of the result. Verify each result with an independent check - a spot-check on one customer computed a different way.",
-   "minutes": 35,
-   "resource": {
-    "label": "PostgreSQL Tutorial - Window Functions",
-    "url": "https://www.postgresql.org/docs/current/tutorial-window.html"
-   }
-  },
-  {
-   "name": "Drill 5 (30 min, recorded): dedupe, point-in-time correctness, gaps and islands",
-   "learn": "Timed SQL drill on the three patterns that separate people who have shipped customer pipelines from people who have not. One: deduplicate a change-data-capture table to the latest row per business key using ROW_NUMBER() OVER (PARTITION BY key ORDER BY updated_at DESC, id DESC) = 1, and explain why the tiebreak column matters when updated_at is not unique. Two: an as-of join - attach the price that was in effect when each order was placed, using a LATERAL subquery or a range-bounded join, and demonstrate the wrong answer you get without it. Three: gaps and islands - find each customer's longest run of consecutive active months using the difference-of-row-numbers trick, and separately find the missing months with generate_series and a LEFT JOIN. Say the grain and the expected row count before executing every one.",
-   "minutes": 35,
-   "resource": {
-    "label": "PostgreSQL - WITH Queries (Common Table Expressions)",
-    "url": "https://www.postgresql.org/docs/current/queries-with.html"
-   }
-  },
-  {
-   "name": "Drill 6 (45 min, recorded, AI-assisted): CSV to a tested, runnable service",
-   "learn": "Timed build with an assistant in the loop. Deliverable: a small FastAPI service that ingests one of your messy CSVs, normalises it, and exposes GET /metrics with query params for date range and segment, plus a health endpoint, with pytest tests that pass and a one-command run. Sequence it deliberately - contract first (write the response Pydantic model and one failing test before any implementation), then the loader, then the endpoint, then pagination and input validation. Non-negotiables that the interviewer will look for: typed request/response models with explicit field constraints, 422 on bad input rather than a 500, a test that exercises the empty-result case and a test on the parsing of one deliberately dirty row, and no unbounded response. Narrate every accept/reject decision on generated code, and at minute 40 stop building and spend five minutes running the tests and stating what is not done.",
-   "minutes": 45,
-   "resource": {
-    "label": "FastAPI - Tutorial: User Guide",
-    "url": "https://fastapi.tiangolo.com/tutorial/"
-   }
-  },
-  {
-   "name": "Drill 7 (45 min, recorded, AI-assisted): LLM extraction with strict schema and a mini eval",
-   "learn": "Timed build: turn 200 unstructured records (support tickets, invoices or emails from your own corpus) into validated structured rows. Required shape: a Pydantic model with enums and constrained types as the extraction schema, a provider call using structured output or a tool schema so the model cannot return free text, validation on the way out with a rejected-rows path rather than a silent drop, bounded concurrency with a semaphore, retries with jittered backoff on transient errors only, and a per-record cache keyed on content hash so re-runs are free. Then the part most candidates skip and the one that wins the round: hand-label 20 records, score the extractor field-by-field, and report precision on the two fields that matter plus a count of records that failed validation. Say the cost and the p95 latency out loud at the end.",
-   "minutes": 45,
-   "resource": {
-    "label": "Pydantic documentation (models, validation, constrained types)",
-    "url": "https://pydantic.dev/docs/validation/latest/get-started/"
-   }
-  },
-  {
-   "name": "Drill 8 (45 min, recorded, AI-assisted): mid-build requirement change",
-   "learn": "The realistic FDE variant: build for 25 minutes, then have a pre-written envelope change the requirement, exactly as a customer does on a Thursday. Sample changes to draw from - the metric must now be computed per timezone-local day instead of UTC; the input arrives as a stream of JSON lines instead of one CSV; the customer needs the last 12 months backfilled and the job must be idempotent on re-run; a second file format must be supported with the same output contract. What is scored is the first ninety seconds after the change: do you restate the new requirement, name what breaks, propose the smallest change that satisfies it, and say explicitly what you are dropping to fit the time - or do you silently start refactoring. Keep the existing tests green through the change, add one test that would have failed before it, and finish with a spoken summary of what shipped, what regressed, and what you would do next.",
-   "minutes": 45,
-   "resource": {
-    "label": "pytest documentation (fixtures, parametrize, tmp_path)",
-    "url": "https://docs.pytest.org/en/stable/"
-   }
-  },
-  {
-   "name": "Watch the tapes: error taxonomy and the second pass",
-   "learn": "The recordings are worthless unless you mine them. For each of the eight, log in GRADES.md: minutes to first correct partial answer, longest silence in seconds, the number of times you ran code before saying what you expected it to return, every correctness bug and its class (dtype, join fan-out, NULL, timezone, off-by-one, assistant-generated), and the one sentence you wish you had said. Build a running error taxonomy and note that the same two classes will account for most of your failures - drill those specifically rather than doing more random exercises. Then do a second pass on the two worst drills under the same clock and confirm the delta with numbers, not feeling. Add assert-based self-checks to your fixture repo (pandas.testing.assert_frame_equal against a saved expected output) so future re-runs are graded automatically instead of by memory.",
+   "name": "Fintech: double-entry ledgers and the reconciliation break",
+   "learn": "Internalise the invariants: every movement is at least two entries, debits equal credits, the journal is append-only, and a correction is a reversing entry - never an UPDATE or a DELETE on a posted row. Know the account taxonomy you will meet (customer balance, clearing and settlement, fees, FX, suspense) and why a suspense account is where unexplained money lives until someone explains it. Learn the reconciliation loop concretely: ingest camt.053 or BAI2 or a processor payout report, match on amount plus value date plus reference, then classify every unmatched item as a timing break, fee break, FX break, duplicate, or genuinely missing; track break aging against the month-end close deadline because that deadline is the customer's real pain. Understand idempotency keys on every write path and that exactly-once is a lie without a dedupe table. The architectural line: an agent may propose a journal entry or explain a break, and must never post one or compute a balance - balances come from the ledger, the model narrates them.",
    "minutes": 25,
    "resource": {
-    "label": "pandas - Testing utilities (assert_frame_equal)",
-    "url": "https://pandas.pydata.org/docs/reference/testing.html"
+    "label": "TigerBeetle docs: Financial Accounting (double-entry, debits and credits, account types)",
+    "url": "https://docs.tigerbeetle.com/coding/financial-accounting/"
+   }
+  },
+  {
+   "name": "Fintech: disputes, chargebacks and the Regulation E clock",
+   "learn": "Dispute intake is the most heavily automated queue in fintech operations and it is entirely deadline-driven. Under 12 CFR 1005.11 a consumer has sixty days from the statement to assert an error; the institution has ten business days to investigate or must issue provisional credit and may then take up to forty-five days (ninety for new accounts, point-of-sale and foreign-initiated transactions), with notice of results within three business days of concluding. In parallel the card networks run their own machinery: reason codes, representment with compelling evidence, pre-arbitration and arbitration, each with deadlines counted in days. Know what goes in an evidence packet - AVS and CVV results, device and IP, delivery confirmation, terms acceptance, prior undisputed history - because assembling that packet is the automatable part while the disposition is regulated. The artifact you build here is a timer plus an immutable audit trail, not a chatbot.",
+   "minutes": 20,
+   "resource": {
+    "label": "eCFR: 12 CFR Part 1005 (Regulation E, Electronic Fund Transfers)",
+    "url": "https://www.ecfr.gov/current/title-12/chapter-X/part-1005"
+   }
+  },
+  {
+   "name": "Fintech: KYC, CDD and sanctions screening as an ops queue",
+   "learn": "Know the onboarding chain: CIP collection (name, date of birth, address, identification number) under 31 CFR 1020.220, identity verification, customer due diligence including beneficial ownership at the 25 percent threshold plus one control person, risk rating, enhanced due diligence for politically exposed persons and high-risk profiles, then ongoing monitoring. Suspicious activity reporting runs on a thirty-day filing clock and carries an absolute prohibition on tipping off the customer - the existence of a SAR is itself protected. Sanctions screening against the OFAC SDN and consolidated lists is a strict-liability regime, matching is fuzzy across name variants, transliterations, dates of birth and addresses, and the false-positive rate dominates the operating cost, which is exactly why this queue attracts AI. The autonomy line: an agent may triage, enrich, deduplicate and draft an alert narrative; it may never dispose of an alert or file, and no SAR content may ever appear in a shared log, a prompt to an uncontracted vendor, or a customer-visible surface.",
+   "minutes": 20,
+   "resource": {
+    "label": "eCFR: 31 CFR 1010.230 (FinCEN CDD rule - beneficial ownership for legal entity customers)",
+    "url": "https://www.ecfr.gov/current/title-31/subtitle-B/chapter-X/part-1010/subpart-B/section-1010.230"
+   }
+  },
+  {
+   "name": "Fintech: PCI scope and the fields a model must never see",
+   "learn": "Separate cardholder data (PAN, cardholder name, expiration date, service code) from sensitive authentication data (full track data, CAV2/CVC2/CVV2/CID, PIN and PIN block). SAD must never be stored after authorisation under any circumstance; PAN must be rendered unreadable in storage and masked on display to at most first six and last four. Learn what defines the cardholder data environment and how tokenization, hosted fields and iframes, and network tokens shrink it, along with what separates SAQ A from SAQ A-EP from SAQ D - because scope determines how expensive your integration is to the customer. Anything that can affect the security of the CDE is in scope, and that explicitly includes your log sink, your trace backend and your eval fixtures. The operating rule to write down: a PAN never enters a prompt, a span attribute, a screenshot in a demo deck, or a test dataset; if the model must reason about a card it gets last four plus BIN metadata plus a token.",
+   "minutes": 20,
+   "resource": {
+    "label": "PCI SSC: PCI Data Security Standard (scope, cardholder data and sensitive authentication data)",
+    "url": "https://www.pcisecuritystandards.org/standards/pci-dss/"
+   }
+  },
+  {
+   "name": "Fintech: who actually signs off",
+   "learn": "Learn the required program shape - internal controls, a designated BSA/AML compliance officer, training, independent testing, and customer due diligence - because those five pillars tell you which named human owns which decision. Then map real approvals: the BSA officer for alert and SAR dispositions, compliance for any customer-facing language and for adverse action notices, treasury or the controller for payment file release under dual control (maker-checker, two credentials, never one service account), the model risk function for anything that scores or ranks a customer, and - if your customer is a fintech riding a sponsor bank's charter - the partner bank, whose oversight team will read your agent's logs during their audit. Produce the matrix as change type to approver to evidence, and get it signed before you build, because retrofitting an approval step into a shipped agent is a rewrite.",
+   "minutes": 15,
+   "resource": {
+    "label": "eCFR: 31 CFR Part 1020 (AML program requirements for banks)",
+    "url": "https://www.ecfr.gov/current/title-31/subtitle-B/chapter-X/part-1020"
+   }
+  },
+  {
+   "name": "Healthcare: the intake workflow end to end",
+   "learn": "Walk the real sequence: referral or scheduling, pre-registration, insurance verification, prior authorisation, consent and intake forms, check-in and registration, patient matching and MRN assignment, triage, then the encounter. Patient identity is the load-bearing step and the one engineers underestimate: there is no national identifier, so matching is deterministic on MRN and probabilistic on name, date of birth, sex and address through an enterprise master patient index, duplicate rates of several percent are normal, and an incorrect merge is a clinical safety event rather than a data-quality ticket. Learn how FHIR models this - Patient.identifier as system plus value, the distinction between an MRN, a visit or account number and a payer member ID, and Patient.link for merges and replaces. Know where it stalls in practice: eligibility failures discovered at the desk, missing prior authorisation, and forms still arriving by fax.",
+   "minutes": 20,
+   "resource": {
+    "label": "HL7 FHIR R4: Patient resource",
+    "url": "https://hl7.org/fhir/R4/patient.html"
+   }
+  },
+  {
+   "name": "Healthcare: eligibility, prior authorisation and the claim lifecycle",
+   "learn": "Follow the money path: a 270 eligibility request returns a 271 with plan status, copay, deductible remaining and benefit detail (or an AAA rejection code that tells you why the payer refused to answer); a 278 services review carries prior authorisation, where the hard part is the payer-specific rule that determines whether an authorisation is even required; then an 837P or 837I claim, a 999 syntax acknowledgment and a 277CA claim acknowledgment, and finally an 835 remittance carrying CARC and RARC codes that explain each adjustment or denial, followed by appeal windows and the patient statement. Learn the code systems you will see in every payload: ICD-10-CM for diagnosis, CPT and HCPCS for procedures, NPI for providers, place-of-service and modifiers. The FDE-relevant conclusion: eligibility discovery, prior-auth packet assembly and denial triage are text-heavy, deadline-bound and non-clinical, which is where the value is; assigning or changing a diagnosis or procedure code is regulated billing work that a certified coder signs.",
+   "minutes": 25,
+   "resource": {
+    "label": "HL7 FHIR R4: CoverageEligibilityRequest",
+    "url": "https://hl7.org/fhir/R4/coverageeligibilityrequest.html"
+   }
+  },
+  {
+   "name": "Healthcare: the three interchange formats you will actually integrate",
+   "learn": "HL7 v2 is pipe-delimited with MSH, PID, PV1 and OBX segments, event types like ADT^A01 admit, A04 register, A08 update and A31 update person, ORU^R01 for results, transported over MLLP on a raw TCP port through an interface engine (Mirth Connect, Rhapsody, Cloverleaf) with ACK and NACK semantics - and every site has Z-segments and local deviations, so v2 is a family of dialects rather than a standard. FHIR R4 is REST over JSON with typed resources, search parameters, Bundles, US Core profiles, SMART on FHIR OAuth2 scopes such as patient/*.read and system/*.read, and Bulk Data $export producing NDJSON for population-scale pulls. X12 carries the money: 270/271, 278, 837, 835, moved over SFTP or a clearinghouse. The practical asymmetry to internalise: reads are increasingly FHIR and comparatively fast to approve; writes usually still go through v2 interfaces or an EHR-vendor-specific programme with a months-long approval path, and that path length is your project timeline.",
+   "minutes": 20,
+   "resource": {
+    "label": "HL7 FHIR R4 specification index",
+    "url": "https://hl7.org/fhir/R4/index.html"
+   }
+  },
+  {
+   "name": "Healthcare: PHI, minimum necessary, de-identification and BAAs",
+   "learn": "PHI is individually identifiable health information created, received or transmitted by a covered entity or business associate. There are exactly two lawful de-identification routes: Safe Harbor, which requires removing all eighteen identifier types - names, geography smaller than a state subject to the three-digit ZIP population rule, all date elements more specific than year, ages over 89, MRNs, account numbers, device identifiers, biometrics, full-face images and any other unique identifying number or code - plus no actual knowledge that re-identification is possible; or Expert Determination with documented statistical reasoning by a qualified person. Minimum necessary applies to everything except treatment. As a vendor you are a business associate: you need a signed BAA before touching PHI and a downstream BAA with every subprocessor, which includes your model provider - calling an inference endpoint with no BAA is the single most common violation in AI deployments. Assume free-text notes contain identifiers your scrubber missed, and contract accordingly rather than relying on regex.",
+   "minutes": 25,
+   "resource": {
+    "label": "HHS: Guidance on De-identification of PHI (Safe Harbor and Expert Determination)",
+    "url": "https://www.hhs.gov/hipaa/for-professionals/privacy/special-topics/de-identification/index.html"
+   }
+  },
+  {
+   "name": "Healthcare: who signs off, and the clinical autonomy line",
+   "learn": "Name the roles before the kickoff call: the designated Privacy Officer and Security Officer, compliance, health information management for record integrity, the CMIO or clinical informatics lead for anything that changes a clinician's screen or workflow, the revenue cycle director for billing-adjacent changes, legal for the BAA and its subprocessor list, and the IRB when data is used for research - and understand that secondary use of clinical data to train or tune a model reads as research to an IRB even when it feels like ordinary engineering. Write the autonomy line into the SOW in one sentence: the agent drafts, a licensed human signs; nothing autonomous writes to the chart; every suggestion carries its source so the clinician can inspect and override. Treat 'we would like to train on your data' as a separate approval requiring far more than a BAA - usually a data use agreement, an IRB determination and an executive sign-off.",
+   "minutes": 15,
+   "resource": {
+    "label": "HHS HIPAA for Professionals (rules index)",
+    "url": "https://www.hhs.gov/hipaa/for-professionals/index.html"
+   }
+  },
+  {
+   "name": "Procurement: requisition to pay and the three-way match",
+   "learn": "Trace the chain: requisition with cost centre and GL account, approval against a delegation-of-authority threshold, purchase order issued to the supplier, goods receipt when the item arrives, invoice receipt, then the three-way match comparing PO, GR and invoice on quantity and price within tolerance keys, posting through a GR/IR clearing account, then a payment run and remittance advice. Services differ: a service entry sheet replaces the goods receipt and many flows are two-way matched, while evaluated receipt settlement pays with no supplier invoice at all. The product surface is the exception queue - invoices blocked for price variance, quantity variance, missing goods receipt, duplicate invoice, wrong or missing PO (maverick spend), and mis-coded GL accounts - so learn what each block code actually means to an AP clerk. Pick up the buyer vocabulary too (spend under management, tail spend, catalogue versus punchout via cXML, contract price list, three-bid-and-a-buy), because misusing it in discovery costs credibility in the first ten minutes.",
+   "minutes": 20,
+   "resource": {
+    "label": "SAP Help Portal: SAP S/4HANA Cloud documentation",
+    "url": "https://help.sap.com/docs/SAP_S4HANA_CLOUD"
+   }
+  },
+  {
+   "name": "Procurement: supplier master data, onboarding and the fraud surface",
+   "learn": "The supplier master is the highest-value fraud target in the enterprise: legal name, tax identity (W-9 or W-8BEN-E, VAT number), remit-to address, bank account, payment terms, insurance and certifications, diversity flags, and identifiers such as DUNS, GLN and the internal vendor number. Onboarding runs tax validation, denied-party and sanctions screening, certificate checks and often a security review before a vendor can be transacted with. The control that matters most: any bank-detail change must be verified out of band against a number already on file, never against a number supplied in the requesting email, because supplier bank-change business email compromise is the most common seven-figure loss in this domain - which makes an agent with write access to vendor banking an attack surface rather than a feature. Duplicate and near-duplicate vendor records are also why every customer's spend analytics is wrong, and cleaning them is a legitimate, low-risk first deliverable.",
+   "minutes": 15,
+   "resource": {
+    "label": "FBI: Business Email Compromise (supplier bank-detail change fraud and out-of-band verification)",
+    "url": "https://www.fbi.gov/how-we-can-help-you/scams-and-safety/common-frauds-and-scams/business-email-compromise"
+   }
+  },
+  {
+   "name": "Procurement: segregation of duties, delegation of authority and SOX ITGC",
+   "learn": "Express separation of duties and least privilege in procurement terms: whoever creates a vendor cannot approve an invoice and cannot release a payment, and requester, approver and receiver must be different identities. Delegation of authority is a concrete table of spend thresholds by role and category, and splitting a purchase to stay under a threshold is a named audit finding, not a clever workaround. SOX IT general controls reduce to three things your deployment must produce evidence for: access provisioning and periodic review, change management, and job monitoring - who had access, what changed and who approved it, and proof that failed jobs were noticed and handled. The consequence that decides your architecture: a service account that can act as any user collapses SoD entirely, so the agent needs its own identity, its own narrow permission set, and an audit trail that distinguishes agent-proposed from human-approved on every record it touches.",
+   "minutes": 20,
+   "resource": {
+    "label": "NIST SP 800-53 Rev. 5 (AC-5 separation of duties, AC-6 least privilege)",
+    "url": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+   }
+  },
+  {
+   "name": "Logistics: order to delivery and the EDI backbone",
+   "learn": "Follow the physical and document chains together: order capture in the OMS, availability and allocation, warehouse work in the WMS (wave, pick, pack, SSCC-labelled cases), carrier selection and rating in the TMS, load tender, bill of lading, pickup, in-transit status, proof of delivery, then freight audit and pay. The message set you will integrate: 850 purchase order, 855 acknowledgment, 856 advance ship notice with its hierarchical shipment-order-pack-item loops, 810 invoice, 940 and 945 warehouse shipping order and advice, 204 motor carrier load tender, 990 tender response, 214 shipment status, 210 freight invoice, and the 997 functional acknowledgment that tells you whether anything was received at all. Transport is AS2 or SFTP through a VAN, and mapping errors surface as 997 or 824 rejects days after the fact. Understand that for a retail supplier the ASN is a financial document: a late or structurally invalid 856 triggers a vendor compliance chargeback regardless of whether the freight arrived.",
+   "minutes": 25,
+   "resource": {
+    "label": "Stedi EDI Reference: X12 856 Ship Notice/Manifest (ASN loops and segments)",
+    "url": "https://www.stedi.com/edi/x12/transaction-set/856"
+   }
+  },
+  {
+   "name": "Logistics: customs, classification and trade compliance",
+   "learn": "Every cross-border shipment carries a classification decision and a screening decision that attach personal liability to a named human. HS and HTS codes drive duty rates; country of origin drives eligibility and tariff treatment; incoterms (EXW, FOB, DAP, DDP) decide who owes duty and who bears risk at each point; ISF 10+2 must be filed before lading for ocean imports. Screening covers denied and restricted party lists, ECCN classification and licence exceptions under the EAR, ITAR for defence articles including technical data - which means a screen share or a shared drawing with a foreign national can itself be a deemed export - and embargoed destinations. Dangerous goods carry their own certification regime (IATA DGR, 49 CFR HMR) where only a trained, currently certified person may sign the declaration. The rule to state up front: classification and licence determination from an agent are advisory only, a licensed customs broker files the entry, and a certified human signs DG paperwork.",
+   "minutes": 15,
+   "resource": {
+    "label": "CBP: Importer Security Filing '10+2' (pre-lading filing requirements for ocean imports)",
+    "url": "https://www.cbp.gov/border-security/ports-entry/cargo-security/importer-security-filing-102"
+   }
+  },
+  {
+   "name": "Logistics: the exception queue and who has authority over it",
+   "learn": "The exceptions are the domain: OS&D (over, short, damaged), refused delivery, misroute, missed appointment, dwell, detention and demurrage accessorials, reweigh and reclass, and lost freight. Freight claims run under the Carmack Amendment with carrier liability limits and filing windows - commonly nine months to file and two years to sue after declination - and a claim needs the bill of lading, a proof of delivery with the exception actually noted at delivery, invoice value and photographs; an exception not written on the POD is usually an unwinnable claim, which is why capture-at-the-dock is the automation with real ROI. Detention and demurrage accrue by the hour or day and are disputed entirely from timestamps, so clean event data converts directly into recovered money. Authority: the dispatcher or transportation manager approves re-routes and accessorials, the shipper of record owns the claim, and carrier scorecards including OTIF decide who gets the freight next quarter.",
+   "minutes": 15,
+   "resource": {
+    "label": "eCFR: 49 CFR Part 370 (principles and practices for investigation of loss and damage claims)",
+    "url": "https://www.ecfr.gov/current/title-49/subtitle-B/chapter-III/subchapter-B/part-370"
+   }
+  },
+  {
+   "name": "Writing the four one-pagers and passing the vocabulary test",
+   "learn": "Compress each domain onto one page a practitioner would not need to correct: three workflows with actors, systems of record and the two real bottlenecks; the data-never-move table with the rule cited by name (PCI SAD storage prohibition, HIPAA Safe Harbor identifiers, GDPR Article 9, ITAR technical data, supplier pricing under NDA); the sign-off matrix as decision to role to threshold to evidence; and a single agent-autonomy line stating what the agent may read, draft, propose and never do. Append a glossary of ten terms and five acronyms per domain and rehearse them aloud until they are unselfconscious, because fluency is judged in the first fifteen minutes by whether you say 'prior auth' and 'the 835' naturally or say 'the insurance thing'. Apply plain-language editing discipline - short sentences, active voice, one idea per line, define an acronym exactly once - then test each page by sending it to someone who works in that domain and counting their corrections; fewer than three is a pass, and every correction becomes a line in the glossary.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google Technical Writing One (plain-language editing: active voice, short sentences, defining terms)",
+    "url": "https://developers.google.com/tech-writing/one"
    }
   }
  ],
  "outcomes": [
-  "You can profile an unfamiliar dirty dataset and state its row count, null profile, duplicate count and the two dtype problems that will bite you, out loud, within the first three minutes of a timed drill.",
-  "You can produce a correct grouped, joined and time-bucketed answer in pandas within 25 minutes on a dataset you have never seen, and reconcile the output total against the cleaned input in code.",
-  "You can write ROW_NUMBER, LAG, a ROWS-framed rolling aggregate, an as-of join and a gaps-and-islands query in SQL without a reference open, and explain the ROWS-versus-RANGE difference on demand.",
-  "You can catch a join fan-out at the moment it happens because you state the expected row count before every merge and check it after - visible on every one of your eight tapes.",
-  "You can complete a 45-minute AI-assisted build that ends with passing tests, a typed contract, and a spoken list of what is not done, having narrated an accept/reject decision on every block of generated code.",
-  "You can absorb a mid-build requirement change and, within ninety seconds, restate it, name what breaks, propose the minimal change, and say what you are cutting to fit the clock.",
-  "You keep your longest silence under fifteen seconds across all eight recordings, including while reading a traceback, measured from the tape rather than estimated.",
-  "You can show an error taxonomy across eight drills with your two dominant bug classes named, and a second-pass recording that demonstrates a measured improvement on both."
+  "You can sketch from memory, for any of the four domains, three end-to-end workflows with actors, systems of record and the two points where the process actually stalls, and name the exception queue that is the real automation target.",
+  "You can state per domain which data must never enter a prompt, a log, a span attribute or an eval fixture, and cite the specific rule that forbids it - PCI's prohibition on storing sensitive authentication data, HIPAA's eighteen Safe Harbor identifiers, GDPR Article 9, ITAR technical data, contract pricing under NDA.",
+  "You can name the human who signs each decision class and the threshold that pulls them in - BSA officer, Privacy Officer, controller under dual control, category manager against a delegation-of-authority table, licensed customs broker, dispatcher - and say what evidence their approval must leave behind.",
+  "You can run a thirty-minute discovery conversation in any of the four domains using the domain's own vocabulary (SEC code, R10 return, camt.053, 271, 278, CARC, three-way match, GR/IR clearing, ASN, SSCC, detention) without stopping to ask what an acronym means.",
+  "You can classify any proposed agent capability into may decide, may draft for human approval, or may not touch this data at all, and defend the placement with a named rule rather than an opinion.",
+  "You can pick the right integration surface and estimate its approval path: FHIR R4 read versus HL7 v2 write versus X12 837/835 through a clearinghouse, ISO 20022 camt.053 versus a processor payout report, cXML punchout versus ERP API, EDI 856 over AS2.",
+  "You can inspect a customer's sample file before a demo, identify the fields that would make loading it an unlawful disclosure or a PCI scope expansion, and propose a masked or synthetic substitute the same day.",
+  "You can produce a one-page domain brief that a working practitioner in that domain corrects fewer than three times."
  ],
  "failureModes": [
-  "You merge two customer tables without checking cardinality, the many-side fans out, and every revenue number you present to the customer is inflated by a factor nobody notices until finance reconciles the quarter.",
-  "A numeric column arrives as object because of thousands separators, the sum silently concatenates strings or coerces to NaN, and the dashboard ships with a metric that is off by orders of magnitude.",
-  "A LEFT JOIN with the right table's column filtered in WHERE quietly becomes an INNER JOIN, so customers with no matching rows vanish from the report and the customer's own count never matches yours.",
-  "Timestamps are compared across a mix of tz-aware and naive datetimes, so daily aggregates are shifted by hours and month boundaries land in the wrong bucket for every customer outside UTC.",
-  "You accept assistant-generated code with a bare except that swallows parse errors, and the pipeline reports success while silently discarding every malformed record for weeks.",
-  "You go quiet for four minutes debugging, the interviewer loses the thread, and the write-up says 'strong coder, unclear how they would work with a customer in the room' - which is a no for an FDE role.",
-  "You spend twenty of your twenty-five minutes perfecting ingestion and never produce a number, so there is nothing to grade on the axis that actually matters."
+  "Someone drops a 'quick sample' extract into Slack the night before a demo and it contains live PANs or unscrubbed clinical narratives, so the demo itself becomes a reportable disclosure and a PCI scope expansion before a single line of integration code exists.",
+  "The agent is given write access to the vendor master or the payment run so the workflow demos end to end, and the customer's SOX auditor records it as a segregation-of-duties failure that forces the integration out at renewal.",
+  "Payment success is modelled as the card authorisation or the ACH submission, so the product reports money that later returns under R10 up to sixty days afterwards, and the operations team stops trusting every number the system produces.",
+  "Free-text notes are sent to a model endpoint with no BAA because a data scientist removed the name column and called it de-identified, ignoring the seventeen other Safe Harbor identifiers embedded in the narrative text.",
+  "A prior-authorisation assistant optimised on approval rate quietly nudges toward diagnosis codes that get approved, which is billing fraud rather than a hallucination bug, and the eval set never catches it because it only scored approvals.",
+  "The generated 856 is syntactically valid but its shipment-order-pack hierarchy or SSCC labels are inconsistent, retailers reject it days later via 824 and levy vendor compliance chargebacks that exceed the value of the automation.",
+  "An export-controlled drawing is pasted into a shared workspace or shown on a troubleshooting screen share with a non-US engineer, which is a deemed export the customer's trade compliance officer is obliged to self-disclose."
  ],
  "interviewQuestions": [
-  "Here is a 900k-row export and a question about monthly revenue. Talk me through your first three minutes before you write any aggregation - what do you check and what would make you stop and ask me something?",
-  "You join orders to a customer attributes table and the row count goes from 84,000 to 310,000. Walk me through how you diagnose it and what the correct query looks like if attributes change over time.",
-  "Write, out loud, the query for each customer's second-largest order. Now do it in a dialect without QUALIFY, and tell me what changes if two orders tie exactly.",
-  "You used an assistant to generate this loader. Show me a line you rejected and tell me why - and tell me what class of bug you have learned to look for first in generated code.",
-  "Your extraction pipeline reports 98% success but the customer says records are missing. The code has no errors in the logs. How do you find out what happened?",
-  "Halfway through a build the customer says the metric must be per local business day, not UTC, and they need twelve months backfilled idempotently. What do you change, what do you drop, and what do you tell them by end of day?",
-  "You are on a screen share with a customer's data engineer and your first answer turns out to be wrong. What do you actually say, and what do you do next?"
+  "A payments customer wants an agent that runs the dispute queue end to end. Which steps would you let it perform, which would you refuse, what regulatory clocks constrain the design, and what exactly must the system log so their examiner can reconstruct a decision two years later?",
+  "You have read access to a hospital's EHR and are building an intake assistant. Walk me from scheduling to a paid claim, name the interface you would use at each hop, and tell me the first three places the workflow actually breaks for the staff rather than for the software.",
+  "A prospect emails you a CSV of sample data the night before a demo. Talk me through your next ten minutes - once for a fintech customer, once for a hospital - and tell me precisely what differs between the two.",
+  "Design an invoice-exception agent for a procurement organisation that is audited under SOX. What identity does it run as, what records can it change, and how would you demonstrate to an auditor that no approval in the system was made by the agent?",
+  "Explain to me, as the customer's VP of Global Trade, why your system will not classify our goods or file our customs entries - and then tell me what it will do that is still worth paying for.",
+  "In healthcare, what is the difference between data that is de-identified and data you are permitted to send to a model vendor? Give me a concrete case where a team gets that distinction wrong and does not notice.",
+  "Pick a domain you have never worked in. How do you get to a credible discovery call in three days, and how would you tell the difference between genuine understanding and repeating jargon back at the customer?"
  ],
- "proofOfWork": "Beyond the eight recorded drills, publish a repository called fde-drill-kit that turns your practice into a reusable, evidence-backed system another engineer could run tomorrow. It ships three synthetic-but-realistic corpora (payments, CRM and event-stream) generated by a seeded script so the defects are reproducible and documented - a defects.md naming each planted trap (mixed date formats, currency-symbol numerics, CDC duplicates with non-unique updated_at, whitespace in join keys, a tz-skewed clock, orphan foreign keys) and the query or cell that exposes it. It ships a docker compose that loads the same data into Postgres so every prompt exists in both pandas and SQL form, a prompts/ directory with all eight drill prompts written the way an interviewer would write them (underspecified, with the ambiguity deliberate), and a solutions/ directory with a reference answer plus an assert-based grader using pandas.testing.assert_frame_equal and SQL count assertions, so anyone can self-score without your judgement. The credibility comes from the evidence section: a GRADES.md with one row per drill recording minutes-to-first-partial-answer, longest silence in seconds, bug classes hit, and rubric score across all five axes, plus the second-pass rows for the two worst drills showing the measured delta; an ERRORS.md distilling the taxonomy down to your two dominant failure classes with the specific drill timestamps where each occurred; and an index page linking the eight unedited recordings. Send that one link when a recruiter asks how you prepare, and it answers the coding question and the self-improvement question at once."
+ "proofOfWork": "Ship a public 'demo-safe data kit and domain risk register' covering all four domains, built as working code rather than documents. The core is a machine-readable data-class policy per domain - YAML or JSON declaring restricted field patterns and the rule that forbids each one - enforced by a linter you wire into CI against one of your own agent projects: a PAN detector with a Luhn check plus BIN and last-four allowance, MRN and account-number patterns, a clinical free-text detector that flags dates finer than year and ages over 89, ECCN and ITAR keyword patterns, and supplier bank-detail fields. The linter runs in three places and must fail the build in each: on any prompt payload before it leaves the process, on OpenTelemetry span attributes and log records, and on every eval fixture in the repository, with a test suite proving each rule catches a crafted violation. Alongside it, ship a synthetic data generator per domain producing realistic but non-real records - test PANs that pass Luhn but are not issuable, HL7 v2 ADT^A04 and X12 271 and 835 fixtures with realistic CARC codes, PO/goods-receipt/invoice triples with deliberate price and quantity variances that exercise a tolerance check, and 856 ASNs including intentionally broken SSCC hierarchies - so that no customer data is ever needed to demo anything. Wrap it with the four one-pagers (three workflows, data-never-move table, sign-off matrix, autonomy line) and, for each domain, a recorded twenty-minute mock discovery call with someone who actually works in it, plus a short diff listing every correction they made and how you changed the one-pager in response. The corrections list is the part that proves fluency, because it shows where you were wrong and that you found out before a customer did."
 }

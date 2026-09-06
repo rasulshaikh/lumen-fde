@@ -1,218 +1,218 @@
 {
-  "i": 29,
-  "topic": "PostgreSQL at depth: planner, indexes, EXPLAIN, locks, transactions, window functions",
-  "track": "E. Backend and Data",
-  "month": 4,
-  "hours": 12,
-  "why": "On almost every engagement the customer's Postgres (RDS, Cloud SQL, or a VM their DBA guards) is the shared dependency your feature lands on, and the new access patterns you introduce (per-tenant filters, JSONB metadata, event tables, job queues, embeddings side tables) are what turns 'the AI thing is slow' into a P1 with your name on it. You will be asked to read an EXPLAIN ANALYZE on a screen-share in front of their DBA and propose an index they will accept, and to ship a schema change to a multi-billion-row table with no maintenance window. Knowing the planner, MVCC and the lock table cold is what lets you say 'this will take 40 seconds and block nothing' and be right.",
-  "prerequisites": [
-    "SQL fluency: joins, GROUP BY, HAVING, subqueries, basic DDL and DML; the pgexercises Basic and Joins sets should feel like warm-up, not learning",
-    "A running Dokeo with real tables from topics 25 and 26 (Production Python architecture; FastAPI in production), plus the ability to generate 5-10M rows of skewed seed data with generate_series so plans actually change",
-    "Topic 14 (AWS data: RDS Postgres) for parameter groups, shared_preload_libraries on managed Postgres, Performance Insights and where slow-query logs land",
-    "Topic 3 (Performance and troubleshooting on a single box) so 'random_page_cost', 'page cache' and 'spilled to disk' map to iostat, vmstat and real hardware",
-    "Docker: run postgres:16 with a named volume and custom postgresql.conf flags (-c shared_preload_libraries=pg_stat_statements,auto_explain), psql with \\timing, \\x and \\watch",
-    "Topic 21 (Observability) is helpful, not required, for wiring pg_stat_statements and lock waits into Grafana"
-  ],
-  "subtopics": [
-    {
-      "name": "Reading EXPLAIN ANALYZE line by line",
-      "learn": "Run EXPLAIN (ANALYZE, BUFFERS, VERBOSE, SETTINGS, WAL, FORMAT TEXT|JSON) and read a plan tree bottom-up and inner-to-outer: cost=startup..total, rows and width are estimates; actual time=first..last, rows and loops are measured, and a child's actual rows must be multiplied by loops to get the true row count. Hunt for the first node where estimated rows diverges from actual by more than 10x, for Filter and Rows Removed by Filter (rows fetched then thrown away), for Buffers: shared hit vs read vs dirtied and temp read/written (a Sort or Hash that spilled), and for Planning Time vs Execution Time. Know that EXPLAIN ANALYZE really executes the statement, so wrap INSERT/UPDATE/DELETE in BEGIN ... ROLLBACK, that TIMING adds overhead on high-node-count plans (use TIMING OFF for a fair measurement), and that BUFFERS is only on by default from PostgreSQL 18. Paste the same plan into explain.depesz.com or explain.dalibo.com when it is more than a screen long, but be able to read raw text when the customer's laptop has no internet.",
-      "minutes": 50,
-      "resource": {
-        "label": "PostgreSQL docs - Using EXPLAIN",
-        "url": "https://www.postgresql.org/docs/current/using-explain.html"
-      }
-    },
-    {
-      "name": "The cost model and the planner knobs that actually matter",
-      "learn": "Understand the arbitrary-unit cost model: seq_page_cost 1.0, random_page_cost 4.0 (drop to 1.1 on SSD/EBS gp3 or the planner will avoid index scans on big tables), cpu_tuple_cost 0.01, cpu_index_tuple_cost 0.005, cpu_operator_cost 0.0025, and effective_cache_size (a hint about OS cache, default 4GB, set to ~50-75% of RAM) which makes index scans look cheaper without allocating anything. Know work_mem (per sort/hash node, per query, default 4MB; set per session with SET LOCAL work_mem = '256MB' for a known-heavy report rather than globally) and hash_mem_multiplier, and when JIT (jit_above_cost 100000) adds seconds of compile time to a plan that would have run in milliseconds. Use enable_seqscan/enable_nestloop/enable_hashjoin = off only as a diagnostic to see the plan the optimizer rejected and what it costed it at, never in production, and read the SETTINGS block in EXPLAIN to see which non-default knobs were in play on the customer's box.",
-      "minutes": 40,
-      "resource": {
-        "label": "PostgreSQL docs - Query Planning configuration (runtime-config-query)",
-        "url": "https://www.postgresql.org/docs/current/runtime-config-query.html"
-      }
-    },
-    {
-      "name": "Statistics, ANALYZE and the anatomy of a misestimate",
-      "learn": "Read pg_stats for a column: null_frac, n_distinct (negative means a fraction of rows), most_common_vals/most_common_freqs, histogram_bounds and correlation (near 1 or -1 means index range scans are cheap sequential IO). Know that default_statistics_target 100 samples 30000 rows and gives 100 MCVs/histogram buckets, that a skewed tenant_id column with 5000 distinct values needs ALTER TABLE t ALTER COLUMN tenant_id SET STATISTICS 1000 followed by ANALYZE, and that autovacuum only re-analyzes after autovacuum_analyze_scale_factor (10%) of the table changes, so a freshly bulk-loaded table is planned on empty-table stats until you run ANALYZE yourself. Fix correlated-column misestimates (city implies country, status implies is_closed) with CREATE STATISTICS s (dependencies, ndistinct, mcv) ON a, b FROM t, and recognise the unfixable ones: functions on columns, JSONB path expressions and inequality on parameters all default to fixed selectivity guesses (0.005, 0.333) regardless of data.",
-      "minutes": 40,
-      "resource": {
-        "label": "PostgreSQL docs - Statistics Used by the Planner",
-        "url": "https://www.postgresql.org/docs/current/planner-stats.html"
-      }
-    },
-    {
-      "name": "B-tree anatomy and the column-order rule",
-      "learn": "Picture the B-tree: a balanced tree of 8kB pages whose leaf level is a doubly linked list of sorted (key, ctid) entries, so every lookup is O(log n) page reads to a leaf followed by a sequential walk along leaves, and every row visit from the leaf is a random heap read. Internalise the concatenated-index rule: the index is sorted by column 1, then column 2 within equal column 1, so equality predicates go first and the single range or ORDER BY column goes last; (tenant_id, created_at) serves WHERE tenant_id = $1 AND created_at > $2 ORDER BY created_at with one range walk, while (created_at, tenant_id) has to scan every tenant's rows in the date range and filter. Distinguish Index Cond (used to navigate the tree) from Filter (evaluated on each row fetched) in the plan, and know why a leading column not in the WHERE clause makes the index unusable except for the rarely-chosen skip-scan-like full index scan.",
-      "minutes": 45,
-      "resource": {
-        "label": "Use The Index, Luke - Concatenated Indexes (column order)",
-        "url": "https://use-the-index-luke.com/sql/where-clause/the-equals-operator/concatenated-keys"
-      }
-    },
-    {
-      "name": "Seq Scan, Index Scan, Index Only Scan, Bitmap scans and when each fires",
-      "learn": "Predict the scan type from selectivity and correlation: Seq Scan for anything past roughly 5-10% of a large table (and always for tiny tables), Index Scan for a handful of rows, Bitmap Index Scan + Bitmap Heap Scan for the middle ground where the planner sorts matching ctids by page to turn random IO into sequential IO (look for Recheck Cond and Heap Blocks: exact=N lossy=M; lossy means the bitmap exceeded work_mem and whole pages were rechecked). Understand Index Only Scan needs every referenced column in the index (add non-key columns with INCLUDE) and a visibility map bit set for each page, otherwise it reports Heap Fetches: N and costs the same as an Index Scan; freshly loaded or heavily updated tables have unset VM bits until VACUUM runs, which is why the same index is fast on Monday and slow on Friday. Know how BitmapAnd/BitmapOr combine two single-column indexes, and why a composite index still beats them for a hot query.",
-      "minutes": 40,
-      "resource": {
-        "label": "PostgreSQL docs - Index-Only Scans and Covering Indexes",
-        "url": "https://www.postgresql.org/docs/current/indexes-index-only-scans.html"
-      }
-    },
-    {
-      "name": "Partial, expression, covering and ordered indexes",
-      "learn": "Build each shape and prove it is used: a partial index CREATE INDEX ... ON jobs (created_at) WHERE status = 'pending' is tiny and stays hot, but the planner only picks it when it can prove the query predicate implies the index predicate, so a parameterised status = $1 executed as a generic plan will skip it; an expression index ON users (lower(email)) is required when the ORM emits WHERE lower(email) = lower($1) (a plain index on email is useless there, see Use The Index Luke's 'obfuscation' chapter); INCLUDE (payload_size) turns an Index Scan plus heap fetch into an Index Only Scan for a read-heavy path without widening the key. Match index order to ORDER BY: a B-tree can be walked backwards, so (tenant_id, created_at) serves ORDER BY created_at DESC, but ORDER BY created_at DESC, id ASC needs (created_at DESC, id ASC) explicitly, and NULLS FIRST/LAST must match too. Check pg_stat_user_indexes.idx_scan before dropping an index the customer swears is used.",
-      "minutes": 45,
-      "resource": {
-        "label": "PostgreSQL docs - Partial Indexes",
-        "url": "https://www.postgresql.org/docs/current/indexes-partial.html"
-      }
-    },
-    {
-      "name": "GIN, GiST, BRIN and hash: indexing JSONB, text search, arrays and time series",
-      "learn": "Choose the non-B-tree index by operator: GIN on a jsonb column with the default jsonb_ops supports @>, ?, ?|, ?& and key-existence, while jsonb_path_ops is roughly 3x smaller and faster but only supports @>; a B-tree on an extracted path ((metadata->>'customer_id')) beats both for equality on one known key. Use GIN with pg_trgm's gin_trgm_ops for LIKE '%term%' and ILIKE (the only way those get an index) and GIN on a stored tsvector generated column for full-text search; know GIN's fastupdate pending list (gin_pending_list_limit, 4MB) makes inserts cheap but the first query after a burst pays to merge it. Use BRIN (pages_per_range 128) on append-only, physically ordered columns like created_at on an events table: a few kB instead of GBs, but useless once updates and deletes scramble physical order. GiST is for ranges, geometry and EXCLUDE constraints (no overlapping bookings); hash indexes are equality-only and rarely worth it over B-tree.",
-      "minutes": 40,
-      "resource": {
-        "label": "PostgreSQL docs - Index Types",
-        "url": "https://www.postgresql.org/docs/current/indexes-types.html"
-      }
-    },
-    {
-      "name": "Join algorithms: Nested Loop, Hash Join, Merge Join and how misestimates pick the wrong one",
-      "learn": "Know the three algorithms and their sweet spots: Nested Loop with an inner Index Scan is ideal when the outer side is small (a handful of rows) and catastrophic when the planner estimated rows=1 but got 50000, because the inner scan runs 50000 times (loops=50000 in the plan); Hash Join builds an in-memory hash on the smaller input (Batches: 1 is good, Batches: 16 means it spilled to disk because the build side exceeded work_mem times hash_mem_multiplier); Merge Join needs both inputs sorted and wins when indexes already provide the order or both sides are huge. Read Hash Cond, Merge Cond and Join Filter, and know the planner only considers all join orders up to join_collapse_limit/from_collapse_limit (8) and switches to the genetic optimizer above geqo_threshold (12) tables, so a 14-table ORM join is planned heuristically. Recognise parallel plans (Gather, Parallel Seq Scan, Parallel Hash Join; max_parallel_workers_per_gather default 2) and why a query that ran in parallel on your laptop runs serially on a 2-vCPU RDS instance.",
-      "minutes": 40,
-      "resource": {
-        "label": "Use The Index, Luke - The Join Operation",
-        "url": "https://use-the-index-luke.com/sql/join"
-      }
-    },
-    {
-      "name": "Sorting, LIMIT, top-N and keyset pagination",
-      "learn": "Read Sort Method: quicksort Memory: NkB (fine), external merge Disk: NkB (spilled: raise work_mem for the session or provide the order via an index), and top-N heapsort (a LIMIT let the sort keep only N rows). Know that an index whose order matches ORDER BY lets a LIMIT 20 stop after 20 index entries (Index Scan with no Sort node at all), that Incremental Sort (PG13+) can exploit a partial prefix match (Presorted Key), and that OFFSET 100000 LIMIT 20 must produce and discard 100000 rows every page so admin exports and infinite scroll get slower per page until they time out. Replace it with keyset pagination: ORDER BY created_at DESC, id DESC LIMIT 20 with WHERE (created_at, id) < ($1, $2) using row-value comparison, which walks the (created_at DESC, id DESC) index directly and is stable under concurrent inserts.",
-      "minutes": 40,
-      "resource": {
-        "label": "Use The Index, Luke - Fetching the next page (keyset pagination)",
-        "url": "https://use-the-index-luke.com/sql/partial-results/fetch-next-page"
-      }
-    },
-    {
-      "name": "Finding the slow queries: pg_stat_statements, auto_explain and the slow log",
-      "learn": "Enable shared_preload_libraries = 'pg_stat_statements,auto_explain' (a restart; on RDS via the parameter group) and CREATE EXTENSION pg_stat_statements, then rank by total_exec_time (what burns the box), by mean_exec_time (what users feel) and by calls (N+1 candidates), reading shared_blks_read, temp_blks_written and wal_bytes per statement; normalised queryid lets you join to auto_explain output and to pg_stat_activity.query_id when compute_query_id = auto. Configure auto_explain.log_min_duration = '250ms', log_analyze = on, log_buffers = on, log_timing = off (timing on every node is expensive), log_nested_statements = on for functions, log_format = json and sample_rate < 1 on busy systems, so the plan that was slow in production is captured with the parameter values that made it slow, which is exactly what you cannot reproduce by hand. Set log_min_duration_statement, log_lock_waits = on and log_temp_files = 0 as the baseline on every customer database you touch, and call pg_stat_statements_reset() at the start of a measurement window rather than reading lifetime averages.",
-      "minutes": 40,
-      "resource": {
-        "label": "PostgreSQL docs - pg_stat_statements",
-        "url": "https://www.postgresql.org/docs/current/pgstatstatements.html"
-      }
-    },
-    {
-      "name": "MVCC: tuple versions, snapshots, dead tuples and HOT updates",
-      "learn": "Understand that every row version carries xmin (creating transaction), xmax (deleting or updating transaction) and ctid, that a snapshot decides visibility per transaction, and that UPDATE never modifies in place: it writes a new version and marks the old one dead, so an update-heavy table is a delete-heavy table. Know the HOT (heap-only tuple) optimisation: when no indexed column changes and the page has free space (leave room with ALTER TABLE t SET (fillfactor = 90)), the new version is chained inside the page and no index entries are written; watch n_tup_hot_upd vs n_tup_upd in pg_stat_user_tables to see whether an 'updated_at' index is silently defeating it. Understand why a transaction left open for hours (state = 'idle in transaction' in pg_stat_activity, backend_xmin far behind) pins every dead tuple since it began across the entire database, set idle_in_transaction_session_timeout, and know the 2^31 transaction-ID wraparound story well enough to explain autovacuum_freeze_max_age and why 'database is not accepting commands to avoid wraparound' is the outage you never want to be on-site for.",
-      "minutes": 40,
-      "resource": {
-        "label": "PostgreSQL docs - Concurrency Control: Introduction (MVCC)",
-        "url": "https://www.postgresql.org/docs/current/mvcc.html"
-      }
-    },
-    {
-      "name": "VACUUM, autovacuum tuning and diagnosing bloat",
-      "learn": "Know the trigger math: autovacuum vacuums a table when dead tuples exceed autovacuum_vacuum_threshold (50) + autovacuum_vacuum_scale_factor (0.2) times reltuples, so a 500M-row table waits for 100M dead rows; fix it per table with ALTER TABLE events SET (autovacuum_vacuum_scale_factor = 0.01, autovacuum_vacuum_threshold = 50000) and, for append-only tables, autovacuum_vacuum_insert_scale_factor so the visibility map gets set. Understand that autovacuum is throttled by autovacuum_vacuum_cost_delay (2ms) and cost_limit (200), that three workers (autovacuum_max_workers) can be starved by one huge table, and that cancelled autovacuums (log line 'canceling autovacuum task') come from DDL and lock conflicts. Measure bloat with pgstattuple (dead_tuple_percent, free_percent) or the pg_stat_user_tables n_dead_tup/n_live_tup ratio, watch pg_stat_progress_vacuum during a long run, and know your repair options ranked by lock cost: plain VACUUM (no exclusive lock, does not return space to the OS), REINDEX INDEX CONCURRENTLY for index bloat, pg_repack for online table rewrite, VACUUM FULL only with an ACCESS EXCLUSIVE lock and a maintenance window.",
-      "minutes": 40,
-      "resource": {
-        "label": "PostgreSQL docs - Routine Vacuuming",
-        "url": "https://www.postgresql.org/docs/current/routine-vacuuming.html"
-      }
-    },
-    {
-      "name": "Isolation levels, lost updates, write skew and the 40001 retry contract",
-      "learn": "Demonstrate each level in two psql sessions: READ COMMITTED (the default) takes a fresh snapshot per statement, so a read-modify-write in application code (SELECT balance; compute; UPDATE) loses updates, while a single UPDATE accounts SET balance = balance - 100 WHERE id = 1 is safe because UPDATE re-reads the latest committed version of the row; REPEATABLE READ takes one snapshot per transaction and aborts a writer that touches a row modified since with SQLSTATE 40001; SERIALIZABLE adds SSI predicate locks (SIReadLock in pg_locks) and detects write skew such as two on-call doctors both reading 'two on call' and both leaving. Know the retry contract: any code that uses REPEATABLE READ or SERIALIZABLE must catch 40001 and rerun the whole transaction with backoff, and be able to choose between the pessimistic tools (SELECT ... FOR UPDATE, FOR NO KEY UPDATE, FOR SHARE, FOR KEY SHARE, and how FK checks take FOR KEY SHARE on the parent row) and optimistic ones (a version column with UPDATE ... WHERE version = $1, or SERIALIZABLE) based on contention and transaction length.",
-      "minutes": 45,
-      "resource": {
-        "label": "PostgreSQL docs - Transaction Isolation",
-        "url": "https://www.postgresql.org/docs/current/transaction-iso.html"
-      }
-    },
-    {
-      "name": "Lock modes, the lock queue, deadlocks and reading pg_locks",
-      "learn": "Memorise the table-level lock ladder and which statement takes which: SELECT takes ACCESS SHARE, INSERT/UPDATE/DELETE take ROW EXCLUSIVE, VACUUM and CREATE INDEX CONCURRENTLY take SHARE UPDATE EXCLUSIVE, plain CREATE INDEX takes SHARE (blocks writes), and most ALTER TABLE, DROP, TRUNCATE and VACUUM FULL take ACCESS EXCLUSIVE which conflicts with everything including SELECT. Understand the killer property: lock requests queue FIFO, so an ALTER TABLE waiting behind one long SELECT blocks every subsequent SELECT on that table too, which is why every migration session must SET lock_timeout = '3s' and retry rather than wait. Diagnose live with pg_stat_activity (wait_event_type = 'Lock', wait_event relation/transactionid/tuple), pg_blocking_pids(pid) to find the head of the chain, pg_locks joined on pid and granted = false, and pg_cancel_backend/pg_terminate_backend to break it; reproduce a deadlock (two sessions updating rows in opposite order) and read the deadlock_timeout (1s) detector's error, which names both queries. Implement a job queue correctly with SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1 and know when NOWAIT or advisory locks (pg_try_advisory_xact_lock) are the better tool.",
-      "minutes": 45,
-      "resource": {
-        "label": "PostgreSQL docs - Explicit Locking",
-        "url": "https://www.postgresql.org/docs/current/explicit-locking.html"
-      }
-    },
-    {
-      "name": "Zero-downtime schema changes on live tables",
-      "learn": "Build a checklist of what rewrites, what scans and what is metadata-only: ADD COLUMN with a constant DEFAULT (even NOT NULL) is instant since PG11 (attmissingval), a volatile default such as clock_timestamp() rewrites the table; adding NOT NULL to an existing column scans under ACCESS EXCLUSIVE, so instead ADD CONSTRAINT c CHECK (col IS NOT NULL) NOT VALID, then VALIDATE CONSTRAINT c (SHARE UPDATE EXCLUSIVE, concurrent writes allowed), then SET NOT NULL which PG12+ skips the scan for because a valid CHECK exists; ADD FOREIGN KEY ... NOT VALID then VALIDATE follows the same pattern; varchar(n) to text is metadata-only, int to bigint is a rewrite you do with a new column, a trigger or batched backfill, and a swap. Use CREATE INDEX CONCURRENTLY (two table scans, waits for every transaction that could see the table, cannot run inside a transaction block, so your migration tool must run it outside BEGIN), check pg_index.indisvalid afterwards because a failed or cancelled build leaves an INVALID index that writes still maintain and the planner ignores, and drop it with DROP INDEX CONCURRENTLY. Wrap every DDL in SET lock_timeout = '3s' with an exponential-backoff retry loop, and create primary keys on big tables as CREATE UNIQUE INDEX CONCURRENTLY followed by ALTER TABLE ... ADD PRIMARY KEY USING INDEX.",
-      "minutes": 40,
-      "resource": {
-        "label": "PostgreSQL docs - ALTER TABLE (Notes section on locking and rewrites)",
-        "url": "https://www.postgresql.org/docs/current/sql-altertable.html"
-      }
-    },
-    {
-      "name": "Window functions: frames, ranking, lag/lead and latest-per-key",
-      "learn": "Write OVER (PARTITION BY p ORDER BY o frame) fluently and know the default frame trap: with ORDER BY and no frame clause the frame is RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW, which includes peer rows with equal ORDER BY values, so a running sum over dates with ties jumps in steps; use ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW for true row-by-row totals, ROWS BETWEEN 6 PRECEDING AND CURRENT ROW for a 7-row moving average, GROUPS (PG11+) for peer groups, and EXCLUDE CURRENT ROW where needed. Use row_number(), rank(), dense_rank(), ntile(), lag(x, 1, default)/lead() for gap and change detection, first_value() and last_value() (last_value needs a frame ending at UNBOUNDED FOLLOWING or it returns the current row), FILTER (WHERE ...) on aggregates, and a named WINDOW w AS (...) clause to avoid repetition. Know that window results cannot be referenced in WHERE (wrap in a subquery or CTE), that a WindowAgg node requires a Sort unless an index on (p, o) provides the order, and compare row_number() = 1 against DISTINCT ON (device_id) ... ORDER BY device_id, ts DESC and LATERAL for the latest-per-key problem you will write on every telemetry engagement.",
-      "minutes": 45,
-      "resource": {
-        "label": "PostgreSQL docs - Window Functions tutorial",
-        "url": "https://www.postgresql.org/docs/current/tutorial-window.html"
-      }
-    },
-    {
-      "name": "CTEs, materialization fences, recursive queries and LATERAL rewrites",
-      "learn": "Know that since PG12 a non-recursive CTE referenced once is inlined into the parent query and optimised with it, that WITH x AS MATERIALIZED forces the old optimisation fence (useful to pin a good plan or to force a filter to happen first), that NOT MATERIALIZED inlines even a multiply-referenced CTE, and that CTEs containing INSERT/UPDATE/DELETE ... RETURNING are always materialised and run exactly once. Write WITH RECURSIVE for org charts and dependency trees, understand UNION vs UNION ALL cycle behaviour and the PG14+ CYCLE and SEARCH DEPTH FIRST clauses, and cap depth defensively. Master the rewrites that fix real slow queries: LATERAL (SELECT ... WHERE d.device_id = x.id ORDER BY ts DESC LIMIT 1) for top-N per group hitting an index once per outer row; NOT EXISTS instead of NOT IN (NOT IN returns no rows if the subquery yields a single NULL, and cannot become an anti-join); WHERE a = $1 OR b = $1 split into UNION ALL when the planner will not use BitmapOr; and col = ANY($1::int[]) instead of a 2000-item IN list.",
-      "minutes": 40,
-      "resource": {
-        "label": "PostgreSQL docs - WITH Queries (Common Table Expressions)",
-        "url": "https://www.postgresql.org/docs/current/queries-with.html"
-      }
-    },
-    {
-      "name": "Declarative partitioning and partition pruning",
-      "learn": "Partition when a table is large and queries carry the partition key: PARTITION BY RANGE (created_at) monthly for events and audit logs, LIST (tenant_id) for a few huge tenants, HASH when you only need to spread. Verify pruning in EXPLAIN (only the matching partitions appear; Subplans Removed: N shows execution-time pruning for parameters and nested loops; enable_partition_pruning must be on) and know the constraints: the partition key must be part of every PRIMARY KEY and UNIQUE constraint, indexes created on the parent cascade to partitions, ATTACH PARTITION scans the new table unless it already carries a matching CHECK constraint, and DETACH PARTITION CONCURRENTLY (PG14+) avoids the ACCESS EXCLUSIVE lock. Understand the operational win (DROP or DETACH an old partition instead of a DELETE that creates months of bloat and vacuum work, use pg_partman or a cron to pre-create partitions) and the cost: planning time grows with partition count, thousands of partitions hurt every query, and partition-wise joins and aggregates are off by default (enable_partitionwise_join).",
-      "minutes": 30,
-      "resource": {
-        "label": "PostgreSQL docs - Table Partitioning",
-        "url": "https://www.postgresql.org/docs/current/ddl-partitioning.html"
-      }
-    },
-    {
-      "name": "Connections, PgBouncer transaction mode and the prepared-statement plan cache",
-      "learn": "Understand that every connection is a forked backend process (several MB of memory plus lock-table and snapshot overhead), that max_connections = 500 on a 4-vCPU RDS instance is a cry for help, and that PgBouncer in pool_mode = transaction is the standard fix but breaks anything session-scoped: SET (use SET LOCAL), server-side prepared statements (until PgBouncer 1.21's max_prepared_statements, or disable the driver cache with asyncpg statement_cache_size=0 / psycopg prepare_threshold=None), LISTEN/NOTIFY, session advisory locks, temp tables and WITH HOLD cursors; size default_pool_size to roughly (2 x cores) + spindles on the server side and let clients queue. Know the plan_cache_mode behaviour for prepared statements: five custom plans, then a generic plan if it is not costlier on average, which is how a skewed tenant_id gets the small-tenant plan forever (force_custom_plan fixes it at the cost of re-planning). Round out the write path: synchronous_commit = off per transaction for non-critical writes (risk: lose the last ~600ms on crash, never corruption), INSERT ... ON CONFLICT (key) DO UPDATE/DO NOTHING for idempotent ingestion, and COPY FROM STDIN rather than batched INSERTs for bulk loads.",
-      "minutes": 35,
-      "resource": {
-        "label": "PgBouncer docs - Configuration (pool_mode, prepared statements)",
-        "url": "https://www.pgbouncer.org/config.html"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can take an unfamiliar EXPLAIN (ANALYZE, BUFFERS) output for a five-table join and, within three minutes and without tooling, point at the node where estimated rows diverges from actual rows by more than 10x, name the cause (stale statistics, correlated columns, function on a column, generic plan, missing extended statistics) and state the change that fixes it.",
-    "You can, for WHERE tenant_id = $1 AND status = 'pending' ORDER BY created_at DESC LIMIT 20 on a 10M-row table, write the single index (column order, partial predicate, INCLUDE columns, direction) that yields an Index Scan or Index Only Scan with no Sort node and Heap Fetches: 0, and prove it with the before and after plans.",
-    "You can generate 5-10M rows of Zipf-skewed multi-tenant seed data with generate_series, take three real Dokeo queries from seconds to under 5 ms, and explain every line of each before/after plan including Buffers and Sort Method.",
-    "You can add a NOT NULL column, a foreign key and a unique index to a 10M-row table while pgbench -c 16 writes to it, with zero failed client transactions and no lock wait above one second, using CONCURRENTLY, NOT VALID/VALIDATE, and a lock_timeout retry wrapper, and read the lock modes each step took from pg_locks while it runs.",
-    "You can reproduce a deadlock, a lock-queue pile-up behind an ALTER TABLE, and an INVALID index in two or three psql sessions, then diagnose each from pg_stat_activity, pg_blocking_pids() and pg_locks alone and state what every session holds and waits on.",
-    "You can write a lost-update demonstration in READ COMMITTED, show it becomes a 40001 under REPEATABLE READ and SERIALIZABLE, implement the retry loop, and justify which of atomic UPDATE, SELECT FOR UPDATE, a version column, or SERIALIZABLE is right for a given contention profile.",
-    "You can write latest-row-per-key, 7-day moving average, gap detection and top-N-per-group three ways each (window function, DISTINCT ON, LATERAL) and say which one the planner executes without a Sort given a specific index.",
-    "You can read pg_stat_statements on a customer database, rank by total_exec_time and by mean_exec_time x calls with shared_blks_read, defend the choice of the three statements worth fixing in a 10-minute conversation with their DBA, and configure auto_explain so the next slow plan is captured with its real parameters."
-  ],
-  "failureModes": [
-    "A 500M-row events table keeps the default autovacuum_vacuum_scale_factor of 0.2 while a nightly analytics job holds a transaction open for six hours; vacuum cannot clear anything behind that backend_xmin, the table reaches 3x bloat, every Index Only Scan reports thousands of Heap Fetches, p99 climbs weekly and the customer's response is to buy a larger instance.",
-    "The ORM emits WHERE lower(email) = lower($1) against a table with a plain B-tree on email; the plan is a 20M-row Seq Scan with Rows Removed by Filter, login p95 hits four seconds, and the fix nobody found for a month is a single expression index on lower(email).",
-    "A deploy runs ALTER TABLE orders ADD COLUMN ... without lock_timeout; it queues for ACCESS EXCLUSIVE behind a 20-minute report SELECT, every subsequent SELECT on orders queues behind the ALTER, the connection pool saturates and the entire application freezes until someone finds the head of the chain with pg_blocking_pids() and terminates it.",
-    "A migration script runs CREATE INDEX without CONCURRENTLY inside a transaction on a 200M-row table, holding a SHARE lock that blocks all writes for 40 minutes; the follow-up attempt with CONCURRENTLY is cancelled by a timeout and leaves an INVALID index that is maintained on every write and used by nothing, silently taxing the table for the next year.",
-    "PgBouncer in transaction mode sits in front of a FastAPI service whose driver caches prepared statements; the app throws intermittent 'prepared statement \"__asyncpg_stmt_12__\" does not exist' errors only under load, the team blames the database, and the fix is statement_cache_size=0 or PgBouncer 1.21 with max_prepared_statements.",
-    "A job queue uses SELECT ... FOR UPDATE LIMIT 1 without SKIP LOCKED, so twenty workers serialise on the first locked row and throughput equals one worker; when someone adds SKIP LOCKED but keeps a composite index ordered (created_at, tenant_id) the queue is fast for small tenants and scans the whole index range for the largest one because the equality column is not leading.",
-    "A prepared statement with a tenant_id parameter switches to the generic plan after five executions; the plan chosen for typical 2000-row tenants is a Nested Loop that runs 600000 times for the tenant holding 60% of the data, that one customer times out every hour, and no one connects it to plan_cache_mode because the query is fast every time they run it by hand with a literal."
-  ],
-  "interviewQuestions": [
-    "Here is an EXPLAIN ANALYZE: a Nested Loop whose outer Seq Scan was estimated at rows=1 and produced rows=48000, with an inner Index Scan showing loops=48000. Explain why the planner chose this, what you would check in pg_stats, and give three fixes ranked from least to most invasive with the risk of each.",
-    "A customer's multi-tenant SaaS has three tenants holding 70% of the rows and two thousand small ones; the same endpoint is 20 ms for small tenants and times out for the big three. Walk me through your diagnosis, covering plan caching and generic plans, statistics targets, partial indexes and partitioning, and tell me what you would actually ship this week and what you would defer.",
-    "Design the migration that adds a NOT NULL column with a default, a foreign key to accounts, and a unique index on (tenant_id, external_id) to a two-billion-row table on RDS with no maintenance window. For each step name the lock mode, whether it scans or rewrites, where it can fail, and how your migration runner recovers.",
-    "Explain MVCC as Postgres implements it: what an UPDATE physically does, what a HOT update is and what defeats it, how a forgotten idle-in-transaction connection or a replica with hot_standby_feedback causes bloat, and the four numbers you would put on a dashboard to catch it early.",
-    "Twenty workers pull jobs from a jobs table. Write the dequeue SQL that is correct under concurrency, explain the lock semantics that make it correct, and then describe what changes if each job triggers a non-idempotent external API call and the process can die between the call and the commit.",
-    "When would you choose SERIALIZABLE over explicit row locks, and when the reverse? Describe SSI briefly, the 40001 retry contract that the application must honour, the throughput cost, and give one concrete case for each choice from a system you have built.",
-    "A query on a customer database got 100x slower overnight with no deploy and no schema change. Give the first five catalog queries you would run, what each one would tell you, and the three most likely root causes in order of probability."
-  ],
-  "proofOfWork": "A public repository, pg-autopsy, that anyone can clone and run with docker compose up: a postgres:16 container preloaded with pg_stat_statements and auto_explain, a seed.sql that builds a realistic multi-tenant schema (tenants, users, documents, events, jobs) with 10M rows and Zipf-skewed tenant sizes, and a queries/ directory holding ten slow queries drawn from Dokeo patterns, each with its before.explain and after.explain (ANALYZE, BUFFERS) captured verbatim, the DDL that changed the plan, and a paragraph naming the exact node and mechanism that was wrong. A locks/ lab contains two-session scripts that reproduce a deadlock, an ALTER TABLE lock-queue freeze and an INVALID index, with the pg_locks and pg_blocking_pids() queries that diagnose each. A migrations/ lab runs a NOT NULL column, a foreign key and a unique index onto the 10M-row table while pgbench -c 16 -T 120 writes to it, using a lock_timeout retry wrapper, and commits the pgbench summary showing zero failed transactions. A 12-minute recorded screencast shows you reading three of the plans cold and narrating the fix, and a one-page INDEX-DECISION-CARD.md distils the column-order rule, when to go partial, expression, INCLUDE, GIN or BRIN, and the lock mode of every DDL statement you are likely to run on a customer's database."
+ "i": 29,
+ "topic": "Auth: OAuth2, OIDC, JWT, RBAC, multi-tenant claims",
+ "track": "E. Backend and Data",
+ "month": 4,
+ "hours": 8.0,
+ "why": "The first two questions a customer's security team asks before a pilot may touch real data are 'how do our people log in with our IdP' and 'prove tenant A can never see tenant B', and the FDE is the person who answers both on the call and then makes them true in code that week. You do not get to choose the IdP (it will be Entra ID, Okta, Ping or a SAML-only ADFS), so you need a model of OAuth2 and OIDC precise enough to wire any of them in a day, explain PKCE and cookie attributes to a reviewer without hand-waving, and diagnose an `iss` mismatch from a token pasted into a ticket. Authorization bugs are the ones that end contracts: a cross-tenant read is a breach notification and a renewal conversation, not a bug ticket.",
+ "prerequisites": [
+  "HTTP redirects, the `Authorization` header, cookies and TLS termination with `X-Forwarded-Proto`/`X-Forwarded-Host` from 'Networking' (topic 2): OIDC is a choreography of 302s, and the issuer URL changes the moment a proxy sits in front of the IdP.",
+  "FastAPI `Depends`, settings and lifespan from 'FastAPI in production' (topic 26): the verifier is a dependency and the JWKS client is lifespan state built exactly once.",
+  "Repository and domain layering from 'Production Python architecture' (topic 25): `tenant_id` becomes a mandatory argument on every repository method, sourced from the verified principal.",
+  "Docker Compose from 'Docker internals' (topic 5) to run Keycloak plus Postgres locally, and a working DefenderMate dashboard with at least one page and one API route to put behind login.",
+  "Cryptography at the level of 'private key signs, public key verifies', SHA-256, and base64url versus base64; you do not implement RSA here, you need to know why HS256 is wrong when the IdP is a third party.",
+  "Postgres transactions and `SET LOCAL` (row-level security is previewed here and deepened in 'PostgreSQL at depth', topic 29, and 'Data modelling for multi-tenant AI systems', topic 30)."
+ ],
+ "subtopics": [
+  {
+   "name": "Authorization code grant, parameter by parameter",
+   "learn": "Trace the front channel and the back channel separately: the browser is sent to `GET {authorization_endpoint}?response_type=code&client_id=&redirect_uri=&scope=openid%20profile&state=&nonce=&code_challenge=&code_challenge_method=S256`, comes back to `redirect_uri?code=&state=`, and only then does your server (never the browser) `POST {token_endpoint}` with `grant_type=authorization_code&code=&redirect_uri=&code_verifier=` plus client authentication (`client_secret_basic` header or `private_key_jwt`). Know the invariants the AS enforces and you rely on: the code is single-use and short-lived (the spec recommends at most 10 minutes; Keycloak's client login timeout defaults to one minute), `redirect_uri` must exactly string-match a registered value, and `state` must round-trip unchanged or the callback is treated as a CSRF attempt. Be able to say what each of the four roles (resource owner, client, authorization server, resource server) maps to in DefenderMate: the analyst, the BFF, Keycloak, the API.",
+   "minutes": 30,
+   "resource": {
+    "label": "RFC 6749 section 4.1 - Authorization Code Grant",
+    "url": "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1"
+   }
+  },
+  {
+   "name": "PKCE: what it computes and which attacks it stops",
+   "learn": "Generate a `code_verifier` of 43-128 characters from the unreserved set `[A-Za-z0-9-._~]`, derive `code_challenge = BASE64URL(SHA256(ASCII(code_verifier)))` with `code_challenge_method=S256` (never `plain`), send the challenge on the authorize request and the verifier on the token request; the AS stores the challenge with the code and refuses the exchange if the hash of the verifier does not match. Understand the two attacks it kills: authorization-code interception on public clients (a malicious mobile app registering the same custom URI scheme receives the code but not the verifier) and authorization-code injection on any client (attacker swaps their code into your session), which is why RFC 9700 and OAuth 2.1 require PKCE even for confidential clients that already hold a secret. Practise the 90-second version for a customer's security reviewer: 'we prove at exchange time that the same party that started the login is finishing it, using a one-time secret that never left our server'.",
+   "minutes": 25,
+   "resource": {
+    "label": "RFC 7636 - Proof Key for Code Exchange",
+    "url": "https://datatracker.ietf.org/doc/html/rfc7636"
+   }
+  },
+  {
+   "name": "The grant zoo and what OAuth 2.1 removed",
+   "learn": "Map every grant to a legitimate use and know which are dead: authorization code plus PKCE for anything with a human; `grant_type=client_credentials` for service-to-service with no user; device authorization (RFC 8628: `device_code`, `user_code`, poll with `grant_type=urn:ietf:params:oauth:grant-type:device_code`) for CLIs and kiosks; `grant_type=refresh_token` to extend sessions. Explain why implicit (`response_type=token`, token in the URL fragment, no client authentication, leaks through history and Referer) and resource-owner password (`grant_type=password`, teaches users to type IdP passwords into apps, breaks MFA and federation) were removed from OAuth 2.1, and that Keycloak's 'Direct access grants' checkbox is the password grant and must stay off on production clients. Be ready to push back when a customer's legacy integration insists on the password grant: offer client credentials or device flow instead.",
+   "minutes": 20,
+   "resource": {
+    "label": "oauth.net - OAuth 2.1",
+    "url": "https://oauth.net/2.1/"
+   }
+  },
+  {
+   "name": "OIDC on top of OAuth: ID token, nonce, discovery, sub",
+   "learn": "Adding `scope=openid` turns an OAuth delegation into an authentication event: the token response gains an `id_token` (a JWT whose `aud` is your client_id, asserting who authenticated and when via `auth_time`, `acr`, `amr`) while the `access_token` remains the credential for the API and may be opaque. Fetch `{issuer}/.well-known/openid-configuration` and read `authorization_endpoint`, `token_endpoint`, `jwks_uri`, `end_session_endpoint`, `userinfo_endpoint`, `code_challenge_methods_supported` and `id_token_signing_alg_values_supported`; for Keycloak the issuer is `https://<host>/realms/<realm>` and `iss` must match byte-for-byte, including scheme and no trailing slash. Generate a `nonce` per login, store it in the pre-login session, and reject an ID token whose `nonce` claim differs (replay defence). Key the local user row on (`iss`, `sub`) because `sub` is the only claim guaranteed stable and unique per issuer; `email` can change, be unverified (`email_verified=false`) or be reassigned, and `preferred_username` is display text.",
+   "minutes": 30,
+   "resource": {
+    "label": "OpenID Connect Core 1.0",
+    "url": "https://openid.net/specs/openid-connect-core-1_0.html"
+   }
+  },
+  {
+   "name": "JWT structure and the non-negotiable validation checklist",
+   "learn": "Read a JWS compact token as `BASE64URL(header).BASE64URL(payload).BASE64URL(signature)`; the header carries `alg`, `typ`, `kid`; the payload carries the registered claims `iss`, `sub`, `aud`, `exp`, `nbf`, `iat`, `jti`. Implement validation in this order and be able to justify each step: pin the allowed algorithms server-side (`algorithms=['RS256']` or ES256; never let the token's `alg` decide, which kills `alg=none` and the RS256-to-HS256 key-confusion attack where the public key is used as an HMAC secret), resolve the key by `kid` from a trusted JWKS (ignore `jku`, `x5u` and embedded `jwk` headers), verify the signature, then `iss` exact, `aud` contains your API's identifier, `exp` and `nbf` with a leeway of at most 30-60 seconds, and require `sub`, `exp`, `iat` to be present. Know that JWS is signed-not-encrypted (anyone can read the payload, so no secrets in claims), JWE is encrypted and rare for access tokens, and that base64url differs from base64 (`-_` not `+/`, no padding), which is why a naive `base64 -d` fails on tokens.",
+   "minutes": 30,
+   "resource": {
+    "label": "RFC 8725 - JSON Web Token Best Current Practices",
+    "url": "https://datatracker.ietf.org/doc/html/rfc8725"
+   }
+  },
+  {
+   "name": "JWKS fetching, kid-based caching and key rotation",
+   "learn": "The IdP publishes public keys at `jwks_uri` as `{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"...\",\"use\":\"sig\",\"alg\":\"RS256\",\"n\":\"...\",\"e\":\"AQAB\"}]}` (Keycloak: `/realms/<realm>/protocol/openid-connect/certs`); your verifier must cache keys by `kid`, refetch once on an unknown `kid` (rate-limited, no more than about once a minute) so scheduled rotation causes zero 401s, and keep serving cached keys if the IdP is unreachable rather than failing the read path closed. Use `jwt.PyJWKClient(jwks_uri, cache_keys=True, lifespan=300)` with `get_signing_key_from_jwt(token)` in Python, or `createRemoteJWKSet(new URL(jwks_uri), {cooldownDuration, cacheMaxAge})` with `jwtVerify` from `jose` in Node; construct the client once at startup (FastAPI lifespan, topic 26), never per request. Rehearse a rotation in Keycloak: Realm settings -> Keys -> add a new `rsa-generated` provider with a higher priority, watch the JWKS document list both keys, confirm new tokens carry the new `kid`, then remove the old provider only after the longest token lifetime has elapsed.",
+   "minutes": 20,
+   "resource": {
+    "label": "PyJWT usage docs - retrieving signing keys from a JWKS endpoint",
+    "url": "https://pyjwt.readthedocs.io/en/stable/usage.html"
+   }
+  },
+  {
+   "name": "Token lifetimes, refresh rotation, revocation and introspection",
+   "learn": "Set the access-token lifetime to 5-15 minutes and accept that a stateless JWT cannot be recalled before `exp`; everything longer-lived is a refresh token that is exchanged with `grant_type=refresh_token` and rotated on every use (Keycloak: Realm settings -> Tokens -> 'Revoke Refresh Token' ON with 'Refresh Token Max Reuse' 0), so a replayed refresh token is detected and the whole token family is revoked. Use RFC 7009 `POST {revocation_endpoint}` with `token` and `token_type_hint=refresh_token` on logout, and RFC 7662 `POST {introspection_endpoint}` (authenticated as the resource server) to get `{\"active\":true,\"scope\":...,\"exp\":...}` for the few operations where 'revoked 30 seconds ago' must be honoured (tenant deletion, API-key rotation) instead of stretching every token to a day. Know that `offline_access` produces offline tokens in Keycloak for background jobs with their own idle rules, and that SSO Session Idle/Max and Client Session Idle/Max cap what any refresh can extend.",
+   "minutes": 25,
+   "resource": {
+    "label": "RFC 7009 - OAuth 2.0 Token Revocation",
+    "url": "https://datatracker.ietf.org/doc/html/rfc7009"
+   }
+  },
+  {
+   "name": "Browser clients: the BFF pattern, cookie attributes and CSRF",
+   "learn": "Decide where tokens live before writing a line of frontend: a SPA holding tokens in `localStorage` hands them to any XSS payload, holding them in memory still exposes them to same-origin script, so the browser-based-apps BCP recommends the backend-for-frontend pattern: the server does the code exchange, stores access and refresh tokens server-side (Redis, topic 31) keyed by an opaque session id, and the browser holds only `Set-Cookie: __Host-sid=<random>; HttpOnly; Secure; SameSite=Lax; Path=/`. Know exactly what each attribute does: `HttpOnly` hides the cookie from `document.cookie`, `Secure` restricts it to TLS, the `__Host-` prefix forbids `Domain=` and forces `Path=/`, and `SameSite=Lax` blocks cross-site POST cookies but still sends on top-level GET navigations, so state-changing routes must also check `Origin` or `Sec-Fetch-Site`, or use a double-submit token. Remember the 4096-byte cookie cap: never put a Keycloak access token carrying roles and group paths into a cookie; store the token server-side and give the browser only the session id.",
+   "minutes": 30,
+   "resource": {
+    "label": "IETF draft - OAuth 2.0 for Browser-Based Applications",
+    "url": "https://datatracker.ietf.org/doc/html/draft-ietf-oauth-browser-based-apps"
+   }
+  },
+  {
+   "name": "Standing up Keycloak: realm, clients, scopes, roles, export and import",
+   "learn": "Run `docker run -p 8080:8080 -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=... quay.io/keycloak/keycloak:26.x start-dev`, create realm `defendermate`, a confidential OIDC client `defendermate-bff` (Client authentication ON, Standard flow ON, Direct access grants OFF, exact Valid redirect URIs, Web origins set, PKCE method S256 under Advanced) and a second client `defendermate-api` that exists so it can appear in `aud`. Distinguish realm roles from client roles (`realm_access.roles` vs `resource_access.<client>.roles` in the token), composite roles, groups with role mappings, and client scopes (default vs optional: `roles`, `profile`, `email`, `offline_access`). Make it reproducible: `kc.sh export --dir /opt/keycloak/data/export --realm defendermate --users realm_file`, commit the JSON, and start with `--import-realm` reading `/opt/keycloak/data/import/` in Compose so a fresh checkout logs in with no clicking. For production run `start` not `start-dev`: `KC_DB=postgres`, `KC_DB_URL`, `KC_HOSTNAME`, `KC_PROXY_HEADERS=xforwarded`, and `KC_HTTP_ENABLED=true` only behind a TLS-terminating proxy.",
+   "minutes": 35,
+   "resource": {
+    "label": "Keycloak - Getting started with Docker",
+    "url": "https://www.keycloak.org/getting-started/getting-started-docker"
+   }
+  },
+  {
+   "name": "Putting tenant and audience claims into the token",
+   "learn": "By default a Keycloak access token's `aud` is `account`, not your API, so add an 'Audience' protocol mapper (Included Client Audience = `defendermate-api`, Add to access token ON) or your `aud` check fails the day you enable it. Model the tenant one of four ways and be able to argue the trade-off: a `tenant_id` user attribute surfaced by a 'User Attribute' mapper (simplest; one tenant per user), groups as tenants via a 'Group Membership' mapper (`/tenants/acme`, full path ON), Keycloak Organizations (26+) exposing an `organization` claim through the `organization` client scope for many-to-many membership, or one realm per tenant (hardest isolation, N discovery URLs, N admin surfaces). For users in several tenants prefer a token bound to one tenant at a time (a tenant picker that re-authorizes) over a `tenants: [...]` array plus an `X-Tenant-Id` header; if you must use the header, the API intersects it with the claim and never trusts it alone. Keep tokens small: turn 'Full scope allowed' OFF on the client, map only the roles the API needs, and never map every group path, or a 50-group admin gets a 6 KB token.",
+   "minutes": 30,
+   "resource": {
+    "label": "Keycloak Server Administration Guide (protocol mappers, roles, groups, organizations)",
+    "url": "https://www.keycloak.org/docs/latest/server_admin/index.html"
+   }
+  },
+  {
+   "name": "Bearer token usage and the JWT access-token profile",
+   "learn": "Accept tokens only in `Authorization: Bearer <token>` (RFC 6750); never from a query string (leaks into access logs, Referer and browser history) and never from a cookie on a pure API. Return `401` with `WWW-Authenticate: Bearer realm=\"defendermate\", error=\"invalid_token\", error_description=\"...\"` for missing, malformed, expired or badly-signed tokens, and `403` with `error=\"insufficient_scope\", scope=\"alerts:write\"` when the token is valid but lacks scope; the distinction matters because well-behaved clients refresh and retry on 401 and must not retry on 403. Read RFC 9068 so you recognise a well-formed JWT access token: header `typ: at+jwt`, required `iss`, `exp`, `aud`, `sub`, `client_id`, `iat`, `jti`; checking `typ` is a cheap way to refuse an ID token presented to the API, the single most common frontend mistake.",
+   "minutes": 20,
+   "resource": {
+    "label": "RFC 6750 - OAuth 2.0 Bearer Token Usage",
+    "url": "https://datatracker.ietf.org/doc/html/rfc6750"
+   }
+  },
+  {
+   "name": "The FastAPI verifier dependency and the Principal object",
+   "learn": "Build one dependency and put nothing auth-related anywhere else: `HTTPBearer(auto_error=False)` extracts the header, `jwks.get_signing_key_from_jwt(token)` resolves the key, `jwt.decode(token, key.key, algorithms=['RS256'], audience='defendermate-api', issuer=settings.issuer, leeway=30, options={'require': ['exp', 'iat', 'sub']})` validates, and the claims are mapped into a frozen `Principal(sub, tenant_id, roles, scopes, sid)` dataclass. Catch `jwt.ExpiredSignatureError`, `jwt.InvalidAudienceError`, `jwt.InvalidIssuerError` and `jwt.PyJWKClientError` separately and turn each into a 401 with the matching `error_description`, so field debugging is one log line rather than a stack trace. Layer authorization as further dependencies (`require_role('tenant_admin')`, `require_scope('alerts:write')`) that take `Principal` via `Depends` and raise 403; pass `Principal` to handlers and repositories as a parameter, never through a global or a thread-local. Same shape in Node for the DefenderMate API: `jose.jwtVerify(token, remoteJwks, {issuer, audience, algorithms: ['RS256']})` in a middleware that attaches `req.principal`.",
+   "minutes": 40,
+   "resource": {
+    "label": "FastAPI tutorial - Security",
+    "url": "https://fastapi.tiangolo.com/tutorial/security/"
+   }
+  },
+  {
+   "name": "RBAC design: roles in the token, permissions in the API",
+   "learn": "Keep the IdP's vocabulary coarse (`tenant_admin`, `analyst`, `viewer`, `integration`) and map roles to fine permissions (`alerts:read`, `alerts:reclassify`, `hubspot:write`, `tenant:manage`) inside the API in one table or module, so adding a permission is a deploy, not an IdP change plus a token reissue. Separate the three questions a request must answer: authentication (who: `sub`), delegation (what the client was allowed to ask for: `scope`) and authorization (what this user may do here: roles -> permissions), and check scope and permission both when the caller is a third-party client. Make every role tenant-relative: `tenant_admin` means admin of the tenant in the token, never of all tenants; a platform-operator role for your own staff must be a distinct realm role the API handles explicitly and audits loudly. Deny by default, centralise decisions in `require(perm)` so there is no `if 'admin' in roles` scattered through handlers, and know where RBAC stops working: per-object sharing and delegation ('let this contractor see only alerts from source X'), which is ABAC or relationship-based (Zanzibar-style OpenFGA/SpiceDB) territory.",
+   "minutes": 30,
+   "resource": {
+    "label": "OWASP Authorization Cheat Sheet",
+    "url": "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html"
+   }
+  },
+  {
+   "name": "Tenant enforcement in the API and the data layer (BOLA)",
+   "learn": "Broken object-level authorization is the number one API risk because it is the default outcome of writing `SELECT * FROM alerts WHERE id = :id`: every repository method takes `tenant_id` as a mandatory first argument sourced from `Principal`, every query carries `AND tenant_id = :tenant_id`, and any tenant identifier in the URL or body is compared against the token and rejected on mismatch. Decide and document 404 vs 403 on mismatch: 404 hides existence and defeats ID enumeration, 403 is more debuggable; pick one per API and test it. Add Postgres row-level security as the second lock: `ALTER TABLE alerts ENABLE ROW LEVEL SECURITY; ALTER TABLE alerts FORCE ROW LEVEL SECURITY; CREATE POLICY tenant_isolation ON alerts USING (tenant_id = current_setting('app.tenant_id', true)::uuid);` with the API running `SET LOCAL app.tenant_id = :tenant_id` inside each transaction as a database role that is not the table owner (owners bypass RLS unless FORCE is set; superusers and `BYPASSRLS` roles always bypass). Carry `tenant_id` explicitly into background work (Temporal activity inputs, Kafka message keys) because there is no request principal there. Write the authorization-matrix test first: two tenants x every role x every route asserting the exact status code, plus URL-swap and header-spoof cases.",
+   "minutes": 35,
+   "resource": {
+    "label": "OWASP API Security Top 10 2023 - API1 Broken Object Level Authorization",
+    "url": "https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/"
+   }
+  },
+  {
+   "name": "Machine identities: client credentials, private_key_jwt, token exchange",
+   "learn": "Service-to-service calls use `grant_type=client_credentials` and the token's `sub` is the service account (Keycloak: `service-account-<client-id>`, after enabling 'Service accounts roles' on the client); prefer `private_key_jwt` client authentication (RFC 7523, `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer`, the client signs a short-lived JWT with its own key) or mTLS (RFC 8705) over a shared `client_secret` that ends up in a `.env` file. When a worker must act for a user after the user's token has expired, do not stash the user's access token in a queue: use RFC 8693 token exchange (`grant_type=urn:ietf:params:oauth:grant-type:token-exchange`, `subject_token`, `audience`, `requested_token_type`) at the boundary, or store only (`sub`, `tenant_id`) and run the job under the service identity with the tenant passed explicitly and the authorization decision re-evaluated at execution time. Give each integration its own client so revocation is per-integration, keep secrets in the secret manager (topics 15 and 62), and rotate by creating the new credential before deleting the old one.",
+   "minutes": 25,
+   "resource": {
+    "label": "RFC 8693 - OAuth 2.0 Token Exchange",
+    "url": "https://datatracker.ietf.org/doc/html/rfc8693"
+   }
+  },
+  {
+   "name": "Logout, sessions and back-channel invalidation",
+   "learn": "There are three sessions to end: the IdP's SSO session (Keycloak cookies `KEYCLOAK_IDENTITY` and `KEYCLOAK_SESSION`), your BFF session, and any outstanding tokens. RP-initiated logout redirects to `{end_session_endpoint}?id_token_hint=<id_token>&post_logout_redirect_uri=<uri>&client_id=<id>`, and Keycloak requires that URI to be listed under 'Valid post logout redirect URIs'. Register a 'Backchannel logout URL' on the client: when the IdP ends a session (admin kills it, or the user logs out of another app) Keycloak POSTs a logout token (a JWT whose `events` claim contains `http://schemas.openid.net/event/backchannel-logout`, plus `sid` and `sub`), which you verify like any JWT and use to delete every BFF session with that `sid`, so store the ID token's `sid` next to the session when you create it. Know that front-channel logout (iframes) breaks under third-party cookie blocking, that deleting your own cookie leaves the SSO session alive so the next visit silently re-logs the user in, and that already-issued access tokens keep working until `exp` unless the API consults a `sid` denylist or introspects.",
+   "minutes": 20,
+   "resource": {
+    "label": "OpenID Connect RP-Initiated Logout 1.0",
+    "url": "https://openid.net/specs/openid-connect-rpinitiated-1_0.html"
+   }
+  },
+  {
+   "name": "Threat model: what RFC 9700 requires and the attack behind each rule",
+   "learn": "Read the OAuth Security BCP as a checklist and map each item to a config line you can point at: exact-string `redirect_uri` matching (no wildcards, no prefix match, no `*` in Keycloak's Valid redirect URIs); PKCE on every code flow; `state` bound to the browser session; `iss` in the authorization response (RFC 9207) to stop mix-up attacks when a client trusts more than one AS; audience-restricted access tokens (`aud`, or the RFC 8707 `resource` parameter) so a token issued for the wiki cannot be replayed at DefenderMate; refresh tokens rotated or sender-constrained (DPoP, RFC 9449, or mTLS); no tokens in URLs; no open redirectors on your own domain that an attacker can chain into a registered `redirect_uri`. Add the JWT-layer items from your verifier: pinned `alg`, `kid` treated as an opaque lookup key (never interpolated into a path or SQL), `jku`/`x5u` ignored, `typ` checked. For each control be able to state the concrete attack it stops in one sentence, because that is exactly the question the customer's AppSec team asks.",
+   "minutes": 25,
+   "resource": {
+    "label": "RFC 9700 - Best Current Practice for OAuth 2.0 Security",
+    "url": "https://datatracker.ietf.org/doc/html/rfc9700"
+   }
+  },
+  {
+   "name": "Enterprise IdPs in the field: Entra ID, Okta, Google, and brokering",
+   "learn": "You will not choose the IdP; the customer has Entra ID, Okta, Ping or Google Workspace, and sometimes a SAML-only ADFS. Decide between trusting their issuer directly (their `iss`, their JWKS, their claim names in your verifier) and brokering through Keycloak as an identity provider (Keycloak federates to their OIDC or SAML IdP, maps attributes with Identity Provider Mappers, and your API trusts exactly one issuer regardless of customer). Learn the Entra specifics that break integrations: `tid` is their directory id (not your app tenant), `oid` is the stable user id while `sub` is pairwise per app, v1.0 and v2.0 tokens have different `iss` (`https://sts.windows.net/{tid}/` vs `https://login.microsoftonline.com/{tid}/v2.0`) and `aud` formats (`api://<app-id>` vs the client id), app roles arrive in `roles` only after assignment in the enterprise application, and a user in more than 200 groups gets an overage indicator (`_claim_names`/`_claim_sources`) instead of `groups`. Okta gotchas: the org authorization server issues access tokens you cannot validate locally (use a custom authorization server), and `groups` needs a claim filter. Provision users just-in-time on first login keyed on (`iss`, `sub`), never on email, and ask for SCIM or a nightly directory sync for deprovisioning.",
+   "minutes": 30,
+   "resource": {
+    "label": "Microsoft Entra - Access token claims reference",
+    "url": "https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference"
+   }
+  },
+  {
+   "name": "Debugging auth in a customer environment",
+   "learn": "Start with `curl -s $ISSUER/.well-known/openid-configuration | jq .` to confirm the issuer the IdP believes it is, then decode without verifying (`python3 -c 'import jwt, sys; print(jwt.decode(sys.argv[1], options={\"verify_signature\": False}))' \"$TOKEN\"`) and compare `iss`, `aud`, `exp`, `typ` and `kid` against what the API expects; never paste a production token into a web decoder. Know the canonical messages and their fixes: `invalid_redirect_uri` (scheme, host, port, trailing slash, `localhost` vs `127.0.0.1` differing from the registered value); `invalid_grant` at the token endpoint (code reused, older than the client login timeout, `redirect_uri` differs from the authorize request, PKCE verifier mismatch, refresh token already rotated); 'Invalid audience' (missing Audience mapper); `iss` mismatch (Keycloak behind a proxy issuing `http://keycloak:8080/...` because `KC_HOSTNAME` and `KC_PROXY_HEADERS` are unset); 'token used before issued' or instant expiry (clock skew on the customer VM: check `chronyc tracking`, then add `leeway`); CORS failure on `/token` from a SPA (Web origins); `unauthorized_client` (grant type disabled on the client). Turn on Keycloak's login and admin event logging (Realm settings -> Events -> Save events) to read the server-side reason instead of guessing from the client's generic error.",
+   "minutes": 25,
+   "resource": {
+    "label": "Keycloak - All configuration options (KC_HOSTNAME, KC_PROXY_HEADERS, KC_DB)",
+    "url": "https://www.keycloak.org/server/all-config"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can stand up Keycloak with Docker Compose, create the realm, the confidential BFF client and the audience-restricted API client, export the realm JSON, and have a fresh checkout log in end to end via `--import-realm` in under 15 minutes without opening the admin console.",
+  "You can draw the authorization code + PKCE + BFF sequence from memory with every parameter (`response_type`, `client_id`, `redirect_uri`, `scope`, `state`, `nonce`, `code_challenge`, `code_challenge_method`, `code`, `code_verifier`) and, for each, name the attack it defeats in one sentence.",
+  "You can write the FastAPI verifier dependency (pinned `RS256`, `iss`, `aud`, `exp` with leeway of at most 30 seconds, required claims, RFC 6750 `WWW-Authenticate` errors) and show a test suite in which `alg=none`, HS256 key confusion, wrong `aud`, wrong `iss`, expired, future `nbf`, tampered payload and an ID token presented as an access token are each rejected with the expected `error` value.",
+  "You can pass an authorization-matrix test (2 tenants x 3 roles x every route) with zero cross-tenant reads, including URL tenant swaps and `X-Tenant-Id` header spoofing, then delete the application-level `WHERE tenant_id` filter and show Postgres RLS still returns zero foreign rows.",
+  "You can explain to a non-engineer security reviewer in under three minutes why the browser holds only an `HttpOnly; Secure; SameSite` session cookie, why PKCE is on for a confidential client, and what is and is not revocable before `exp`, and have them repeat it back correctly.",
+  "You can rotate Keycloak's realm signing key under load and show a flat 401 line in Grafana because the verifier refetches JWKS on an unknown `kid`, then state the safe ordering (publish new key, wait the longest token lifetime, remove old key).",
+  "You can take an Entra ID or Okta token a customer pastes into a ticket and, within a minute, name why the API rejects it (v1 vs v2 `iss`, `api://` vs client-id `aud`, unassigned app roles, groups overage, opaque org-server token) and the exact setting that fixes it.",
+  "You can implement refresh-token rotation and back-channel logout so that replaying a used refresh token revokes the family and an admin-initiated Keycloak logout kills the BFF session on the next request, and demonstrate both with curl."
+ ],
+ "failureModes": [
+  "Keycloak behind the customer's ALB mints tokens with `iss` = `http://keycloak:8080/realms/prod` because `KC_HOSTNAME` and `KC_PROXY_HEADERS` were never set; every token fails the API's issuer check after the go-live DNS cutover, and the on-call 'fix' is to remove `issuer=` from `jwt.decode`, which stays in production for a year.",
+  "The API validates signature and `exp` but not `aud` because Keycloak's default token says `aud: account` and nobody added the Audience mapper; a token minted for the customer's internal wiki client in the same realm is accepted by DefenderMate's API and a contractor with wiki access lists alert data.",
+  "`tenant_id` is read from an `X-Tenant-Id` header 'because the frontend already sends it' and the token claim is never compared; the customer's pentest changes the header and reads another tenant's HubSpot write history, which is a breach notification and a renewal conversation, not a bug.",
+  "The IdP rotates its signing key on the first Sunday of the quarter; the API fetched JWKS once at startup with no refetch on unknown `kid`, so every pod returns 401 at 03:00 until someone restarts the deployment, and the incident is misdiagnosed as an IdP outage for 40 minutes.",
+  "A Temporal workflow stores the analyst's access token in its input so an activity can call the API 40 minutes later; it is expired, so the realm's Access Token Lifespan is bumped to 24 hours to make the demo work, and every leaked token is now a day-long credential.",
+  "The local user table is keyed on email; the customer's Okta admin changes an employee's address during a domain migration, JIT provisioning creates a second account, the old one keeps `tenant_admin`, and the audit trail for a disputed reclassification is split across two identities nobody can reconcile.",
+  "Full group paths and every client role are mapped into the access token and the BFF stores the whole token in the session cookie; for the customer's IT director, who is in 60 groups, the cookie exceeds 4096 bytes, the browser drops it, and only that one person is stuck in a login loop, on demo day."
+ ],
+ "interviewQuestions": [
+  "A customer's security reviewer asks why your confidential backend uses PKCE when it already authenticates with a client secret. Explain the authorization-code injection attack, what `state` and `nonce` already cover, and what PKCE adds on top.",
+  "DefenderMate will be sold to 30 customers, each with their own IdP: Okta, Entra ID, Google Workspace and one on-prem ADFS that only speaks SAML. Design login and tenant-claim handling. Compare trusting 30 issuers directly with brokering through your own IdP on `sub` stability, key rotation, JIT provisioning, offboarding, and blast radius when one customer's IdP is compromised.",
+  "After a Keycloak upgrade, about 3 percent of API calls return 401 for ten minutes every six hours and then recover on their own. Walk me through the diagnosis: what you look at in the token, in the API logs and in the IdP, and what the fix is.",
+  "Your API is stateless and validates JWTs locally. The customer's compliance team requires that a terminated employee loses access within 60 seconds. What do you change, what does each change cost in latency and operational complexity, and where do you refuse to go?",
+  "A user belongs to three tenants. Design the claim shape and the API contract for choosing the active tenant so that no client can escalate into a tenant it is not a member of. Where does the check live, what do you return on mismatch (403 or 404) and why, and how does this survive into background jobs?",
+  "A frontend developer is sending the ID token to your API 'because it has the user's email in it' and it works in dev. Explain what is wrong, what breaks first in production, and the fix on both the Keycloak side and the client side.",
+  "A pentest report says 'JWT accepted with alg=HS256 signed with the server's public key'. Explain the vulnerability class, how a verifier ends up vulnerable, and the exact code and configuration that make it impossible; then name the other two JWT header fields you also refuse to honour."
+ ],
+ "proofOfWork": "A public `auth-kit` directory in the DefenderMate repository that a customer's security reviewer could read in fifteen minutes and a new engineer could run in five. It contains: (1) a `docker-compose.yml` bringing up Keycloak, Postgres, the API and the BFF with a committed `realm-export.json` that reproduces two tenants (acme, globex), three roles, the Audience mapper and the `tenant_id` mapper, imported automatically with `--import-realm`; (2) a `SECURITY-REVIEW.md` written for a non-vendor reviewer with a sequence diagram of authorization code + PKCE + BFF, token lifetimes, cookie attributes, logout behaviour, key-rotation handling and an explicit list of what is and is not revocable before `exp`, where every claim in the document links to the test that proves it; (3) an authorization-matrix suite (`pytest -m authz`) that mints real tokens from Keycloak for 2 tenants x 3 roles and asserts the status code of every route, plus negative tests for `alg=none`, HS256 key confusion, wrong `aud`, wrong `iss`, expired, future `nbf`, tampered payload, an ID token used as an access token, `X-Tenant-Id` spoofing and URL tenant swaps, and an RLS test that drops the application filter and proves zero foreign rows; (4) a recorded key-rotation drill in which realm keys are rotated while `k6` traffic runs, with the Grafana panel showing a flat 401 line and the verifier's JWKS refetch visible in logs; and (5) a five-minute recording in which you explain PKCE and the BFF cookie model to a non-engineer using only the diagram, followed by them repeating it back."
 }

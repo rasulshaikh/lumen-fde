@@ -1,227 +1,218 @@
 {
-  "i": 35,
-  "topic": "Testing and contracts: pytest, property tests, OpenAPI contract tests",
-  "track": "E. Backend and Data",
-  "month": 5,
-  "hours": 6.0,
-  "why": "An FDE ships an API into a customer's environment and then leaves; the customer's integration team keeps building against it for years, and the only thing that protects them from your successor's refactor is a machine-checked contract that fails the build. Customer data is the adversary: unicode task names, empty lists, 10 MB payloads, and out-of-order state transitions arrive on day one of production, and property-based tests are the cheapest way to meet them in CI first. A published coverage number and a green contract job are also what a customer's procurement and security review actually ask for in the vendor questionnaire, so the test suite is part of the sales artefact, not just engineering hygiene.",
-  "prerequisites": [
-    "Production Python architecture (topic 25): the Kaupex Task Compiler's domain/repository split, Protocol-typed ports and the KaupexError hierarchy (InvalidTransition, NotFound, Conflict) that tests will assert on",
-    "FastAPI in production (topic 26): Depends, dependency_overrides, lifespan, settings via pydantic-settings, and the problem+json error handlers",
-    "PostgreSQL at depth (topic 29): SQLAlchemy 2.0 async engine and sessions, Alembic migrations, transactions and SAVEPOINT semantics",
-    "Docker running locally (topics 5-6) so testcontainers can start a Postgres container; understands ports, volumes and image tags",
-    "CI/CD (topic 18): can read and edit a GitHub Actions workflow with jobs, services, artifacts and required status checks",
-    "JSON Schema vocabulary as emitted by pydantic v2: type, required, properties, additionalProperties, enum, format, minLength/maxLength, anyOf"
-  ],
-  "subtopics": [
-    {
-      "name": "Test layers for a FastAPI + Postgres + Temporal service",
-      "learn": "Lay out tests/unit (pure domain, no IO, milliseconds), tests/integration (repositories against a real Postgres), tests/api (handlers through the ASGI app) and tests/contract (Schemathesis against the OpenAPI document), each behind a registered marker so `pytest -m unit` runs in under five seconds and the full suite runs in CI. Use the src layout with `--import-mode=importlib` so test files need no `__init__.py` and can share basenames, set `testpaths = [\"tests\"]`, and put shared fixtures in a root conftest.py with layer-specific conftest.py files below it. Decide what each layer is allowed to touch: unit tests may not import sqlalchemy or httpx; integration tests may not mock the database; API tests may override dependencies but not monkeypatch internals. Be able to argue why a bug should be caught at a given layer and why moving a test down a layer makes it faster and more precise.",
-      "minutes": 15,
-      "resource": {
-        "label": "pytest docs - Good Integration Practices (test layout, src layout, import modes)",
-        "url": "https://docs.pytest.org/en/stable/explanation/goodpractices.html"
-      }
-    },
-    {
-      "name": "pytest configuration as a hard gate",
-      "learn": "Configure `[tool.pytest.ini_options]` so the suite fails on anything ambiguous: `addopts = \"-ra --strict-markers --strict-config --import-mode=importlib\"`, `filterwarnings = [\"error\", ...]` with narrow `ignore::DeprecationWarning:third_party.*` exceptions, `xfail_strict = true` so an xfail that starts passing fails the build, `faulthandler_timeout = 60`, `minversion`, `required_plugins` and `markers = [...]` for every custom marker. Know the debugging flags cold: `-x`/`--maxfail=3`, `--lf`, `--ff`, `--sw` (stepwise), `--pdb`, `-k \"transition and not cancel\"`, `--durations=10 --durations-min=0.5`, `--co -q` to check collection, `-p no:randomly` to pin ordering. Know the exit codes: 0 all passed, 1 failures, 2 interrupted, 3 internal error, 4 usage error, 5 no tests collected; a `-k` expression matching nothing returns 5 and must not be treated as success by a wrapper script.",
-      "minutes": 20,
-      "resource": {
-        "label": "pytest docs - API Reference (ini options and command-line flags)",
-        "url": "https://docs.pytest.org/en/stable/reference/reference.html"
-      }
-    },
-    {
-      "name": "Fixtures: scope, teardown order, conftest layering, factories",
-      "learn": "Understand fixture scopes (function, class, module, package, session), that a higher-scoped fixture cannot request a lower-scoped one (ScopeMismatch), and that yield fixtures tear down in reverse dependency order, so a session-scoped Postgres container outlives the function-scoped session that borrows a connection from it. Use `request.addfinalizer` when teardown must run even if setup partially failed, `autouse=True` only for cross-cutting invariants (reset `app.dependency_overrides`, clear a Redis test DB), and fixture overriding in a nested conftest.py to swap a real adapter for a fake in one directory. Prefer factory fixtures (`make_task(**overrides)` returning a domain object with sane defaults) over dozens of near-identical fixtures; inspect what is active with `pytest --fixtures`, `--fixtures-per-test` and `--setup-show`. Know that `tmp_path`, `monkeypatch` and `caplog` are function-scoped and that `tmp_path_factory` is the session-scoped alternative.",
-      "minutes": 25,
-      "resource": {
-        "label": "pytest docs - How to use fixtures",
-        "url": "https://docs.pytest.org/en/stable/how-to/fixtures.html"
-      }
-    },
-    {
-      "name": "Parametrize as a state-transition matrix",
-      "learn": "Encode the Kaupex Task state machine as a table: `@pytest.mark.parametrize(\"state,event,expected\", CASES, ids=...)` where CASES covers every (state, event) pair and `expected` is either the next state or `InvalidTransition`, so the test file is the executable specification of allowed transitions. Use `pytest.param(..., marks=pytest.mark.xfail(strict=True, reason=\"...\"))` for known gaps instead of deleting rows, stack two parametrize decorators for a cartesian product, `indirect=True` to route a parameter through a fixture (build the task in the requested state against the real DB), and `pytest_generate_tests` when the matrix must be computed from the enum at collection time so a new state cannot be added without a test row. Readable ids (`ids=lambda c: f\"{c.state}-{c.event}\"`) make `-k \"queued-cancel\"` selection and CI failure output usable.",
-      "minutes": 15,
-      "resource": {
-        "label": "pytest docs - How to parametrize fixtures and test functions",
-        "url": "https://docs.pytest.org/en/stable/how-to/parametrize.html"
-      }
-    },
-    {
-      "name": "Test doubles at the boundary: monkeypatch, autospec, respx, in-memory fakes",
-      "learn": "Use `monkeypatch.setattr/setenv/delenv/setitem/chdir` for process-level state and `unittest.mock.patch(\"kaupex.adapters.llm.AsyncAnthropic\", autospec=True)` with `spec_set=True` so a renamed or misspelled method raises AttributeError instead of silently returning a Mock; use `AsyncMock` for coroutines and `assert_awaited_once_with`. Patch where the name is looked up (the importing module), not where it is defined. For HTTP boundaries prefer `respx.mock` routers (`respx.post(url).mock(return_value=httpx.Response(429, headers={\"retry-after\": \"1\"}))`, `assert_all_called=True`) so retry and backoff paths are exercised against realistic responses. For the persistence boundary prefer an in-memory fake that implements the same `TaskRepository` Protocol, run the same test module against both fake and real repository (parametrised fixture), and never mock a SQLAlchemy Session: the mock will pass while the query is wrong.",
-      "minutes": 20,
-      "resource": {
-        "label": "Python docs - unittest.mock (patch, autospec, spec_set, AsyncMock)",
-        "url": "https://docs.python.org/3/library/unittest.mock.html"
-      }
-    },
-    {
-      "name": "Async API tests through ASGITransport with dependency overrides",
-      "learn": "Configure pytest-asyncio with `asyncio_mode = \"auto\"` and `asyncio_default_fixture_loop_scope = \"session\"` so a session-scoped async engine and the test share one event loop; otherwise asyncpg raises 'attached to a different loop' on the second test. Build the client as `httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=\"http://test\")`; know that ASGITransport does not run lifespan, so wrap with `asgi_lifespan.LifespanManager(app)` when startup wiring (pool creation, Temporal client) matters. Override `get_session` and `get_current_user` via `app.dependency_overrides[...]` inside a fixture and call `app.dependency_overrides.clear()` in teardown; keep one test that uses a real signed JWT so the auth path is not permanently bypassed. Assert status code, full JSON body, `content-type: application/problem+json` on errors and the `X-Request-ID` header, and rely on server exceptions propagating into the test rather than being turned into a 500 you then miss.",
-      "minutes": 25,
-      "resource": {
-        "label": "FastAPI docs - Async Tests (httpx ASGITransport)",
-        "url": "https://fastapi.tiangolo.com/advanced/async-tests/"
-      }
-    },
-    {
-      "name": "Real Postgres in tests: testcontainers, migrations, rollback isolation, xdist",
-      "learn": "Start `PostgresContainer(\"postgres:16-alpine\")` once per session, take `get_connection_url()`, and run `alembic.command.upgrade(cfg, \"head\")` against it so every CI run also proves the migration chain applies from empty. Isolate tests with the SQLAlchemy 'join an external transaction' recipe: open a connection, `begin()`, bind the session, `begin_nested()` for a SAVEPOINT, roll back at teardown; fall back to `TRUNCATE ... RESTART IDENTITY CASCADE` for tests that must observe a real commit (advisory locks, `FOR UPDATE SKIP LOCKED` workers). For RLS-protected tables (topic 30) the test session must `SET LOCAL app.tenant_id` exactly as the app does or every query returns zero rows. Under pytest-xdist derive the database from `PYTEST_XDIST_WORKER` (`kaupex_test_gw0`) with `CREATE DATABASE ... TEMPLATE kaupex_test` so workers never share rows, and know the CI fallbacks when Docker is unavailable: a GitHub Actions `services:` container or `TESTCONTAINERS_RYUK_DISABLED=true` in restricted runners.",
-      "minutes": 25,
-      "resource": {
-        "label": "testcontainers-python docs - Postgres module",
-        "url": "https://testcontainers-python.readthedocs.io/en/latest/modules/postgres/README.html"
-      }
-    },
-    {
-      "name": "Property-based testing with Hypothesis: strategies, shrinking, properties worth writing",
-      "learn": "Write `@given(st.text(), st.integers(min_value=0))` tests and understand that Hypothesis searches then shrinks to a minimal counterexample, which is why a failure reads like `text=''` rather than a 300-character string. Build strategies for domain types with `st.builds(TaskCreate, name=st.text(min_size=1, max_size=120))`, `st.from_type(...)` for simple pydantic models (constrained fields need explicit strategies), `st.sampled_from(TaskState)`, `st.lists(..., unique_by=...)`, `st.one_of`, `.map/.filter/.flatmap`, `@st.composite`, `assume()` for cheap preconditions and `@example(...)` to pin past regressions. Know the property families and pick the right one: round-trip (`Task.model_validate_json(t.model_dump_json()) == t`), invariant (compiled task DAG is acyclic), idempotence (normalise twice equals once), oracle (naive implementation equals optimised), and metamorphic (adding a step never shortens the plan). Read health checks (`too_slow`, `filter_too_much`, `data_too_large`) as strategy bugs to fix, not warnings to suppress.",
-      "minutes": 25,
-      "resource": {
-        "label": "Hypothesis docs - Quick start guide",
-        "url": "https://hypothesis.readthedocs.io/en/latest/quickstart.html"
-      }
-    },
-    {
-      "name": "Deterministic Hypothesis in CI: settings profiles, example database, reproduce_failure",
-      "learn": "Register profiles in conftest.py: `settings.register_profile(\"ci\", max_examples=500, deadline=None, derandomize=True, print_blob=True)` and `\"dev\"` with `max_examples=50`, then `settings.load_profile(os.getenv(\"HYPOTHESIS_PROFILE\", \"dev\"))`; select with `--hypothesis-profile` and pin with `--hypothesis-seed`. Understand the `.hypothesis/examples` DirectoryBasedExampleDatabase (gitignored, cached between CI runs with actions/cache or replaced by `GitHubArtifactDatabase` so a failure found on main is replayed on every branch), and paste the `@reproduce_failure(version, blob)` line from a `print_blob=True` report into the test to pin a specific counterexample. Know that the 200 ms default `deadline` is flaky on loaded CI runners and why `deadline=None` is the honest fix, and that a Hypothesis `Flaky` error means the test failed then passed on replay: the code under test is nondeterministic (time, dict order, uncontrolled randomness), not the framework.",
-      "minutes": 15,
-      "resource": {
-        "label": "Hypothesis docs - API reference (settings, database, reproduce_failure)",
-        "url": "https://hypothesis.readthedocs.io/en/latest/reference/api.html"
-      }
-    },
-    {
-      "name": "Stateful testing of the Task lifecycle with RuleBasedStateMachine",
-      "learn": "Model the Task service as a `RuleBasedStateMachine`: `tasks = Bundle(\"tasks\")`, `@initialize()` to create a tenant, `@rule(target=tasks, payload=st.builds(...))` that calls create and returns the id, `@rule(task=tasks, event=st.sampled_from(Event))` that applies a transition and mirrors it in a plain-dict model, `consumes(tasks)` on delete, `@precondition(lambda self: self.model)` to gate rules, and `@invariant()` that after every step asserts each real task equals the model and every terminal task has `completed_at` set. Export with `TestTaskMachine = TaskMachine.TestCase` and `TestTaskMachine.settings = settings(max_examples=200, stateful_step_count=30)`. When it fails, Hypothesis prints the minimal `state.create(...)`, `state.transition(...)` sequence; paste it into a regression test. This is how you find the cancel-after-complete and double-retry bugs that a parametrised matrix cannot express because they depend on history.",
-      "minutes": 20,
-      "resource": {
-        "label": "Hypothesis docs - Stateful testing",
-        "url": "https://hypothesis.readthedocs.io/en/latest/stateful.html"
-      }
-    },
-    {
-      "name": "OpenAPI as the contract: making FastAPI's generated schema complete and strict",
-      "learn": "Every route must declare what it can actually return: `response_model=`, `status_code=201`, and `responses={404: {\"model\": Problem}, 409: {\"model\": Problem}, 422: {\"model\": Problem}}` with `content` keyed by `application/problem+json`, otherwise Schemathesis `status_code_conformance` and `content_type_conformance` fail on the first real error. Set stable operation ids with `generate_unique_id_function=lambda r: f\"{r.tags[0]}_{r.name}\"` (or `operation_id=`) because generated clients and OpenAPI links key on them. Make request models `ConfigDict(extra=\"forbid\")` so the schema emits `additionalProperties: false` and `negative_data_rejection` has teeth; push `Field(min_length, max_length, pattern, ge, le)` constraints into the schema so generated data hits real boundaries; document response headers under `responses[200][\"headers\"]`; hide `/healthz` and `/readyz` with `include_in_schema=False`; use `openapi_extra` for anything FastAPI cannot express, such as `links`.",
-      "minutes": 20,
-      "resource": {
-        "label": "FastAPI docs - Additional Responses in OpenAPI",
-        "url": "https://fastapi.tiangolo.com/advanced/additional-responses/"
-      }
-    },
-    {
-      "name": "Committed schema snapshot and breaking-change detection with oasdiff",
-      "learn": "Commit `openapi.json` and add a test `assert app.openapi() == json.loads(Path(\"openapi.json\").read_text())` with a `make openapi` target to regenerate, so any schema change appears as a reviewable diff in the PR rather than a surprise to the customer's client generator. In CI fetch the base with `git show origin/main:openapi.json > base.json` and run `oasdiff breaking base.json openapi.json --fail-on ERR`; know the classes it flags: removed path or method, new required request property, removed or renamed response property, type narrowing, enum value removed from a request or added to a response, `required` added to a response schema, and know which of those are ERR versus WARN and why an added optional response field is not breaking. Use `oasdiff changelog` output as the PR comment and the customer-facing release note. Define the policy: a breaking diff requires a `/v2` path or a major version bump plus a deprecation window, and the CI job enforces it rather than a reviewer's memory.",
-      "minutes": 20,
-      "resource": {
-        "label": "oasdiff - OpenAPI diff and breaking-change detection (GitHub)",
-        "url": "https://github.com/oasdiff/oasdiff"
-      }
-    },
-    {
-      "name": "Schemathesis CLI: phases, checks, and reading a failure",
-      "learn": "Run `schemathesis run http://127.0.0.1:8000/openapi.json --header \"Authorization: Bearer $TOKEN\" --max-examples 100 --seed 42 --max-failures 10 --wait-for-schema 30 --report junit` (or a file schema plus `--url`) and understand the four phases: examples (schema `example`/`examples` values), coverage (boundary values, `maxLength+1`, missing required fields, wrong types), fuzzing (Hypothesis-generated data) and stateful (OpenAPI links). Know each default check and what a failure means for Kaupex: `not_a_server_error` (unhandled exception), `status_code_conformance` (undocumented 403), `content_type_conformance`, `response_headers_conformance`, `response_schema_conformance` (nullable field not marked), `negative_data_rejection` (invalid body accepted), `positive_data_acceptance` (valid body rejected), `missing_required_header`, `unsupported_method`, `use_after_free`, `ensure_resource_availability`, `ignored_auth` (endpoint answers without a token). Tune with `--exclude-checks`, `--include-path-regex '^/v1/tasks'`, `--max-response-time 1.5`, `--phases`, and `schemathesis.toml` sections such as `[checks.negative_data_rejection] expected-statuses = [\"400\", \"422\"]`; reproduce a failure from the printed curl command and `--report-vcr-path`.",
-      "minutes": 20,
-      "resource": {
-        "label": "Schemathesis docs - Checks reference",
-        "url": "https://schemathesis.readthedocs.io/en/stable/reference/checks/"
-      }
-    },
-    {
-      "name": "Schemathesis inside pytest: from_asgi, parametrize, OpenAPI links, stateful",
-      "learn": "Load the schema straight from the app with `schema = schemathesis.openapi.from_asgi(\"/openapi.json\", app)`, or from a fixture via `schemathesis.pytest.from_fixture(\"api_schema\")` so the app under test carries the same `dependency_overrides` (test DB, fixed clock) as the rest of the suite; write `@schema.parametrize() def test_api(case): case.call_and_validate(headers=auth)` and scope with `schema.include(operation_id=...)` / `schema.exclude(path_regex=...)`. Add explicit `links` under `responses.201` via `openapi_extra` (`\"operationId\": \"tasks_get_task\", \"parameters\": {\"task_id\": \"$response.body#/id\"}`) so `APIWorkflow = schema.as_state_machine(); TestAPI = APIWorkflow.TestCase` chains create, get, transition and delete and `use_after_free` catches a GET 200 after DELETE. Retrofit conformance onto existing handwritten API tests with `schema[\"/v1/tasks/{task_id}\"][\"GET\"].validate_response(response)`. Mark all of this `@pytest.mark.contract` and run it as its own CI job because it is minutes, not seconds.",
-      "minutes": 20,
-      "resource": {
-        "label": "Schemathesis docs - Testing Python Apps (from_asgi, from_fixture)",
-        "url": "https://schemathesis.readthedocs.io/en/stable/guides/python-apps/"
-      }
-    },
-    {
-      "name": "Coverage that measures the truth: branch, greenlet concurrency, exclusions, fail_under",
-      "learn": "Configure `[tool.coverage.run]` with `source = [\"kaupex\"]`, `branch = true`, `parallel = true`, `relative_files = true` and `concurrency = [\"thread\", \"greenlet\"]`: SQLAlchemy's asyncio bridge runs DB calls inside greenlets and without the greenlet tracer the lines inside repositories report as never executed. In `[tool.coverage.report]` set `fail_under = 85`, `show_missing = true`, `skip_covered = true`, and `exclude_also` for `if TYPE_CHECKING:`, `raise NotImplementedError`, `@abstractmethod` and the `__main__` guard; `omit` generated migrations. Drive it through pytest-cov (`--cov=kaupex --cov-branch --cov-report=term-missing:skip-covered --cov-report=xml --cov-fail-under=85`) and use `--cov-context=test` to see which test covers which line when deciding what to delete. Know the difference between line and branch percentages, why an `except` clause with no test is a branch miss, and why the number is a floor for finding untested modules (`coverage report --sort=miss`) rather than a quality score.",
-      "minutes": 20,
-      "resource": {
-        "label": "coverage.py docs - Configuration reference",
-        "url": "https://coverage.readthedocs.io/en/latest/config.html"
-      }
-    },
-    {
-      "name": "Subprocess and worker coverage: parallel data files and combine",
-      "learn": "Code that runs in a child process is invisible to coverage by default: a Temporal worker started with `subprocess.Popen`, a CLI invoked in an integration test, or a `multiprocessing` pool. Enable measurement either with `patch = [\"subprocess\"]` in `[tool.coverage.run]` (coverage 7.10+) or the older `COVERAGE_PROCESS_START=pyproject.toml` environment variable plus the `.pth` hook, set `sigterm = true` so a worker killed by SIGTERM still flushes its `.coverage.<host>.<pid>.<random>` data file, and add `multiprocessing` to `concurrency` when pools are involved. After the run, `coverage combine` merges the data files, then `coverage report` and `coverage xml -o coverage.xml`; pytest-cov does the combine automatically for xdist workers but not for your own subprocesses. When unit and integration run in separate CI jobs, upload the `.coverage.*` files as artifacts and combine in a final job, which only works with `relative_files = true` because the checkout paths differ.",
-      "minutes": 15,
-      "resource": {
-        "label": "coverage.py docs - Measuring sub-processes",
-        "url": "https://coverage.readthedocs.io/en/latest/subprocess.html"
-      }
-    },
-    {
-      "name": "CI wiring: unit, integration and contract jobs that block merge",
-      "learn": "Split the workflow into a `unit` job (`pytest -m \"not integration and not contract\" -n auto`), an `integration` job with `services: postgres: image: postgres:16` plus `options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5` and `ports: [\"5432:5432\"]`, and a `contract` job that starts `uvicorn kaupex.main:app --port 8000 &` then runs `schemathesis run http://127.0.0.1:8000/openapi.json --wait-for-schema 30 --report junit --max-examples 50 --seed ${{ github.run_id }}` and uploads `schemathesis-report/` with actions/upload-artifact (or uses `schemathesis/action@v3`). Add the `oasdiff breaking` step, `--junitxml` for the test summary, `actions/cache` on `.hypothesis`, `timeout-minutes` on every job and `concurrency: group: ${{ github.workflow }}-${{ github.ref }}, cancel-in-progress: true`. Then make it a gate: branch protection with all three jobs as required status checks, so 'a failing contract breaks the build' is enforced by the repository, not by the reviewer noticing a red check.",
-      "minutes": 25,
-      "resource": {
-        "label": "GitHub Docs - Creating PostgreSQL service containers",
-        "url": "https://docs.github.com/en/actions/tutorials/use-containerized-services/create-postgresql-service-containers"
-      }
-    },
-    {
-      "name": "Publishing coverage: Codecov upload, patch gates, and the badge",
-      "learn": "Upload `coverage.xml` with `codecov/codecov-action@v5` (`files: coverage.xml`, `fail_ci_if_error: true`, `token: ${{ secrets.CODECOV_TOKEN }}`), then write a `codecov.yml` where `coverage.status.project.default.target: auto` with `threshold: 1%` stops regressions and `coverage.status.patch.default.target: 80%` is the gate that actually matters on a PR: new code must be tested even when the repo total is low. Embed the badge markdown from the Codecov settings page in the README so the number is public and updates itself. Know the SaaS-free alternative for a customer's air-gapped repo: `coverage json` and `jq .totals.percent_covered` produce a shields endpoint JSON (`{\"schemaVersion\": 1, \"label\": \"coverage\", \"message\": \"87%\", \"color\": \"green\"}`) committed to a gh-pages branch or gist and rendered via `img.shields.io/endpoint?url=...`, and publish `htmlcov/` as a build artifact so a reviewer can open the missed lines.",
-      "minutes": 15,
-      "resource": {
-        "label": "Codecov docs - Status badges",
-        "url": "https://docs.codecov.com/docs/status-badges"
-      }
-    },
-    {
-      "name": "Flaky tests: ordering, clocks, timeouts and quarantine policy",
-      "learn": "Install pytest-randomly so every run shuffles test order and reseeds `random`, Faker and NumPy; when a failure appears, reproduce with the printed `--randomly-seed=N` and disable with `-p no:randomly` only to bisect, never in CI. Add pytest-timeout (`timeout = 120` in ini, `--timeout-method=thread` when signals are unavailable) so a hung Temporal client fails the job in two minutes instead of six hours. Control time with time-machine (`time_machine.travel(...)`) rather than `sleep()`, and replace sleeps in async tests with a poll-until-deadline helper. Know the five root causes to check in order: shared mutable state across tests, clock, network, ordering, event loop or connection reused across loops. Define a quarantine policy: a `@pytest.mark.flaky` marker excluded from the required job, a ticket with owner and expiry, and `pytest-repeat --count=50` to prove a fix; never put pytest-rerunfailures on the required check because it converts a real race into green.",
-      "minutes": 15,
-      "resource": {
-        "label": "pytest-randomly - official repository (README)",
-        "url": "https://github.com/pytest-dev/pytest-randomly"
-      }
-    },
-    {
-      "name": "Mutation testing and assertion quality: why coverage lies",
-      "learn": "Configure `[tool.mutmut] paths_to_mutate = [\"src/kaupex/domain/\"]` and `tests_dir = [\"tests/unit/\"]`, run `mutmut run`, then `mutmut results` and `mutmut show <id>` (or `mutmut browse`) to read surviving mutants: a flipped `<` to `<=` or a removed `raise` that no test noticed. Every survivor is a line that is covered but not asserted, which is how a 92% covered module still ships a wrong transition guard. Fix survivors by strengthening assertions, not adding tests: `pytest.raises(InvalidTransition, match=r\"queued -> done\")` instead of bare `pytest.raises(Exception)`, exact `response.json() == {...}` instead of `\"id\" in response.json()`, `pytest.approx` with explicit tolerance, and `assert result` never on its own. Run mutation testing on the domain package only and on a schedule or on demand, not as a required gate, because a full run is minutes to hours.",
-      "minutes": 15,
-      "resource": {
-        "label": "mutmut docs - mutation testing for Python",
-        "url": "https://mutmut.readthedocs.io/en/latest/"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can run `pytest -m unit` on the Kaupex Task Compiler in under five seconds and the full suite (unit, integration against a testcontainers Postgres, API, contract) in CI, with `--strict-markers --strict-config`, `filterwarnings = error` and `xfail_strict = true` enforced and every marker registered.",
-    "You can write a Hypothesis `RuleBasedStateMachine` for the Task lifecycle that, when a deliberately planted bug allows cancel after complete, prints a minimal three-step counterexample which you turn into a pinned regression test with `@reproduce_failure` or `@example`.",
-    "You can make a full `schemathesis run` against the Kaupex `/openapi.json` pass with all default checks enabled and at least one OpenAPI link exercised in the stateful phase, and explain from the failure output which handler or schema field was wrong for any check you had to fix along the way.",
-    "You can demonstrate that adding a required property to a request model or deleting a response field fails the `oasdiff breaking --fail-on ERR` job and the committed `openapi.json` snapshot test, while adding an optional response field passes both.",
-    "You can show branch coverage for the async repository layer moving from near zero to accurate by adding `concurrency = [\"thread\", \"greenlet\"]`, and explain why the pre-fix number was wrong rather than low.",
-    "You can configure a Postgres-backed test suite to run under `pytest -n auto` with one database per xdist worker derived from `PYTEST_XDIST_WORKER`, with zero cross-worker failures across ten consecutive runs.",
-    "You can set up branch protection so a PR cannot merge while any of unit, integration, contract or oasdiff jobs is red, and a Codecov patch status below 80% is visible on the PR with the badge in the README reflecting main.",
-    "You can run `mutmut` on `kaupex/domain`, pick three surviving mutants and kill each by tightening an assertion rather than adding a test, explaining what the original assertion failed to check."
-  ],
-  "failureModes": [
-    "A route returns 409 from the `Conflict` handler but only 200 and 422 are declared in `responses=`; the customer's generated TypeScript client treats 409 as an unknown error and retries the task creation in a loop, producing duplicate tasks until Schemathesis `status_code_conformance` is finally added to CI three months later.",
-    "Repository tests run against a mocked SQLAlchemy Session that returns whatever the test says; the real query has a missing `tenant_id` predicate, tests are green, and the first cross-tenant data exposure is found by the customer's security team during UAT.",
-    "Coverage is 91% and celebrated, but `concurrency` was never set so every line inside the greenlet-bridged async repository counts as executed only when the sync fallback path runs; after a refactor the badge stays green while the actual async code path has no test.",
-    "The API suite shares a module-scoped async engine with function-scoped tests under pytest-asyncio's default function loop; the second test fails with 'Future attached to a different loop', the team adds `pytest-rerunfailures`, and a genuine connection-pool leak hides behind retries for months.",
-    "`openapi.json` is regenerated on every deploy but never committed or diffed; a pydantic model rename changes `status` to `state` in the response, no test fails because the app and its own schema still agree, and the customer's integration breaks on Monday morning.",
-    "Hypothesis runs with the default 200 ms `deadline` on shared CI runners; property tests fail intermittently under load, someone adds `suppress_health_check` and `@settings(max_examples=5)` to make CI green, and the tests stop finding anything.",
-    "Integration tests `TRUNCATE` tables between runs but xdist workers share one database; tests pass locally with `-p no:xdist` and fail randomly in CI, so the team drops parallelism and the suite grows to a 40-minute serial run that nobody waits for before merging."
-  ],
-  "interviewQuestions": [
-    "A customer's integration team says our API 'changed under them' although every deploy passed CI. Walk me through what a contract-testing setup that would have caught it looks like, what specifically runs in CI, what counts as a breaking change, and how you would roll the change out instead.",
-    "Design the test strategy for a FastAPI service backed by Postgres with row-level security and Temporal workers. What runs at each layer, what is real versus faked, how do you isolate tests that must commit, and how do you keep the whole thing under ten minutes in CI with parallel workers?",
-    "You have 90% line coverage and a production bug in a state-transition guard that every test exercised. Explain why coverage did not catch it, what mutation testing would have shown, and how you would decide which assertions to strengthen.",
-    "Schemathesis reports `response_schema_conformance` failures on GET /v1/tasks/{id} for about 2% of generated cases and `ignored_auth` on one endpoint. Debug both: what are the likely causes in a pydantic/FastAPI app, how do you reproduce one case, and which fix belongs in the schema versus the handler?",
-    "Write a property-based test for the Kaupex task compiler that would find an ordering bug the parametrised unit tests cannot. What property do you state, what strategy generates the inputs, how do you keep it deterministic in CI, and what do you do when Hypothesis reports Flaky?",
-    "Our integration suite against Postgres is flaky under `pytest -n auto` but green serially. Give me your diagnosis procedure and the three most likely root causes in order, and the fix for each.",
-    "A customer's security questionnaire asks for our test coverage and how we prevent regressions in the API they consume. What do you send them, how is it produced, and what claim would you refuse to make from a coverage number alone?"
-  ],
-  "proofOfWork": "A pull request against the Kaupex Task Compiler repository that intentionally introduces one breaking API change (renaming `status` to `state` in the task response) and one behavioural regression (allowing `cancel` from `completed`), with the CI run attached showing exactly which gates caught which defect: the committed `openapi.json` snapshot test and `oasdiff breaking --fail-on ERR` fail on the rename, the Hypothesis `RuleBasedStateMachine` prints the minimal counterexample for the illegal transition, and the Schemathesis stateful phase reports `use_after_free` or a schema conformance failure with the reproducing curl command. The PR description contains a short table mapping each defect to the job that caught it, the time to first red check, and a one-paragraph note on why branch coverage stayed above the `fail_under` threshold for both defects, demonstrating in one artefact why contracts and properties are gates and coverage is only a floor."
+ "i": 35,
+ "topic": "Kafka and event-driven design",
+ "track": "E. Backend and Data",
+ "month": 4,
+ "hours": 8.0,
+ "why": "Every customer above a certain size already runs Kafka in some form (MSK, Confluent Cloud, Redpanda, Event Hubs) and expects your product to consume from their topics and publish back onto them under their schema registry, ACLs and retention rules; the FDE is the person who reads their topic contract, sizes the consumer group, and explains on a Friday night why the pilot dropped or duplicated events. Just as often the customer does not have Kafka and an architect on their side wants it for four hundred events a day, and the fastest way to earn credibility is a one-page memo showing a webhook or a Postgres table does the job with a tenth of the operational weight. The phrase 'exactly-once' will be said in a design review by someone holding a vendor slide; you need to state in one sentence exactly what it covers and design the idempotent consumer for everything it does not.",
+ "prerequisites": [
+  "PostgreSQL from topic 29: transactions and isolation, `INSERT ... ON CONFLICT`, `SELECT ... FOR UPDATE SKIP LOCKED`, and enough about WAL to understand what `wal_level=logical` and a replication slot are",
+  "Redis from topic 31: `SET NX EX` idempotency keys and Redis Streams consumer groups (`XREADGROUP`/`XACK`), so you can compare a Stream to a Kafka partition honestly",
+  "FastAPI in production from topic 26: lifespan hooks for creating and flushing a producer, and how background workers are deployed separately from the API process",
+  "Docker internals from topic 5: Compose networking and why a broker's advertised address differs from its bind address; TCP and TLS basics from topic 2",
+  "Observability from topic 21: Prometheus scraping, Grafana panels and W3C `traceparent` context propagation, which you will carry through record headers",
+  "Python with confluent-kafka-python (librdkafka) installed, plus Docker with at least 4 GB free for a three-broker Redpanda cluster, Postgres and Debezium Connect"
+ ],
+ "subtopics": [
+  {
+   "name": "Log, queue or webhook: the decision",
+   "learn": "Place the three on a table by what the receiver controls: a webhook is sender-push (receiver must be up, sender owns retries, no replay, ordering unspecified, each new consumer means another endpoint to register); a queue such as SQS or a Postgres table drained with `SELECT ... FOR UPDATE SKIP LOCKED` is competing consumers with per-message ack and delete (visibility timeout, no fan-out without an extra layer, nothing to replay after ack); a Kafka topic is a durable, replayable log that any number of consumer groups read at their own pace with per-key ordering. Reach for a topic when at least two of these hold: more than one independent consumer needs the same events, you need replay or reprocessing from history, per-key ordering matters, or sustained throughput is thousands per second rather than hundreds per day. Be able to say out loud what Kafka costs you: no per-message ack or delete, no built-in delayed delivery or priority, and the operational weight of brokers, a schema registry and consumer-group hygiene.",
+   "minutes": 30,
+   "resource": {
+    "label": "Apache Kafka Documentation - Use Cases",
+    "url": "https://kafka.apache.org/43/getting-started/uses/"
+   }
+  },
+  {
+   "name": "Partitions, offsets, segments and retention",
+   "learn": "A topic is N independent append-only logs; each record has a partition and a monotonic offset, and ordering exists only inside one partition. On disk a partition is a directory of segments (`segment.bytes`, `segment.ms`) with `.index` and `.timeindex` files; retention is enforced per closed segment by `retention.ms`/`retention.bytes` under `cleanup.policy=delete`, so a one-hour retention with a 1 GB active segment still keeps hours of data, or by compaction under `cleanup.policy=compact`. Partition count is a one-way door: you can add partitions (`kafka-topics.sh --alter --partitions`, `rpk topic add-partitions`) but never remove them, and adding them changes the key-to-partition mapping for every keyed producer. Size it as max(target MB/s divided by per-partition MB/s, the most consumer instances you will ever run) and know that each partition costs file handles, replication traffic and leader-election time on failover.",
+   "minutes": 30,
+   "resource": {
+    "label": "Apache Kafka Documentation - Topic-Level Configs",
+    "url": "https://kafka.apache.org/43/configuration/topic-configs/"
+   }
+  },
+  {
+   "name": "Keys, partitioners and what 'ordered' really means",
+   "learn": "The default partitioner is `murmur2(key) mod numPartitions`; null keys use the sticky partitioner (KIP-480, strictly uniform since KIP-794), which fills one batch to a single partition then moves on, so null-keyed records have no ordering at all. Ordering holds only for records with the same key in one partition from one producer, and only when `enable.idempotence=true` or `max.in.flight.requests.per.connection=1` stops a retried batch leapfrogging a later one. Choose keys deliberately for DefenderMate: `document_id` orders one document's lifecycle, `tenant_id` orders everything for a tenant but pins a large tenant to one partition (hot key). Detect skew with per-partition end offsets from `rpk topic describe -p` or `kafka-get-offsets.sh --topic documents.v1`.",
+   "minutes": 25,
+   "resource": {
+    "label": "Apache Kafka Documentation - Design: The Producer",
+    "url": "https://kafka.apache.org/43/design/design/#the-producer"
+   }
+  },
+  {
+   "name": "Producer path: acks, idempotence, batching, timeouts",
+   "learn": "Trace `send()` through the record accumulator: `batch.size` and `linger.ms` decide when a batch flushes, `compression.type=lz4|zstd` compresses per batch, and a full `buffer.memory` blocks for `max.block.ms` then throws. `acks=0` is fire-and-forget, `acks=1` is leader-only (lost on leader failover), `acks=all` waits for the in-sync replicas. `enable.idempotence=true` (default since 3.0) assigns a producer id plus per-partition sequence numbers so the broker dedupes retries, and forces `acks=all`, `retries=MAX_INT` and in-flight at most 5; it does not survive a producer restart. `delivery.timeout.ms` (default 120 s) is the total budget including retries and must exceed `linger.ms + request.timeout.ms`. The delivery callback, not the return value of `send()`, is where you learn a record was lost, so in confluent-kafka-python always pass `on_delivery=` and call `flush()` on shutdown.",
+   "minutes": 30,
+   "resource": {
+    "label": "Apache Kafka Documentation - Producer Configs",
+    "url": "https://kafka.apache.org/43/configuration/producer-configs/"
+   }
+  },
+  {
+   "name": "Replication, ISR and the durability equation",
+   "learn": "Each partition has one leader and N-1 followers; the in-sync replica set (ISR) is the followers within `replica.lag.time.max.ms` of the leader, and the high watermark is the last offset replicated to the whole ISR, which is as far as consumers can read. `acks=all` waits for the ISR, and `min.insync.replicas` sets how small the ISR may shrink before writes fail with `NotEnoughReplicas` instead of quietly losing durability. RF=3 with `min.insync.replicas=2` and `acks=all` survives one broker; losing two makes the topic unwritable, which is the correct trade. `unclean.leader.election.enable=false` (default) chooses unavailability over electing an out-of-sync replica that truncates committed records. Spread replicas with `broker.rack`. Since 3.3 the controller quorum runs on KRaft (KIP-500) instead of ZooKeeper; Redpanda runs Raft per partition and has no separate controller tier.",
+   "minutes": 25,
+   "resource": {
+    "label": "Apache Kafka Documentation - Design: Replication",
+    "url": "https://kafka.apache.org/43/design/design/#replication"
+   }
+  },
+  {
+   "name": "Consumer group protocol and rebalances",
+   "learn": "A group coordinator broker owns each group: members send JoinGroup and SyncGroup (classic protocol) and one member, the leader, runs the `partition.assignment.strategy` (Range, RoundRobin, StickyAssignor, CooperativeStickyAssignor). Eager strategies revoke every partition from every member on any change (stop-the-world); cooperative (KIP-429) revokes only the partitions that move, across two rounds. KIP-848 (`group.protocol=consumer`, GA in 4.0) moves assignment into the broker so rebalances are incremental and driven by per-member heartbeats. Know the triggers: member join or leave, `session.timeout.ms` expiring on missed heartbeats, `max.poll.interval.ms` expiring, a partition-count change, or subscription change. More consumers than partitions leaves consumers idle; `group.instance.id` (static membership) lets a restarted pod reclaim its partitions without a rebalance if it returns within `session.timeout.ms`.",
+   "minutes": 30,
+   "resource": {
+    "label": "Apache Kafka Documentation - Consumer Rebalance Protocol (KIP-848)",
+    "url": "https://kafka.apache.org/43/operations/consumer-rebalance-protocol/"
+   }
+  },
+  {
+   "name": "The poll loop: heartbeats, max.poll.interval.ms and backpressure",
+   "learn": "Heartbeats run on a background thread every `heartbeat.interval.ms`, but `poll()` itself is the liveness signal for processing: fail to call it within `max.poll.interval.ms` (default 300 s) and the consumer leaves the group and its partitions are reassigned while you are still working, guaranteeing duplicates. Bound work per poll with `max.poll.records` (Java) or one-message-at-a-time in librdkafka, and for slow per-record work such as an LLM call per chunk use `pause()`/`resume()` on the partitions while a bounded worker pool drains, so `poll()` keeps being called. `fetch.min.bytes` and `fetch.max.wait.ms` trade latency for batch efficiency; `max.partition.fetch.bytes` must exceed your largest record or the consumer stalls on it forever. Implement `on_revoke` to commit or flush in-flight work before partitions move.",
+   "minutes": 25,
+   "resource": {
+    "label": "Apache Kafka Documentation - Consumer Configs",
+    "url": "https://kafka.apache.org/43/configuration/consumer-configs/"
+   }
+  },
+  {
+   "name": "Offsets: commit ordering, auto.offset.reset, expiry and lag",
+   "learn": "Committed offsets live in `__consumer_offsets` keyed by (group, topic, partition) and mean 'next offset to read'. `enable.auto.commit=true` commits the offsets returned by the previous `poll()` on the next `poll()` every `auto.commit.interval.ms`, so any handler that has not finished can be committed past; explicit commit-after-process gives at-least-once and commit-before-process gives at-most-once. `auto.offset.reset` applies only when the group has no committed offset or it is out of range: `latest` (default) silently skips all history for a brand-new group, `earliest` replays everything, `none` throws. Offsets for an empty group expire after `offsets.retention.minutes` (7 days), so a service down for eight days restarts as if new. Operate with `kafka-consumer-groups.sh --describe --group X` (CURRENT-OFFSET, LOG-END-OFFSET, LAG), `--reset-offsets --to-datetime 2026-01-01T00:00:00.000 --execute` while the group is inactive, or `rpk group seek`. Lag per partition, not the total, is the SLI.",
+   "minutes": 30,
+   "resource": {
+    "label": "Apache Kafka Documentation - Basic Operations: Managing Consumer Groups",
+    "url": "https://kafka.apache.org/43/operations/basic-kafka-operations/#managing-consumer-groups"
+   }
+  },
+  {
+   "name": "Delivery semantics: what 'exactly-once' actually claims",
+   "learn": "Decompose the guarantee into three hops: producer to broker (the idempotent producer removes duplicates caused by retries), consumer position (commit placement decides duplicate versus loss), and the side effect (whatever your consumer does to the outside world). Kafka's exactly-once semantics cover only consume-transform-produce where inputs, outputs and offset commits are all inside Kafka and committed atomically in one transaction, read by consumers with `isolation.level=read_committed`. The moment a consumer writes to Postgres, calls an HTTP API or invokes a model, EOS ends and you need an idempotent consumer or a transactional outbox; practise saying that in one sentence to an architect who has read a vendor slide. Know that `read_committed` consumers cannot read past the last stable offset (LSO), so a hung transaction blocks the partition until `transaction.timeout.ms` expires.",
+   "minutes": 25,
+   "resource": {
+    "label": "Apache Kafka Documentation - Design: Message Delivery Semantics",
+    "url": "https://kafka.apache.org/43/design/design/#message-delivery-semantics"
+   }
+  },
+  {
+   "name": "Transactions internals: transactional.id, epochs and zombie fencing",
+   "learn": "A transactional producer sets `transactional.id` and calls `init_transactions()`, which registers with the transaction coordinator (owner of a `__transaction_state` partition) and bumps the producer epoch, fencing any older instance with the same id so its next send fails with `ProducerFenced`. Then `begin_transaction()`, `produce()` to any partitions, `send_offsets_to_transaction(offsets, consumer_group_metadata)` to fold the consumer commit into the same transaction, and `commit_transaction()`, which writes control markers into every involved partition. The `transactional.id` must be stable per input partition set (Kafka Streams uses one per task) or fencing protects nothing, and thousands of ids load the coordinator. Cost: extra round trips per commit, end-to-end latency bounded by commit interval, and `transaction.timeout.ms` must stay below the broker's `transaction.max.timeout.ms` (15 min default).",
+   "minutes": 25,
+   "resource": {
+    "label": "KIP-98 - Exactly Once Delivery and Transactional Messaging",
+    "url": "https://cwiki.apache.org/confluence/spaces/KAFKA/pages/66854913/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging"
+   }
+  },
+  {
+   "name": "Idempotent consumers: dedupe keys and the processed-events table",
+   "learn": "Make every handler safe to run twice: derive an idempotency key from the event (an `event_id` header, or `topic-partition-offset` as a fallback), and in the same Postgres transaction as the business write run `INSERT INTO processed_events(event_id) VALUES ($1) ON CONFLICT DO NOTHING`, skipping the work when zero rows were inserted; commit the Kafka offset only after that transaction commits. For state updates prefer natural idempotence, an upsert such as `ON CONFLICT (document_id) DO UPDATE ... WHERE EXCLUDED.version > documents.version`, over a dedupe table. For side effects you do not own (a customer's REST API, email) pass the key through as an `Idempotency-Key` header and persist the response. A Redis `SET NX EX` check (topic 31) is faster but not atomic with the database write; know when that gap is acceptable and when it is not.",
+   "minutes": 25,
+   "resource": {
+    "label": "microservices.io - Pattern: Idempotent Consumer",
+    "url": "https://microservices.io/patterns/communication-style/idempotent-consumer.html"
+   }
+  },
+  {
+   "name": "Transactional outbox and CDC with Debezium",
+   "learn": "Dual writes (commit the row, then produce) lose or orphan an event whenever the process dies between the two; the fix is an `outbox` table written in the same transaction as the business row and relayed to Kafka by a separate process. Relay options: a poller (`SELECT ... FOR UPDATE SKIP LOCKED`, delete after the delivery callback; simple, but adds polling latency and load) or change data capture, where Debezium reads the Postgres WAL through a logical replication slot (`wal_level=logical`, `pgoutput` plugin, `REPLICA IDENTITY FULL` if you need old values on updates) and the outbox event router SMT turns each row into a record on a topic derived from `aggregatetype`, keyed by `aggregateid`. Understand slot risk: an idle slot pins WAL forever and fills the disk, so alert on `pg_replication_slots` lag. CDC is at-least-once, so the consumer side still needs the idempotency work from the previous subtopic.",
+   "minutes": 30,
+   "resource": {
+    "label": "Debezium Documentation - Outbox Event Router",
+    "url": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html"
+   }
+  },
+  {
+   "name": "Schemas: registry, wire format and compatibility modes",
+   "learn": "Serialise with Avro, Protobuf or JSON Schema through a schema registry; the Confluent wire format prefixes each payload with a magic byte and a 4-byte schema id, so consumers fetch the writer schema by id and resolve it against their reader schema. Set subject compatibility deliberately: BACKWARD (default; new schema reads old data, so consumers upgrade first, and you may only delete fields or add fields with defaults), FORWARD (producers upgrade first), FULL, and the `_TRANSITIVE` variants that check against every prior version rather than only the latest. Subject naming (`TopicNameStrategy` default versus `RecordNameStrategy` when many event types share one topic) decides what 'compatible' is checked against. JSON without a registry is a promise, not a contract, and renaming a field is always two releases: add the new field with a default, remove the old one later.",
+   "minutes": 30,
+   "resource": {
+    "label": "Confluent Platform Documentation - Schema Registry",
+    "url": "https://docs.confluent.io/platform/current/schema-registry/index.html"
+   }
+  },
+  {
+   "name": "Event design: notification vs state transfer, envelopes and PII",
+   "learn": "Decide per event type whether it is a thin notification (`document.uploaded {document_id}`; consumers call back for state and are coupled to your API's availability) or event-carried state transfer (the full document metadata rides along; consumers are decoupled but you have now published PII onto a retained log). Standardise the envelope on CloudEvents attributes (`id`, `source`, `type`, `time`, `subject`, `datacontenttype`), carried as Kafka headers in binary mode or as the JSON body in structured mode, and version the type name (`defendermate.document.uploaded.v1`). Never put PII in keys or headers: they survive compaction and show up in every console. For regulated customers pair state transfer with crypto-shredding, encrypting payload fields with a per-tenant key so erasure means deleting a key rather than rewriting an immutable log.",
+   "minutes": 25,
+   "resource": {
+    "label": "CloudEvents Specification (GitHub)",
+    "url": "https://github.com/cloudevents/spec"
+   }
+  },
+  {
+   "name": "Log compaction and tombstones for state topics",
+   "learn": "`cleanup.policy=compact` keeps the latest record per key rather than a time window, turning a topic into a durable changelog that a new consumer can bootstrap from with `auto.offset.reset=earliest` and end up holding current state for every key. Deletes are tombstones, a record with the key and a null value, retained for `delete.retention.ms` (24 h default) so lagging consumers see the delete before it is compacted away. Compaction runs only on closed segments and is governed by `min.cleanable.dirty.ratio`, `min.compaction.lag.ms` and `max.compaction.lag.ms`; the active head is never compacted, so 'one record per key' is a guarantee only after the cleaner catches up. Use `cleanup.policy=compact,delete` when you want both a key snapshot and an age bound.",
+   "minutes": 20,
+   "resource": {
+    "label": "Apache Kafka Documentation - Design: Log Compaction",
+    "url": "https://kafka.apache.org/43/design/design/#log-compaction"
+   }
+  },
+  {
+   "name": "Failure handling: retries, dead-letter topics, poison pills",
+   "learn": "Separate transient from permanent failures in the handler: retry transient ones in-process with bounded exponential backoff while keeping `poll()` alive (pause the partition), and route permanent ones (deserialisation error, schema violation, business-rule rejection) to `<topic>.dlq` carrying the original bytes plus headers for exception class, message, source topic/partition/offset and attempt count, then commit and move on. A record the deserialiser throws on will otherwise crash-loop the consumer at the same offset indefinitely, so deserialise inside a try or use an error-handling deserialiser wrapper. Retry topics (`<topic>.retry.1m`, `<topic>.retry.10m`) trade per-key ordering for throughput; say so explicitly when you choose them. Kafka Connect exposes the same knobs as `errors.tolerance=all`, `errors.deadletterqueue.topic.name` and `errors.deadletterqueue.context.headers.enable=true`. Build the replay path out of the DLQ before you need it.",
+   "minutes": 30,
+   "resource": {
+    "label": "Confluent Developer - Event Streaming Patterns: Dead Letter Stream",
+    "url": "https://developer.confluent.io/patterns/event-processing/dead-letter-stream/"
+   }
+  },
+  {
+   "name": "Observability: lag, broker health and trace propagation",
+   "learn": "Alert on consumer lag per partition and on its derivative (lag rising while produce rate is flat means a stuck consumer, not a busy one), exported by kafka-lag-exporter or Burrow, and on broker signals `UnderReplicatedPartitions`, `OfflinePartitionsCount`, `ActiveControllerCount != 1`, `RequestHandlerAvgIdlePercent` and disk headroom. Propagate W3C `traceparent` through record headers so a trace spans producer, broker hop and consumer; follow the OpenTelemetry messaging semantic conventions (`messaging.system=kafka`, `messaging.destination.name`, `messaging.kafka.message.key`, `messaging.kafka.offset`, `messaging.consumer.group.name`) and model consumption as a `receive` span plus a `process` span per record with span links, because one poll can carry records from many producer traces. Log (topic, partition, offset, key) on every handler error so support can replay one record instead of a day.",
+   "minutes": 25,
+   "resource": {
+    "label": "OpenTelemetry Semantic Conventions - Kafka messaging",
+    "url": "https://opentelemetry.io/docs/specs/semconv/messaging/kafka/"
+   }
+  },
+  {
+   "name": "Security and multi-tenant isolation on a shared cluster",
+   "learn": "Authenticate clients with SASL/SCRAM-SHA-512 or mTLS on a TLS listener (`security.protocol=SASL_SSL`, `sasl.mechanism=SCRAM-SHA-512`) and authorise with ACLs: `kafka-acls.sh --add --allow-principal User:ingest --operation Write --topic documents.v1`, `--operation Read --group ingest-workers` for the consumer group, and `--resource-pattern-type prefixed` to cover `tenant-a.*`. Once `authorizer.class.name` is set, a resource with no ACL is denied unless `allow.everyone.if.no.acl.found=true`, which you should never ship. Protect tenants from each other with quotas (`producer_byte_rate`, `consumer_byte_rate`, `request_percentage` per user or client id via `kafka-configs.sh --alter --add-config`) so one tenant's replay cannot starve the rest. Decide topic-per-tenant (hard, ACL-enforceable isolation; partitions and metadata scale linearly with tenants) versus a shared topic keyed by tenant (efficient; isolation exists only in your application code) and write the reasoning down.",
+   "minutes": 20,
+   "resource": {
+    "label": "Apache Kafka Documentation - Operations: Multi-Tenancy (naming, quotas, ACLs)",
+    "url": "https://kafka.apache.org/43/operations/multi-tenancy/"
+   }
+  },
+  {
+   "name": "Lab: rebuild DefenderMate ingestion on a local Redpanda cluster",
+   "learn": "Run a three-broker Redpanda cluster with Docker Compose (`redpanda start --smp 1 --memory 1G --advertise-kafka-addr <node>:9092` per node) plus its built-in schema registry and console, create topics with `rpk topic create documents.v1 -p 6 -r 3 -c min.insync.replicas=2`, and rebuild the ingestion path as `document.uploaded` to chunker to `chunk.created` to embedder to `embedding.ready` using confluent-kafka-python with `acks=all`, `enable.idempotence=true`, manual commits after the Postgres write and the processed-events dedupe. Then break it on purpose: `docker kill` one broker mid-produce and compare lost-record counts under `acks=1` versus `acks=all`; SIGKILL the consumer between database commit and offset commit and count duplicates with and without the dedupe table; inject a malformed record and watch it land in the DLQ; watch lag with `rpk group describe`. Every assertion is a number printed by a script, not a screenshot.",
+   "minutes": 55,
+   "resource": {
+    "label": "Redpanda Docs - Redpanda Quickstart (Docker)",
+    "url": "https://docs.redpanda.com/streaming/current/get-started/quick-start/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can bring up a three-broker Redpanda cluster from Compose, create a topic with RF=3 and `min.insync.replicas=2`, produce 100k keyed records with `acks=all` and idempotence on, kill one broker mid-run and show zero loss and zero reordering per key; kill a second and show writes fail with `NotEnoughReplicas` rather than silently degrading.",
+  "You can demonstrate all three commit-placement outcomes (loss, duplicates, correct) by moving `commit()` before or after processing and SIGKILLing the consumer between them, then explain each outcome from the numbers in `rpk group describe` or `kafka-consumer-groups.sh --describe`.",
+  "You can run a consumer whose handler takes 90 seconds per record without it being evicted from the group, by pausing partitions and bounding work per poll, and show the rebalance log lines before and after the fix.",
+  "You can state in one sentence what Kafka's exactly-once semantics do and do not cover, then show a consume-transform-produce transaction where a `read_committed` consumer never sees the aborted records and a `read_uncommitted` one does.",
+  "You can implement outbox plus Debezium CDC into Redpanda and prove atomicity: kill the API between the Postgres commit and any produce call, and show the event still arrives and is processed exactly once downstream thanks to the processed-events table.",
+  "You can register an Avro schema, attempt a breaking change (removing a field without a default under BACKWARD compatibility), have the registry reject it with an HTTP 409, and show an old consumer still reading records written by a compatible new producer.",
+  "You can size a topic from a throughput target and consumer parallelism ceiling, explain why the count cannot shrink, and demonstrate what breaks for a keyed, stateful consumer when partitions are added.",
+  "You can hand a customer a one-page 'when not to Kafka' memo with a decision matrix across webhook, SQS, Postgres queue, Redis Streams and Kafka, each row backed by a concrete number (events/day, consumers, replay window, ordering need, ops headcount)."
+ ],
+ "failureModes": [
+  "A new consumer service shipped with the default `auto.offset.reset=latest`; because the group had no committed offset it skipped the entire backlog produced before its first deploy, and nobody noticed until a monthly reconciliation found 40,000 documents that were never embedded.",
+  "Each record triggered an LLM call with client-side retries, so a batch took longer than `max.poll.interval.ms`; the consumer was evicted, its partitions moved to a peer that reprocessed the same batch and was also evicted, producing a rebalance storm where lag climbed for hours while CPU sat near zero.",
+  "One malformed message from an upstream team made the deserialiser throw before `poll()` returned; the consumer crash-looped on the same offset for six hours and the fix (catch, publish to a DLQ with the offset in headers, commit) took ten minutes once someone looked at the offset in the logs.",
+  "Someone added partitions to a keyed topic to 'increase throughput'; murmur2 now mapped the same `document_id` to a different partition, the stateful downstream consumer saw updates out of order, and its last-write-wins logic reverted several documents to stale versions before anyone connected the two events.",
+  "A team turned on transactions and told the customer the pipeline was exactly-once, but the consumer also POSTed purchase orders to the customer's ERP; a rebalance re-delivered a batch and the ERP received duplicate orders, because Kafka transactions never covered the HTTP side effect.",
+  "A consumer group was offline for eight days during a migration, longer than `offsets.retention.minutes`; on restart the expired offsets fell back to `earliest`, replaying a week of events through a non-idempotent notification forwarder that sent every customer duplicate emails.",
+  "`advertised.listeners` was left pointing at `localhost:9092` inside Compose, so clients could connect for metadata but were redirected to an unreachable address; the producer hung and eventually failed with 'Local: Message timed out' and half a day was lost before anyone compared bind address to advertised address."
+ ],
+ "interviewQuestions": [
+  "A customer's architect insists on Kafka for a pilot that ingests about 5,000 documents a day from a SaaS webhook into our product. Walk me through how you decide, what you propose instead if you disagree, how you make that case without losing the room, and what facts would change your mind.",
+  "Define exactly-once in Kafka precisely: which components participate, which configs enable it, and where the boundary of the guarantee sits. Then our consumer writes to Postgres and calls a third-party REST API for every event; design effectively-once end to end and name what is still not guaranteed.",
+  "Debug this: lag on a single partition grows without bound while other partitions are healthy, consumer CPU is low, and the logs show repeated 'Attempt to heartbeat failed since group is rebalancing'. Talk me through your hypotheses, what you check in what order, and the fix.",
+  "Design multi-tenant event ingestion for an AI product where tenants differ 100x in volume, per-document ordering matters, and one tenant's replay must never starve another. Topics per tenant or a shared topic keyed by tenant? Partition count, quotas, ACLs, and how the answer changes at 10 tenants versus 2,000.",
+  "A service writes an order row to Postgres and then publishes to Kafka. Sometimes there is a row and no event, sometimes an event and no row. Fix it, then compare the two relay implementations for the outbox (polling versus WAL-based CDC) on latency, load, failure modes and what happens when the relay is down for a day.",
+  "We need to add a field now and rename another field next quarter in an event schema consumed by four teams we do not control. Which compatibility mode do you set, what is the rollout order for producers and consumers, and what exactly breaks if you get the order wrong?",
+  "Configure a topic for durability at a customer who cannot lose a single event: replication factor, `min.insync.replicas`, `acks`, unclean leader election, rack placement. For each single- and double-broker failure, tell me precisely what the customer experiences and what, if anything, they lose."
+ ],
+ "proofOfWork": "A public repository with a `make prove` target that runs six named, self-asserting chaos scenarios against a three-broker Redpanda cluster, Postgres 16 with `wal_level=logical`, Debezium Connect and the rebuilt DefenderMate ingestion consumers: (1) broker kill under `acks=1` versus `acks=all` with idempotence, printing lost and reordered record counts per key; (2) consumer SIGKILL between database commit and offset commit, printing duplicate counts with and without the processed-events table; (3) a 90-second handler under default versus tuned poll settings, printing whether the member was evicted; (4) a poison-pill record, asserting it lands in the DLQ with source topic, partition, offset and exception headers while the group keeps moving; (5) outbox atomicity, killing the API between commit and any produce call and asserting the event still arrives exactly once downstream; (6) a breaking Avro change rejected by the schema registry with a 409 while an old consumer keeps reading new records. Each scenario ends with PASS or FAIL against a numeric assertion, the run writes a results table into the README, and a Grafana dashboard JSON in the repo shows per-partition lag, under-replicated partitions and end-to-end trace latency during the run. Alongside it sits a two-page 'consuming from the customer's Kafka' runbook covering credentials, ACL requests, schema registry access, offset reset procedure and the questions to ask before the first connection."
 }

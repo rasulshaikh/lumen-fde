@@ -1,218 +1,228 @@
 {
  "i": 46,
- "topic": "Prompt engineering as code: versioning, regression sets, structured outputs",
- "track": "G. AI Engineering",
- "month": 6,
- "hours": 6,
- "why": "An FDE ships prompts into a customer's production path - a classifier that writes into their CRM, an extractor that feeds their claims queue - and then changes them weekly as the customer discovers edge cases; without version control, a pinned model snapshot and a regression set that runs before merge, every improvement is an uncontrolled experiment on the customer's data. The failure you are preventing has no stack trace: a prompt edit that fixes the one document the customer complained about and silently degrades the other nine hundred, discovered a fortnight later in their monthly report. Treating prompts as code - files in Git, a changelog, typed outputs behind schemas, and a CI gate with a committed baseline - is what lets you say 'this change moved recall from 0.91 to 0.94 across 240 labelled cases, here is the diff and here is what it cost' instead of 'it seems better now'.",
+ "topic": "System design playbook: load balancing, caching, sharding, queues, rate limits, IDs, search",
+ "track": "F. Distributed Systems and System Design",
+ "month": 5,
+ "hours": 10,
+ "why": "An FDE is the person in the room when the customer's architect asks 'and what happens when we roll this to all 500 clients?' and you have to answer on a whiteboard with numbers, inside their constraints (their VPC, their Postgres, their Kafka, their security team) rather than in the abstract. Every deployment you scope is assembled from the same seven building blocks: something in front spreading traffic, something remembering answers, something splitting data, something absorbing bursts, something saying no, something naming things, and something finding them. The system design round is also where senior FDE loops at Palantir, Anthropic and Databricks separate 'can build a feature' from 'can own a customer's production system', and the interviewer is grading the same thing the customer is: can you run the conversation end to end, attach numbers, name trade-offs, and tell a credible story about what breaks first.",
  "prerequisites": [
-  "Production Python structure from 'Production Python architecture' (topic 25) and the pytest muscle from 'Testing and contracts' (topic 35): fixtures, conftest.py, parametrize, markers, and the habit of asserting on typed objects rather than strings.",
-  "LLM mechanics from 'LLM fundamentals' (topic 45): tokenisation and why token counts drive cost, sampling parameters (temperature, top_p, top_k), context windows, and why the same input at temperature 0 can still produce different output.",
-  "Git at depth from topic 4: reading a diff properly, git log -p on a path, git bisect, and branch/PR review discipline - you will bisect a prompt regression across a dozen commits and it only works if prompts are files.",
-  "CI/CD from topic 18: GitHub Actions workflow syntax, path filters, repository secrets, required status checks, artifacts and job-level concurrency.",
-  "Working API access to at least Anthropic (and ideally OpenAI for contrast), the SDK installed, and the rate-limit behaviour from 'LLM-era system design' (topic 43): RPM/ITPM/OTPM buckets, 429 with retry-after, exponential backoff with jitter.",
-  "An inventory of DefenderMate's current LLM call sites: every prompt that exists today, what each is supposed to return, and which table or field consumes it (the multi-tenant schema from topic 30 - llm_calls, tool_calls, audit_log)."
+  "Networking from topic 2 (TCP/IP, DNS, TLS, HTTP/2, load balancers): handshake and TLS-termination cost, HTTP/1.1 keep-alive vs HTTP/2 multiplexing, DNS TTL behaviour, and exactly what an L4 proxy can and cannot see compared with an L7 proxy",
+  "PostgreSQL from topic 29: B-tree vs GIN indexes, `EXPLAIN (ANALYZE, BUFFERS)`, row locks and MVCC bloat, `max_connections` and pooling, and why random keys hurt insert locality; plus the RLS multi-tenant schema from topic 30",
+  "Redis from topic 31: TTL and expiry, `maxmemory` and eviction, `SET NX PX` locks, Lua/`MULTI` atomicity, and the token-bucket limiter and idempotency store you already built for DefenderMate",
+  "Kafka from topic 33: partitions as the ordering unit, consumer groups and rebalances, offset commits, `acks`, the idempotent producer, and the DefenderMate ingestion consumers with their duplicate/reorder drill results",
+  "DDIA vocabulary from topic 39 and Raft/linearizability from topic 40: single-leader replication and lag, read-your-writes, hash vs range partitioning and rebalancing, quorum, CAP/PACELC, and what 'exactly once' can and cannot mean",
+  "SLIs/SLOs and error budgets from topic 20, HA/DR (multi-AZ vs multi-region, RTO/RPO) from topic 24, and load testing with k6 from topic 22 so failure stories can be reproduced rather than imagined",
+  "A running DefenderMate stack (FastAPI, Postgres with RLS, Redis, Kafka/Redpanda, Next.js, SSE relay of Claude) and at least one week of real numbers: requests per endpoint, p50/p99, tokens per call, documents per tenant per day"
  ],
  "subtopics": [
   {
-   "name": "Prompt files as versioned artifacts, not string literals",
-   "learn": "Move every prompt out of application source into prompts/<id>/v<N>.md with YAML front-matter carrying id, version, model snapshot, max_tokens, temperature, declared variables, output schema reference and owner. The loader resolves by (id, version), renders, and computes a SHA-256 of the rendered text; that hash - not the text - is what you log on every call. Choose a version bump rule and write it down: MAJOR when the output contract changes (a field removed, renamed or retyped), MINOR when behaviour changes but the contract holds, PATCH for wording. Never edit a released version in place - add v(N+1) - because traces, baselines and the customer's audit log all reference a version that must stay resolvable forever.",
-   "minutes": 20,
+   "name": "The 45-minute delivery frame: requirements, non-functionals as numbers, and the API you commit to",
+   "learn": "Run the clock deliberately: minutes 0-5 functional requirements (three core flows, an explicit out-of-scope list), 5-10 non-functionals written as numbers not adjectives (p99 per endpoint, availability target, consistency per operation, retention, tenancy isolation, cost ceiling), 10-15 core entities and the API (verbs, cursor pagination, `Idempotency-Key` on every write), 15-30 a high-level design that satisfies every functional requirement before any optimisation, 30-45 two or three deep dives chosen by the non-functionals, closing with the failure story. Write assumptions in a corner of the board and say them aloud so the interviewer or customer architect can correct them early; a wrong assumption stated is recoverable, a wrong assumption hidden is fatal. Adopt one trade-off vocabulary for the whole session (consistency vs availability per operation, latency vs cost, simplicity vs scale) and use it every time you pick between two options.",
+   "minutes": 30,
    "resource": {
-    "label": "Semantic Versioning 2.0.0 specification",
-    "url": "https://semver.org/"
+    "label": "Hello Interview - System Design Delivery Framework",
+    "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery"
    }
   },
   {
-   "name": "Templating: strict rendering and the data/instruction boundary",
-   "learn": "Render with Jinja2 using Environment(undefined=StrictUndefined) so a missing or misspelled variable raises at render time instead of silently producing an empty slot - that silent empty slot is the single most common cause of 'the model suddenly got confused'. Never use str.format or f-strings on text that contains JSON braces or the customer's own curly braces. Wrap every injected value in explicit delimiters (<document>...</document>, <tenant_taxonomy>...</tenant_taxonomy>) and strip or escape the closing delimiter out of the value so customer content cannot close your tag and start issuing instructions. Snapshot-test the rendered result: a golden file per (prompt version, fixture) so a one-line template change shows up in review as a rendered-text diff, which is what reviewers can actually reason about.",
-   "minutes": 20,
+   "name": "Back-of-envelope estimation: DefenderMate at 500 clients",
+   "learn": "Derive every number from a stated chain of assumptions and round aggressively: 500 tenants x 200 seats = 100k users; 10% daily active = 10k; 20 messages each = 200k messages/day = ~2.3/s average, x10 diurnal peak = ~25/s; each message is one Claude call at ~3k input and ~500 output tokens = 600M input tokens/day, so at roughly $3 per million input the bill is thousands of dollars a day and the largest lever is prompt caching (topic 59), not servers; 100 documents per tenant per day = 50k docs, 20 chunks each = 1M chunks/day, 1536 float32 dims = 6 KB each = ~6 GB of vectors per day = ~2 TB/year, which is what forces per-tenant partitioning and a real vector store rather than a single pgvector table; messages at 2 KB = 400 MB/day = 150 GB/year, so Postgres holds the transactional data for years without sharding. Memorise the latency table (L1 ~1 ns, RAM ~100 ns, SSD random read ~100 us, same-region RTT ~0.5 ms, cross-continent ~70-150 ms) and the powers of two (2^20 ~ 1M, 2^30 ~ 1G). Convert QPS to capacity: a FastAPI worker doing 50 ms of DB-bound work handles ~20 rps, a 4-worker pod ~80 rps, so 25 msg/s needs one pod plus headroom and the bottleneck is the queue and the upstream model, not the API tier. Always end the estimate with 'the thing that saturates first is X'.",
+   "minutes": 35,
    "resource": {
-    "label": "Claude docs - Use XML tags to structure your prompts",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#structure-prompts-with-xml-tags"
+    "label": "System Design Primer - Back-of-the-envelope calculations",
+    "url": "https://github.com/donnemartin/system-design-primer#back-of-the-envelope-calculations"
    }
   },
   {
-   "name": "Messages API anatomy: system, turns, prefill, stop_reason",
-   "learn": "Know the request surface cold: POST /v1/messages with model, max_tokens (required, and a truncation risk not a safety net), system as a top-level parameter (string or list of content blocks - there is no role: system message), messages strictly alternating user and assistant, plus temperature, top_p, stop_sequences and metadata.user_id. Force output shape by prefilling: make the final message role assistant with partial content such as '{' or '<analysis>'; the prefill must not end in trailing whitespace or the API rejects it. Branch on stop_reason every single time - end_turn, max_tokens (truncated, never hand it to json.loads), stop_sequence, tool_use, refusal - and persist usage.input_tokens and usage.output_tokens with the trace, because cost regressions are as real as accuracy regressions.",
-   "minutes": 20,
+   "name": "Traffic entry: DNS, anycast, CDN and where TLS terminates",
+   "learn": "Know the Route 53 routing policies (simple, weighted, latency, failover with health checks, geolocation, geoproximity, multivalue answer) and what each is actually for: weighted for canaries and migrations, latency for multi-region reads, failover for DR with a health-checked primary. Understand what a 60 s TTL buys and what it does not: recursive resolvers, JVM default caching, and mobile OS caches routinely ignore it, so DNS failover is minutes not seconds, which is why anycast or an ALB in front of both regions is the answer when RTO is tight. Draw the TLS termination point and defend it: terminate at the edge or ALB for cheap certificate management, re-encrypt to origin or run mTLS to pods when the customer's security team requires it, and price the handshake (1-RTT TLS 1.3, 2-RTT TLS 1.2, resumption avoids both). Put the customer's WAF on the diagram and state what it can inspect at each termination choice.",
+   "minutes": 30,
    "resource": {
-    "label": "Claude API reference - Messages",
-    "url": "https://platform.claude.com/docs/en/api/messages"
+    "label": "Amazon Route 53 - Choosing a routing policy",
+    "url": "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy.html"
    }
   },
   {
-   "name": "Structured output by forced tool use",
-   "learn": "Define exactly one tool whose input_schema is your output contract and set tool_choice to {\"type\": \"tool\", \"name\": \"extract_finding\"} so the model must emit it; then read the tool_use content block's input dict rather than parsing prose or stripping markdown fences. Understand why this beats 'reply with JSON only': the schema travels in the request, decoding is steered toward it, and there is no preamble to strip. Understand the costs too - tool definitions are input tokens on every call, forcing a tool removes the model's ability to abstain, so add an explicit no_finding branch or nullable fields rather than letting it fabricate, and forced tool choice interacts badly with extended thinking. Generate input_schema from your Pydantic model so the schema and the parser can never drift apart. Agentic multi-tool orchestration and MCP are topic 47; here the tool is only a typing mechanism.",
+   "name": "L4 vs L7 load balancing, algorithms and connection reuse",
+   "learn": "L4 (NLB, IPVS) balances TCP flows, preserves source IP and cannot see paths or headers; L7 (ALB, Nginx, Envoy) terminates HTTP and can route on path/host/header/cookie, retry idempotent requests, add `X-Forwarded-For` and `X-Request-ID`, and terminate TLS. Know the Nginx upstream algorithms and when each wins: default weighted round-robin for uniform short requests, `least_conn` for long-lived SSE and LLM streams whose durations vary by 100x, `hash $key consistent` (ketama ring, minimal remapping when a server leaves) for cache locality per tenant, `ip_hash` only when you have no better affinity key. Configure connection reuse or pay a handshake per request: `keepalive 32;` in the upstream block plus `proxy_http_version 1.1;` and `proxy_set_header Connection \"\";` in the location. Use `max_fails` and `fail_timeout` for passive health detection and understand their default (1 failure, 10 s). Know two ways balancing silently goes wrong: HTTP/2 multiplexes many requests onto one client connection so an L4 balancer in front sees one flow and cannot spread them, and least-connections cannot tell a 30-second SSE stream from a 30 ms JSON call until the connection count already skewed.",
+   "minutes": 40,
+   "resource": {
+    "label": "nginx - ngx_http_upstream_module (least_conn, hash consistent, keepalive, max_fails)",
+    "url": "https://nginx.org/en/docs/http/ngx_http_upstream_module.html"
+   }
+  },
+  {
+   "name": "Health checks, draining and zero-downtime rollouts behind the balancer",
+   "learn": "Separate liveness (the process is alive, restart me if not) from readiness (I can serve: pool warm, config loaded, not shutting down) and never make the balancer's check hit the database on every probe. Know the ALB target-group knobs and defaults: `HealthCheckIntervalSeconds` 30, `HealthyThresholdCount` 5, `UnhealthyThresholdCount` 2, `HealthCheckTimeoutSeconds` 5, and success matcher defaulting to `200` (a range such as `200-299` is opt-in), and that a target takes interval x threshold seconds to become healthy after a deploy, which sets your minimum rollout time. Reason about draining: the deregistration delay (default 300 s) must be longer than your longest in-flight request (an SSE stream can be 60 s) and shorter than or equal to the pod's `terminationGracePeriodSeconds`, and the app must flip `/readyz` to 503 on SIGTERM and keep serving in-flight requests until the balancer stops sending new ones. Name the cascading risk of deep health checks: when a shared dependency blips, every target fails its check at once and the balancer takes the whole fleet out of rotation.",
+   "minutes": 30,
+   "resource": {
+    "label": "AWS ALB - Health checks for target groups",
+    "url": "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/target-group-health-checks.html"
+   }
+  },
+  {
+   "name": "Cache placement and invalidation: cache-aside, write-through, TTLs, eviction and stampedes",
+   "learn": "Choose where the cache lives (in-process LRU, Redis, CDN) by hit ratio times cost-of-miss, and choose the write pattern: cache-aside (miss, load, `SET key val EX ttl`) is the default; write-through keeps the cache authoritative at the cost of write latency; write-behind buys write throughput at the cost of losing data on a crash. Design the key schema to include tenant and schema version (`t:{tenant}:conv:{id}:v3`) so a deploy can move to `v4` instead of flushing. Know the `maxmemory-policy` options (`allkeys-lru`, `allkeys-lfu`, `volatile-lru`, `volatile-ttl`, `noeviction`) and that `noeviction` at `maxmemory` makes writes fail with an OOM error rather than evicting, which turns a full cache into an outage. Prevent stampedes three ways and know when each applies: a single-flight lock (`SET lock:{key} 1 NX PX 5000`, others wait or serve stale), probabilistic early expiration (recompute before expiry with probability rising as TTL approaches zero), and jittered TTLs so a million keys written at deploy time do not expire in the same second. Cache 'not found' with a short TTL to stop lookups of nonexistent ids hammering the database. Compute what the database absorbs if the cache disappears: at 90% hit ratio, losing the cache is a 10x read spike.",
+   "minutes": 40,
+   "resource": {
+    "label": "Redis docs - Key eviction (maxmemory-policy)",
+    "url": "https://redis.io/docs/latest/develop/reference/eviction/"
+   }
+  },
+  {
+   "name": "HTTP and CDN caching semantics: Cache-Control, ETag, Vary and purge",
+   "learn": "Use the directives precisely: `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=30, stale-if-error=600` for shared caches, `private` for per-user responses, `no-store` for anything with secrets; hashed static assets get `max-age=31536000, immutable`. Implement conditional requests: `ETag` plus `If-None-Match` returns 304 and saves bandwidth but not compute unless the ETag is cheap to derive. Understand `Vary`: omit `Vary: Accept-Encoding` and you serve gzip to a client that cannot decode it; omit `Vary: Authorization` (or fail to key on tenant) on a CDN-cached API response and one tenant sees another's data. Know the purge models: URL purge is exact and slow at scale, surrogate-key or tag purge invalidates every object tagged `tenant:42` in one call. Apply to DefenderMate: Next.js `_next/static` is immutable, the tenant branding/config endpoint gets a short `s-maxage` with an ETag, and nothing under `/api/conversations` is ever shared-cacheable.",
+   "minutes": 30,
+   "resource": {
+    "label": "MDN - HTTP caching",
+    "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching"
+   }
+  },
+  {
+   "name": "Read replicas, replication lag and read-your-writes",
+   "learn": "Streaming replication is the first scale-out step for reads and the first place users see 'my data disappeared'. Know the `synchronous_commit` levels (`off`, `local`, `remote_write`, `on`, `remote_apply`) and `synchronous_standby_names`: only `remote_apply` guarantees a replica read sees the committed write, and it charges every commit a network round trip. Measure lag with `pg_stat_replication` (`write_lag`, `flush_lag`, `replay_lag`) and on the standby `pg_last_wal_replay_lsn()`; decide about `hot_standby_feedback` (prevents query cancellation on the replica, causes bloat on the primary). Route reads by consistency requirement: writes and anything read-after-write go to the primary; pin a session to the primary for N seconds after it writes, or record the commit LSN in the response and have the replica route compare it with `pg_last_wal_replay_lsn()` before serving; send list views, dashboards and analytics to replicas. Rehearse the failure: a user posts a message, the next GET hits a replica 300 ms behind, the message is missing, the UI retries the POST and creates a duplicate.",
+   "minutes": 35,
+   "resource": {
+    "label": "PostgreSQL docs - High Availability, Load Balancing, and Replication",
+    "url": "https://www.postgresql.org/docs/current/high-availability.html"
+   }
+  },
+  {
+   "name": "Partitioning and sharding: key choice, hash vs range, rebalancing and scatter-gather",
+   "learn": "Partition inside one Postgres before sharding across many: `PARTITION BY RANGE (created_at)` for append-heavy time series such as `llm_calls` and `audit_log` (retention becomes `DETACH PARTITION` + `DROP` instead of a week-long DELETE), `PARTITION BY HASH (tenant_id)` to spread a hot table; partition pruning only happens when the partition key appears in the WHERE clause, so every query path must carry it. Shard across databases only when the single primary's write throughput, working set or blast radius forces it, and pick the key by three rules: high cardinality, present in every hot query, spreads writes. Hash keys spread evenly but kill range scans; range keys keep locality but make the newest range the hottest (a `created_at` shard key puts every write on one shard). Use consistent hashing with virtual nodes so rebalancing moves a fraction of keys, and study Redis Cluster's 16384 fixed hash slots and `{tenant}` hash tags as the concrete model for slot-based resharding without a stop-the-world. Anything not keyed by the shard key becomes scatter-gather: the slowest shard defines p99, and secondary indexes are either local (query every shard) or global (async, eventually consistent).",
+   "minutes": 45,
+   "resource": {
+    "label": "PostgreSQL docs - Table Partitioning",
+    "url": "https://www.postgresql.org/docs/current/ddl-partitioning.html"
+   }
+  },
+  {
+   "name": "Hot keys, skew and the noisy-neighbour tenant",
+   "learn": "Detect skew before customers do: per-partition-key consumption in DynamoDB via CloudWatch Contributor Insights, per-partition end offsets in Kafka via `rpk topic describe -p`, hot Redis keys via `redis-cli --hotkeys` (requires an LFU policy) or `MONITOR` samples, per-tenant row counts and QPS in Postgres. Know the canonical hard ceiling, DynamoDB's 3,000 RCU and 1,000 WCU per physical partition, so 'one hot tenant' has a number attached. Mitigate in order of cost: cache the hot object; per-tenant rate limits so one bulk import cannot starve 499 tenants; write sharding (append `#0..N` to the key and fan in on read); move the whale tenant to its own shard or cell via a tenant-to-shard directory; split the partition key. State the price of each mitigation (write sharding makes reads N times more expensive; a directory becomes a critical dependency).",
    "minutes": 25,
    "resource": {
-    "label": "GitHub - anthropics/anthropic-cookbook (tool use and structured extraction recipes)",
-    "url": "https://github.com/anthropics/claude-cookbooks"
+    "label": "DynamoDB - Best practices for designing and using partition keys",
+    "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html"
    }
   },
   {
-   "name": "Strict JSON Schema modes and the subset they actually enforce",
-   "learn": "With OpenAI's response_format {\"type\": \"json_schema\", \"json_schema\": {\"name\": ..., \"schema\": ..., \"strict\": true}}, constrained decoding guarantees the output parses and matches the shape - but only over a subset of JSON Schema: every object needs \"additionalProperties\": false, every property must appear in required (optionality is expressed as a [\"string\", \"null\"] type union, not by omission), and most value constraints (minimum, maxLength, pattern, format) are not enforced by the decoder. Anthropic's strict output-schema mode carries the same class of restriction. The operating rule: the schema guarantees shape, your validator guarantees meaning. Enum values outside a tenant's taxonomy, dates in the wrong century and confidence scores of 1.7 all still arrive as perfectly valid JSON.",
-   "minutes": 20,
+   "name": "Multi-tenant data layouts: pooled, siloed, bridge and cells",
+   "learn": "Compare the four layouts with numbers for 500 tenants: pooled (shared tables + `tenant_id` + RLS, one migration, largest blast radius, noisy neighbours), schema-per-tenant (500 schemas means 500x migration fan-out and catalog bloat), database-per-tenant (isolation and per-tenant restore, but 500 connection pools and 500 backups), and cell-based (a full stack per group of tenants, tenant-to-cell directory, a bad deploy or hot tenant hurts one cell). Recommend tiers: pooled for standard tenants, siloed for regulated or whale tenants, and make the tenant directory (`tenant_id -> cell, shard, region, tier, limits, keys`) an explicitly cached, versioned service because every request depends on it. Study Citus's distribute-by-tenant model as the middle path: tables co-located on the `tenant_id` distribution column so joins stay local, small reference tables replicated to every node. Know the tenant-move procedure (dual-write or CDC into the destination, backfill, verify counts, cut over behind the directory, keep the source read-only for rollback) because a customer will ask for it.",
+   "minutes": 35,
    "resource": {
-    "label": "OpenAI Platform docs - Structured Outputs",
-    "url": "https://developers.openai.com/api/docs/guides/structured-outputs"
+    "label": "Citus docs - Multi-tenant Applications",
+    "url": "https://docs.citusdata.com/en/stable/use_cases/multi_tenant.html"
    }
   },
   {
-   "name": "Writing schemas the model reliably obeys",
-   "learn": "Field order is causal: JSON is generated left to right, so {\"reasoning\": ..., \"label\": ...} gives you chain-of-thought before the decision while the reverse commits to a label and then rationalises it. Prefer enums over free strings, flat over deeply nested, and avoid anyOf/oneOf unions and recursive definitions, which degrade both adherence and decoder support. Use field descriptions as instructions (they are read by the model), ISO 8601 strings for dates rather than nested date objects, bounded arrays with maxItems, and only include a confidence field if you have written down what the number means and how you will calibrate it. Then test the schema itself: hand-write or generate 20 valid instances and assert your parser accepts every one before you ever call a model.",
-   "minutes": 20,
+   "name": "Queues and async work: delivery semantics, visibility timeouts, ordering, DLQs",
+   "learn": "Put every LLM call and document ingest behind a queue for three reasons you can state: decouple request latency from processing, absorb bursts up to the queue's depth, retry without the user. Define the semantics precisely: at-most-once (ack before work), at-least-once (ack after work, duplicates on crash), and 'exactly once' meaning at-least-once plus an idempotent consumer with a dedup key, or Kafka transactions for Kafka-to-Kafka only. SQS mechanics: `VisibilityTimeout` must exceed worst-case processing or be extended with `ChangeMessageVisibility` on a heartbeat, `maxReceiveCount` in the redrive policy moves poison messages to the dead-letter queue, FIFO queues with `MessageGroupId` give per-tenant ordering at a 300 requests/s per-queue ceiling (3,000 batched) unless high-throughput mode is enabled. Kafka mechanics: the partition is the ordering unit, a rebalance pauses the group, commit the offset after the side effect, and `max.poll.interval.ms` (default 300 s) kicks slow consumers out. Design the DLQ path: who is paged, how a message is inspected and replayed, and how a poison message in a FIFO group is quarantined so it stops blocking the tenant behind it.",
+   "minutes": 40,
    "resource": {
-    "label": "Understanding JSON Schema (json-schema.org)",
-    "url": "https://json-schema.org/understanding-json-schema/reference"
+    "label": "Amazon SQS - Visibility timeout",
+    "url": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html"
    }
   },
   {
-   "name": "Validate, repair once, then fail: the parse boundary",
-   "learn": "Every LLM call site returns a typed object or raises - nothing in between reaches the customer's system of record. Use Pydantic v2 model_validate_json for shape and field_validator / model_validator for semantics that no schema can express: end_date >= start_date, label in this tenant's taxonomy, entity IDs that exist in the customer's database. On ValidationError, feed error.errors() back as one repair turn and stop; an unbounded repair loop is a cost incident waiting to happen. Track repair_rate as a first-class metric next to accuracy - a rising repair rate is the earliest signal of prompt or model drift. The caller, not the parser, decides what a hard failure means: fallback model, queue for human review, or 422 to the customer's integration.",
-   "minutes": 20,
+   "name": "Backpressure, load shedding and queue sizing",
+   "learn": "Size with Little's Law (L = lambda x W): at 25 jobs/s and 8 s per Claude call you need ~200 concurrent workers or the queue grows without bound; an unbounded queue converts an overload into a latency disaster hours later when it finally drains and re-runs thousands of jobs nobody wants. Shed early and cheaply: bound concurrency at the balancer or gateway and return 503 with `Retry-After` when exceeded, keep separate queues and worker pools for interactive vs batch so a bulk import never queues in front of a chat message, and enforce per-tenant quotas so fairness is a property of the system rather than luck. Propagate deadlines (`X-Request-Deadline` or gRPC deadlines) and drop work whose caller has already timed out. Recognise the cascading pattern from the SRE book: one server dies, survivors take its load and slow down, clients retry, the retries kill the survivors.",
+   "minutes": 35,
    "resource": {
-    "label": "Pydantic documentation (v2)",
-    "url": "https://pydantic.dev/docs/validation/latest/get-started/"
+    "label": "Google SRE Book - Handling Overload",
+    "url": "https://sre.google/sre-book/handling-overload/"
    }
   },
   {
-   "name": "Determinism controls and model snapshot pinning",
-   "learn": "temperature: 0 is greedy sampling, not determinism - batching, hardware and routing still produce run-to-run variation of roughly one to a few percent on borderline cases, so build for variance instead of pretending it is absent. Pin the dated snapshot string in prompt front-matter (for example claude-sonnet-4-5-20250929) rather than a moving alias, pin the anthropic-version header, set temperature explicitly and leave top_p unset (setting both is discouraged and interacts unpredictably). Make the eval runner record the resolved model id from the response body rather than the one you requested, so an aliased or silently upgraded model shows up in the results file. Treat a model alias in production exactly like :latest on a container image.",
-   "minutes": 15,
+   "name": "Transactional outbox and CDC: publishing events without dual-write bugs",
+   "learn": "Dual-write (commit to Postgres, then publish to Kafka) loses events when the process dies between the two and publishes phantom events when the commit rolls back. Fix with an outbox table written in the same transaction as the business row and drained by a relay: either a poller (`SELECT ... FROM outbox ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED`) or Debezium's outbox event router reading the WAL (`wal_level=logical`, columns `id`, `aggregatetype`, `aggregateid`, `type`, `payload`, routing to `outbox.event.<aggregatetype>` keyed by `aggregateid` so a tenant's or document's events stay ordered). The relay is at-least-once, so consumers still need idempotency (topic 33's dedup drill). Know the operational hazards: a stalled replication slot retains WAL until the primary's disk fills, and a poller with no index on the unsent flag becomes the slowest query in the database. Map it to DefenderMate: `document.uploaded` fans out to ingestion, `message.created` to the classifier and analytics.",
+   "minutes": 30,
    "resource": {
-    "label": "Claude docs - Models overview (snapshot ids and deprecations)",
-    "url": "https://platform.claude.com/docs/en/models/overview"
+    "label": "Debezium docs - Outbox Event Router",
+    "url": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html"
    }
   },
   {
-   "name": "Building the regression set: case format, stratification, provenance",
-   "learn": "One JSONL file, one case per line: {id, inputs{}, expected{}, tags[], source, added_at, notes}. Populate from three streams and no others: every production failure the customer has ever reported, converted into a case on the day it is reported; a stratified sample across tenant, document type, language and length so no single slice dominates; and deliberately degenerate inputs (empty document, 200-page document, wrong language, PII-dense, an embedded instruction telling the model to ignore its instructions). A sharp 120-case set beats a vague 1,000-case one. Scrub before committing - real customer text in a fixtures directory is a data-handling problem, so redact, synthesise, or keep fixtures in a separate private store referenced by hash. The source field is what lets you answer 'which incident produced this test' a year later.",
+   "name": "Rate limiting: algorithms, placement and the 429 contract",
+   "learn": "Know the algorithms and their exact failure: fixed window (a 2x burst straddling the boundary), sliding window log (exact, O(n) memory per key), sliding window counter (O(1), approximate), token bucket (rate plus burst, the default for APIs), leaky bucket and GCRA (a single timestamp per key, no burst above rate). Place limits at three layers with different keys: edge via Nginx `limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;` and `limit_req zone=api burst=20 nodelay;` (set `limit_req_status 429;` because the default is 503), gateway per API key, and application per tenant in Redis with an atomic Lua script or `MULTI`/`EXEC` on `rl:{tenant}:{window}`. Apportion inherited upstream limits: the Claude tokens-per-minute budget is shared by 500 tenants, so the per-tenant limiter must sum to less than the upstream ceiling and reserve headroom for retries. Honour the response contract: 429 with `Retry-After` and the IETF `RateLimit-Policy` / `RateLimit` headers (older drafts used `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`) so client SDKs back off correctly, and distinguish 429 (you asked too often) from 503 (we are overloaded).",
+   "minutes": 40,
+   "resource": {
+    "label": "nginx - ngx_http_limit_req_module (limit_req_zone, burst, nodelay, limit_req_status)",
+    "url": "https://nginx.org/en/docs/http/ngx_http_limit_req_module.html"
+   }
+  },
+  {
+   "name": "Timeouts, retries, backoff with jitter and circuit breakers",
+   "learn": "Every hop gets a timeout shorter than its caller's, so a 60 s user budget becomes 55 s at the API, 50 s at the worker and 45 s at the model call, and nothing waits on a caller that has already gone. Retry only idempotent operations, only on retryable errors (connection reset, 429, 503, 529), and only within a retry budget (retries never exceed ~10% of first attempts) so a partial outage cannot triple load. Use full jitter (`sleep = random(0, min(cap, base * 2^attempt))`) rather than plain exponential so retries do not arrive in synchronised waves. Add a circuit breaker per dependency (closed, open after N failures in a window, half-open with a single probe) to fail fast instead of consuming every worker's timeout on a dead dependency, and reserve hedged requests for read paths where duplicate work is safe. Multiply the layers to see a retry storm: client SDK 3x times API 3x times queue consumer 5x is 45 attempts per failed call.",
+   "minutes": 30,
+   "resource": {
+    "label": "Amazon Builders' Library - Timeouts, retries, and backoff with jitter",
+    "url": "https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"
+   }
+  },
+  {
+   "name": "Unique IDs at scale: UUIDv4 vs UUIDv7, Snowflake, ULID, sequences",
+   "learn": "Random UUIDv4 primary keys scatter inserts across the whole B-tree, causing page splits, WAL amplification and cache misses on a large `messages` table; UUIDv7 (RFC 9562: 48-bit Unix milliseconds, then version, then 74 bits of random or counter) and ULID are k-sortable so inserts append at the right-hand edge, and PostgreSQL 18 ships `uuidv7()` natively. Know the Snowflake layout and its arithmetic: 41-bit millisecond timestamp (about 69 years), 10-bit worker id (1,024 generators), 12-bit sequence (4,096 ids per ms per worker), and the two operational problems, assigning worker ids without collision (ZooKeeper, StatefulSet ordinal, database lease) and refusing to issue ids when the clock moves backwards. `bigserial` sequences are simplest on one primary but leak volume to customers and do not survive sharding; sharded systems either embed the shard id in the key or use a k-sortable id plus a directory. Decide per table: `bigint` sequence for internal joins, UUIDv7 for anything externally visible or destined for a shard.",
+   "minutes": 30,
+   "resource": {
+    "label": "RFC 9562 - Universally Unique IDentifiers (UUIDv7)",
+    "url": "https://www.rfc-editor.org/rfc/rfc9562.html"
+   }
+  },
+  {
+   "name": "Idempotency keys and safe write APIs",
+   "learn": "Clients send an `Idempotency-Key` (a UUID they generate) on every POST that creates something; the server stores key, tenant/user scope, a fingerprint of the request body and the final response, with a TTL (Stripe keeps them 24 hours). A repeat with the same key and same body replays the stored status and body; the same key with a different body is rejected (Stripe returns 400, you may choose 422); a concurrent duplicate while the first is still running is fenced with `SET idem:{tenant}:{key} NX PX 30000` or a unique index on the key column and told 409 to retry later. Scope keys per tenant so two tenants using the same UUID cannot collide or leak. Chain it with consumer dedup so a retried webhook or a re-driven queue message cannot create a second document, and store the key with the row so support can answer 'why do I have two of these'.",
    "minutes": 25,
    "resource": {
-    "label": "GitHub - openai/evals (eval registry and JSONL case format)",
-    "url": "https://github.com/openai/evals"
+    "label": "Stripe API reference - Idempotent requests",
+    "url": "https://docs.stripe.com/api/idempotent_requests"
    }
   },
   {
-   "name": "Deterministic graders before LLM judges",
-   "learn": "Climb the assertion ladder cheapest-first and stop as soon as it discriminates: schema validity, exact or normalised match on enums and IDs, set precision/recall/F1 for multi-label extraction, numeric tolerance, must-contain and must-not-contain regexes (banned phrases, no leaked system prompt, no 'XXXX' placeholder, no hallucinated URL), JSONPath field equality, and hard ceilings on latency and output tokens. Only genuinely open-ended outputs need a model-graded judge, and that machinery - judge prompts, rubrics, human agreement calibration - is topic 53; do not build it here. Aggregate per tag, never as one number, so the report says 'recall fell only on tenant=acme, doc_type=invoice'. With imbalanced classes report precision and recall per class; accuracy on a 5% positive rate is a number that cannot go down.",
+   "name": "Search: inverted indexes, analyzers, BM25, Postgres FTS and when to add a search engine",
+   "learn": "An inverted index maps term to posting list; the analyzer (tokenise, lowercase, stop words, stem) runs at index time and query time and must be identical or recall silently collapses. Understand BM25 versus TF-IDF in one sentence each (term-frequency saturation and document-length normalisation) so you can explain a ranking to a customer. Start in Postgres: a stored generated column `GENERATED ALWAYS AS (to_tsvector('english', body)) STORED` with a GIN index, `@@ websearch_to_tsquery('english', $1)`, `ts_rank_cd` for ordering, and `pg_trgm` with `gin_trgm_ops` for fuzzy and `ILIKE '%x%'`; always AND a `tenant_id` predicate and let RLS enforce it. Move to OpenSearch or Elasticsearch when you need facets, relevance tuning, highlighting, or search QPS that competes with OLTP, and know the costs: near-real-time visibility governed by `refresh_interval` (1 s default, so 'I just uploaded it and cannot find it'), mapping changes requiring a reindex behind an alias, tenant isolation via a mandatory `term` filter on `tenant_id` or an index per whale tenant. Hybrid retrieval that fuses BM25 with vector search via reciprocal rank fusion is topic 49.",
+   "minutes": 40,
+   "resource": {
+    "label": "PostgreSQL docs - Full Text Search",
+    "url": "https://www.postgresql.org/docs/current/textsearch.html"
+   }
+  },
+  {
+   "name": "Telling the failure story: trigger, propagation, detection, mitigation, design change",
+   "learn": "Close every design with a three-to-five-minute 'what breaks first' narrative built from the cascading-failure catalogue: a replica lags and users see vanished messages; Redis restarts and the database takes a 10x read spike; one tenant's bulk import fills the classifier queue for everyone; a deploy with a short grace period leaves the balancer sending to dead pods. Use a fixed structure so it lands under time pressure: trigger, propagation (why it spread instead of staying local), detection (which SLI moved, which alert fired, how long until a human knew), the 3 a.m. mitigation (shed, fail over, flip a flag, scale), and the design change that prevents recurrence, each with a number attached (lag in ms, queue depth, minutes to detect). Rehearse aloud until the story takes under five minutes and names at least one thing you would monitor from day one.",
    "minutes": 25,
    "resource": {
-    "label": "promptfoo documentation - Introduction",
-    "url": "https://www.promptfoo.dev/docs/intro/"
-   }
-  },
-  {
-   "name": "Baselines, thresholds and a flakiness budget",
-   "learn": "Commit baseline.json holding per-metric and per-tag scores plus the model snapshot, prompt hash and date that produced them. CI compares the current run to the baseline, fails on any regression beyond epsilon, and moving the baseline requires an explicit --accept-baseline commit that a human reviews. Derive epsilon empirically: run the suite three to five times against an unchanged prompt, compute the per-metric standard deviation, and gate at roughly two sigma. A gate tighter than measured noise produces false failures, and a team that sees four false failures marks the check non-required - at which point you have no gate at all. Track per-case flip history: a case that flips on 30% of runs is not a regression signal, it is a bad case, so sharpen it or move it to a flaky tag that reports without gating.",
-   "minutes": 20,
-   "resource": {
-    "label": "pytest documentation",
-    "url": "https://docs.pytest.org/en/stable/"
-   }
-  },
-  {
-   "name": "Running the suite: pytest, concurrency, response caching, cost caps",
-   "learn": "Load cases in conftest.py and drive them with @pytest.mark.parametrize so each case is an individually named test that CI can report by id. Get concurrency from pytest-xdist -n 8 or an asyncio.Semaphore, and honour 429 with exponential backoff plus jitter and the retry-after header rather than hammering. Cache responses keyed on sha256(model + rendered_prompt + params + schema) into a local directory or bucket so re-running an unchanged prompt is free and a reviewer can reproduce the run offline; keep a --no-cache flag for the authoritative run. Emit results.jsonl plus a markdown summary table, and abort the whole run when accumulated usage crosses a configured USD ceiling so a retry loop cannot burn the customer's budget overnight. For large suites, the Message Batches API trades latency for roughly half the cost.",
-   "minutes": 25,
-   "resource": {
-    "label": "pytest how-to - Parametrizing tests",
-    "url": "https://docs.pytest.org/en/stable/how-to/parametrize.html"
-   }
-  },
-  {
-   "name": "CI wiring: a gate that runs and does not get switched off",
-   "learn": "A GitHub Actions workflow on pull_request with paths filters ('prompts/**', 'src/llm/**', 'evals/**'), a concurrency group that cancels superseded runs, the API key from repository secrets, permissions scoped to contents: read and pull-requests: write, and never pull_request_target on a repo that takes fork PRs. Run two tiers: a smoke suite of ~20 stratified cases finishing in about a minute as a required check on every PR, and the full suite nightly on schedule plus on-demand via workflow_dispatch. Post the score table as a sticky PR comment showing the delta against baseline, upload results.jsonl as an artifact, and make the failure message name the three worst-regressed case IDs - a red X with no explanation gets overridden, a red X that says 'case inv-0142 flipped from correct to missing_total' gets fixed.",
-   "minutes": 25,
-   "resource": {
-    "label": "GitHub Actions documentation",
-    "url": "https://docs.github.com/en/actions"
-   }
-  },
-  {
-   "name": "The prompt pull request: changelog, review checklist, bisect",
-   "learn": "Keep a CHANGELOG.md per prompt in Keep a Changelog form: version, date, what changed, why (the customer ticket number), the metric delta from the eval run, and the model snapshot it was validated against. Give reviewers a fixed checklist: is the rendered-output diff attached, is the output schema unchanged or was MAJOR bumped, was a new regression case added for the bug being fixed, is the baseline delta explained, is the rollback version named. Because prompts are ordinary files, git log -p prompts/classify/ and git bisect actually work - practise bisecting a twelve-commit range to find which change moved recall on one tenant, because that drill is what converts 'prompts in Git' from a filing convention into a debugging capability.",
-   "minutes": 15,
-   "resource": {
-    "label": "Keep a Changelog 1.1.0",
-    "url": "https://keepachangelog.com/en/1.1.0/"
-   }
-  },
-  {
-   "name": "Runtime registry, rollback and trace linkage",
-   "learn": "At runtime, resolve prompts through a registry keyed by (prompt_id, version) with the active version per environment held in configuration, not in code. Log prompt_id, prompt_version, prompt_hash, model snapshot and schema_version on every call and persist them on the row your application writes - DefenderMate's llm_calls table - so 'which prompt produced this wrong answer in the customer's audit log' is one SQL query rather than an archaeology project. Rollback then means flipping a config value to v(N-1) and redeploying config, which is minutes, not reverting and rebuilding a service. If you adopt a hosted prompt registry such as Langfuse, keep Git as the single source of truth and sync one way into it; two writable sources of truth produce a production prompt that never appeared in any code review.",
-   "minutes": 20,
-   "resource": {
-    "label": "Langfuse documentation (prompt management and tracing)",
-    "url": "https://langfuse.com/docs"
-   }
-  },
-  {
-   "name": "Few-shot examples as versioned data, not prose",
-   "learn": "Store examples in examples/<prompt>/*.jsonl with an id per example and render them into <example> blocks at build time, instead of gluing them into the template body where they cannot be diffed, counted or attributed. Enforce four rules: examples must be drawn from the same distribution as production input; the set must include the negative or none-of-the-above case or the model will never emit it; formatting must be internally consistent, because models copy the format of examples far more strongly than they follow prose instructions; and any example used in the prompt is excluded from the regression set, otherwise you are grading on your own training data. Measure marginal value by running the suite at 0, 3 and 8 examples and keeping the smallest set that holds the score - every example is input tokens on every call forever.",
-   "minutes": 15,
-   "resource": {
-    "label": "Claude docs - Use examples (multishot prompting)",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#use-examples-effectively"
-   }
-  },
-  {
-   "name": "Prompt caching and prefix stability as a tested property",
-   "learn": "Mark cache breakpoints with cache_control: {\"type\": \"ephemeral\"} on a content block. Caching is prefix-based: everything before the breakpoint must be byte-identical between calls, so a timestamp, a request id, a tenant name or a shuffled example order anywhere in the system prompt silently destroys every hit. Order the request static to dynamic - tools, then system instructions, then long shared documents with the breakpoint after them, then the per-request user content. Verify with usage.cache_creation_input_tokens and usage.cache_read_input_tokens rather than assuming; the minimum cacheable prefix is around 1024 tokens (2048 on the smallest models), the default TTL is five minutes with a one-hour option, and you get at most four breakpoints. Put cache hit rate in the eval report next to accuracy so a prompt edit that quadruples cost fails CI like any other regression.",
-   "minutes": 20,
-   "resource": {
-    "label": "Claude docs - Prompt caching",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
-   }
-  },
-  {
-   "name": "Multi-tenant variants without forking the prompt",
-   "learn": "Never create classify_v3_acme.md. Compose instead: one base prompt plus a per-tenant overlay containing only the delta - taxonomy enum values, domain glossary, tone, redaction rules - stored as tenant configuration data and injected into one fixed, clearly delimited slot. The regression set then carries a tenant tag and CI runs base plus every overlay, so a base change that breaks tenant seven fails before merge rather than during their pilot. Enforce overlay limits in code: an overlay may extend enums and glossaries, it may not alter the output schema (that is a base MAJOR bump) and it may not contain text that overrides safety or grounding instructions. Decide deliberately where the overlay sits relative to the cache breakpoint: before it means a per-tenant cache, after it means one shared prefix and cheaper cold starts.",
-   "minutes": 20,
-   "resource": {
-    "label": "Claude docs - Giving Claude a role with a system prompt",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#give-claude-a-role"
-   }
-  },
-  {
-   "name": "Model migration drill and per-version cost budgets",
-   "learn": "When a new snapshot ships or the customer asks for a cheaper model, you do not 'try it in prod'. Branch, change only the model field in front-matter, run the full suite with response caching disabled, and produce a three-column table - old, new, delta - per tag, plus p50/p95 latency and input/output tokens and USD per case computed from usage (or estimated up front with the count-tokens endpoint, which is free and lets you price a change before spending). Expect specific breakages: prompts that leaned on prefill or brittle formatting, few-shot sets over-fitted to the previous model's verbosity, and stricter refusal behaviour on customer documents that read as adversarial. Record a per-prompt token budget in front-matter and fail CI when a version exceeds it, keep the previous snapshot pinned and runnable for instant rollback, and diary the published deprecation date sixty days ahead.",
-   "minutes": 20,
-   "resource": {
-    "label": "Claude docs - Token counting",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+    "label": "Google SRE Book - Addressing Cascading Failures",
+    "url": "https://sre.google/sre-book/addressing-cascading-failures/"
    }
   }
  ],
  "outcomes": [
-  "You can take any row in DefenderMate's llm_calls table and recover the exact prompt text, model snapshot and output schema that produced it, from Git, using only the logged prompt_id, prompt_version and prompt_hash.",
-  "You can run the smoke suite on a prompt change in under two minutes and get a per-tag score table with the delta against a committed baseline and the id of every case that flipped in either direction.",
-  "You can open a pull request that edits a prompt and have CI block the merge on a regression larger than two sigma, with the three worst-regressed case IDs named in the failure output and a sticky score comment on the PR.",
-  "You can return a validated typed object from every LLM call site, with schema violations counted as a repair_rate metric and semantic violations (bad enum, impossible date, unknown entity id) caught by validators rather than written into the customer's database.",
-  "You can convert a customer bug report into a labelled regression case, reproduce the failure locally, fix the prompt and show before/after scores on both that case and the full set within a single working session.",
-  "You can quantify a proposed model swap in one command: accuracy delta per tag, p50/p95 latency, tokens and USD per 1,000 documents, and the list of cases that only the old model gets right.",
-  "You can onboard a new tenant's taxonomy as an overlay without editing the base prompt, and prove from the CI run that every other tenant's scores were unchanged.",
-  "You can show a cache read/creation token ratio above 80% on the shared prefix and name three specific edits that would drop it to zero."
+  "You can run a 45-minute design of a stated system (DefenderMate at 500 tenants, or an unfamiliar prompt) against a visible clock and leave behind written requirements, a numbers table, a component diagram, two deep dives and a failure story without being prompted for any of them.",
+  "You can produce a capacity estimate in under five minutes from stated assumptions (average and peak QPS, storage per year, bandwidth, cache size for a target hit ratio, worker count from Little's Law) and name the component that saturates first with the number that proves it.",
+  "You can choose a load-balancing algorithm and connection-reuse configuration for a stated workload (short JSON calls vs long SSE streams) and write the Nginx upstream block or ALB target-group settings, including health-check thresholds and a deregistration delay that matches the pod's grace period.",
+  "You can specify a cache layer end to end (key schema with tenant and version, TTL with jitter, eviction policy, invalidation trigger, stampede protection) and state the database load if the cache is lost.",
+  "You can pick a partition or shard key for a given query mix, state the hot-spot risk and which queries become scatter-gather, and describe the rebalancing and tenant-move procedure step by step.",
+  "You can design a per-tenant rate limiter (algorithm, storage, key, 429 and header contract) and a retry policy (timeouts per hop, jitter, retry budget, circuit breaker) that together provably cannot amplify a partial outage, and show it with a k6 run.",
+  "You can design an async pipeline (outbox, queue with visibility timeout and DLQ, idempotent consumer) and say exactly what happens to a message on a crash at each of the five points between the user's POST and the stored result.",
+  "You can decide between Postgres full-text search and a dedicated search engine for a stated workload and write either the generated tsvector column with its GIN index or the index mapping and mandatory tenant filter."
  ],
  "failureModes": [
-  "A prompt is tweaked to satisfy one loud customer complaint and shipped without an eval run; recall on the other three document types drops five points and nobody notices until the customer's monthly summary shows findings that stopped appearing two weeks earlier.",
-  "The same system prompt exists as an f-string in three services and has drifted into three different versions, so the incident review cannot establish which text produced the output the customer is angry about.",
-  "Production pins a moving model alias rather than a dated snapshot; the alias advances, output formatting shifts slightly, the downstream parser starts writing nulls into the customer's CRM overnight, and there is no deploy in the timeline to correlate against.",
-  "The regression set was assembled from cases the current prompt already passes, so it reads 100% forever, provides zero signal on every PR, and the first genuine edge case is still discovered by the customer.",
-  "Someone prepends a timestamp or the tenant name to the system prompt for 'better context'; cache hit rate goes to zero, per-document cost quadruples, and it surfaces a month later as a billing question rather than as a failing test.",
-  "The eval gate is set at exactly the baseline with no noise allowance, produces four false failures in a fortnight, and is quietly removed from required checks - after which prompt changes merge unreviewed and the gate exists only in the runbook.",
-  "Real customer PDFs are committed as eval fixtures to make runs reproducible; the repo is later shared with a partner team or a contractor and a reproducibility decision has become a data-handling breach under the customer's DPA."
+  "A Redis restart during a deploy expired every key at once; thousands of concurrent misses hit Postgres, connections pinned at `max_connections`, and the API served 500s for twenty minutes even though the database itself was healthy; jittered TTLs and a single-flight lock would have held.",
+  "The customer's Nginx ran round-robin with no upstream `keepalive` in front of SSE streams; every stream opened a fresh TCP connection and long conversations pinned one pod while others idled, tripling p99 time-to-first-token under mild load until `least_conn` and `keepalive 32` were added.",
+  "Reads were routed to a replica 400 ms behind the primary; a user posted a message, the conversation list did not show it, the frontend retried the POST without an idempotency key, and the tenant saw duplicates that support then had to delete by hand.",
+  "`created_at` was chosen as the shard key for `llm_calls`; every write landed on the newest shard, and one tenant's overnight bulk re-classification saturated that shard for all 500 tenants while the other shards sat idle.",
+  "Retries in the client SDK (3x), the API (3x) and the queue consumer (5x) compounded to 45 attempts per failed call during an upstream 529 event, exhausting the shared Claude rate limit for every tenant and leaving a backlog that took six hours to drain after the upstream recovered.",
+  "Deregistration delay was 300 s but `terminationGracePeriodSeconds` was 30 s, so on every rollout the ALB kept routing to pods that had already been SIGKILLed; the resulting five minutes of 502s per deploy were blamed on 'the network' for a month.",
+  "A CDN-cached per-tenant branding endpoint lacked `Vary` and a tenant-aware cache key; the first tenant to request after a purge had its logo and name served to every other tenant for the next five minutes."
  ],
  "interviewQuestions": [
-  "Three customers each need a slightly different classification taxonomy on the same extraction prompt. Walk me through your versioning design: what lives in Git, what lives in tenant config, what forces a major version bump, how CI proves a base-prompt change did not break tenant two, and how you stop this becoming three forked prompts in six months.",
-  "A customer says the extractor 'got worse this week' and you have no eval set. What do you do in the first hour, what do you do in the first day, and what do you put in place so that next time this question is answerable in five minutes with evidence?",
-  "Your structured output is a forced tool call with a JSON schema. The model returns valid JSON that is semantically wrong: a date in the wrong field and an enum value that does not exist in that tenant's taxonomy. Tell me exactly where each of those is caught, what the caller does in each case, and what you would have to change if the customer required zero human review.",
-  "Design the CI gate for prompt changes end to end. What is the pass threshold and how did you choose the number, what is fast enough to be a required check on every PR versus what runs nightly, what stops it burning money, and what specifically prevents the team from marking it non-required after the third false failure?",
-  "A new model snapshot is announced that is 40% cheaper and the customer wants it in production next week. Give me the migration plan, the evidence you would put in front of their engineering lead, and the two things you expect to break that will not show up as a schema error.",
-  "Explain prompt caching to a customer's architect who believes it is a semantic cache that will answer similar questions for free. What is actually cached, what invalidates it, how do you measure hit rate from the API response, and give me a one-line prompt change that quietly destroys it.",
-  "Your regression set has 200 cases and 12 of them flip between runs at temperature 0. Explain why that happens mechanically, and tell me what you do with each of those 12 - because 'set temperature lower' is not an answer."
+  "Design DefenderMate for 500 tenants: 100k users, 200k messages a day, each message one Claude call with a 60-second user budget, plus 50k document uploads a day. Walk me through the queues, the shard or partition key, the per-hop latency budget, and the one component you expect to saturate first, with numbers.",
+  "A customer says 'just add read replicas' to fix a slow dashboard and a slow conversation view. When does that help, when does it not, and how do you handle the user who just posted a message and immediately reloads? Show me the routing rule and how you would measure lag.",
+  "You have a Redis-backed per-tenant limiter and an upstream Claude tokens-per-minute limit shared by all tenants. Design the fairness policy: how do you apportion the upstream budget, what does a tenant see when they hit their share, and how does a bursty tenant not starve a steady one? What headers do you return?",
+  "Debug: after every deploy, 502s spike for about four minutes then recover. The path is ALB to Kubernetes pods running FastAPI. Give me the three most likely causes, the exact ALB access-log fields and pod events you would check for each, and the fix.",
+  "Explain the transactional outbox pattern. Why is writing to Postgres and then publishing to Kafka broken, what does the outbox change, why do consumers still need idempotency, and what happens to the primary if the Debezium replication slot stalls for a day?",
+  "The `messages` table has reached 2 TB and the customer wants sub-100 ms conversation loads. Walk through partitioning versus sharding: how you choose the key, which queries break, how you migrate with zero downtime, and how you prove afterwards that it worked.",
+  "A tenant reports two search problems: newly uploaded documents are missing for up to a minute, and once a document from another tenant appeared in results. Diagnose both, name the exact settings or query clauses involved, and say what you would monitor to catch each before the customer does."
  ],
- "proofOfWork": "A public repository (`defendermate-prompts`, or the `prompts/` package extracted from DefenderMate) that a stranger can clone and exercise in under five minutes with a single `make eval`, including a fake-provider mode that needs no API key so a reviewer can run it for free. It contains: `prompts/<id>/vN.md` files with YAML front-matter (dated model snapshot, sampling params, declared variables, token budget, output schema reference) and a per-prompt `CHANGELOG.md`; `schemas/` with Pydantic v2 models that generate the JSON Schemas used as tool `input_schema`, so parser and schema cannot drift; `evals/cases/*.jsonl` with at least 120 labelled cases tagged by tenant, document type and difficulty, each carrying a `source` field so the handful that originated in real bug reports are traceable, all scrubbed or synthesised; a grader module implementing the deterministic assertion ladder with per-tag precision and recall; `baseline.json` plus a `bin/eval` runner with response caching, bounded concurrency, a USD cost ceiling and an explicit `--accept-baseline` path; and a GitHub Actions workflow that runs the smoke suite on `pull_request` behind path filters and posts a sticky score-delta comment. The README shows one real pull request where the gate failed, the failure message naming the regressed case IDs, and the follow-up commit that fixed it, alongside a short `MIGRATION.md` recording an actual model-snapshot swap with the old-versus-new table for accuracy per tag, p95 latency, tokens and USD per 1,000 documents. The thing that convinces an interviewer is not the harness - it is the CHANGELOG showing eight prompt versions, each with a metric delta and the customer ticket that motivated it."
+ "proofOfWork": "A public 'design dossier' repository that goes beyond the six written designs: (1) a numbers workbook for DefenderMate at 500 tenants in which every capacity figure is derived from a named assumption cell, with a sensitivity column showing what changes at 5,000 tenants and which component saturates first at each scale; (2) an executable slice in docker-compose: Nginx with `least_conn`, upstream `keepalive` and a documented drain sequence, Redis running a Lua sliding-window per-tenant limiter that returns 429 with `Retry-After` and `RateLimit` headers, Postgres with a range-partitioned `llm_calls` table, a streaming replica, and a lag probe reading `pg_stat_replication`, plus an outbox table drained into Redpanda; (3) three k6 scripts that reproduce three failure stories (cache-flush stampede, replica-lag read-your-writes, layered retry storm) with before/after Grafana screenshots showing the mitigation working; and (4) a recorded 45-minute self-run of the DefenderMate design against a timer, scored on a written rubric (requirements, numbers, diagram, two deep dives, failure story) with timestamps for each section. A reviewer can clone the repo, run `make demo`, and watch each failure story happen and then not happen."
 }

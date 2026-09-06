@@ -1,227 +1,227 @@
 {
  "i": 28,
- "topic": "TypeScript and Node for FDEs",
+ "topic": "FastAPI in production: DI, settings, lifespan, background tasks, workers, deployment",
  "track": "E. Backend and Data",
  "month": 4,
- "hours": 8,
- "why": "Customer platform teams, internal tools, agent tooling and nearly every vendor SDK (including the MCP reference SDK) are TypeScript-first, so a Python-first FDE who cannot read a tsconfig, diagnose an ESM import error or explain why a Node service stalls loses the platform team's trust in week one. The fastest way to build an integration or demo UI over a customer's API that survives their next backend deploy is a client whose types are generated from their OpenAPI document and whose boundaries are validated at runtime. This topic gets you to the point where you ship a small, tested Node service and a typed MCP client without asking the customer's frontend lead for help.",
+ "hours": 8.0,
+ "why": "An FDE ships the service into the customer's cluster and is the person standing next to their platform team when it returns 502s on every deploy or freezes at 09:00 when one tenant sends a slow prompt; the HTTP layer's worker model, timeouts, shutdown sequence and health semantics are exactly where a working demo dies on contact with a real load balancer and real traffic. FastAPI is the default Python service layer for LLM-backed systems on Palantir, Anthropic and Databricks deployed teams, so the interview loop probes whether you know its DI, lifespan and threadpool mechanics at the level of flags and syscalls, not tutorials. Getting this right is what turns Kaupex from a prototype into something a customer SRE will accept a pager for.",
  "prerequisites": [
-  "Modern JavaScript fluency: closures, classes and prototypes, `this` binding, destructuring, Promises and async/await; you should be able to read an unfamiliar Node codebase before you type it",
-  "Topic 26 (FastAPI in production): you will consume its `/openapi.json`, so know how Pydantic models, `Optional`, and `response_model` map to schema `required`, `nullable` and `anyOf`",
-  "Topic 0 (Shell mastery): stdin/stdout/stderr separation, exit codes and pipes; the MCP stdio transport is exactly this contract",
-  "Topic 2 (Networking): HTTP keep-alive, idle timeouts, TLS and what an ALB does to a connection Node has already closed",
-  "JSON Schema basics: `type`, `required`, `properties`, `additionalProperties`, `anyOf`/`oneOf`, `$ref`; MCP tool schemas and OpenAPI are both JSON Schema dialects",
-  "Topic 5 (Docker internals): you will containerise the Node service and hit SIGTERM handling and `--max-old-space-size` when the pod OOMs"
+  "The service, repository and domain layers from 'Production Python architecture: domain models, repositories, DI, packaging' (topic 25); this topic wires them into routers and dependencies without letting FastAPI leak into them",
+  "asyncio fundamentals: the event loop, `await`, `asyncio.gather`, `asyncio.timeout()`, `CancelledError`, and the ability to name what does and does not block a loop (`time.sleep`, `requests`, sync `psycopg2` all do)",
+  "Docker exec-form `CMD`, PID 1 signal handling, non-root images and multi-stage builds from 'Docker internals' (topic 5) and 'Production images and supply chain' (topic 6)",
+  "Kubernetes probes, requests and limits, HPA and rolling updates from 'Kubernetes production ops' (topic 8), because this topic defines the endpoints and shutdown behaviour those mechanisms depend on",
+  "HTTP keep-alive, load-balancer idle timeouts and `X-Forwarded-*` headers from 'Networking' (topic 2), and enough k6 from 'Load testing and chaos' (topic 22) to run a ramping-arrival-rate script",
+  "Kaupex running locally under Docker Compose: a FastAPI service with Postgres via SQLAlchemy asyncio + asyncpg, an outbound LLM call through httpx, and a Temporal client, on a box where you can read `ps`, `ss` and `pg_stat_activity`"
  ],
  "subtopics": [
   {
-   "name": "Event loop phases and what actually blocks it",
-   "learn": "Trace one tick: timers, pending callbacks, poll, check (`setImmediate`), close; the microtask queue drains between every macrotask and `process.nextTick` runs before promise microtasks, which is why a recursive `nextTick` starves I/O. Know the sync calls that freeze every concurrent request on the single thread: `JSON.parse` of a multi-MB body, `fs.readFileSync`, `crypto.pbkdf2Sync`, catastrophic regex backtracking, and a tight `for` over a large array. Measure with `perf_hooks.monitorEventLoopDelay()` p99 and `node --cpu-prof`; offload to `worker_threads` or a child process. The libuv threadpool (`UV_THREADPOOL_SIZE`, default 4) covers only fs, `dns.lookup`, zlib and crypto, so `dns.lookup` under load serialises behind slow file reads.",
+   "name": "def vs async def: which thread your handler actually runs on",
+   "learn": "FastAPI runs `async def` path operations on the event-loop thread and plain `def` ones in a worker thread via `anyio.to_thread.run_sync`; the same rule applies to dependencies. Any blocking call inside `async def` (`requests.get`, `time.sleep`, a sync SQLAlchemy session, the sync OpenAI client) freezes every request in that process until it returns. Prove it: an `async def` endpoint calling `time.sleep(2)` hit by 10 concurrent curls takes 20 s; switch to `def` or `await asyncio.sleep(2)` and it takes 2 s. Rule for Kaupex: `async def` with async clients (httpx.AsyncClient, SQLAlchemy asyncio, temporalio) everywhere, `def` only for legacy sync libraries; when a worker stalls, `py-spy dump --pid <pid>` shows which frame is holding the loop.",
    "minutes": 25,
    "resource": {
-    "label": "Node.js Learn - The Node.js Event Loop, Timers, and process.nextTick()",
-    "url": "https://nodejs.org/learn/asynchronous-work/event-loop-timers-and-nexttick"
+    "label": "FastAPI docs: Concurrency and async / await",
+    "url": "https://fastapi.tiangolo.com/async/"
    }
   },
   {
-   "name": "A tsconfig that catches real bugs",
-   "learn": "Start from `strict: true` and add `noUncheckedIndexedAccess` (indexing returns `T | undefined`, which kills a whole class of customer-data crashes), `exactOptionalPropertyTypes`, `useUnknownInCatchVariables`, `noImplicitOverride`, `noFallthroughCasesInSwitch`. For a Node service choose `module: \"NodeNext\"` and `moduleResolution: \"NodeNext\"` (forces explicit `.js` extensions in relative imports), `target: \"ES2022\"`, `verbatimModuleSyntax` so type-only imports are `import type` and cannot leak into runtime, `isolatedModules` for esbuild/tsx compatibility, `sourceMap` plus `node --enable-source-maps` for readable production stack traces, and `declaration` + `declarationMap` only for libraries. Understand `skipLibCheck` as a speed trade you accept knowingly, and that `tsc --noEmit` is the CI type gate while emit is a separate concern.",
-   "minutes": 30,
-   "resource": {
-    "label": "TypeScript TSConfig Reference - strict (the strict-mode family of checks)",
-    "url": "https://www.typescriptlang.org/tsconfig/strict.html"
-   }
-  },
-  {
-   "name": "ESM vs CommonJS and the exports map",
-   "learn": "`\"type\": \"module\"` in package.json makes `.js` files ESM; `.mjs`/`.cjs` override per file. ESM has no `__dirname`, `__filename` or `require`: use `fileURLToPath(import.meta.url)` and `createRequire(import.meta.url)`. Diagnose `ERR_REQUIRE_ESM` (CJS requiring an ESM-only package; Node 22 lifts this for synchronous ESM graphs), `ERR_MODULE_NOT_FOUND` (missing `.js` extension or a deep import the package does not export), and `Cannot use import statement outside a module`. Read an `exports` map with `import`/`require`/`types`/`default` conditions and understand that `@modelcontextprotocol/sdk/client/index.js` resolves only because the SDK exports that subpath; use the `imports` field (`#internal/*`) for in-package aliases instead of tsconfig `paths`. Know the dual-package hazard: two copies of a module, two `instanceof` identities.",
-   "minutes": 30,
-   "resource": {
-    "label": "Node.js API - Modules: Packages (type, exports, imports, conditions)",
-    "url": "https://nodejs.org/api/packages.html"
-   }
-  },
-  {
-   "name": "Narrowing, discriminated unions and exhaustiveness",
-   "learn": "TypeScript is structural, so `unknown` (not `any`) is the type of anything crossing a boundary, and you narrow it with `typeof`, `in`, `instanceof`, equality and truthiness checks. Model MCP `content` items as a discriminated union on the `type` literal (`text` | `image` | `audio` | `resource_link` | `resource`) and `switch` on it with `default: assertNever(item)` returning `never`, so a new variant fails compilation instead of silently falling through. Write type predicates `(x): x is ToolResult` and assertion functions `asserts x is Config`; use `satisfies` to check a literal against a type without widening it and `as const` to keep literal types. Know where narrowing does not survive: inside callbacks, across `await`, and on `obj[dynamicKey]`.",
-   "minutes": 30,
-   "resource": {
-    "label": "TypeScript Handbook - Narrowing",
-    "url": "https://www.typescriptlang.org/docs/handbook/2/narrowing.html"
-   }
-  },
-  {
-   "name": "Generics, mapped and conditional types you will actually use",
-   "learn": "Generic functions with constraints (`<T extends { id: string }>`), default type parameters, and when inference from arguments beats an explicit type argument. Build the four tools you need daily: `keyof` and indexed access `T[K]`; mapped types `{ [K in keyof T]-?: ... }` with `readonly`/`?` modifiers and `as` key remapping; conditional types with `infer` (this is how `Awaited`, `ReturnType`, `Parameters` are defined) and their distribution over unions; template literal types for event and route names. Derive `ToolName = keyof Tools` and `ToolInput<N extends ToolName> = z.infer<Tools[N][\"input\"]>` so adding a tool is one line. Recognise a type that has become a liability: `tsc --extendedDiagnostics` instantiation counts and `--generateTrace` when the editor slows down.",
-   "minutes": 30,
-   "resource": {
-    "label": "TypeScript Handbook - Creating Types from Types",
-    "url": "https://www.typescriptlang.org/docs/handbook/2/types-from-types.html"
-   }
-  },
-  {
-   "name": "Runtime validation with Zod at every boundary",
-   "learn": "Types are erased at compile time, so every value from `JSON.parse`, `process.env`, HTTP bodies, stdin and tool results must be parsed, not cast. Use `z.object` with the default strip behaviour understood (unknown keys are silently dropped), `.strict()` when drift must be loud, `.passthrough()` when you forward opaque data; `z.discriminatedUnion(\"type\", [...])` for tagged payloads; `z.coerce.number()` for env vars; `.transform` to normalise at the edge. Prefer `.safeParse` returning `{ success, data | error }` in request paths so validation never throws; surface `error.issues[].path` and `message` as customer-readable text. `z.infer<typeof Schema>` is the single source of truth, never a hand-written interface next to the schema. Validate at boundaries only; interior code trusts its types.",
-   "minutes": 30,
-   "resource": {
-    "label": "Zod - Defining schemas (z.object strict/passthrough, discriminatedUnion, coerce, transform)",
-    "url": "https://zod.dev/api"
-   }
-  },
-  {
-   "name": "Generating TypeScript from FastAPI's OpenAPI document",
-   "learn": "FastAPI serves `/openapi.json`; set `generate_unique_id_function` so `operationId` becomes `{tag}-{name}` instead of `read_items_items__get`, because every generator turns operationId into a method name. Run `npx openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.d.ts` and read the output: a `paths` interface keyed by route and method with `parameters`, `requestBody` and `responses` by status code, and `components[\"schemas\"]` for Pydantic models. Know the mapping rules: `Optional[str]` with a default is optional and nullable, `str | None` without default is required and nullable, `Literal` becomes a union of literals, `dict` becomes `Record<string, unknown>`. Commit the generated file and add a CI step that regenerates and runs `git diff --exit-code` so backend drift fails the build.",
-   "minutes": 30,
-   "resource": {
-    "label": "FastAPI - Generate Clients (OpenAPI, operationId, client generation)",
-    "url": "https://fastapi.tiangolo.com/advanced/generate-clients/"
-   }
-  },
-  {
-   "name": "A typed HTTP client with openapi-fetch",
-   "learn": "`createClient<paths>({ baseUrl })` gives you `client.GET(\"/items/{id}\", { params: { path: { id } } })` where path, query, headers and body are all typed from the generated schema and a typo in a route is a compile error. The response is `{ data, error, response }` discriminated by status, so a 2xx `data` and 4xx `error` have different types and you cannot forget the failure branch. Add middleware with `onRequest` for `Authorization` and `X-Request-Id` headers and `onResponse` for retry-on-429 with `Retry-After`; pass `signal: AbortSignal.timeout(ms)` on every call. Understand why this beats heavyweight codegen (orval, openapi-generator) for an FDE: zero runtime schema, a few kB, and regeneration is one command. Wrap it in a domain module so callers never see raw paths.",
+   "name": "The 40-token anyio threadpool and CPU-bound work",
+   "learn": "All sync endpoints and sync dependencies in a process share one anyio thread limiter with 40 tokens; the 41st concurrent sync call queues, which presents as rising latency with idle CPU. Raise it in lifespan with `anyio.to_thread.current_default_thread_limiter().total_tokens = N`, and know that it does not govern `loop.run_in_executor(None, ...)`, which uses asyncio's own default ThreadPoolExecutor. Threads do not help CPU-bound work under the GIL (PDF parsing, tokenising a 2 MB prompt, a pandas transform in the compile step): move it to `loop.run_in_executor(process_pool, fn, arg)` with a `ProcessPoolExecutor` created in lifespan, or off the request path into a Temporal activity. Compare `time.process_time()` against wall clock on a slow request to tell the two cases apart.",
    "minutes": 25,
    "resource": {
-    "label": "openapi-fetch API reference - createClient, fetch options, middleware",
-    "url": "https://openapi-ts.dev/openapi-fetch/api"
+    "label": "AnyIO docs: Working with threads (default thread limiter)",
+    "url": "https://anyio.readthedocs.io/en/stable/threads.html"
    }
   },
   {
-   "name": "Promises, cancellation and timeouts done right",
-   "learn": "`Promise.all` rejects on the first failure and leaves the rest running; `allSettled` for fan-out where partial results matter; `Promise.race` for timeouts leaks the loser, so use `AbortSignal.timeout(ms)` and `AbortSignal.any([userSignal, timeoutSignal])` and pass the signal into `fetch`, `setTimeout` from `timers/promises`, `events.once(emitter, \"x\", { signal })` and your own loops via `signal.throwIfAborted()`. Since Node 15 an unhandled rejection crashes the process (`--unhandled-rejections=strict|warn|none`), so a `.then` without `.catch` or an un-awaited async call in an event handler is a latent outage. Bound concurrency with a semaphore or `p-limit` instead of `Promise.all` over ten thousand items; consume async iterables with `for await`.",
+   "name": "Depends() mechanics: sub-dependencies, per-request cache, router-level guards",
+   "learn": "A dependency is any callable; FastAPI resolves the graph once per request, and the same callable appearing twice in that graph runs once unless declared `Depends(fn, use_cache=False)`. Use `Annotated[AsyncSession, Depends(get_session)]` type aliases so signatures stay one line, classes as dependencies for parametrised ones (`class Pagination: def __init__(self, limit: int = 50, offset: int = 0)`), and `dependencies=[Depends(verify_tenant)]` on `APIRouter` or `include_router` for side-effect-only guards every route under a prefix must pass. Know what belongs in DI (request-scoped: session, current user, tenant id, idempotency key) versus lifespan and `app.state` (process-scoped clients), and that `app.dependency_overrides` is the seam tests use, so anything constructed inline in a handler is untestable.",
    "minutes": 30,
    "resource": {
-    "label": "MDN - AbortController and AbortSignal",
-    "url": "https://developer.mozilla.org/en-US/docs/Web/API/AbortController"
+    "label": "FastAPI docs: Dependencies tutorial (sub-dependencies, classes, caching)",
+    "url": "https://fastapi.tiangolo.com/tutorial/dependencies/"
    }
   },
   {
-   "name": "Streams, backpressure and newline-delimited JSON",
-   "learn": "Node streams: `Readable`, `Writable`, `Transform`, `highWaterMark` (16 KiB in bytes, 16 items in `objectMode`), `write()` returning `false` and waiting for `drain`. Never chain `.pipe()` in production; use `pipeline()` from `stream/promises`, which propagates errors and destroys every stream on failure. `fetch().body` is a Web `ReadableStream`, not a Node stream; bridge with `Readable.fromWeb` and `Readable.toWeb`, decode with `TextDecoderStream`. For the MCP stdio transport, read `process.stdin` line by line with `readline.createInterface({ input })` and `for await (const line of rl)`, parse each line as one JSON-RPC message, and write responses with `process.stdout.write(JSON.stringify(msg) + \"\\n\")`; logs go to stderr because any stray byte on stdout corrupts the protocol stream.",
+   "name": "Dependencies with yield: sessions, commit/rollback and Depends(scope=...)",
+   "learn": "`async def get_session(): async with SessionLocal() as s: yield s` gives a request-scoped session whose exit code runs after the response has been sent by default (`scope=\"request\"`), so a `commit()` placed after the yield can fail after the client already saw 200. Where the client must see the failure, commit inside the handler or declare `Depends(get_session, scope=\"function\")` so the exit block runs before the response; a `\"request\"`-scoped dependency may only depend on other `\"request\"`-scoped ones, while `\"function\"` may depend on either. Wrap the yield in `try/except/finally` so `rollback()` runs on exceptions and re-raise, because swallowing the exception in the dependency turns a 500 into a silent 200. Verify with a test that asserts the row is absent after a handler raises.",
+   "minutes": 30,
+   "resource": {
+    "label": "FastAPI docs: Dependencies with yield (scope, exceptions after yield)",
+    "url": "https://fastapi.tiangolo.com/tutorial/dependencies/dependencies-with-yield/"
+   }
+  },
+  {
+   "name": "Typed settings with pydantic-settings and a cached get_settings() dependency",
+   "learn": "Define `class Settings(BaseSettings)` with `model_config = SettingsConfigDict(env_prefix=\"KAUPEX_\", env_file=\".env\", env_nested_delimiter=\"__\", extra=\"forbid\")`, typed fields (`database_url: PostgresDsn`, `llm_api_key: SecretStr`, `request_timeout_s: float = 30`), and expose it through `@lru_cache def get_settings() -> Settings` used as `Depends(get_settings)`; the cache means one parse per process and tests swap it with `app.dependency_overrides[get_settings]`. Instantiate settings once at import of `main.py` so a missing or malformed variable crashes the process at start with a `ValidationError` naming the field, instead of at the first request. Know the precedence: constructor args, then environment, then `.env`, then a secrets directory (`_secrets_dir=\"/run/secrets\"`, one file per field, which is how Docker and Kubernetes secret mounts arrive), then defaults. Never log a settings object without `SecretStr` on every credential, because `repr()` ends up in the customer's log aggregator.",
+   "minutes": 30,
+   "resource": {
+    "label": "FastAPI docs: Settings and Environment Variables",
+    "url": "https://fastapi.tiangolo.com/advanced/settings/"
+   }
+  },
+  {
+   "name": "Lifespan: build process-scoped clients once, tear down in reverse",
+   "learn": "`@asynccontextmanager async def lifespan(app: FastAPI)` replaces the deprecated `@app.on_event`; before `yield` build the SQLAlchemy async engine, the `httpx.AsyncClient`, the Temporal client and any `ProcessPoolExecutor`, put them on `app.state` (or yield a dict that lands on `request.state`), and after `yield` close them in reverse (`await client.aclose()`, `await engine.dispose()`, `pool.shutdown()`). Lifespan runs once per worker process, so `--workers 4` means four pools of everything; an exception before `yield` sends ASGI `lifespan.startup.failed` and uvicorn exits non-zero, which is what you want when the DB URL is wrong. Do not put slow warmups (model download, a 30 s migration) in lifespan on Kubernetes unless the startup probe's `failureThreshold * periodSeconds` covers the worst case.",
    "minutes": 25,
    "resource": {
-    "label": "Node.js API - Stream (pipeline, backpressure, Web Streams interop)",
-    "url": "https://nodejs.org/api/stream.html"
+    "label": "FastAPI docs: Lifespan Events",
+    "url": "https://fastapi.tiangolo.com/advanced/events/"
    }
   },
   {
-   "name": "HTTP servers, keep-alive and graceful shutdown",
-   "learn": "`http.createServer` timeouts you must set consciously: `server.keepAliveTimeout` (default 5 s; must exceed the load balancer idle timeout, typically 60 s on an ALB, or the LB reuses a socket Node already closed and the customer sees 502s), `server.headersTimeout`, `server.requestTimeout`, `maxHeadersCount`. Graceful shutdown on `SIGTERM`: stop accepting with `server.close()`, call `server.closeIdleConnections()`, give in-flight requests a deadline, then `process.exit(0)`; the Kubernetes `terminationGracePeriodSeconds` must exceed that deadline and readiness must flip first. Global `fetch` is undici: configure an `Agent` with `connections`, `keepAliveTimeout`, `headersTimeout` and `bodyTimeout` rather than trusting defaults. Trust `X-Forwarded-For` only behind a proxy you control.",
-   "minutes": 25,
-   "resource": {
-    "label": "Node.js API - HTTP (server timeouts, close, closeIdleConnections)",
-    "url": "https://nodejs.org/api/http.html"
-   }
-  },
-  {
-   "name": "Errors: unknown catch, cause chains and system codes",
-   "learn": "With `useUnknownInCatchVariables`, `catch (e)` is `unknown`; narrow with `instanceof Error` and wrap anything else. Chain context with `new Error(msg, { cause: e })` and define `class ToolCallError extends Error` with a `code` and `toolName`, setting `this.name` so logs and `instanceof` work. Node system errors carry `code` (`ECONNRESET`, `ECONNREFUSED`, `ETIMEDOUT`, `ENOTFOUND`, `EPIPE`, `ERR_MODULE_NOT_FOUND`), so branch on `code`, never on message text. `process.on(\"uncaughtException\")` and `\"unhandledRejection\"` exist to log and exit, not to keep running in a corrupted state. Use a result type `{ ok: true, value } | { ok: false, error }` for expected failures (validation, not found) and throw only for bugs and infrastructure faults. `--enable-source-maps` and `Error.stackTraceLimit` for usable traces from `dist/`.",
-   "minutes": 25,
-   "resource": {
-    "label": "Node.js API - Errors (system error codes, cause, captureStackTrace)",
-    "url": "https://nodejs.org/api/errors.html"
-   }
-  },
-  {
-   "name": "MCP wire protocol: JSON-RPC, lifecycle and transports",
-   "learn": "Every MCP message is JSON-RPC 2.0: requests carry `jsonrpc`, `id`, `method`, `params`; responses carry `result` or `error` with `code` and `message`; notifications have no `id`. Lifecycle: client sends `initialize` with `protocolVersion`, `capabilities` and `clientInfo`; server replies with its `capabilities` (`tools`, `resources`, `prompts`, `logging`, each optionally with `listChanged`) and `serverInfo`; client sends `notifications/initialized`; only then may it call `tools/list`, `tools/call`, `resources/read`, `prompts/get`. stdio transport is one message per line on stdout with stderr free for logs. Streamable HTTP uses a single endpoint, POST for client messages, optional `text/event-stream` responses, `Mcp-Session-Id` for session affinity and `Last-Event-ID` for resumption. Standard error codes -32700 to -32603, server range -32000 to -32099; a tool result with `isError: true` is a tool-level failure, not a protocol error.",
+   "name": "Connection-pool arithmetic: engine pools x workers x replicas vs Postgres max_connections",
+   "learn": "`create_async_engine(url, pool_size=5, max_overflow=10, pool_timeout=30, pool_recycle=1800, pool_pre_ping=True)` allows up to 15 connections per process; the fleet total is (pool_size + max_overflow) x workers per pod x replicas, and it must stay under Postgres `max_connections` (default 100) minus `superuser_reserved_connections` and whatever Temporal workers, migrations and the dashboard also hold. Know the two symptoms apart: `QueuePool limit of size 5 overflow 10 reached, connection timed out` in the app means this process exhausted its pool (a leaked session or a slow query), while `FATAL: too many connections` from Postgres means the fleet is oversubscribed. When replicas x workers grows, put PgBouncer in transaction mode in front and drop per-process pools to 2 or 3; `pool_pre_ping` costs one round trip per checkout but survives an RDS failover without a restart.",
    "minutes": 30,
    "resource": {
-    "label": "Model Context Protocol Specification - Lifecycle (2025-06-18)",
-    "url": "https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle"
+    "label": "SQLAlchemy 2.0 docs: Connection Pooling",
+    "url": "https://docs.sqlalchemy.org/en/20/core/pooling.html"
    }
   },
   {
-   "name": "Building the DefenderMate client on the TypeScript SDK",
-   "learn": "Import `Client` from `@modelcontextprotocol/sdk/client/index.js` and a transport: `StdioClientTransport({ command, args, env })` spawns the server as a child process; `StreamableHTTPClientTransport(new URL(endpoint), { requestInit: { headers } })` for a remote server. `await client.connect(transport)` performs the handshake; then `client.listTools()`, `client.callTool({ name, arguments })`, `client.listResources()`, `client.readResource({ uri })`, `client.getServerCapabilities()`. Pass per-request `RequestOptions` with `timeout` and `resetTimeoutOnProgress` for long tools; subscribe to `notifications/tools/list_changed` and re-list. Always `await client.close()` in `finally` so the child process does not orphan. Wrap all of this in a `DefenderMateClient` class exposing one typed method per tool so consumers never touch raw JSON-RPC.",
-   "minutes": 30,
-   "resource": {
-    "label": "Model Context Protocol - TypeScript SDK (GitHub)",
-    "url": "https://github.com/modelcontextprotocol/typescript-sdk"
-   }
-  },
-  {
-   "name": "Typing tool inputs and outputs end to end",
-   "learn": "MCP `inputSchema` and optional `outputSchema` are JSON Schema, so author one Zod schema per DefenderMate tool and emit JSON Schema with Zod 4's `z.toJSONSchema(schema)`; write a test that fetches `tools/list` from the running server and asserts each emitted schema deep-equals the server's `inputSchema`, which turns silent contract drift into a red test. Validate every `callTool` result: `content` as a discriminated union on `type`, `isError`, and `structuredContent` parsed with the tool's output schema. Implement `callTyped<N extends ToolName>(name: N, args: ToolInput<N>): Promise<ToolOutput<N>>` on top of the SDK so the compiler rejects a wrong argument shape and the runtime rejects a wrong response shape. Know the conversion edges: Zod `.optional()` vs `.nullable()`, `z.record`, `z.enum` to `enum`, and unrepresentable types like `z.date()` and transforms.",
-   "minutes": 30,
-   "resource": {
-    "label": "Zod - JSON Schema conversion (z.toJSONSchema)",
-    "url": "https://zod.dev/json-schema"
-   }
-  },
-  {
-   "name": "Testing with Vitest: transport mocks, fake timers, type tests",
-   "learn": "`vitest.config.ts` with `test.include`, `coverage.provider: \"v8\"` and thresholds; `describe`/`it`/`expect`, `vi.fn()`, `vi.spyOn`, and `vi.mock(\"module\", factory)` with its hoisting rules. Mock the transport, not the network: implement the SDK `Transport` interface with an in-memory fake that returns canned JSON-RPC responses so `Client` runs the real handshake against your fixtures. Use `vi.useFakeTimers()` and `await vi.advanceTimersByTimeAsync(ms)` to test exponential backoff and `AbortSignal.timeout` paths in milliseconds of wall time. Add type-level tests with `expectTypeOf<ToolInput<\"scan\">>().toEqualTypeOf<{ target: string }>()` and run `vitest --typecheck` so a regenerated schema that changes a type fails a test. A contract test in `globalSetup` starts the FastAPI server and hits it through the generated client; `--reporter=junit` for CI.",
-   "minutes": 30,
-   "resource": {
-    "label": "Vitest Guide - Mocking (vi.mock hoisting, spies, fake timers)",
-    "url": "https://vitest.dev/guide/mocking"
-   }
-  },
-  {
-   "name": "Dev loop, build and run: tsx, tsc, native type stripping",
-   "learn": "Development: `tsx --watch src/main.ts` (esbuild under the hood, no type checking, so keep `tsc --noEmit --watch` running beside it). Node 22.6+ runs `.ts` directly with `--experimental-strip-types`, and Node 23.6+ strips by default; only erasable syntax is allowed (no `enum`, `namespace`, parameter properties) unless you pass `--experimental-transform-types`, and the `erasableSyntaxOnly` tsconfig flag enforces this at compile time. Production: `tsc -p tsconfig.build.json` to `dist/` and `node --enable-source-maps dist/main.js`, or bundle with `esbuild src/main.ts --bundle --platform=node --format=esm --outfile=dist/main.js` (externalise native modules) to sidestep the `.js` extension problem and ship one file. For a CLI, `bin` in package.json plus `#!/usr/bin/env node`. Know `NODE_OPTIONS` and `--max-old-space-size` when a container OOMs at 2 GB while the heap default is lower.",
-   "minutes": 25,
-   "resource": {
-    "label": "Node.js API - Modules: TypeScript (type stripping, transform types)",
-    "url": "https://nodejs.org/api/typescript.html"
-   }
-  },
-  {
-   "name": "Dependency hygiene and npm supply chain",
-   "learn": "`npm ci` installs exactly the lockfile, deletes `node_modules` first and fails if `package.json` and lock disagree; `npm install` re-resolves and mutates the lock, so CI and Dockerfiles use `ci`. Commit `package-lock.json` (lockfile v3) and pin the runtime with `engines` plus `.nvmrc` or `.node-version`. `npm audit --omit=dev` for what ships; `overrides` to force a patched transitive version; `npm ls <pkg>` to find who pulls a dependency; `--ignore-scripts` to defuse install-time payloads in untrusted environments. Pin the MCP SDK to an exact version while the protocol is moving and upgrade deliberately with a changelog read. Verify publisher provenance with `npm view <pkg> dist.integrity` and prefer packages published with `--provenance`. pnpm's strict `node_modules` layout is the cheap way to kill phantom imports.",
+   "name": "Outbound httpx: one shared AsyncClient, explicit Timeout and Limits",
+   "learn": "Never build `httpx.AsyncClient()` per request; it defeats keep-alive and leaks sockets under load. Create one in lifespan with `timeout=httpx.Timeout(10.0, connect=3.0, read=60.0, pool=5.0)` and `limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)`; the `pool` timeout fires when every connection is busy and is usually the first visible sign an upstream slowed down. For LLM calls the `read` timeout must exceed the provider's worst-case generation time, and the whole call still has to fit inside the load balancer's idle timeout, otherwise stream tokens instead of waiting. Wrap upstream calls in `asyncio.timeout()` at the handler level so a hung dependency cannot pin a request forever, and map `httpx.TimeoutException` to a 504 carrying the request id rather than a 500 with a traceback.",
    "minutes": 20,
    "resource": {
-    "label": "npm Docs - npm ci",
-    "url": "https://docs.npmjs.com/cli/v10/commands/npm-ci/"
+    "label": "HTTPX docs: Timeouts",
+    "url": "https://www.python-httpx.org/advanced/timeouts/"
    }
   },
   {
-   "name": "Type-aware ESLint rules that prevent outages",
-   "learn": "Flat config `eslint.config.js` using `tseslint.config(...tseslint.configs.recommendedTypeChecked)` with `languageOptions.parserOptions.projectService: true` so rules can see types. The rules that pay for themselves on day one: `@typescript-eslint/no-floating-promises` (an un-awaited promise is a swallowed error and a future crash), `no-misused-promises` (an async function passed where a void callback is expected, e.g. `server.on(\"request\", async ...)` or an Express handler), `switch-exhaustiveness-check`, `no-unnecessary-condition`, `consistent-type-imports`, `no-unsafe-argument`. Run `eslint . --max-warnings 0` in CI and let Prettier own formatting only. Know how to introduce these on a legacy codebase: enable as `warn`, fix the hottest paths, flip to `error` per directory.",
+   "name": "BackgroundTasks: the exact guarantee, and when to hand off to Temporal instead",
+   "learn": "`background_tasks.add_task(fn, *args)` runs after the response is sent, in the same process and on the same event loop (sync functions go to the threadpool); there is no retry, no persistence, no visibility from other workers, and a SIGTERM or OOM kill between response and completion loses it silently. Use it only for work whose loss is acceptable: audit-log fan-out, cache warm, a metrics push. Anything a customer would notice missing (billing event, callback webhook to their system, the compile job itself) goes to Temporal or a Redis stream with the enqueue inside the request's DB transaction (outbox pattern) so the 200 and the job are atomic. A background task that raises after the response is sent appears only in logs, so give it its own exception wrapper and a counter.",
    "minutes": 20,
    "resource": {
-    "label": "typescript-eslint - no-floating-promises rule",
-    "url": "https://typescript-eslint.io/rules/no-floating-promises/"
+    "label": "FastAPI docs: Background Tasks",
+    "url": "https://fastapi.tiangolo.com/tutorial/background-tasks/"
    }
   },
   {
-   "name": "Config, structured logging and debugging a live Node process",
-   "learn": "Parse `process.env` once at boot with `z.object({ DEFENDERMATE_URL: z.string().url(), TIMEOUT_MS: z.coerce.number().default(30000), ... }).parse(process.env)` into a frozen typed `config`, so a missing variable fails fast with a list of every issue rather than `undefined` three calls deep. Log JSON lines to stdout with pino: `pino({ level, redact: [\"req.headers.authorization\", \"*.apiKey\"] })`, child loggers carrying `requestId` and `toolName`, `pino-pretty` only in development. Debug a running service with `node --inspect` and `chrome://inspect`, `--inspect-brk` for start-up bugs, `--cpu-prof` and `--heap-prof` for profiles written to cwd, `process.memoryUsage().heapUsed` trended over an hour for leaks, `NODE_DEBUG=http,net` when a connection mysteriously hangs.",
+   "name": "Bigger-applications layout with APIRouter and the service layer from topic 25",
+   "learn": "Split Kaupex into `app/main.py` (an app factory `create_app()` with lifespan, middleware and `include_router` calls), `app/api/v1/{tasks,compile,health}.py` (thin routers built as `APIRouter(prefix=\"/tasks\", tags=[\"tasks\"], dependencies=[...])`), `app/core/{settings,deps,logging}.py`, and `app/services/` plus `app/repositories/` from topic 25 that never import FastAPI. Routers obtain services through `Depends`, so the domain code stays importable in a plain pytest run with no ASGI app. Declare `responses={404: {\"model\": Problem}}` on routers so OpenAPI stays honest for the customer's client generator, and run the factory with `uvicorn 'app.main:create_app' --factory` so tests can build one app per settings object without import-time side effects.",
    "minutes": 25,
    "resource": {
-    "label": "Node.js Learn - Debugging Node.js",
-    "url": "https://nodejs.org/learn/getting-started/debugging"
+    "label": "FastAPI docs: Bigger Applications - Multiple Files",
+    "url": "https://fastapi.tiangolo.com/tutorial/bigger-applications/"
+   }
+  },
+  {
+   "name": "Error handlers and middleware: problem responses, request ids, pure ASGI",
+   "learn": "Register `@app.exception_handler(RequestValidationError)` to return your `Problem` shape (422 with `detail` and `X-Request-ID`), `@app.exception_handler(Exception)` to return a 500 carrying the id but never the traceback, and map domain exceptions to 4xx in one place. Write middleware as pure ASGI (`async def __call__(self, scope, receive, send)`) rather than `BaseHTTPMiddleware`, which buffers responses, breaks streaming and background tasks in some version combinations, and hides exceptions from your handlers; middleware order is last-added-outermost. Build a request-id middleware that reads `X-Request-ID` or mints a UUID, stores it in a `ContextVar` for log records, and echoes it on the response; know that uvicorn's `--reset-contextvars` exists because contextvars can otherwise leak between requests on a keep-alive connection.",
+   "minutes": 30,
+   "resource": {
+    "label": "Starlette docs: Middleware (BaseHTTPMiddleware limitations, pure ASGI middleware)",
+    "url": "https://github.com/encode/starlette/blob/master/docs/middleware.md"
+   }
+  },
+  {
+   "name": "Health endpoints that mean something: /healthz, /readyz, /startupz",
+   "learn": "`/healthz` (liveness) must only prove the process serves HTTP, with no DB or upstream checks, because a flaky Postgres would otherwise get every pod restarted in rotation. `/readyz` runs `SELECT 1` through the pool under a 1 s timeout, confirms the Temporal client is connected, and returns 503 with a JSON body naming the failing check; it also flips to 503 the moment SIGTERM arrives so the load balancer drains. `/startupz` covers migrations or model load, paired with a startup probe whose `failureThreshold * periodSeconds` exceeds the worst-case start. Exclude all three from access logs, metrics and SLIs (topic 20), mount them on a router with no auth, and know the probe knobs: `periodSeconds`, `timeoutSeconds` (default 1 s, easily tripped under load), `failureThreshold`.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs: Configure Liveness, Readiness and Startup Probes",
+    "url": "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+   }
+  },
+  {
+   "name": "Process model and worker sizing: uvicorn --workers, gunicorn, or one process per pod",
+   "learn": "`uvicorn app.main:app --workers 4` (or `fastapi run --workers 4`) forks a supervisor plus N processes, each with its own event loop, pools and memory; gunicorn with `-k uvicorn.workers.UvicornWorker` adds `--max-requests`, `--graceful-timeout` and hot restart, but the FastAPI docs now steer you to uvicorn's own manager. On Kubernetes run one worker per container and scale with replicas, because requests and limits, HPA and readiness all reason per pod; use `--workers` on a single VM such as Kaupex on Hetzner under Compose. For async apps start at workers = cores, not the `2n+1` gunicorn folklore that assumes blocking workers, then measure RSS per worker (`ps -o pid,rss,cmd`) so N x RSS plus pools fits the container limit with headroom for LLM response buffers. `--limit-max-requests` with `--limit-max-requests-jitter` is the honest answer to slow memory growth you have not found yet.",
+   "minutes": 35,
+   "resource": {
+    "label": "FastAPI docs: Server Workers",
+    "url": "https://fastapi.tiangolo.com/deployment/server-workers/"
+   }
+  },
+  {
+   "name": "Uvicorn flags that decide production behaviour",
+   "learn": "Set these deliberately and keep them in version control: `--timeout-keep-alive` (default 5 s; must exceed the load balancer's idle timeout or the LB reuses a connection uvicorn just closed and the customer sees intermittent 502s), `--timeout-graceful-shutdown` (unset means wait indefinitely for in-flight requests), `--limit-concurrency` (returns 503 instead of queueing once connections plus tasks exceed N, your first load-shedding knob), `--backlog` (default 2048, the kernel accept queue), `--limit-max-requests` with jitter, `--proxy-headers` plus `--forwarded-allow-ips` (default trusts only 127.0.0.1, so behind an ingress `request.client.host` is wrong until you widen it), `--root-path`, `--loop uvloop --http httptools` for a real throughput gain, `--no-access-log` when the ingress already logs, `--log-config` pointing at your dictConfig, and `--timeout-worker-healthcheck` for the supervisor. Put them in the Dockerfile `CMD` so they are code-reviewed, not remembered.",
+   "minutes": 30,
+   "resource": {
+    "label": "Uvicorn docs: Settings (official repo)",
+    "url": "https://github.com/Kludex/uvicorn/blob/main/docs/settings.md"
+   }
+  },
+  {
+   "name": "Graceful shutdown end to end: SIGTERM, drain, in-flight, lifespan, grace period",
+   "learn": "On SIGTERM uvicorn stops accepting, closes idle keep-alive connections, waits for in-flight requests up to `--timeout-graceful-shutdown`, then runs lifespan shutdown. On Kubernetes the pod is removed from Endpoints concurrently with SIGTERM, so add `lifecycle.preStop: exec sleep 5` (or flip `/readyz` to 503 and sleep) so traffic stops arriving before the server stops accepting, and make `terminationGracePeriodSeconds` (default 30) exceed preStop + graceful timeout + lifespan teardown, otherwise SIGKILL cuts the longest LLM request mid-stream. Test it: start a 20 s request, `kubectl delete pod`, confirm the request completes and the ingress logs no 502; repeat with a 40 s request and watch it die so you know the ceiling. Gunicorn semantics differ (SIGTERM graceful, SIGINT and SIGQUIT quick), which matters when a customer runbook mixes them.",
+   "minutes": 35,
+   "resource": {
+    "label": "Kubernetes docs: Pod Lifecycle (termination of Pods)",
+    "url": "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"
+   }
+  },
+  {
+   "name": "Production Dockerfile for FastAPI: multi-stage uv, non-root, exec-form CMD and PID 1",
+   "learn": "Build with `uv` in a builder stage (`uv sync --frozen --no-dev` into `/app/.venv`), copy only the venv and source into `python:3.12-slim`, run as a non-root `USER` with a fixed UID, set `PYTHONUNBUFFERED=1` so shutdown logs are not lost in a stdout buffer, and finish with exec-form `CMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\", ...]`. Shell-form `CMD uvicorn ...` runs under `/bin/sh -c`, which does not forward SIGTERM, so every stop waits the full grace period and SIGKILLs a healthy server; if an entrypoint script must run migrations first it must end in `exec \"$@\"`, and use `--init` or `tini` when a `ProcessPoolExecutor` could leave zombies. Verify with `time docker stop <id>`: a correct image exits in under a second when idle, ten seconds means SIGTERM never reached uvicorn. The FastAPI docs now deprecate the old `uvicorn-gunicorn-fastapi` base image; write the Dockerfile yourself and be able to explain every line to a customer's platform team. Ties to topic 6 for SBOM, scanning and signing.",
+   "minutes": 30,
+   "resource": {
+    "label": "FastAPI docs: FastAPI in Containers - Docker",
+    "url": "https://fastapi.tiangolo.com/deployment/docker/"
+   }
+  },
+  {
+   "name": "Behind a proxy or load balancer: root_path, forwarded headers, timeout alignment",
+   "learn": "When the customer mounts Kaupex under `/api/kaupex` at their ingress, `--root-path /api/kaupex` (or `FastAPI(root_path=...)`) makes the OpenAPI `servers` entry and `url_for` correct without touching routes; `X-Forwarded-Proto` and `X-Forwarded-For` are honoured only when `--proxy-headers` is on and the proxy's IP is in `--forwarded-allow-ips`, otherwise redirects go to `http://` and every log line shows the proxy's address. Align the timeouts along the path: LB idle (ALB 60 s, nginx `proxy_read_timeout` 60 s) must be shorter than uvicorn `--timeout-keep-alive` for connection reuse to be safe, and longer than your slowest handler or you stream. Reproduce the classic intermittent 502 locally with nginx `keepalive_timeout 10s` in front of uvicorn's 5 s keep-alive under k6 load, then fix it, so you recognise the pattern in a customer's environment on day one.",
+   "minutes": 20,
+   "resource": {
+    "label": "FastAPI docs: Behind a Proxy",
+    "url": "https://fastapi.tiangolo.com/advanced/behind-a-proxy/"
+   }
+  },
+  {
+   "name": "Testing the wiring: dependency_overrides, ASGITransport, lifespan in tests",
+   "learn": "Replace external edges with `app.dependency_overrides[get_settings] = lambda: Settings(database_url=test_url, llm_api_key=\"x\")` and an override of `get_session` that yields a session inside a transaction rolled back after each test. Use `httpx.AsyncClient(transport=ASGITransport(app=app), base_url=\"http://test\")` under pytest-anyio for async tests, and `with TestClient(app) as c:` when a test needs lifespan to have run, because a bare `TestClient(app)` outside the context manager skips startup and `app.state` is empty. Write one test asserting `/readyz` returns 503 when the DB override raises, one asserting the request-id header is echoed, and one asserting a handler exception leaves no row committed; these three catch most wiring regressions before a customer does.",
+   "minutes": 25,
+   "resource": {
+    "label": "FastAPI docs: Testing Dependencies with Overrides",
+    "url": "https://fastapi.tiangolo.com/advanced/testing-dependencies/"
+   }
+  },
+  {
+   "name": "Load-test the worker matrix with k6 and commit the decision",
+   "learn": "Write a k6 script using the `ramping-arrival-rate` executor against two endpoints (an IO-bound call to an LLM stub that sleeps 300 ms, and the CPU-bound compile step) with thresholds `http_req_duration: ['p(95)<500']` and `http_req_failed: ['rate<0.01']`. Run the matrix `--workers 1,2,4` x `--limit-concurrency 64,256,unset` on a 2 vCPU box, capturing p50, p95, p99, RPS, 503 count and per-worker RSS. Expect the IO-bound endpoint to scale with concurrency rather than workers, the CPU-bound one to scale with workers up to the core count, and an unset concurrency limit to turn saturation into timeouts instead of fast 503s. Record the winning configuration and the evidence table in `DEPLOY.md` beside the Dockerfile, and keep the script running in CI as a smoke threshold; topic 22 goes deeper on load and chaos.",
+   "minutes": 40,
+   "resource": {
+    "label": "Grafana k6 docs",
+    "url": "https://grafana.com/docs/k6/latest/"
+   }
+  },
+  {
+   "name": "Metrics across worker processes",
+   "learn": "With `--workers 4`, `prometheus_client`'s default registry is per process, so each scrape hits whichever worker accepted the connection and counters appear to move backwards. Either run one worker per pod (the Kubernetes default from the worker-sizing subtopic) or enable multiprocess mode: set `PROMETHEUS_MULTIPROC_DIR`, serve `/metrics` from a fresh `CollectorRegistry()` with `multiprocess.MultiProcessCollector(registry)`, and call `multiprocess.mark_process_dead(pid)` on worker exit. Gauges are the trap in this mode; pick `multiprocess_mode=\"livesum\"` or `\"max\"` deliberately per gauge. With OpenTelemetry instead, `FastAPIInstrumentor.instrument_app(app, excluded_urls=\"healthz,readyz,metrics\")` keeps probe noise out of traces and the `http.server.duration` histogram that topic 21 builds dashboards on.",
+   "minutes": 20,
+   "resource": {
+    "label": "prometheus_client docs: Multiprocess Mode",
+    "url": "https://prometheus.github.io/client_python/multiprocess/"
    }
   }
  ],
  "outcomes": [
-  "You can take a customer's FastAPI `/openapi.json`, generate `paths` and `components` types with openapi-typescript, and produce an openapi-fetch client where a backend field rename fails `tsc` in CI instead of failing a demo.",
-  "You can write a `DefenderMateClient` that connects over stdio or Streamable HTTP, completes the `initialize` handshake, lists tools, calls a tool with Zod-validated arguments and results, and closes cleanly in `finally` without orphaning the child process.",
-  "You can diagnose `ERR_REQUIRE_ESM`, `ERR_MODULE_NOT_FOUND` and `Cannot use import statement outside a module` in under five minutes by reading `package.json` `type` and `exports` and the tsconfig `module` and `moduleResolution` settings.",
-  "You can prove a Node service is blocking its event loop with `monitorEventLoopDelay` or `--cpu-prof`, name the offending synchronous call, and move it to a worker thread or a stream with a measured before/after p99.",
-  "You can write a Vitest suite that mocks the MCP transport rather than the network, uses fake timers to test retry and backoff, asserts generated types with `expectTypeOf`, and enforces coverage thresholds in CI.",
-  "You can enable `strict`, `noUncheckedIndexedAccess` and `no-floating-promises` on an existing codebase and explain to the customer's team which category of production bug each newly surfaced error represents.",
-  "You can shut a Node HTTP server down on SIGTERM behind an ALB with zero 502s, with `keepAliveTimeout`, load balancer idle timeout, drain deadline and Kubernetes `terminationGracePeriodSeconds` correctly ordered and verified under load.",
-  "You can explain to a Python team, in their vocabulary, that Zod is Pydantic, `tsc --noEmit` is mypy, `npm ci` is a locked `pip install -r`, Vitest is pytest, and precisely where each analogy breaks."
+  "You can demonstrate, with 10 concurrent curls and a `py-spy dump`, why a blocking call inside an `async def` handler stalls every request in the process, and fix it three ways (async client, `def`, `run_in_executor` with a process pool), choosing correctly between IO-bound and CPU-bound work.",
+  "You can start Kaupex with `KAUPEX_DATABASE_URL` unset and have it exit non-zero within one second with a `ValidationError` naming the field, and show that every credential in the settings `repr()` prints as `**********`.",
+  "You can write the connection budget for a deployment as (pool_size + max_overflow) x workers x replicas against Postgres `max_connections` and prove it by running the fleet at full pool while reading `SELECT count(*) FROM pg_stat_activity`.",
+  "You can `kubectl delete pod` (or `docker stop`) during a 20 s in-flight request and show that the request completes with 200, the pod leaves Endpoints before uvicorn stops accepting, and shutdown finishes inside the grace period, with the ordering visible in timestamped logs.",
+  "You can produce a k6 results table for workers {1,2,4} x `--limit-concurrency` {64,256,unset} on a 2 vCPU host with p95, RPS, 503 rate and RSS per worker for an IO-bound and a CPU-bound endpoint, and defend the chosen configuration in writing.",
+  "You can implement `/healthz`, `/readyz` and `/startupz` such that a Postgres outage flips readiness to 503 within 2 s without a single liveness restart, with all three excluded from access logs, metrics and SLIs.",
+  "You can write a pure-ASGI request-id middleware and problem-shaped exception handlers so every 4xx and 5xx from Kaupex carries `X-Request-ID` and no response ever contains a traceback, verified by tests using `dependency_overrides` and `ASGITransport`.",
+  "You can explain to a customer's platform team in under five minutes why the same image runs one uvicorn process per pod on their cluster but `--workers 4` on the Hetzner VM, and what changes in memory, metrics scraping and probe behaviour if they choose the other."
  ],
  "failureModes": [
-  "The service passes every type check but crashes nightly with `ERR_UNHANDLED_REJECTION` because one `client.callTool()` inside an event handler was never awaited; `no-floating-promises` would have flagged it on the first commit.",
-  "An MCP server prints a `console.log` startup banner to stdout; the client's JSON-RPC parser hits `Starting DefenderMate...` as its first line, throws, and every tool call fails with an opaque parse error while the server process looks perfectly healthy.",
-  "The TypeScript client was generated from `/openapi.json` once in March; the backend made `tenant_id` required in June, the client kept sending `undefined`, and the resulting 422s were swallowed by a `catch (e) { console.error(e) }` for six weeks.",
-  "Behind an ALB with a 60 s idle timeout, `server.keepAliveTimeout` is left at Node's 5 s default, so the ALB reuses sockets Node has already closed and the customer sees intermittent 502s that never reproduce in a load test against the pod directly.",
-  "`JSON.parse` on a 40 MB tool result blocks the event loop for 800 ms, every concurrent SSE stream stalls, the liveness probe times out, and Kubernetes restarts the pod in the middle of the executive demo.",
-  "Results are validated with Zod's default strip mode, so the server's new `warnings` field is silently dropped and nobody notices for a month that the model is no longer being told when a scan returned degraded data.",
-  "CI runs `npm install` instead of `npm ci`, resolves a fresh transitive MCP SDK version with a protocol bump, and the handshake fails only in staging because every developer machine still has the old lockfile-resolved tree."
+  "An `async def` handler calls the sync OpenAI client for a 20 s completion; one slow prompt from one tenant freezes the worker's event loop, readiness probes time out at their 1 s default, kubelet restarts pods in rotation, and the customer reports that 'the API dies every morning at nine'.",
+  "`terminationGracePeriodSeconds` is left at 30 while `--timeout-graceful-shutdown` is unset and compile requests take 45 s; every rolling deploy SIGKILLs in-flight compilations, clients see connection resets, and their retries double the load on the freshly started pods.",
+  "uvicorn's default `--timeout-keep-alive 5` sits behind an ALB with a 60 s idle timeout; the ALB reuses a connection uvicorn closed a millisecond earlier and roughly 0.1% of requests return 502 with nothing in the application logs, which takes a week to attribute.",
+  "`pool_size=5, max_overflow=10` with `--workers 4` across six replicas plus Temporal workers exceeds RDS `max_connections` on a db.t3.medium; Postgres refuses with `FATAL: too many connections`, and because readiness checks the DB, every pod leaves service at the same moment.",
+  "A yield dependency commits after the response is sent under the default `scope=\"request\"`; the commit fails on a unique-constraint violation, the client already received 201, and the 'created' task never exists, surfacing weeks later as a phantom-ID support ticket.",
+  "Shell-form `CMD uvicorn ...` in the Dockerfile means SIGTERM reaches `/bin/sh`, not uvicorn; every stop waits the full grace period then SIGKILLs, lifespan teardown never runs, and httpx connections and PgBouncer server slots leak until `server_idle_timeout` reaps them.",
+  "`BackgroundTasks` is used to send the customer's job-complete webhook; an OOM kill between the 200 and the task loses the callback, their system waits forever, and there is no queue to inspect because the work only ever existed in one process's memory."
  ],
  "interviewQuestions": [
-  "Walk me through everything that happens between `node dist/main.js` and the first `tools/call` response of an MCP client: module resolution, the initialize handshake, transport framing, and where each class of failure would surface and how you would recognise it.",
-  "A customer's Node service handles 200 requests per second comfortably, then p99 jumps to three seconds whenever one specific report endpoint is hit, with nothing in the logs. How do you find the cause, what are the three most likely culprits, and what is the fix for each?",
-  "Design the type layer for a client that calls twelve MCP tools whose schemas are owned by another team. Where do types come from, where exactly do you validate at runtime, and what fails in CI on the day they change a schema without telling you?",
-  "Explain the difference between `Promise.race` against a timeout promise and `AbortSignal.timeout` passed into `fetch`. What leaks in the first approach, and how would you cancel a chain of three dependent async calls when the user closes the tab?",
-  "We have a mixed codebase with `require` in some files and `import` in others, and the build intermittently fails with `ERR_REQUIRE_ESM`. What are the realistic options, and what would you recommend for a team that publishes a library consumed by both CommonJS and ESM customers?",
-  "You are handed a TypeScript service with `strict: false` and roughly four hundred `any`s, and the customer wants it hardened in two weeks without pausing feature work. What sequence of compiler flags and lint rules do you introduce, in what order, and how do you keep the team from reverting them?",
-  "How would you drain a Node HTTP server in Kubernetes behind an ALB so a rolling deploy produces zero 502s? Name every timeout that has to be ordered, the order, and how you would verify it before telling the customer it is safe."
+  "Kaupex p99 latency triples every weekday at 09:00 while CPU sits at 15% and the database is idle. Walk me through diagnosis on a running pod with only `kubectl exec`, `py-spy` and the uvicorn logs: what are your top three hypotheses, and how does each one show up?",
+  "Design settings and secrets handling for a FastAPI service a customer will run in three places: a developer laptop, a staging namespace, and an air-gapped production cluster where secrets arrive as mounted files. What is the precedence order, how does a wrong value fail, and how do tests override it?",
+  "We are moving from 3 replicas with `--workers 4` to 12 replicas with one worker each on the customer's EKS cluster. What changes for connection pools, metrics scraping, probes, memory and graceful shutdown, and what would you set differently in each place?",
+  "A rolling deploy produces about eight seconds of 502s at the ingress each time a pod terminates, yet the application logs show every request completed with 200. Explain the race, the two fixes, and how you would prove which one closed it.",
+  "When would you reach for `BackgroundTasks`, a Temporal workflow, or a Redis stream for work that happens after the request returns? Give a concrete example of each and the failure the wrong choice produces in production.",
+  "Compare `--limit-concurrency`, the anyio thread limiter, the SQLAlchemy pool size and the load balancer's connection limit as load-shedding points. Under sustained overload, which one do you want to trip first, and why?",
+  "A customer's security team insists on `BaseHTTPMiddleware` to audit every request and response body. Explain what that does to streaming LLM responses and background tasks, and propose a pure-ASGI design that still satisfies the audit requirement."
  ],
- "proofOfWork": "A public repository `defendermate-ts-client` containing: (1) `src/api/schema.d.ts` generated from DefenderMate's `/openapi.json` with a `npm run gen && git diff --exit-code` CI step that fails on drift; (2) a `DefenderMateClient` class wrapping the MCP TypeScript SDK with a generic `callTyped<N>()` whose argument and return types derive from per-tool Zod schemas, plus a test asserting that each `z.toJSONSchema` output deep-equals the server's `tools/list` `inputSchema`; (3) a Vitest suite at or above 85 percent coverage that mocks the transport, uses fake timers to verify exponential backoff on `-32000` errors and `AbortSignal.timeout` paths, and includes `expectTypeOf` type tests run under `vitest --typecheck`; (4) `docs/EVENT_LOOP.md` with a captured `--cpu-prof` profile showing a deliberately introduced `JSON.parse` stall, its fix via a worker thread, and before/after `monitorEventLoopDelay` p99 numbers; and (5) a Dockerfile plus a SIGTERM drain test proving zero failed requests during a rolling restart under k6, with `keepAliveTimeout`, drain deadline and `terminationGracePeriodSeconds` documented in one table. The README explains every design choice in terms a Python-first team can map to Pydantic, mypy, pip lockfiles and pytest."
+ "proofOfWork": "A public repository, `kaupex-api-prod`, that a reviewer can run cold with `make up && make load && make chaos`. `make up` starts the FastAPI service, Postgres and an LLM stub under Compose and includes a recorded three-second clip of the service exiting non-zero with a `ValidationError` when `KAUPEX_DATABASE_URL` is removed. `make load` runs the k6 matrix (workers 1/2/4 x `--limit-concurrency` 64/256/unset) against the IO-bound and CPU-bound endpoints on a 2 vCPU host and writes `LOAD_REPORT.md` with p50/p95/p99, RPS, 503 rate and RSS per worker, ending in a one-paragraph decision that is reflected verbatim in the Dockerfile `CMD`. `make chaos` starts a 20 s in-flight request, sends SIGTERM, and a pytest asserts that the request returned 200, `/readyz` flipped to 503 before accepting stopped, lifespan teardown logged `engine disposed`, and total shutdown fit inside a 30 s budget; it then rebuilds with a shell-form `CMD` to demonstrate the ten-second hang and SIGKILL. Alongside sits a `k8s/` folder with a Deployment carrying all three probes, `preStop`, `terminationGracePeriodSeconds`, requests and limits, plus a one-page `RUNBOOK.md` a customer SRE could follow to size workers and pools for their node type and Postgres `max_connections`."
 }

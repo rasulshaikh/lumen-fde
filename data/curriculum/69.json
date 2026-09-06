@@ -1,209 +1,191 @@
 {
  "i": 69,
- "topic": "Technical writing and public write-ups",
- "track": "J. FDE Craft and Communication",
+ "topic": "Cloud and Kubernetes security games",
+ "track": "I. Security and Compliance",
  "month": 8,
  "hours": 6,
- "why": "An FDE's output is mostly artifacts other people read without you in the room: the runbook the customer's on-call follows at 3am, the incident write-up their VP forwards to their CISO, the design doc that decides whether your integration ships. If the prose is vague, the deployment stalls in review; if it is precise, you buy trust you did not have to earn in a meeting. Public case studies do the same job pre-sales - a hiring loop or a prospect who has read three of your write-ups arrives already believing you can do the work, which is the single highest-leverage thing you can put on the internet in a job search.",
+ "why": "As an FDE you deploy into the customer's own AWS account and their Kubernetes cluster, often with a security team watching every IAM role you request and every Pod spec you apply, and 'the vendor's workload got popped and pivoted to our data' is the fastest way to be thrown off an account. Playing the attacker in flaws2.cloud and Kubernetes Goat teaches you exactly how a leaked credential, an SSRF, a privileged Pod or an over-broad Role turns into a full account compromise, so you can design the deployment that does not do that and defend the design in the architecture review. The tangible output is a client-facing hardening checklist you can hand a customer's platform team, which is worth more in a security review than any certificate.",
  "prerequisites": [
-  "At least three finished pieces of real work with a decision and a measurable outcome in them - ideally the Lumen FDE deployment, a migration or integration you owned, and a production incident you debugged end to end.",
-  "Working Git and Markdown: branches, PRs, fenced code blocks, and the docs-as-code idea from developer tooling and Git internals (topic 2).",
-  "Enough observability and SLO literacy (topics 27 and 29) to quote p50/p95/p99, error budgets and before/after numbers without hand-waving.",
-  "A publishing surface you control - rasul.in with a working build and deploy, plus the ability to add a route, an OG image and a feed.",
-  "Basic diagramming: you can draw a system as boxes with labelled arrows and know what a trust boundary is (threat modelling, topic 62).",
-  "Customer-facing judgement about what is confidential: contract terms, NDAs, and the difference between 'a fintech in Southeast Asia' and naming the account."
+  "Kubernetes production ops and security (topics 8 and 10): RBAC verbs and resources, ServiceAccount tokens, requests/limits, NetworkPolicy and Pod Security concepts, plus kubectl -n, get -o yaml, exec, auth can-i.",
+  "IAM and cloud security (topic 15): IAM policies, roles vs users, STS temporary credentials, IRSA, and why long-lived access keys are the thing you are trying to eliminate.",
+  "AWS networking and compute (topic 13): VPC, security groups, EC2, Lambda, and the fact that 169.254.169.254 is the instance metadata endpoint.",
+  "Docker internals (topic 5): namespaces, cgroups, capabilities, the container filesystem, and what the Docker socket grants whoever can reach it.",
+  "Application security: OWASP Top 10 (topic 61) and threat modelling (topic 62): SSRF, broken access control, secrets management, and how to reason about an attacker's next hop.",
+  "Enough shell and curl to hit a metadata endpoint, decode a JWT, base64 a secret and read a kubeconfig without a tutorial."
  ],
  "subtopics": [
   {
-   "name": "Pick three stories that each contain a real decision",
-   "learn": "Before writing a word, list eight candidate stories from your own work and score each on: was there a decision with at least two defensible options, is there a number that moved, and can you publish it without leaking a customer. Keep the three that score highest and write one sentence per piece stating the reader ('a platform engineer evaluating whether to run this in their own VPC') and the one thing they should believe afterwards. Reject 'here is how I built a CRUD app' - a case study people share is one where the obvious answer was wrong and you show why. Write the three one-sentence promises down; every later cut is judged against them.",
+   "name": "Set up the three ranges and adopt the attacker's loop",
+   "learn": "Stand up all three environments before you learn any theory: run flaws2.cloud's attacker and defender tracks in the browser, deploy Kubernetes Goat into a local kind or minikube cluster (never a shared or production cluster) with its setup script, and register the two free TryHackMe rooms. Internalise the attacker loop you will repeat in every scenario: enumerate what identity/token you currently hold, find what it can reach, use that to obtain the next credential, escalate, then persist. Keep a running lab journal keyed by scenario with the exact command, the credential or path it exposed, and the single control that would have stopped it - that journal becomes the client checklist at the end.",
    "minutes": 25,
    "resource": {
-    "label": "Julia Evans - Some blogging myths (choosing what is worth publishing)",
-    "url": "https://jvns.ca/blog/2023/06/05/some-blogging-myths/"
+    "label": "Kubernetes Goat - official site and setup",
+    "url": "https://madhuakula.com/kubernetes-goat/"
    }
   },
   {
-   "name": "The case-study spine: context, constraint, options, decision, mechanism, result",
-   "learn": "Adopt one skeleton and reuse it across all three pieces: (1) the situation and the hard constraint, (2) the two or three options actually on the table, (3) what you chose and the trade-off you accepted, (4) how the thing actually works, at the level of config keys and API calls, (5) what changed, with numbers, and (6) what you would do differently. This is the Architecture Decision Record shape (context / decision / consequences) stretched to narrative length. Draft all three spines as bullet outlines first and confirm each has a real 'consequences' section - the honest cost you paid is what makes readers trust the rest.",
+   "name": "flaws2 attacker track: SSRF to IMDS to account credentials",
+   "learn": "Work the full attacker chain: an image-parsing endpoint that fetches a URL you control (SSRF), which you point at http://169.254.169.254/latest/meta-data/iam/security-credentials/ to steal the container/instance role's temporary credentials, then load them with aws configure or environment variables and run aws sts get-caller-identity to confirm who you now are. Understand each hop as a distinct control failure: the app trusting an attacker-supplied URL, the workload holding a role far broader than it needs, and the metadata service handing tokens to anything that can make a local HTTP request. This exact chain (Capital One, 2019) is the canonical cloud breach and the one a security reviewer will ask you about by name.",
+   "minutes": 30,
+   "resource": {
+    "label": "AWS docs - Instance metadata and user data",
+    "url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html"
+   }
+  },
+  {
+   "name": "The IMDS fix: IMDSv2, hop limit, and blocking metadata from workloads",
+   "learn": "Learn the concrete defence you will recommend on every AWS engagement: enforce IMDSv2 (HttpTokens: required) so the metadata endpoint requires a PUT-issued session token that SSRF usually cannot obtain, set HttpPutResponseHopLimit to 1 so a container one network hop away cannot reach it, and on EKS block Pod egress to 169.254.169.254 entirely so workloads use IRSA instead of the node role. Know the difference between the node's instance role and the Pod's IRSA role, and why a Pod inheriting the node role is the single most common EKS privilege-escalation path. Be able to write the exact modify-instance-metadata-options call and the NetworkPolicy/iptables rule that implement this.",
+   "minutes": 20,
+   "resource": {
+    "label": "EKS Best Practices - Security",
+    "url": "https://aws.github.io/aws-eks-best-practices/security/docs/"
+   }
+  },
+  {
+   "name": "flaws2 defender track: CloudTrail, Athena and GuardDuty",
+   "learn": "Switch sides and reconstruct the same attack from logs: query CloudTrail (the account's API audit log) to find the sequence of calls the stolen credential made, run those queries at scale in Athena over CloudTrail-in-S3, and read what GuardDuty flags automatically (for example UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration, which fires when a role's credentials are used from an IP outside the instance). Learn to read the fields that matter: userIdentity, sourceIPAddress, eventName, and the tell-tale sign of credential theft - an instance role suddenly calling APIs from an external IP. This is the evidence trail every incident review and every SOC 2 auditor expects to exist.",
+   "minutes": 30,
+   "resource": {
+    "label": "AWS docs - CloudTrail user guide",
+    "url": "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-user-guide.html"
+   }
+  },
+  {
+   "name": "Secrets baked into images and Kubernetes objects",
+   "learn": "Run the Goat scenarios that plant credentials where they always end up: hardcoded keys in a Docker image layer (docker history / dive shows them even after a later RUN deletes the file), tokens in ConfigMaps, and secrets passed as environment variables that leak into crash dumps, logs and any process that can read /proc/<pid>/environ. Learn to hunt them the way an attacker does and the way you should before shipping: scan image layers, grep the manifests, and check kubectl get secrets across namespaces. The FDE lesson is that a Secret object is base64, not encryption, and that build-time secrets in images survive forever in the registry - so the fix is a real secrets manager (External Secrets, IRSA-scoped Secrets Manager) plus image scanning in CI, not deletion.",
    "minutes": 25,
    "resource": {
-    "label": "Architecture Decision Records - adr.github.io",
-    "url": "https://adr.github.io/"
+    "label": "Trivy docs - vulnerability and secret scanning",
+    "url": "https://trivy.dev/docs/latest/guide/"
    }
   },
   {
-   "name": "Audience definition and the prerequisite contract",
-   "learn": "Work Google Technical Writing One's audience unit and apply it literally: write the reader's role, what they already know, and what they need to do after reading. Then compute the curse-of-knowledge delta - list every term you used that the reader does not have (IRSA, backpressure, idempotency key, ANN recall) and decide for each whether to define it inline, link it, or cut the sentence. State prerequisites explicitly at the top of a how-to ('assumes kubectl access and a namespace you can create Secrets in'). A reader who bounces at paragraph three because you assumed too much never tells you why.",
+   "name": "Container escape: privileged Pods, capabilities and hostPath",
+   "learn": "Do the escape scenarios and learn precisely what grants them: privileged: true (disables most isolation, hands you the host devices), hostPID/hostNetwork/hostIPC sharing the node's namespaces, dangerous capabilities such as CAP_SYS_ADMIN, and a hostPath volume mounting the node filesystem so you write to /var/lib/kubelet or read every other Pod's secrets. Practise the classic breakout: a privileged Pod that mounts the host root and chroots into it, giving root on the node and therefore on every workload scheduled there. Tie each to its control in the securityContext you will mandate: runAsNonRoot, allowPrivilegeEscalation: false, readOnlyRootFilesystem, drop ALL capabilities, and no host namespaces.",
+   "minutes": 30,
+   "resource": {
+    "label": "Kubernetes docs - Configure a security context for a Pod",
+    "url": "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/"
+   }
+  },
+  {
+   "name": "The mounted Docker socket and Docker-in-Docker",
+   "learn": "Exploit the scenario where /var/run/docker.sock is mounted into a container: whoever holds the socket can create a new container mounting the host root and is effectively root on the node, which is why 'just mount the socket for CI' is a full compromise waiting to happen. Understand the same risk for a shared containerd socket and for privileged Docker-in-Docker sidecars in build pipelines. Know the safe alternatives you will propose to customers - rootless build tooling such as Kaniko or Buildah, or a sandboxed builder - and be able to explain why mounting the socket is categorically different from any other volume mount.",
    "minutes": 20,
    "resource": {
-    "label": "Google Technical Writing One",
-    "url": "https://developers.google.com/tech-writing/one"
+    "label": "Docker docs - Docker Engine security",
+    "url": "https://docs.docker.com/engine/security/"
    }
   },
   {
-   "name": "Sentence-level surgery: active voice, one idea, no zombie nouns",
-   "learn": "Run a mechanical pass over your draft: find every passive construction (search for 'was', 'were', 'is being', 'by the') and name the actor or justify keeping it; split any sentence over roughly 25 words; convert nominalisations back into verbs ('performed an evaluation of' becomes 'evaluated'); delete 'in order to', 'it should be noted that', 'basically', 'simply', 'just', 'obviously'. Replace vague quantifiers with numbers: 'significantly faster' becomes 'p95 fell from 4.1s to 380ms'. Do this as a timed pass, not while drafting - drafting and editing in the same pass is how people produce 3000 words that say nothing.",
+   "name": "Kubelet, NodePort and the exposed cluster attack surface",
+   "learn": "Enumerate the network-reachable attack surface the Goat scenarios expose: an unauthenticated or over-permissive kubelet API (port 10250) that lets you list Pods and exec into them, NodePort/LoadBalancer services that accidentally publish an internal dashboard or debug endpoint to the internet, and metadata or admin UIs reachable from inside the cluster. Practise using amicontained to fingerprint what your container can do (capabilities, seccomp, namespaces) and reasoning about what a compromised Pod can reach on the pod network. The FDE takeaway is an exposure review before every go-live: what did we accidentally publish, and can a single popped Pod talk to the control plane, the metadata service, or another tenant.",
    "minutes": 25,
    "resource": {
-    "label": "Federal Plain Language Guidelines",
-    "url": "https://digital.gov/guides/plain-language"
+    "label": "Kubernetes docs - Securing a cluster",
+    "url": "https://kubernetes.io/docs/tasks/administer-cluster/securing-a-cluster/"
    }
   },
   {
-   "name": "Paragraphs, lists, tables, and summary-first structure",
-   "learn": "Apply Technical Writing Two's structural moves: one topic per paragraph with the point in the first sentence, three to five sentences max, and a hard rule that a reader skimming only your first sentences still gets the argument. Convert any sequence of 'and then' prose into a numbered list when order matters and a bulleted list when it does not; keep list items grammatically parallel. Convert any comparison of three or more things across two or more attributes into a table with the decision criterion as a column. Put the conclusion at the top of each section - technical readers scan, they do not read in order.",
-   "minutes": 20,
+   "name": "RBAC as an attack graph: from a token to cluster-admin",
+   "learn": "Treat RBAC the way an attacker does. From a compromised ServiceAccount token (mounted by default at /var/run/secrets/kubernetes.io/serviceaccount/token), run kubectl auth can-i --list to map your rights, then find the escalation edges: get/list secrets (steal every credential in the namespace), create pods (schedule a privileged Pod and escape), pods/exec (jump into other workloads), bind/escalate on roles (grant yourself more), and impersonate (become another identity). Use kubectl-who-can to invert the question and find who holds a dangerous verb. Learn the deployment discipline this forces: never automountServiceAccountToken unless the workload calls the API, and scope every Role to named resources rather than wildcards.",
+   "minutes": 30,
    "resource": {
-    "label": "Google Technical Writing Two",
-    "url": "https://developers.google.com/tech-writing/two"
+    "label": "Kubernetes docs - RBAC good practices",
+    "url": "https://kubernetes.io/docs/concepts/security/rbac-good-practices/"
    }
   },
   {
-   "name": "Terminology discipline and a project word list",
-   "learn": "Pick one term per concept and never vary it for elegance - 'job' and 'task' and 'run' meaning the same thing across three sections is a bug, not style. Build a five-to-fifteen line word list at the top of your notes fixing your spellings and capitalisation (Kubernetes not k8s in prose, PostgreSQL not Postgres in headings, 'command-line' adjectival, 'sign in' verb vs 'sign-in' noun) and check it against Google's word list for the entries you are unsure about. Ban 'easy', 'simple', 'just' and 'obviously' outright: they tell a stuck reader the failure is theirs.",
-   "minutes": 20,
-   "resource": {
-    "label": "Google developer documentation style guide - word list",
-    "url": "https://developers.google.com/style/word-list"
-   }
-  },
-  {
-   "name": "Diataxis: never blend tutorial, how-to, reference and explanation",
-   "learn": "Learn the four modes and their failure signature: a tutorial that stops to explain CAP theorem loses the beginner; a how-to that narrates your journey wastes an expert's time; reference that editorialises becomes untrustworthy; explanation with copy-paste commands gets pasted into production. Classify each of your three pieces (a case study is mostly explanation with a how-to appendix) and move any misplaced content out into a linked companion page. Apply the same test to the customer-facing docs you ship: if your runbook has a paragraph starting 'historically we...', it belongs somewhere else.",
-   "minutes": 20,
-   "resource": {
-    "label": "Diataxis - the four kinds of documentation",
-    "url": "https://diataxis.fr/"
-   }
-  },
-  {
-   "name": "Blameless incident write-ups that survive a customer's exec reading them",
-   "learn": "Learn the postmortem template shape: impact stated in customer terms and duration, a timestamped timeline with timezone, root cause separated from triggering condition, what went well / what went badly / where we got lucky, and action items each with an owner, a due date and a type (prevent, detect, mitigate). Write in the passive-free but person-free register: 'the deploy script applied the migration before draining connections', never 'Priya forgot to drain connections'. Include the detection gap explicitly - how long between impact starting and anyone knowing - because that is the number that decides whether the customer trusts your monitoring.",
+   "name": "Where Kubernetes secrets really live: etcd and encryption at rest",
+   "learn": "Follow a Secret from kubectl to storage: it is base64-encoded (trivially decoded) and, unless you configure an EncryptionConfiguration with a KMS provider, it sits in plaintext in etcd, so anyone with etcd access or an etcd backup has every credential in the cluster. Practise pulling secrets via the API with a stolen token and understand that RBAC on the secrets resource, not the base64, is the only thing protecting them. Know the controls you will require on a customer cluster: encryption at rest with an external KMS, tight RBAC on secrets, disabling token automounting, and moving real secrets to an external store synced in with least-privilege IRSA rather than storing them long-term in the cluster.",
    "minutes": 25,
    "resource": {
-    "label": "Google SRE Book - Postmortem Culture: Learning from Failure",
-    "url": "https://sre.google/sre-book/postmortem-culture/"
+    "label": "Kubernetes docs - Secrets",
+    "url": "https://kubernetes.io/docs/concepts/configuration/secret/"
    }
   },
   {
-   "name": "Read five real published postmortems and steal their moves",
-   "learn": "Pick five write-ups from the post-mortems collection spanning different failure classes (cascading failure, config push, capacity exhaustion, data loss, dependency outage) and for each, annotate: how many sentences before you know the impact, where the timeline starts, how they describe the contributing cause without blame, and what they chose not to disclose. Notice that the widely-shared ones are specific and slightly uncomfortable - they name the wrong assumption. Extract three concrete devices (an impact box at the top, a 'why our monitoring missed it' section, a diagram of the request path at failure) and put them in your own template.",
-   "minutes": 20,
-   "resource": {
-    "label": "danluu/post-mortems - collection of public postmortems",
-    "url": "https://github.com/danluu/post-mortems"
-   }
-  },
-  {
-   "name": "Numbers that survive scrutiny: baselines, percentiles, and honest deltas",
-   "learn": "Every performance or cost claim needs four things stated: the baseline configuration, the measurement method and sample size, the percentile (never a bare average for latency), and the confounders you did not control. Write 'p99 ingest latency over 7 days of production traffic, ~2.1M requests/day, fell from 3.4s to 610ms after switching to batched upserts; hardware and traffic mix unchanged' rather than '5x faster'. Frame reliability numbers against an SLO and error budget rather than as raw uptime. If a number came from a synthetic benchmark, say so in the same sentence - a reader who catches you inflating one figure discounts the whole piece.",
+   "name": "Pod Security Standards and Admission enforcement",
+   "learn": "Learn the enforcement layer that would have blocked half the escapes above. Pod Security Admission applies the baseline and restricted profiles per namespace via labels (pod-security.kubernetes.io/enforce=restricted), rejecting privileged Pods, host namespaces, dangerous capabilities and root containers at admission time. Understand the three modes (enforce, audit, warn) so you can roll it out safely - run audit/warn first to find what breaks, then flip to enforce - and know restricted's exact requirements (runAsNonRoot, seccompProfile RuntimeDefault, drop ALL capabilities, no privilege escalation). This is the single highest-leverage cluster-wide control an FDE can turn on without rewriting any application.",
    "minutes": 25,
    "resource": {
-    "label": "Google SRE Book - Service Level Objectives",
-    "url": "https://sre.google/sre-book/service-level-objectives/"
+    "label": "Kubernetes docs - Pod Security Standards",
+    "url": "https://kubernetes.io/docs/concepts/security/pod-security-standards/"
    }
   },
   {
-   "name": "One diagram per idea: C4 levels and drawing the trust boundary",
-   "learn": "Learn the C4 levels (system context, container, component, code) and pick exactly one level per diagram - the most common diagram failure is mixing a Kubernetes Pod, an AWS account boundary and a Python class in one picture. For a case study, a system-context diagram plus one container diagram is usually the whole visual budget. Label every arrow with protocol and direction of initiation ('HTTPS, service to API, mTLS'), draw the customer/vendor boundary explicitly, and give the diagram a caption that states its claim rather than its contents. Any diagram you cannot summarise in one sentence is two diagrams.",
+   "name": "Default-deny networking with NetworkPolicy",
+   "learn": "Reproduce the lateral-movement scenario where a compromised Pod freely reaches every other service, the metadata endpoint and the control plane, then shut it down. Apply a default-deny-all ingress and egress NetworkPolicy per namespace and add explicit allow rules only for the flows the app actually needs, including a rule that denies Pod egress to 169.254.169.254. Understand that NetworkPolicy is enforced by the CNI (Calico, Cilium), so a cluster whose CNI does not support it silently ignores your policies - a trap you must check for. The deliverable mindset: every namespace ships with a default-deny baseline, and each allowed connection is a documented decision, not an accident.",
    "minutes": 20,
    "resource": {
-    "label": "The C4 model for visualising software architecture",
-    "url": "https://c4model.com/"
+    "label": "Kubernetes docs - Network Policies",
+    "url": "https://kubernetes.io/docs/concepts/services-networking/network-policies/"
    }
   },
   {
-   "name": "Diagrams as code, versioned next to the prose",
-   "learn": "Author diagrams in Mermaid (flowchart, sequenceDiagram, and the state and ER types) inside fenced ```mermaid blocks so they live in the same repo and PR as the text and never drift from it. Learn enough syntax to draw a request path with participants and activation bars, and a deployment topology with subgraphs for the VPC and cluster. Know the limits - once you need precise layout or annotation, export a hand-drawn SVG instead and commit the source file. Check that your site's renderer actually supports Mermaid before you commit to it; if not, render to SVG at build time.",
-   "minutes": 15,
-   "resource": {
-    "label": "Mermaid docs - flowchart syntax (nodes, edges, subgraphs)",
-    "url": "https://mermaid.js.org/syntax/flowchart.html"
-   }
-  },
-  {
-   "name": "Alt text, contrast, and images that survive dark mode",
-   "learn": "Write alt text that carries the informational content, not the filename: for a diagram, one sentence stating what it shows plus a pointer to the nearby prose that describes it fully; for decorative images, alt=\"\" so screen readers skip them. Never put load-bearing information only in a screenshot - a terminal screenshot cannot be copied, searched, or read aloud, so paste the text too. Check contrast on diagram strokes and make sure exported PNGs with transparent backgrounds do not vanish on a dark-themed page; a flat background colour on the export is the cheap fix.",
-   "minutes": 15,
-   "resource": {
-    "label": "W3C WAI - Images Tutorial (alt text decision tree)",
-    "url": "https://www.w3.org/WAI/tutorials/images/"
-   }
-  },
-  {
-   "name": "Code blocks and terminal transcripts that actually run",
-   "learn": "Every command you publish should be copy-pasteable: no leading '$' inside the copyable region, placeholders in an obvious form like <CLUSTER_NAME>, language tags on fences for highlighting, and long flags (--namespace not -n) so the reader can tell what they are running. Show the expected output right after the command so a reader can tell whether it worked. For multi-step flows, record an asciinema cast rather than a GIF - it is text, it is copyable, and it does not weigh 8MB. Before publishing, run every command in the piece on a clean machine or container; stale snippets are the number-one reason a technical post gets a scathing comment.",
-   "minutes": 20,
-   "resource": {
-    "label": "asciinema - terminal session recorder",
-    "url": "https://github.com/asciinema/asciinema"
-   }
-  },
-  {
-   "name": "Confidentiality: anonymise the customer, get approval, pick a licence",
-   "learn": "Establish a repeatable clearance loop: draft, strip identifying details (company name, headcount, exact ARR, cluster names, region if unusual, screenshots with hostnames and email addresses in them), replace with a category ('a Series-B logistics platform running ~200 services'), then send to your customer contact and get written approval before publishing - email is enough, verbal is not. Check the MSA/NDA for a publicity clause first. Redact credentials properly: rotate anything that appears in a screenshot rather than blurring it, and scrub .git history if a secret ever landed in the repo. Put an explicit licence on your own sample code so readers know they may use it.",
+   "name": "Policy-as-code at admission: Kyverno and OPA Gatekeeper",
+   "learn": "Go beyond built-in Pod Security to custom guardrails enforced as admission webhooks. Write a Kyverno policy (or an OPA Gatekeeper ConstraintTemplate) that rejects, for example, images not from an approved registry, containers without resource limits, or any use of hostPath - and run it in audit mode before enforce. Understand the mechanism: a validating admission webhook that the API server calls on every create/update, which means a broken or slow webhook can block all deployments (failurePolicy matters), and that mutating policies can inject secure defaults such as dropping capabilities. This is how mature platform teams make insecure specs literally un-deployable, and knowing it lets you meet a customer's existing policy stack.",
    "minutes": 25,
    "resource": {
-    "label": "GitHub Docs - Removing sensitive data from a repository",
-    "url": "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository"
+    "label": "Kyverno docs",
+    "url": "https://kyverno.io/docs/introduction/"
    }
   },
   {
-   "name": "Publishing mechanics on rasul.in: title, canonical URL, cards, dates",
-   "learn": "Ship each piece with: a title that states the specific claim ('Cutting p99 retrieval latency 5x by moving reranking off the request path' beats 'Lessons from an AI deployment'), a one-paragraph TL;DR above the fold, a stable slug you will never change, a canonical link tag, published and updated dates, and Open Graph plus Twitter card tags with a real og:image so the link renders as a card in Slack and LinkedIn instead of a bare URL. Test the card render with the platform's own debugger before you share. Confirm the page is server-rendered or statically generated so crawlers and link unfurlers see the text.",
+   "name": "Runtime detection and cluster audit logging",
+   "learn": "Prevention fails, so learn detection. Deploy Falco and trigger its rules by doing something suspicious in a Pod - spawning a shell in a container, reading /etc/shadow, writing below a system binary directory, or making an unexpected outbound connection - and read the alert it produces. Turn on the Kubernetes API audit log and find the entries for token use, exec into Pods, and secret reads, mapping each to the attacker actions from earlier scenarios. The FDE point is that a customer's SOC needs the signal to exist: without audit logging and runtime detection, a compromise of your workload is invisible until data leaves, and 'we had no logs' is the worst sentence in a post-incident review.",
    "minutes": 20,
    "resource": {
-    "label": "Google Search Central - Canonical URLs and consolidating duplicate URLs",
-    "url": "https://developers.google.com/search/docs/crawling-indexing/consolidate-duplicate-urls"
+    "label": "Falco docs",
+    "url": "https://falco.org/docs/"
    }
   },
   {
-   "name": "Prose CI: Vale, markdownlint, and link checking in the build",
-   "learn": "Treat prose like code. Add markdownlint for structural rules (heading increments, fence languages, no trailing whitespace, line length) and Vale with a style based on the Google developer style guide plus a repo vocabulary file for your own terms and product names. Wire both into a GitHub Actions job on pull requests so a broken heading level or a banned word ('simply') fails the check before it ships. Add a link checker for internal and external links and run it on a schedule, not just on push, so rot in old posts surfaces. Set Vale's error/warning/suggestion levels deliberately - if everything is an error, you will disable it in a week.",
+   "name": "Benchmarks and scanners: kube-bench, Trivy, Prowler",
+   "learn": "Run the automated tools that turn a subjective review into a scored report you can hand a customer. kube-bench checks a cluster against the CIS Kubernetes Benchmark; Trivy scans images for CVEs, misconfigured manifests and leaked secrets; Prowler (and ScoutSuite) audit the AWS account against CIS and surface public S3 buckets, over-permissive roles and missing CloudTrail. Learn to read their output as a prioritised list - not every finding is real or reachable - and to separate 'must fix before go-live' from 'noise'. These reports are the evidence backbone of your hardening checklist and exactly what a security team expects a competent vendor to produce unprompted.",
    "minutes": 20,
    "resource": {
-    "label": "Vale - syntax-aware prose linter",
-    "url": "https://github.com/vale-cli/vale"
+    "label": "kube-bench - CIS Kubernetes Benchmark checker",
+    "url": "https://github.com/aquasecurity/kube-bench"
    }
   },
   {
-   "name": "Ship, distribute, and handle the comment thread",
-   "learn": "Publishing is not distribution. For each piece: post to the two or three places your reader actually is, use the original title rather than editorialised bait, and be present for the first few hours to answer questions. Read the venue's rules before posting - most technical forums penalise self-promotional framing and reward a plain descriptive title and an author who replies substantively. When someone finds a genuine error, fix the post, add a dated correction note at the bottom, and thank them in the thread; when someone is just hostile, do not reply. Track which piece got forwarded internally by strangers - that, not raw traffic, is the signal the write-up worked.",
+   "name": "TryHackMe rooms and the client-facing hardening checklist",
+   "learn": "Finish the two free TryHackMe rooms to reinforce the attacker chain in a graded setting, then convert your entire lab journal into the deliverable: a one-to-two page client-facing hardening checklist grouped by layer - cloud identity (IMDSv2, no long-lived keys, scoped IRSA, block public S3, CloudTrail on), cluster (Pod Security restricted, RBAC least privilege, secrets encryption, default-deny NetworkPolicy), workload (non-root, drop capabilities, read-only rootfs, no socket mounts), and detection (audit log, Falco/GuardDuty). Each item states the risk in one line, the control, and how to verify it (the exact command or console check), so a customer's platform engineer can act on it without you in the room.",
    "minutes": 20,
    "resource": {
-    "label": "Hacker News guidelines",
-    "url": "https://news.ycombinator.com/newsguidelines.html"
+    "label": "Kubernetes docs - Security checklist",
+    "url": "https://kubernetes.io/docs/concepts/security/security-checklist/"
    }
   }
  ],
  "outcomes": [
-  "You can take a 2000-word draft and cut it 30% in one editing pass without losing a claim, showing the before/after word count and a list of the passive constructions, nominalisations and vague quantifiers you replaced.",
-  "You can state, for any page you write, which Diataxis mode it is and what belongs on a different page - and you can point at content you actually moved out.",
-  "You can write an incident write-up with impact in customer terms, a timestamped timeline with timezone, root cause separated from trigger, a stated detection gap, and action items that each have an owner, a date and a prevent/detect/mitigate label.",
-  "You can defend every number in your write-up: baseline, measurement method, sample size, percentile, and the confounders you did not control.",
-  "You can produce a system-context and a container diagram at a single C4 level each, authored as Mermaid in the repo, with protocol-labelled arrows, an explicit trust boundary and alt text that carries the content.",
-  "You can run every command in a published post on a clean container and have them all work, with expected output shown inline.",
-  "You can run a customer-clearance pass that strips identifying details, rotates any exposed credential, and produces written approval before publish.",
-  "You have three case studies live on rasul.in with canonical URLs, OG cards that render in Slack, a feed, and a CI job that lints prose and checks links on every pull request."
+  "You can execute the full SSRF-to-IMDS-to-credentials chain in flaws2.cloud, load the stolen role, run aws sts get-caller-identity, and then name the three independent controls (app-level URL validation, least-privilege role, IMDSv2 with hop limit 1) that each break the chain.",
+  "You can reconstruct that same attack from CloudTrail in Athena, point to the exact fields that reveal instance-credential exfiltration, and say which GuardDuty finding would have fired.",
+  "You can escape a privileged Pod to root on the node in Kubernetes Goat and then write the securityContext plus Pod Security restricted profile that makes the escape impossible.",
+  "You can take a compromised ServiceAccount token, run kubectl auth can-i --list, identify the specific verb (secrets get, pods create, roles escalate, impersonate) that leads to cluster-admin, and remediate it to a scoped Role.",
+  "You can explain, and demonstrate, that a Kubernetes Secret is base64 not encryption, and configure encryption at rest plus RBAC so a leaked token cannot read every credential in the cluster.",
+  "You can apply a default-deny NetworkPolicy and a Kyverno/Pod Security admission rule to a namespace, verify they block a bad Pod, and explain the audit-then-enforce rollout that avoids breaking running workloads.",
+  "You can run kube-bench, Trivy and Prowler against a cluster and account, triage the findings into must-fix-before-go-live versus noise, and produce a scored report.",
+  "You can hand a customer's platform team a one-to-two page hardening checklist where every item has a risk, a control, and a verification command."
  ],
  "failureModes": [
-  "The write-up leads with the journey ('when we first kicked off the project...') and buries impact and outcome under 800 words, so the exec who was forwarded it closes the tab before learning what happened.",
-  "A runbook says 'simply restart the service' with no expected output and no failure branch, so the customer's on-call at 3am runs it, sees an unfamiliar error, and escalates to you anyway - the doc bought nothing.",
-  "A screenshot in a published post contains a hostname, an internal email address or a partially visible token, and the account's security team finds it before you do.",
-  "Commands in the post were written from memory or from a shell with unexported env vars already set, so they fail for every reader on a clean machine and the top comment is someone pasting the error.",
-  "An incident report names an individual or a team as the cause, the customer's manager reads it, and the next incident gets reported to you late or not at all because people learned that honesty is punished.",
-  "Performance claims quote an average instead of a percentile and omit the baseline, so a sceptical engineer in the customer's review reproduces a different result and the whole document loses credibility.",
-  "Diagrams live in a Figma or Lucidchart file outside the repo, drift from the deployed architecture within two sprints, and are then used by a new joiner to reason about a system that no longer exists."
+  "An FDE requests a broad node/instance role 'to move fast', the workload gets an SSRF, and the attacker uses the metadata endpoint to inherit that role and pivot across the customer's whole account.",
+  "A build or debug container ships with /var/run/docker.sock mounted, so a single application compromise becomes root on the node and every co-located tenant workload.",
+  "Pods run as root with default automounted ServiceAccount tokens and no Pod Security profile, so one popped container reads every Secret in the namespace and schedules a privileged escape Pod.",
+  "NetworkPolicies are written and applied but the cluster's CNI does not enforce them, so the team believes the namespace is isolated while all Pod-to-Pod and Pod-to-metadata traffic flows freely.",
+  "Secrets are stored as Kubernetes Secret objects with no encryption-at-rest configured, so an etcd backup copied to S3 exposes every credential in plaintext base64.",
+  "IMDSv2 is left optional (HttpTokens: optional) and the hop limit is default, so SSRF still trivially retrieves credentials despite the team assuming metadata is protected.",
+  "No API audit log or runtime detection is enabled, so the workload compromise is invisible until data exfiltration is noticed externally and the post-incident review finds no evidence to reconstruct the attack."
  ],
  "interviewQuestions": [
-  "Walk me through a write-up you published about your own work. What did you cut, and how did you decide what was safe to disclose about the customer?",
-  "You have 45 minutes to write the customer-facing incident summary for a 4-hour partial outage in the integration you deployed. What sections do you write, in what order, and what do you deliberately leave out of the first version?",
-  "A customer's on-call engineer has to run your failover procedure for the first time at 3am with no context. Write - out loud - the first five lines of that runbook, and tell me what makes them safe to follow.",
-  "Your post claims a 5x latency improvement. I'm the skeptical staff engineer in the room. Convince me the number is real.",
-  "How do you decide whether something belongs in a tutorial, a how-to, reference, or an explanation page - and give me an example of a doc you've seen that failed because it mixed two of them.",
-  "You wrote a design doc, three reviewers left conflicting comments, and one of them is the customer's architect who outranks the others. How do you converge the document without a meeting?",
-  "We want our FDEs publishing customer case studies. Design the process end to end: what gets written, who reviews it, what the legal and confidentiality gates are, and how you keep it from becoming marketing fluff."
+  "Walk me through the Capital One-style breach: an app has an SSRF, it runs on EC2/EKS, and the attacker ends up reading an S3 bucket. Name every hop and the control at each hop that would have stopped it.",
+  "We are deploying your workload into our EKS cluster. What IAM and Pod-level configuration will you insist on, and how do you prevent your Pod from ever using the node's instance role?",
+  "A container in our cluster has been compromised. Assume it has a mounted ServiceAccount token. Walk me through, as the attacker, how you would try to reach cluster-admin, and then tell me which single RBAC change would most reduce that blast radius.",
+  "Explain the difference between Pod Security Admission and an OPA Gatekeeper / Kyverno policy. When would you reach for each, and what breaks if the admission webhook is down?",
+  "A customer says 'our Kubernetes Secrets are secure, they're in etcd'. What's wrong or incomplete about that, and what would you change?",
+  "You have two days before go-live in a customer account you've never seen. What do you run to assess cloud and cluster security posture, and how do you decide what is a blocker versus acceptable risk?",
+  "How would you detect that a workload in the cluster has been compromised, and what would you have needed to set up in advance for that detection to be possible?"
  ],
- "proofOfWork": "Beyond the three published case studies, build and open-source a 'write-up kit' repo that turns your process into something another engineer can adopt in an afternoon. It contains four Markdown templates (case study, incident postmortem, design doc / ADR, and customer runbook) with inline commentary explaining what each section is for and the failure it prevents; a Vale style package with a vocabulary file plus a rules set that flags banned hedges ('simply', 'just', 'obviously'), bare averages for latency, undefined acronyms and passive-voice hot spots; a markdownlint config and a GitHub Actions workflow that runs both plus a link checker on every pull request; a redaction and clearance checklist covering screenshot scrubbing, credential rotation, git-history scanning and the written-approval step; and a short README that links each of your three published pieces to the template it was built from. Prove it works, not just that it exists: include the CI run on your own posts, a before/after diff of one draft showing the word count drop and the specific lint findings you fixed, and one piece of evidence that a real reader acted on the writing - a forwarded thread, an issue someone opened against your snippets, or a customer sign-off email (redacted) approving publication."
+ "proofOfWork": "Produce a 'break-and-harden' report on a local Kubernetes Goat cluster and the flaws2.cloud ranges: for at least eight scenarios (SSRF-to-IMDS, privileged-Pod escape, mounted Docker socket, RBAC token escalation, secrets in image layers, exposed kubelet/NodePort, secret-in-etcd, and a lateral-movement path), document the exact attacker commands and captured evidence (the stolen credential, the node root shell, the auth can-i --list output), then remediate each and prove the fix - re-run the attack and show it now fails, with the securityContext, Pod Security label, RBAC Role, NetworkPolicy or Kyverno policy that blocked it. Attach machine-generated evidence: kube-bench, Trivy and Prowler reports before and after, plus a screenshot of a Falco alert and a CloudTrail/Athena query reconstructing the flaws2 attack. Conclude with the deployable one-to-two page client hardening checklist (cloud identity, cluster, workload, detection layers), where every line is a risk, a control, and the verification command a customer's engineer can run themselves."
 }

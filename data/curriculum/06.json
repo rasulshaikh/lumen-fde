@@ -1,227 +1,227 @@
 {
-  "i": 6,
-  "topic": "Production images and supply chain: multi-stage, non-root, SBOM, scanning, signing",
-  "track": "B. Containers and Kubernetes",
-  "month": 1,
-  "hours": 6.0,
-  "why": "The container image is the unit an FDE actually hands to a customer, and it is the customer's security team, not yours, that decides whether it runs: their Wiz or Prisma scan, their admission controller, their procurement checklist asking for an SBOM. A PoC that took three weeks to build dies on go-live day when the image is 1.2 GB, runs as root, and shows 300 CVEs, and the FDE is the only person in the room who can fix it before the change window closes. Knowing how to make an image small, non-root, scannable, attested and signed is what lets you say 'yes, deploy it to prod' in a regulated bank or a FedRAMP boundary instead of 'let me get back to you'.",
-  "prerequisites": [
-    "Layers, union filesystems, namespaces and cgroups from 'Docker internals' (topic 5): you should already know why deleting a file in a later RUN does not shrink the image",
-    "Linux users, UIDs/GIDs, file permission bits and capabilities from 'Linux internals' (topic 1), because non-root is mostly a permissions problem",
-    "Signals and PID 1 semantics (SIGTERM vs SIGKILL, zombie reaping) from 'Linux internals' (topic 1)",
-    "TLS certificates and what an OIDC identity token is, from 'Networking' (topic 2), since keyless signing is OIDC plus short-lived x509",
-    "A GitHub repository with a working CI job from 'Git at depth' (topic 4); Dokeo (Python) and DefenderMate (TypeScript/Next.js) are the two images you will harden",
-    "Comfort reading JSON with `jq` and a SHA-256 digest without flinching"
-  ],
-  "subtopics": [
-    {
-      "name": "OCI image anatomy: manifest, config, layers, tag vs digest",
-      "learn": "Read a real manifest with `docker buildx imagetools inspect --raw <ref>` and identify the three parts: the config blob (`application/vnd.oci.image.config.v1+json`, holding `config.User`, `Env`, `Entrypoint`, `rootfs.diff_ids`, `history`), the ordered layer descriptors (`mediaType`, `digest`, `size`) and, for multi-arch, the image index that points at per-platform manifests. Understand that the image digest is the sha256 of the manifest bytes, so `repo@sha256:...` is immutable while `repo:tag` is a mutable pointer a registry can move under you. Be able to pull by digest, read `RepoDigests` from `docker image inspect`, and explain why a scanner result is only meaningful against a digest.",
-      "minutes": 15,
-      "resource": {
-        "label": "OCI Image Spec: Image Manifest",
-        "url": "https://github.com/opencontainers/image-spec/blob/main/manifest.md"
-      }
-    },
-    {
-      "name": "Layer cache mechanics and instruction ordering",
-      "learn": "Know exactly how BuildKit decides a cache hit: `RUN` is keyed on the instruction string plus parent layer, `COPY`/`ADD` on the checksum of the copied files, and any miss invalidates every later instruction. Order Dockerfiles so lockfiles (`uv.lock`, `package-lock.json`) are copied and dependencies installed before application source, keep `apt-get update && apt-get install -y --no-install-recommends ... && rm -rf /var/lib/apt/lists/*` in one RUN to avoid stale package indexes, and use `RUN --mount=type=cache,target=/root/.cache/uv` (or `/root/.npm`) so package caches persist between builds without landing in a layer. In CI use `--cache-from type=registry,ref=...` with `--cache-to type=registry,mode=max` or `type=gha` so cold runners still hit cache.",
-      "minutes": 20,
-      "resource": {
-        "label": "Docker Docs: Build cache",
-        "url": "https://docs.docker.com/build/cache/"
-      }
-    },
-    {
-      "name": "Multi-stage builds: builder/runtime split, --target, COPY --from",
-      "learn": "Structure every production Dockerfile as at least two stages: a `builder` with compilers, headers (`gcc`, `libpq-dev`, `python3-dev`) and dev dependencies, and a `runtime` stage that starts from a slim base and receives only artifacts via `COPY --from=builder`. Use `docker build --target builder` to run tests inside the build, `COPY --link` so copied layers are cache-independent of the base, and name stages so `--from` references survive refactors. Verify the split worked by checking the runtime stage has no `gcc` or `pip` cache and that shared libraries the binary needs (`libpq5`, not `libpq-dev`) are still present with `ldd` or by simply starting the app; a runtime that lacks a `.so` fails at import time, not build time.",
-      "minutes": 30,
-      "resource": {
-        "label": "Docker Docs: Multi-stage builds",
-        "url": "https://docs.docker.com/build/building/multi-stage/"
-      }
-    },
-    {
-      "name": "Base image choice: slim vs Alpine/musl vs distroless vs Wolfi",
-      "learn": "Compare the four real options on size, CVE count and debuggability: `python:3.12-slim-bookworm` (~150 MB, glibc, apt, dozens of 'will not fix' Debian CVEs), `python:3.12-alpine` (~50 MB, musl: wheels need `musllinux` tags or compile from source, different DNS resolver behaviour, slower malloc), `gcr.io/distroless/python3-debian12` (no shell, no package manager, `:debug` tag adds busybox) and Chainguard/Wolfi `cgr.dev/chainguard/python` (glibc, apk, rebuilt nightly, near-zero CVEs, `-dev` variant for a shell). Understand that the CVE count on Debian stable is mostly unfixed-upstream noise and that distroless trades `kubectl exec` debugging for attack surface, which you recover with ephemeral debug containers. Pick per customer: a bank that mandates a specific approved base wins over your preference.",
-      "minutes": 20,
-      "resource": {
-        "label": "GoogleContainerTools/distroless",
-        "url": "https://github.com/GoogleContainerTools/distroless"
-      }
-    },
-    {
-      "name": "Python runtime slimming with uv (Dokeo)",
-      "learn": "Build Dokeo with `uv sync --frozen --no-dev --no-install-project` in the builder against a cache mount, then copy the finished `.venv` into a slim runtime and set `PATH=/app/.venv/bin:$PATH`. Set `UV_COMPILE_BYTECODE=1` and `UV_LINK_MODE=copy` in the builder, `PYTHONDONTWRITEBYTECODE=1` and `PYTHONUNBUFFERED=1` in the runtime so logs stream and no `__pycache__` is written to a read-only filesystem at run time. Know why the venv must be created with the same Python path in both stages (the venv's `pyvenv.cfg` and shebangs are absolute) and why `pip install --no-cache-dir` or a cache mount is mandatory if you fall back to pip.",
-      "minutes": 20,
-      "resource": {
-        "label": "uv Docs: Using uv in Docker",
-        "url": "https://docs.astral.sh/uv/guides/integration/docker/"
-      }
-    },
-    {
-      "name": "Node runtime slimming (DefenderMate)",
-      "learn": "For DefenderMate run `npm ci` with a `--mount=type=cache,target=/root/.npm` in the builder, build, then either `npm ci --omit=dev` into a clean stage or `npm prune --omit=dev`, and copy only `dist/`, production `node_modules` and `package.json` into `node:22-bookworm-slim` or `gcr.io/distroless/nodejs22-debian12`. For the Next.js front end use `output: 'standalone'` in `next.config.js` and copy `.next/standalone` plus `.next/static` and `public`, which drops the image from ~1 GB to ~150 MB. Set `NODE_ENV=production`, use the existing `node` user (uid 1000) or your own high UID, and know that `npm start` is shell-form and breaks signal delivery (covered in the PID 1 subtopic).",
-      "minutes": 15,
-      "resource": {
-        "label": "nodejs/docker-node: Docker and Node.js Best Practices",
-        "url": "https://github.com/nodejs/docker-node/blob/main/docs/BestPractices.md"
-      }
-    },
-    {
-      "name": "Build context, .dockerignore and build-time secrets",
-      "learn": "Understand that everything in the build context is sent to the daemon and available to `COPY .`, so `.dockerignore` (next to the Dockerfile, or `<Dockerfile>.dockerignore`) must exclude `.git`, `.env*`, `node_modules`, `.venv`, `__pycache__`, test fixtures and local data; a 'Sending build context 2.1GB' line is a bug. Never pass credentials as `ARG` or `ENV`: ARG values are recorded in `docker history` and ENV is baked into the image config forever. Use `RUN --mount=type=secret,id=npmrc,target=/root/.npmrc` with `--secret id=npmrc,src=$HOME/.npmrc` (or `env=NPM_TOKEN`) and `--mount=type=ssh` for private git, and know that 'deleting' a secret in a later RUN or using multi-stage does not help if it was ever written to a layer of the final stage.",
-      "minutes": 20,
-      "resource": {
-        "label": "Docker Docs: Build secrets",
-        "url": "https://docs.docker.com/build/building/secrets/"
-      }
-    },
-    {
-      "name": "Non-root by construction: USER, numeric UID, --chown, writable paths",
-      "learn": "Create a dedicated user with a high, fixed UID (`useradd -u 10001 -r -s /usr/sbin/nologin app` or `addgroup`/`adduser` on Alpine) and set `USER 10001:10001` numerically, because Kubernetes `runAsNonRoot: true` cannot verify a named user and fails with 'cannot verify user is non-root'. Copy application files with `COPY --chown=10001:10001` and give the process exactly one writable directory (a mounted `emptyDir` at `/tmp` or `/app/data`) so the pod can run with `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false` and `capabilities.drop: [ALL]`. Bind to a port above 1024 (8080, not 80) so you do not need `CAP_NET_BIND_SERVICE`, and test locally with `docker run --read-only --user 10001 --cap-drop ALL --tmpfs /tmp` before the customer's Pod Security 'restricted' profile does it for you.",
-      "minutes": 30,
-      "resource": {
-        "label": "Kubernetes Docs: Configure a Security Context for a Pod or Container",
-        "url": "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/"
-      }
-    },
-    {
-      "name": "PID 1, signals and exec-form ENTRYPOINT",
-      "learn": "Know that shell-form `CMD npm start` or `CMD python app.py` makes `/bin/sh -c` PID 1, which does not forward SIGTERM, so `docker stop` and Kubernetes pod deletion wait the full grace period (`terminationGracePeriodSeconds`, default 30 s) and then SIGKILL in-flight requests. Always use exec form `ENTRYPOINT [\"python\", \"-m\", \"uvicorn\", ...]`, set `STOPSIGNAL` if the app expects something other than SIGTERM, and if your process spawns children (gunicorn, a shell wrapper, Playwright) add `tini` (`ENTRYPOINT [\"tini\", \"--\", ...]`) or run with `--init` so zombies get reaped. Prove it: `docker stop` should return in under 2 seconds and the app log should show the graceful shutdown hook firing.",
-      "minutes": 15,
-      "resource": {
-        "label": "krallin/tini: A tiny but valid init for containers",
-        "url": "https://github.com/krallin/tini"
-      }
-    },
-    {
-      "name": "Dockerfile linting: hadolint and docker build --check",
-      "learn": "Run `hadolint Dockerfile` and be able to fix the rules that matter in production: DL3006/DL3007 (unpinned or `latest` base), DL3008/DL3018 (unpinned apt/apk packages), DL3009 (apt lists not cleaned), DL3002 (final USER is root), DL3025 (shell-form CMD/ENTRYPOINT) and DL4006 (missing `set -o pipefail`). Run BuildKit's own linter with `docker build --check .` and add `# check=error=true` after the `# syntax=` line so checks like `JSONArgsRecommended`, `SecretsUsedInArgOrEnv`, `UndefinedVar` and `LegacyKeyValueFormat` fail the build rather than warn. Wire both into the pre-commit config you built for Dokeo in topic 4 so they run in under a second.",
-      "minutes": 15,
-      "resource": {
-        "label": "Docker Docs: Build checks reference",
-        "url": "https://docs.docker.com/reference/build-checks/"
-      }
-    },
-    {
-      "name": "Image forensics: dive, docker history, wasted-space hunting",
-      "learn": "Use `dive <image>` to walk layers and see the efficiency score and 'wasted space' from files added then removed or overwritten; run it headless in CI with `CI=true dive --lowestEfficiency=0.95 --highestUserWastedPercent=0.05 <image>`. Cross-check with `docker history --no-trunc --format '{{.Size}}\\t{{.CreatedBy}}'` to find the one RUN that added 400 MB, and `docker image inspect --format '{{.Size}}'` for the total. The usual culprits you should recognise on sight: apt lists, pip or npm cache, dev dependencies, `.git`, test data copied by `COPY .`, and compilers left in the final stage.",
-      "minutes": 15,
-      "resource": {
-        "label": "wagoodman/dive: explore layers and wasted space",
-        "url": "https://github.com/wagoodman/dive"
-      }
-    },
-    {
-      "name": "Trivy image scanning: flags, package types, exit codes",
-      "learn": "Run `trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --pkg-types os,library --scanners vuln,secret <image>@<digest>` and read the output by package type: `os` findings come from the base image's dpkg/apk database and are fixed by bumping the base, `library` findings come from `uv.lock`/`package-lock.json`-installed packages and are fixed by bumping your dependency. Understand the vulnerability DB is pulled from a registry on first run (`~/.cache/trivy`) and must be cached or mirrored (`TRIVY_DB_REPOSITORY`) in CI to avoid rate limiting, and that `--scanners misconfig` (or `trivy config .`) also lints the Dockerfile itself with checks such as running as root or a missing HEALTHCHECK. Know what `--ignore-unfixed` hides so you can defend it to a customer.",
-      "minutes": 30,
-      "resource": {
-        "label": "Trivy Docs: Container Image target",
-        "url": "https://trivy.dev/docs/latest/target/container_image/"
-      }
-    },
-    {
-      "name": "Vulnerability triage: severity, EPSS, unfixed, .trivyignore with expiry, VEX",
-      "learn": "Triage a CVE in this order: is a fixed version available (`FixedVersion` column), is the vulnerable code reachable in your process (a `curl` CVE in a distroless image with no curl is not), what is the EPSS exploitation probability versus the CVSS score, and is it in the customer's own scanner's list. Record every accepted finding in `.trivyignore` (or `.trivyignore.yaml` with `statement` and `expired_at`) with an expiry date so the suppression fails the build when it lapses, and for statements a customer must consume, emit an OpenVEX document and feed it with `trivy --vex`. Never suppress by severity alone and never use `--ignore-unfixed` on a language package, since 'unfixed' there almost always means 'you have not bumped it'.",
-      "minutes": 20,
-      "resource": {
-        "label": "Trivy Docs: Filtering (severity, ignore file, VEX)",
-        "url": "https://trivy.dev/docs/latest/configuration/filtering/"
-      }
-    },
-    {
-      "name": "SBOM: SPDX vs CycloneDX, generation, attestation, rescanning",
-      "learn": "Generate an SBOM three ways and know when each applies: `syft <image> -o spdx-json=sbom.spdx.json -o cyclonedx-json=sbom.cdx.json` for a standalone file a customer's GRC team asked for, `trivy image --format cyclonedx --output sbom.cdx.json` when you want the same tool to scan it, and `docker buildx build --sbom=true --push` to attach an in-toto SBOM attestation to the image index (readable with `docker buildx imagetools inspect <ref> --format '{{ json .SBOM }}'`). Set `BUILDKIT_SBOM_SCAN_STAGE=true` on the builder stage if the customer wants build-time dependencies listed too. Then prove the value: run `trivy sbom sbom.cdx.json` a week later without pulling the image, and diff two SBOMs to answer 'what changed between the version you approved and this one'.",
-      "minutes": 30,
-      "resource": {
-        "label": "Docker Docs: SBOM attestations",
-        "url": "https://docs.docker.com/build/metadata/attestations/sbom/"
-      }
-    },
-    {
-      "name": "Provenance and SLSA levels",
-      "learn": "Understand what each SLSA Build level actually guarantees: L1 is provenance that exists, L2 is provenance signed by a hosted build platform, L3 adds an isolated, hardened build so the provenance cannot be forged by the repo's own workflow. Attach provenance with `docker buildx build --provenance=mode=max` (records Dockerfile, build args, source commit and materials as an in-toto statement of type `https://slsa.dev/provenance/v1`) and use the `slsa-framework/slsa-github-generator` reusable workflow when a customer needs L3. Know the operational gotcha: provenance and SBOM attestations turn a single manifest into an image index with `unknown/unknown` platform entries, which confuses some registries and breaks AWS Lambda container deploys, so `--provenance=false` is sometimes the right call per target.",
-      "minutes": 20,
-      "resource": {
-        "label": "SLSA v1.0: Build levels",
-        "url": "https://slsa.dev/spec/v1.0/levels"
-      }
-    },
-    {
-      "name": "Signing with cosign keyless: Fulcio, Rekor, identity-bound verification",
-      "learn": "Trace the keyless flow end to end: the CI job's OIDC token (GitHub Actions needs `permissions: id-token: write`) is exchanged at Fulcio for a ~10-minute x509 certificate binding the workflow identity, the signature is made with an ephemeral key, the cert and signature are recorded in the Rekor transparency log, and the bundle is pushed to the registry as an OCI artifact tagged `sha256-<digest>.sig` next to the image. Always sign the digest, never the tag: `cosign sign --yes ${IMAGE}@${DIGEST}` using the digest output of the build step. Verify with `cosign verify --certificate-identity https://github.com/<org>/<repo>/.github/workflows/build.yml@refs/heads/main --certificate-oidc-issuer https://token.actions.githubusercontent.com <ref>@<digest>` and understand that omitting the identity check means 'signed by anyone with a GitHub account'. Know the key-based alternative (`cosign generate-key-pair --kms awskms://...`) for customers who cannot reach the public Sigstore instance.",
-      "minutes": 25,
-      "resource": {
-        "label": "Sigstore Docs: Signing containers with cosign",
-        "url": "https://docs.sigstore.dev/cosign/signing/signing_with_containers/"
-      }
-    },
-    {
-      "name": "Enforcing at admission: digest pinning, imagePullPolicy, verifyImages",
-      "learn": "Turn signing into a control: deploy by digest (`image: repo@sha256:...`) or have the policy engine mutate tags to digests, and understand why `imagePullPolicy: IfNotPresent` with a mutable tag means different nodes silently run different code. Install Kyverno in a kind cluster and write a `ClusterPolicy` with `verifyImages` that requires a keyless attestor with your workflow `subject` and the GitHub `issuer`, sets `mutateDigest: true` and `required: true`, then watch an unsigned image get rejected with the exact error message a customer's platform team would see. Know the equivalent in Sigstore `policy-controller` (`ClusterImagePolicy` plus the `policy.sigstore.dev/include: \"true\"` namespace label) and how Pod Security admission 'restricted' independently requires non-root, dropped capabilities and a `RuntimeDefault` seccomp profile.",
-      "minutes": 20,
-      "resource": {
-        "label": "Kyverno Docs: Verify Images",
-        "url": "https://kyverno.io/docs/policy-types/cluster-policy/verify-images/overview/"
-      }
-    },
-    {
-      "name": "The Trivy gate in GitHub Actions",
-      "learn": "Build the deliverable's CI job: `docker/build-push-action` with `load: true` for a pre-push scan (or scan the pushed digest from `steps.build.outputs.digest`), then `aquasecurity/trivy-action` with `image-ref`, `severity: HIGH,CRITICAL`, `ignore-unfixed: true`, `exit-code: '1'` and a second run with `format: sarif` uploaded via `github/codeql-action/upload-sarif` so findings appear in the Security tab. Cache `~/.cache/trivy` with `actions/cache` or set `TRIVY_DB_REPOSITORY` to a mirror so the vulnerability DB download does not get rate-limited and take every pipeline down at once. Add a scheduled workflow that rescans the currently deployed digest nightly, because a green build on Monday says nothing about Thursday's CVE disclosure.",
-      "minutes": 20,
-      "resource": {
-        "label": "aquasecurity/trivy-action",
-        "url": "https://github.com/aquasecurity/trivy-action"
-      }
-    },
-    {
-      "name": "Hardening the pipeline itself: permissions, OIDC, SHA-pinned actions",
-      "learn": "A signed image is only as trustworthy as the workflow that signed it. Set job-level `permissions:` to the minimum (`contents: read`, `packages: write`, `id-token: write`), pin every third-party action to a full commit SHA with a version comment (`uses: docker/build-push-action@<sha> # v6.x`) and let Dependabot bump them, and never interpolate untrusted event data such as `github.event.pull_request.title` into a `run:` script. Use OIDC federation to the cloud (ties to topic 15) instead of long-lived registry credentials in secrets, avoid `pull_request_target` with a checkout of the PR head, and understand that anyone who can edit the workflow file on the default branch can produce a validly signed image, which is exactly the gap SLSA L3 closes.",
-      "minutes": 15,
-      "resource": {
-        "label": "GitHub Docs: Secure use reference for GitHub Actions",
-        "url": "https://docs.github.com/en/actions/reference/security/secure-use"
-      }
-    },
-    {
-      "name": "Reproducible and multi-platform builds",
-      "learn": "Pin the base image by digest (`FROM python:3.12-slim@sha256:...`) and package versions so two builds from the same commit produce the same layers, set `SOURCE_DATE_EPOCH` (BuildKit honours it) and add `rewrite-timestamp=true` to the image output so layer mtimes stop changing the digest on every build. Build for both architectures with `docker buildx build --platform linux/amd64,linux/arm64` on a `docker-container` driver (`docker buildx create --use`), and know that QEMU emulation via `docker/setup-qemu-action` is 5 to 20 times slower than native arm runners or cross-compiling with `--platform=$BUILDPLATFORM` and the `TARGETARCH` build arg. The result is an image index, so verify each platform manifest with `imagetools inspect` before telling a customer on Graviton it is supported.",
-      "minutes": 15,
-      "resource": {
-        "label": "Docker Docs: Reproducible builds with GitHub Actions",
-        "url": "https://docs.docker.com/build/ci/github-actions/reproducible-builds/"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can take Dokeo from a naive single-stage `python:3.12` image to a multi-stage image under 200 MB with a dive efficiency score above 0.95, and show the `docker history` line-by-line explanation of where the other 900 MB went.",
-    "You can run both Dokeo and DefenderMate under `docker run --read-only --user 10001 --cap-drop ALL --tmpfs /tmp` and under a Kubernetes Pod Security 'restricted' namespace with `runAsNonRoot: true` and `readOnlyRootFilesystem: true` without CreateContainerConfigError or a PermissionError at startup.",
-    "You can produce a `trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1` result of zero findings on both images, with every accepted CVE in `.trivyignore` carrying a written justification and an expiry date, and a CI job that goes red when a new HIGH appears.",
-    "You can attach SPDX and CycloneDX SBOMs plus SLSA provenance to an image at build time, read them back with `docker buildx imagetools inspect --format '{{ json .SBOM }}'`, and rescan the SBOM file a week later with `trivy sbom` without pulling the image.",
-    "You can sign an image keyless from GitHub Actions and verify it by digest with `cosign verify --certificate-identity ... --certificate-oidc-issuer ...`, then explain to a customer's security reviewer what Fulcio, Rekor and the `.sig` tag each contribute and what verification does not prove.",
-    "You can install Kyverno in a kind cluster, write a `verifyImages` policy bound to your workflow identity, and demonstrate the unsigned 'before' image being rejected while the signed 'after' image is admitted with its tag mutated to a digest.",
-    "You can diagnose a container that takes 30 seconds to stop, prove it is shell-form CMD swallowing SIGTERM with a `docker stop` timing and a `ps` of PID 1, and fix it so shutdown completes in under 2 seconds with the graceful hook logged.",
-    "You can receive a 300-item CVE export from a customer's Wiz or Prisma scan and, in 15 minutes, sort it into base-image fixes, dependency bumps, unreachable-in-this-image, and accepted-with-expiry, and write the one-page disposition their security team will actually sign."
-  ],
-  "failureModes": [
-    "A team ships `FROM python:3.12` with gcc, perl and 1.1 GB of Debian, the customer's Wiz scan on go-live morning reports 400 CVEs, and the change window closes while everyone argues about which of them are real.",
-    "Switching to Alpine to 'fix' image size makes a Python wheel with no musllinux build compile from source for 18 minutes on every CI run, and later the musl resolver's handling of Kubernetes search domains produces intermittent NXDOMAIN under load that nobody connects to the base-image change.",
-    "The Dockerfile says `USER appuser` and the pod spec says `runAsNonRoot: true`; the pod sits in CreateContainerConfigError with 'cannot verify user is non-root' because the kubelet cannot resolve a named user without reading /etc/passwd from the image.",
-    "`CMD npm start` makes `sh` PID 1, SIGTERM is never delivered to Node, every pod takes the full 30-second grace period and then is SIGKILLed mid-request, so a 20-pod rolling deploy takes 10 minutes and drops traffic the whole time.",
-    "A private registry token is passed as `ARG NPM_TOKEN` and the image is pushed to a shared registry; six weeks later someone runs `docker history` on it and the still-valid token is in the layer metadata for everyone with pull access.",
-    "The Trivy gate runs with `--exit-code 1` and without `--ignore-unfixed` on a Debian base, goes red every other day on CVEs with no upstream fix, and within a month the job has `continue-on-error: true` and the gate is theatre.",
-    "Cosign signs the tag instead of the digest; a later build moves the tag, verification of `repo:v1.2` still passes because the signature was looked up by whatever digest the tag now points at, and the customer's audit trail no longer says what actually ran."
-  ],
-  "interviewQuestions": [
-    "A customer's security team sends you a 312-row CVE export from their scanner and says nothing deploys until it is zero, and go-live is Thursday. Walk me through your first hour, what you would actually change in the image, what you would push back on, and what the document you hand them on Wednesday night looks like.",
-    "Explain exactly what happens between `cosign sign` starting in a GitHub Actions job and `cosign verify` succeeding on a customer's laptop: which services are contacted, what is stored where, and what would an attacker need to control to produce a signature that passes your verify command?",
-    "Design the image supply chain for a customer whose production cluster is air-gapped: how do images, SBOMs, signatures, the Trivy database and trust roots get across the boundary, how does the cluster verify without reaching public Sigstore, and where does your CI's SLSA level stop meaning anything?",
-    "A pod goes into CrashLoopBackOff right after you switch the image to non-root and enable `readOnlyRootFilesystem`; logs show `PermissionError: [Errno 13] Permission denied: '/app/.cache'`. List the possible causes, the fix you would pick for each, and how you would have caught this before it reached the customer's cluster.",
-    "Why is `--ignore-unfixed` both necessary and dangerous in a CI vulnerability gate? Describe a gate design that stays green for months without anyone adding `continue-on-error`, including how suppressions expire and how new disclosures on already-deployed digests get caught.",
-    "What is the difference between an SBOM, a SLSA provenance attestation and a cosign signature? For each, tell me which customer question it answers, how it is stored in the registry relative to the image, and one way each can be technically valid yet misleading.",
-    "Write, at the whiteboard, a multi-stage Dockerfile for a FastAPI service that depends on psycopg with C extensions, such that the runtime stage has no compiler and runs as a numeric non-root user. Then tell me how you would prove the runtime stage still has every shared library it needs before the first customer request hits it."
-  ],
-  "proofOfWork": "A public repository, `hardened-images-lab`, containing the naive and hardened Dockerfiles for both Dokeo and DefenderMate side by side, with a `make compare` target that builds each pair and prints a table of image size, dive efficiency score, layer count, Trivy HIGH/CRITICAL count and `docker stop` latency, and a `make verify` target that a reviewer can run cold: it pulls the hardened images by digest, checks `cosign verify` with the pinned workflow identity and GitHub issuer, checks `cosign verify-attestation --type cyclonedx` and diffs the SBOM against the committed baseline, then spins up a kind cluster with Kyverno, applies the `verifyImages` ClusterPolicy and shows the naive image rejected and the hardened image admitted under a Pod Security 'restricted' namespace with `runAsNonRoot` and `readOnlyRootFilesystem`. The GitHub Actions workflow that produces the images is itself the reference: SHA-pinned actions, job-level least-privilege permissions, OIDC-only registry auth, multi-arch build with SBOM and provenance attestations, a Trivy gate with a `.trivyignore` whose every entry has a justification and an expiry, and a nightly rescan of the deployed digest. The README ends with a one-page 'Image Security Review' written for a customer security team, listing digest, base image and its rationale, signature identity, SBOM location and the CVE disposition table, in the exact shape you would attach to a change request."
+ "i": 6,
+ "topic": "Production images and supply chain: multi-stage, non-root, SBOM, scanning, signing",
+ "track": "B. Containers and Kubernetes",
+ "month": 1,
+ "hours": 6.0,
+ "why": "The container image is the unit an FDE actually hands to a customer, and it is the customer's security team, not yours, that decides whether it runs: their Wiz or Prisma scan, their admission controller, their procurement checklist asking for an SBOM. A PoC that took three weeks to build dies on go-live day when the image is 1.2 GB, runs as root, and shows 300 CVEs, and the FDE is the only person in the room who can fix it before the change window closes. Knowing how to make an image small, non-root, scannable, attested and signed is what lets you say 'yes, deploy it to prod' in a regulated bank or a FedRAMP boundary instead of 'let me get back to you'.",
+ "prerequisites": [
+  "Layers, union filesystems, namespaces and cgroups from 'Docker internals' (topic 5): you should already know why deleting a file in a later RUN does not shrink the image",
+  "Linux users, UIDs/GIDs, file permission bits and capabilities from 'Linux internals' (topic 1), because non-root is mostly a permissions problem",
+  "Signals and PID 1 semantics (SIGTERM vs SIGKILL, zombie reaping) from 'Linux internals' (topic 1)",
+  "TLS certificates and what an OIDC identity token is, from 'Networking' (topic 2), since keyless signing is OIDC plus short-lived x509",
+  "A GitHub repository with a working CI job from 'Git at depth' (topic 4); Dokeo (Python) and DefenderMate (TypeScript/Next.js) are the two images you will harden",
+  "Comfort reading JSON with `jq` and a SHA-256 digest without flinching"
+ ],
+ "subtopics": [
+  {
+   "name": "OCI image anatomy: manifest, config, layers, tag vs digest",
+   "learn": "Read a real manifest with `docker buildx imagetools inspect --raw <ref>` and identify the three parts: the config blob (`application/vnd.oci.image.config.v1+json`, holding `config.User`, `Env`, `Entrypoint`, `rootfs.diff_ids`, `history`), the ordered layer descriptors (`mediaType`, `digest`, `size`) and, for multi-arch, the image index that points at per-platform manifests. Understand that the image digest is the sha256 of the manifest bytes, so `repo@sha256:...` is immutable while `repo:tag` is a mutable pointer a registry can move under you. Be able to pull by digest, read `RepoDigests` from `docker image inspect`, and explain why a scanner result is only meaningful against a digest.",
+   "minutes": 15,
+   "resource": {
+    "label": "OCI Image Spec: Image Manifest",
+    "url": "https://github.com/opencontainers/image-spec/blob/main/manifest.md"
+   }
+  },
+  {
+   "name": "Layer cache mechanics and instruction ordering",
+   "learn": "Know exactly how BuildKit decides a cache hit: `RUN` is keyed on the instruction string plus parent layer, `COPY`/`ADD` on the checksum of the copied files, and any miss invalidates every later instruction. Order Dockerfiles so lockfiles (`uv.lock`, `package-lock.json`) are copied and dependencies installed before application source, keep `apt-get update && apt-get install -y --no-install-recommends ... && rm -rf /var/lib/apt/lists/*` in one RUN to avoid stale package indexes, and use `RUN --mount=type=cache,target=/root/.cache/uv` (or `/root/.npm`) so package caches persist between builds without landing in a layer. In CI use `--cache-from type=registry,ref=...` with `--cache-to type=registry,mode=max` or `type=gha` so cold runners still hit cache.",
+   "minutes": 20,
+   "resource": {
+    "label": "Docker Docs: Build cache",
+    "url": "https://docs.docker.com/build/cache/"
+   }
+  },
+  {
+   "name": "Multi-stage builds: builder/runtime split, --target, COPY --from",
+   "learn": "Structure every production Dockerfile as at least two stages: a `builder` with compilers, headers (`gcc`, `libpq-dev`, `python3-dev`) and dev dependencies, and a `runtime` stage that starts from a slim base and receives only artifacts via `COPY --from=builder`. Use `docker build --target builder` to run tests inside the build, `COPY --link` so copied layers are cache-independent of the base, and name stages so `--from` references survive refactors. Verify the split worked by checking the runtime stage has no `gcc` or `pip` cache and that shared libraries the binary needs (`libpq5`, not `libpq-dev`) are still present with `ldd` or by simply starting the app; a runtime that lacks a `.so` fails at import time, not build time.",
+   "minutes": 30,
+   "resource": {
+    "label": "Docker Docs: Multi-stage builds",
+    "url": "https://docs.docker.com/build/building/multi-stage/"
+   }
+  },
+  {
+   "name": "Base image choice: slim vs Alpine/musl vs distroless vs Wolfi",
+   "learn": "Compare the four real options on size, CVE count and debuggability: `python:3.12-slim-bookworm` (~150 MB, glibc, apt, dozens of 'will not fix' Debian CVEs), `python:3.12-alpine` (~50 MB, musl: wheels need `musllinux` tags or compile from source, different DNS resolver behaviour, slower malloc), `gcr.io/distroless/python3-debian12` (no shell, no package manager, `:debug` tag adds busybox) and Chainguard/Wolfi `cgr.dev/chainguard/python` (glibc, apk, rebuilt nightly, near-zero CVEs, `-dev` variant for a shell). Understand that the CVE count on Debian stable is mostly unfixed-upstream noise and that distroless trades `kubectl exec` debugging for attack surface, which you recover with ephemeral debug containers. Pick per customer: a bank that mandates a specific approved base wins over your preference.",
+   "minutes": 20,
+   "resource": {
+    "label": "GoogleContainerTools/distroless",
+    "url": "https://github.com/GoogleContainerTools/distroless"
+   }
+  },
+  {
+   "name": "Python runtime slimming with uv (Dokeo)",
+   "learn": "Build Dokeo with `uv sync --frozen --no-dev --no-install-project` in the builder against a cache mount, then copy the finished `.venv` into a slim runtime and set `PATH=/app/.venv/bin:$PATH`. Set `UV_COMPILE_BYTECODE=1` and `UV_LINK_MODE=copy` in the builder, `PYTHONDONTWRITEBYTECODE=1` and `PYTHONUNBUFFERED=1` in the runtime so logs stream and no `__pycache__` is written to a read-only filesystem at run time. Know why the venv must be created with the same Python path in both stages (the venv's `pyvenv.cfg` and shebangs are absolute) and why `pip install --no-cache-dir` or a cache mount is mandatory if you fall back to pip.",
+   "minutes": 20,
+   "resource": {
+    "label": "uv Docs: Using uv in Docker",
+    "url": "https://docs.astral.sh/uv/guides/integration/docker/"
+   }
+  },
+  {
+   "name": "Node runtime slimming (DefenderMate)",
+   "learn": "For DefenderMate run `npm ci` with a `--mount=type=cache,target=/root/.npm` in the builder, build, then either `npm ci --omit=dev` into a clean stage or `npm prune --omit=dev`, and copy only `dist/`, production `node_modules` and `package.json` into `node:22-bookworm-slim` or `gcr.io/distroless/nodejs22-debian12`. For the Next.js front end use `output: 'standalone'` in `next.config.js` and copy `.next/standalone` plus `.next/static` and `public`, which drops the image from ~1 GB to ~150 MB. Set `NODE_ENV=production`, use the existing `node` user (uid 1000) or your own high UID, and know that `npm start` is shell-form and breaks signal delivery (covered in the PID 1 subtopic).",
+   "minutes": 15,
+   "resource": {
+    "label": "nodejs/docker-node: Docker and Node.js Best Practices",
+    "url": "https://github.com/nodejs/docker-node/blob/main/docs/BestPractices.md"
+   }
+  },
+  {
+   "name": "Build context, .dockerignore and build-time secrets",
+   "learn": "Understand that everything in the build context is sent to the daemon and available to `COPY .`, so `.dockerignore` (next to the Dockerfile, or `<Dockerfile>.dockerignore`) must exclude `.git`, `.env*`, `node_modules`, `.venv`, `__pycache__`, test fixtures and local data; a 'Sending build context 2.1GB' line is a bug. Never pass credentials as `ARG` or `ENV`: ARG values are recorded in `docker history` and ENV is baked into the image config forever. Use `RUN --mount=type=secret,id=npmrc,target=/root/.npmrc` with `--secret id=npmrc,src=$HOME/.npmrc` (or `env=NPM_TOKEN`) and `--mount=type=ssh` for private git, and know that 'deleting' a secret in a later RUN or using multi-stage does not help if it was ever written to a layer of the final stage.",
+   "minutes": 20,
+   "resource": {
+    "label": "Docker Docs: Build secrets",
+    "url": "https://docs.docker.com/build/building/secrets/"
+   }
+  },
+  {
+   "name": "Non-root by construction: USER, numeric UID, --chown, writable paths",
+   "learn": "Create a dedicated user with a high, fixed UID (`useradd -u 10001 -r -s /usr/sbin/nologin app` or `addgroup`/`adduser` on Alpine) and set `USER 10001:10001` numerically, because Kubernetes `runAsNonRoot: true` cannot verify a named user and fails with 'cannot verify user is non-root'. Copy application files with `COPY --chown=10001:10001` and give the process exactly one writable directory (a mounted `emptyDir` at `/tmp` or `/app/data`) so the pod can run with `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false` and `capabilities.drop: [ALL]`. Bind to a port above 1024 (8080, not 80) so you do not need `CAP_NET_BIND_SERVICE`, and test locally with `docker run --read-only --user 10001 --cap-drop ALL --tmpfs /tmp` before the customer's Pod Security 'restricted' profile does it for you.",
+   "minutes": 30,
+   "resource": {
+    "label": "Kubernetes Docs: Configure a Security Context for a Pod or Container",
+    "url": "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/"
+   }
+  },
+  {
+   "name": "PID 1, signals and exec-form ENTRYPOINT",
+   "learn": "Know that shell-form `CMD npm start` or `CMD python app.py` makes `/bin/sh -c` PID 1, which does not forward SIGTERM, so `docker stop` and Kubernetes pod deletion wait the full grace period (`terminationGracePeriodSeconds`, default 30 s) and then SIGKILL in-flight requests. Always use exec form `ENTRYPOINT [\"python\", \"-m\", \"uvicorn\", ...]`, set `STOPSIGNAL` if the app expects something other than SIGTERM, and if your process spawns children (gunicorn, a shell wrapper, Playwright) add `tini` (`ENTRYPOINT [\"tini\", \"--\", ...]`) or run with `--init` so zombies get reaped. Prove it: `docker stop` should return in under 2 seconds and the app log should show the graceful shutdown hook firing.",
+   "minutes": 15,
+   "resource": {
+    "label": "krallin/tini: A tiny but valid init for containers",
+    "url": "https://github.com/krallin/tini"
+   }
+  },
+  {
+   "name": "Dockerfile linting: hadolint and docker build --check",
+   "learn": "Run `hadolint Dockerfile` and be able to fix the rules that matter in production: DL3006/DL3007 (unpinned or `latest` base), DL3008/DL3018 (unpinned apt/apk packages), DL3009 (apt lists not cleaned), DL3002 (final USER is root), DL3025 (shell-form CMD/ENTRYPOINT) and DL4006 (missing `set -o pipefail`). Run BuildKit's own linter with `docker build --check .` and add `# check=error=true` after the `# syntax=` line so checks like `JSONArgsRecommended`, `SecretsUsedInArgOrEnv`, `UndefinedVar` and `LegacyKeyValueFormat` fail the build rather than warn. Wire both into the pre-commit config you built for Dokeo in topic 4 so they run in under a second.",
+   "minutes": 15,
+   "resource": {
+    "label": "Docker Docs: Build checks reference",
+    "url": "https://docs.docker.com/reference/build-checks/"
+   }
+  },
+  {
+   "name": "Image forensics: dive, docker history, wasted-space hunting",
+   "learn": "Use `dive <image>` to walk layers and see the efficiency score and 'wasted space' from files added then removed or overwritten; run it headless in CI with `CI=true dive --lowestEfficiency=0.95 --highestUserWastedPercent=0.05 <image>`. Cross-check with `docker history --no-trunc --format '{{.Size}}\\t{{.CreatedBy}}'` to find the one RUN that added 400 MB, and `docker image inspect --format '{{.Size}}'` for the total. The usual culprits you should recognise on sight: apt lists, pip or npm cache, dev dependencies, `.git`, test data copied by `COPY .`, and compilers left in the final stage.",
+   "minutes": 15,
+   "resource": {
+    "label": "wagoodman/dive: explore layers and wasted space",
+    "url": "https://github.com/wagoodman/dive"
+   }
+  },
+  {
+   "name": "Trivy image scanning: flags, package types, exit codes",
+   "learn": "Run `trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --pkg-types os,library --scanners vuln,secret <image>@<digest>` and read the output by package type: `os` findings come from the base image's dpkg/apk database and are fixed by bumping the base, `library` findings come from `uv.lock`/`package-lock.json`-installed packages and are fixed by bumping your dependency. Understand the vulnerability DB is pulled from a registry on first run (`~/.cache/trivy`) and must be cached or mirrored (`TRIVY_DB_REPOSITORY`) in CI to avoid rate limiting, and that `--scanners misconfig` (or `trivy config .`) also lints the Dockerfile itself with checks such as running as root or a missing HEALTHCHECK. Know what `--ignore-unfixed` hides so you can defend it to a customer.",
+   "minutes": 30,
+   "resource": {
+    "label": "Trivy Docs: Container Image target",
+    "url": "https://trivy.dev/docs/latest/target/container_image/"
+   }
+  },
+  {
+   "name": "Vulnerability triage: severity, EPSS, unfixed, .trivyignore with expiry, VEX",
+   "learn": "Triage a CVE in this order: is a fixed version available (`FixedVersion` column), is the vulnerable code reachable in your process (a `curl` CVE in a distroless image with no curl is not), what is the EPSS exploitation probability versus the CVSS score, and is it in the customer's own scanner's list. Record every accepted finding in `.trivyignore` (or `.trivyignore.yaml` with `statement` and `expired_at`) with an expiry date so the suppression fails the build when it lapses, and for statements a customer must consume, emit an OpenVEX document and feed it with `trivy --vex`. Never suppress by severity alone and never use `--ignore-unfixed` on a language package, since 'unfixed' there almost always means 'you have not bumped it'.",
+   "minutes": 20,
+   "resource": {
+    "label": "Trivy Docs: Filtering (severity, ignore file, VEX)",
+    "url": "https://trivy.dev/docs/latest/configuration/filtering/"
+   }
+  },
+  {
+   "name": "SBOM: SPDX vs CycloneDX, generation, attestation, rescanning",
+   "learn": "Generate an SBOM three ways and know when each applies: `syft <image> -o spdx-json=sbom.spdx.json -o cyclonedx-json=sbom.cdx.json` for a standalone file a customer's GRC team asked for, `trivy image --format cyclonedx --output sbom.cdx.json` when you want the same tool to scan it, and `docker buildx build --sbom=true --push` to attach an in-toto SBOM attestation to the image index (readable with `docker buildx imagetools inspect <ref> --format '{{ json .SBOM }}'`). Set `BUILDKIT_SBOM_SCAN_STAGE=true` on the builder stage if the customer wants build-time dependencies listed too. Then prove the value: run `trivy sbom sbom.cdx.json` a week later without pulling the image, and diff two SBOMs to answer 'what changed between the version you approved and this one'.",
+   "minutes": 30,
+   "resource": {
+    "label": "Docker Docs: SBOM attestations",
+    "url": "https://docs.docker.com/build/metadata/attestations/sbom/"
+   }
+  },
+  {
+   "name": "Provenance and SLSA levels",
+   "learn": "Understand what each SLSA Build level actually guarantees: L1 is provenance that exists, L2 is provenance signed by a hosted build platform, L3 adds an isolated, hardened build so the provenance cannot be forged by the repo's own workflow. Attach provenance with `docker buildx build --provenance=mode=max` (records Dockerfile, build args, source commit and materials as an in-toto statement of type `https://slsa.dev/provenance/v1`) and use the `slsa-framework/slsa-github-generator` reusable workflow when a customer needs L3. Know the operational gotcha: provenance and SBOM attestations turn a single manifest into an image index with `unknown/unknown` platform entries, which confuses some registries and breaks AWS Lambda container deploys, so `--provenance=false` is sometimes the right call per target.",
+   "minutes": 20,
+   "resource": {
+    "label": "SLSA v1.0: Build levels",
+    "url": "https://slsa.dev/spec/v1.0/levels"
+   }
+  },
+  {
+   "name": "Signing with cosign keyless: Fulcio, Rekor, identity-bound verification",
+   "learn": "Trace the keyless flow end to end: the CI job's OIDC token (GitHub Actions needs `permissions: id-token: write`) is exchanged at Fulcio for a ~10-minute x509 certificate binding the workflow identity, the signature is made with an ephemeral key, the cert and signature are recorded in the Rekor transparency log, and the bundle is pushed to the registry as an OCI artifact tagged `sha256-<digest>.sig` next to the image. Always sign the digest, never the tag: `cosign sign --yes ${IMAGE}@${DIGEST}` using the digest output of the build step. Verify with `cosign verify --certificate-identity https://github.com/<org>/<repo>/.github/workflows/build.yml@refs/heads/main --certificate-oidc-issuer https://token.actions.githubusercontent.com <ref>@<digest>` and understand that omitting the identity check means 'signed by anyone with a GitHub account'. Know the key-based alternative (`cosign generate-key-pair --kms awskms://...`) for customers who cannot reach the public Sigstore instance.",
+   "minutes": 25,
+   "resource": {
+    "label": "Sigstore Docs: Signing containers with cosign",
+    "url": "https://docs.sigstore.dev/cosign/signing/signing_with_containers/"
+   }
+  },
+  {
+   "name": "Enforcing at admission: digest pinning, imagePullPolicy, verifyImages",
+   "learn": "Turn signing into a control: deploy by digest (`image: repo@sha256:...`) or have the policy engine mutate tags to digests, and understand why `imagePullPolicy: IfNotPresent` with a mutable tag means different nodes silently run different code. Install Kyverno in a kind cluster and write a `ClusterPolicy` with `verifyImages` that requires a keyless attestor with your workflow `subject` and the GitHub `issuer`, sets `mutateDigest: true` and `required: true`, then watch an unsigned image get rejected with the exact error message a customer's platform team would see. Know the equivalent in Sigstore `policy-controller` (`ClusterImagePolicy` plus the `policy.sigstore.dev/include: \"true\"` namespace label) and how Pod Security admission 'restricted' independently requires non-root, dropped capabilities and a `RuntimeDefault` seccomp profile.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kyverno Docs: Verify Images",
+    "url": "https://kyverno.io/docs/policy-types/cluster-policy/verify-images/overview/"
+   }
+  },
+  {
+   "name": "The Trivy gate in GitHub Actions",
+   "learn": "Build the deliverable's CI job: `docker/build-push-action` with `load: true` for a pre-push scan (or scan the pushed digest from `steps.build.outputs.digest`), then `aquasecurity/trivy-action` with `image-ref`, `severity: HIGH,CRITICAL`, `ignore-unfixed: true`, `exit-code: '1'` and a second run with `format: sarif` uploaded via `github/codeql-action/upload-sarif` so findings appear in the Security tab. Cache `~/.cache/trivy` with `actions/cache` or set `TRIVY_DB_REPOSITORY` to a mirror so the vulnerability DB download does not get rate-limited and take every pipeline down at once. Add a scheduled workflow that rescans the currently deployed digest nightly, because a green build on Monday says nothing about Thursday's CVE disclosure.",
+   "minutes": 20,
+   "resource": {
+    "label": "aquasecurity/trivy-action",
+    "url": "https://github.com/aquasecurity/trivy-action"
+   }
+  },
+  {
+   "name": "Hardening the pipeline itself: permissions, OIDC, SHA-pinned actions",
+   "learn": "A signed image is only as trustworthy as the workflow that signed it. Set job-level `permissions:` to the minimum (`contents: read`, `packages: write`, `id-token: write`), pin every third-party action to a full commit SHA with a version comment (`uses: docker/build-push-action@<sha> # v6.x`) and let Dependabot bump them, and never interpolate untrusted event data such as `github.event.pull_request.title` into a `run:` script. Use OIDC federation to the cloud (ties to topic 15) instead of long-lived registry credentials in secrets, avoid `pull_request_target` with a checkout of the PR head, and understand that anyone who can edit the workflow file on the default branch can produce a validly signed image, which is exactly the gap SLSA L3 closes.",
+   "minutes": 15,
+   "resource": {
+    "label": "GitHub Docs: Secure use reference for GitHub Actions",
+    "url": "https://docs.github.com/en/actions/reference/security/secure-use"
+   }
+  },
+  {
+   "name": "Reproducible and multi-platform builds",
+   "learn": "Pin the base image by digest (`FROM python:3.12-slim@sha256:...`) and package versions so two builds from the same commit produce the same layers, set `SOURCE_DATE_EPOCH` (BuildKit honours it) and add `rewrite-timestamp=true` to the image output so layer mtimes stop changing the digest on every build. Build for both architectures with `docker buildx build --platform linux/amd64,linux/arm64` on a `docker-container` driver (`docker buildx create --use`), and know that QEMU emulation via `docker/setup-qemu-action` is 5 to 20 times slower than native arm runners or cross-compiling with `--platform=$BUILDPLATFORM` and the `TARGETARCH` build arg. The result is an image index, so verify each platform manifest with `imagetools inspect` before telling a customer on Graviton it is supported.",
+   "minutes": 15,
+   "resource": {
+    "label": "Docker Docs: Reproducible builds with GitHub Actions",
+    "url": "https://docs.docker.com/build/ci/github-actions/reproducible-builds/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take Dokeo from a naive single-stage `python:3.12` image to a multi-stage image under 200 MB with a dive efficiency score above 0.95, and show the `docker history` line-by-line explanation of where the other 900 MB went.",
+  "You can run both Dokeo and DefenderMate under `docker run --read-only --user 10001 --cap-drop ALL --tmpfs /tmp` and under a Kubernetes Pod Security 'restricted' namespace with `runAsNonRoot: true` and `readOnlyRootFilesystem: true` without CreateContainerConfigError or a PermissionError at startup.",
+  "You can produce a `trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1` result of zero findings on both images, with every accepted CVE in `.trivyignore` carrying a written justification and an expiry date, and a CI job that goes red when a new HIGH appears.",
+  "You can attach SPDX and CycloneDX SBOMs plus SLSA provenance to an image at build time, read them back with `docker buildx imagetools inspect --format '{{ json .SBOM }}'`, and rescan the SBOM file a week later with `trivy sbom` without pulling the image.",
+  "You can sign an image keyless from GitHub Actions and verify it by digest with `cosign verify --certificate-identity ... --certificate-oidc-issuer ...`, then explain to a customer's security reviewer what Fulcio, Rekor and the `.sig` tag each contribute and what verification does not prove.",
+  "You can install Kyverno in a kind cluster, write a `verifyImages` policy bound to your workflow identity, and demonstrate the unsigned 'before' image being rejected while the signed 'after' image is admitted with its tag mutated to a digest.",
+  "You can diagnose a container that takes 30 seconds to stop, prove it is shell-form CMD swallowing SIGTERM with a `docker stop` timing and a `ps` of PID 1, and fix it so shutdown completes in under 2 seconds with the graceful hook logged.",
+  "You can receive a 300-item CVE export from a customer's Wiz or Prisma scan and, in 15 minutes, sort it into base-image fixes, dependency bumps, unreachable-in-this-image, and accepted-with-expiry, and write the one-page disposition their security team will actually sign."
+ ],
+ "failureModes": [
+  "A team ships `FROM python:3.12` with gcc, perl and 1.1 GB of Debian, the customer's Wiz scan on go-live morning reports 400 CVEs, and the change window closes while everyone argues about which of them are real.",
+  "Switching to Alpine to 'fix' image size makes a Python wheel with no musllinux build compile from source for 18 minutes on every CI run, and later the musl resolver's handling of Kubernetes search domains produces intermittent NXDOMAIN under load that nobody connects to the base-image change.",
+  "The Dockerfile says `USER appuser` and the pod spec says `runAsNonRoot: true`; the pod sits in CreateContainerConfigError with 'cannot verify user is non-root' because the kubelet cannot resolve a named user without reading /etc/passwd from the image.",
+  "`CMD npm start` makes `sh` PID 1, SIGTERM is never delivered to Node, every pod takes the full 30-second grace period and then is SIGKILLed mid-request, so a 20-pod rolling deploy takes 10 minutes and drops traffic the whole time.",
+  "A private registry token is passed as `ARG NPM_TOKEN` and the image is pushed to a shared registry; six weeks later someone runs `docker history` on it and the still-valid token is in the layer metadata for everyone with pull access.",
+  "The Trivy gate runs with `--exit-code 1` and without `--ignore-unfixed` on a Debian base, goes red every other day on CVEs with no upstream fix, and within a month the job has `continue-on-error: true` and the gate is theatre.",
+  "Cosign signs the tag instead of the digest; a later build moves the tag, verification of `repo:v1.2` still passes because the signature was looked up by whatever digest the tag now points at, and the customer's audit trail no longer says what actually ran."
+ ],
+ "interviewQuestions": [
+  "A customer's security team sends you a 312-row CVE export from their scanner and says nothing deploys until it is zero, and go-live is Thursday. Walk me through your first hour, what you would actually change in the image, what you would push back on, and what the document you hand them on Wednesday night looks like.",
+  "Explain exactly what happens between `cosign sign` starting in a GitHub Actions job and `cosign verify` succeeding on a customer's laptop: which services are contacted, what is stored where, and what would an attacker need to control to produce a signature that passes your verify command?",
+  "Design the image supply chain for a customer whose production cluster is air-gapped: how do images, SBOMs, signatures, the Trivy database and trust roots get across the boundary, how does the cluster verify without reaching public Sigstore, and where does your CI's SLSA level stop meaning anything?",
+  "A pod goes into CrashLoopBackOff right after you switch the image to non-root and enable `readOnlyRootFilesystem`; logs show `PermissionError: [Errno 13] Permission denied: '/app/.cache'`. List the possible causes, the fix you would pick for each, and how you would have caught this before it reached the customer's cluster.",
+  "Why is `--ignore-unfixed` both necessary and dangerous in a CI vulnerability gate? Describe a gate design that stays green for months without anyone adding `continue-on-error`, including how suppressions expire and how new disclosures on already-deployed digests get caught.",
+  "What is the difference between an SBOM, a SLSA provenance attestation and a cosign signature? For each, tell me which customer question it answers, how it is stored in the registry relative to the image, and one way each can be technically valid yet misleading.",
+  "Write, at the whiteboard, a multi-stage Dockerfile for a FastAPI service that depends on psycopg with C extensions, such that the runtime stage has no compiler and runs as a numeric non-root user. Then tell me how you would prove the runtime stage still has every shared library it needs before the first customer request hits it."
+ ],
+ "proofOfWork": "A public repository, `hardened-images-lab`, containing the naive and hardened Dockerfiles for both Dokeo and DefenderMate side by side, with a `make compare` target that builds each pair and prints a table of image size, dive efficiency score, layer count, Trivy HIGH/CRITICAL count and `docker stop` latency, and a `make verify` target that a reviewer can run cold: it pulls the hardened images by digest, checks `cosign verify` with the pinned workflow identity and GitHub issuer, checks `cosign verify-attestation --type cyclonedx` and diffs the SBOM against the committed baseline, then spins up a kind cluster with Kyverno, applies the `verifyImages` ClusterPolicy and shows the naive image rejected and the hardened image admitted under a Pod Security 'restricted' namespace with `runAsNonRoot` and `readOnlyRootFilesystem`. The GitHub Actions workflow that produces the images is itself the reference: SHA-pinned actions, job-level least-privilege permissions, OIDC-only registry auth, multi-arch build with SBOM and provenance attestations, a Trivy gate with a `.trivyignore` whose every entry has a justification and an expiry, and a nightly rescan of the deployed digest. The README ends with a one-page 'Image Security Review' written for a customer security team, listing digest, base image and its rationale, signature identity, SBOM location and the CVE disposition table, in the exact shape you would attach to a change request."
 }

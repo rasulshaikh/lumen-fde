@@ -1,227 +1,227 @@
 {
  "i": 45,
- "topic": "LLM fundamentals: tokens, attention, pretraining, RLHF, scaling, limits",
- "track": "G. AI Engineering",
- "month": 6,
- "hours": 10,
- "why": "An FDE is the person a customer's VP of Ops corners after the demo and asks \"why did it make that up, and can you guarantee it won't?\" — and the answer has to be mechanistic, honest, and scoped, not a shrug or a sales line. Everything else in this track (prompting, tool use, RAG, evals, fine-tuning) is a set of levers whose behaviour only makes sense once you can say which part of the stack each lever touches: tokenizer, attention, pretraining distribution, or post-training preference model. Getting this wrong in front of a customer costs you the engagement — you either overpromise a determinism the architecture cannot deliver, or you kill a viable use case because you could not explain that the failure was retrieval, not the model.",
+ "topic": "MIT 6.824 Raft lab (optional deep dive)",
+ "track": "F. Distributed Systems and System Design",
+ "month": 5,
+ "hours": 20,
+ "why": "Reading the Raft paper makes you conversational; writing Raft and getting it past an adversarial tester makes you the person in the room who can say what a customer's etcd, Consul, CockroachDB or Kafka-KRaft cluster will actually do when a node's disk goes slow or a rack loses the network. FDEs get handed exactly these questions on-site — 'why did the API server freeze for 40 seconds', 'why did both workers hold the lock', 'is 4 nodes across 2 datacentres fine' — and the answers live in details you only internalise by hitting them: persist-before-reply, current-term-only commits, never truncating on a stale AppendEntries. It is also the strongest possible signal in a Palantir/Databricks/Anthropic loop that your distributed-systems knowledge is load-bearing rather than recited.",
  "prerequisites": [
-  "The LLM serving mental model from 'LLM-era system design' (topic 43): tokens-per-second rate limits, seconds-not-milliseconds p99, streaming responses, and queue-plus-worker rather than synchronous calls — this topic explains *why* those constraints exist.",
-  "Working Python and the ability to run a script against a hosted API (topic 25): you will call a tokenizer, count tokens, sweep temperature, and read logprobs, so `uv`/`venv`, `pip install tiktoken transformers`, and an API key in an env var must be non-events.",
-  "Basic linear algebra vocabulary: matrix multiply, dot product, vector norm, softmax. You do not need to derive backprop, but you must be able to read `softmax(QK^T / sqrt(d_k))V` and say what each symbol is and what shape it has.",
-  "Napkin-maths fluency from topic 42's estimation drills: powers of two, GB/s versus GFLOP/s, and the habit of writing the number down before arguing about the architecture — scaling laws and KV-cache sizing are pure napkin maths.",
-  "Enough statistics to distinguish a sampled distribution from a point estimate: what a probability distribution over 100k+ classes means, what sampling from it does, and why a single benchmark score without a confidence interval is close to meaningless.",
-  "The writing discipline from topic 69 in draft form: this topic's deliverable is a client-facing one-pager, so you need to be able to compress a mechanism into two sentences a non-engineer can repeat to their boss."
+  "Topic 40 (6.824 selected lectures): the Raft paper's Figure 2 read at least twice, plus the lecture notes on elections, log matching and the Figure 8 commit rule — this lab is the implementation of exactly that material, not an introduction to it",
+  "Topic 39 (DDIA): chapters 5, 8 and 9 — leader-based replication, the unreliability of clocks and networks, and linearizability, so you know what property the tester's checker is actually enforcing",
+  "Go at Tour-of-Go level: goroutines, channels, sync.Mutex, sync.Cond, structs and interfaces, slices and their aliasing behaviour. There is no Go topic in this plan, so budget 2-3 hours on the Tour plus Effective Go before hour one of the lab; the lab itself will not teach you Go",
+  "Topic 2 (Networking): what a partition looks like on the wire — dropped, delayed, reordered and duplicated packets, asymmetric reachability — because labrpc simulates precisely these and your code must be correct under all of them",
+  "Topic 1 (Linux internals): fsync/fdatasync semantics and rough costs on local NVMe versus EBS/NFS, since 'persist before you reply' is the single most expensive rule in Raft and the reason customers' consensus clusters flap",
+  "Topic 4 (Git): the lab is distributed as a git repo you `git pull` repeatedly, and you will want branches per part and `git bisect` when a passing test starts failing"
  ],
  "subtopics": [
   {
-   "name": "Tokenization: BPE merges, byte-level fallback, and the bugs they cause",
-   "learn": "Understand byte-pair encoding end to end: start from a byte-level alphabet, count adjacent pair frequencies in the training corpus, greedily merge the most frequent pair, repeat until you hit vocab size, and store the ordered merge list. Know that encoding at inference replays those merges in order, which is why the tokenizer is frozen with the model and why a fine-tune cannot add a token without resizing the embedding matrix. Learn the concrete consequences: leading whitespace makes ' the' and 'the' different tokens; digits split unpredictably so arithmetic and ID matching are brittle; non-Latin scripts and code inflate token counts 2-4x; a trailing space before a completion boundary silently degrades quality. Be able to run a tokenizer on a customer's actual document and show which fields fragment badly.",
-   "minutes": 35,
-   "resource": {
-    "label": "Hugging Face LLM Course - Byte-Pair Encoding tokenization",
-    "url": "https://huggingface.co/learn/llm-course/chapter6/5"
-   }
-  },
-  {
-   "name": "Token accounting: measuring, not guessing, before you quote a price",
-   "learn": "Get hands-on with at least two tokenizers and prove to yourself that '4 characters per token' is a Latin-prose-only heuristic. Use `tiktoken.encoding_for_model()` or `tiktoken.get_encoding('cl100k_base')` / `o200k_base` to count, and the provider's own token-counting endpoint for the model you will actually bill against, because vocabularies differ and a cross-vendor estimate can be 30% off. Measure the same 10 KB of the customer's real content in English prose, JSON, SQL, Japanese, and a base64 blob, and record the tokens-per-KB for each. Know that images and tool schemas also consume input tokens, and that a system prompt plus tool definitions is a fixed per-call tax you pay on every request.",
-   "minutes": 25,
-   "resource": {
-    "label": "tiktoken (official OpenAI BPE tokenizer repository)",
-    "url": "https://github.com/openai/tiktoken"
-   }
-  },
-  {
-   "name": "Embeddings and position: why order is not free",
-   "learn": "Understand that the token ID indexes a row of an embedding matrix of shape [vocab_size, d_model], and that attention itself is permutation-equivariant — without position information, 'A caused B' and 'B caused A' are the same input. Learn the three families you will see in model configs: learned absolute positions (GPT-2), sinusoidal, and rotary (RoPE), which rotates Q and K by an angle proportional to position so attention scores depend on relative distance. Know that RoPE's `theta`/`rope_scaling` config is what vendors change to extend context, and that a naively extended context degrades before it breaks. Separately, do not confuse these internal token embeddings with the sentence-embedding models you will use in topic 49 for retrieval — different objective, different output.",
-   "minutes": 25,
-   "resource": {
-    "label": "Hugging Face LLM Course - How do Transformers work?",
-    "url": "https://huggingface.co/learn/llm-course/chapter1/4"
-   }
-  },
-  {
-   "name": "Self-attention: Q, K, V and the causal mask, at the level where you can draw it",
-   "learn": "Be able to derive and draw scaled dot-product attention: project each token into query, key and value vectors; score every query against every key with a dot product; divide by sqrt(d_k) to keep the softmax out of saturation; softmax over the key axis to get weights that sum to 1; take the weighted sum of values. Understand multi-head attention as running h of these in parallel on d_model/h dimensions and concatenating, so different heads can track different relations. Know the causal mask concretely: positions j > i are set to -inf before the softmax so a decoder-only model can be trained on every position of a sequence in one pass. From this, derive two things you will use constantly: attention is O(n^2) in sequence length, and every output token attends to every prior token, which is why the whole prompt is re-read (from cache) at each step.",
+   "name": "Lab setup and a tour of the skeleton",
+   "learn": "Clone the 6.5840 repo, install a current Go toolchain, and run `make raft1` in `src` to watch every 3A test fail with 'expected one leader, got none' — that is your baseline. Read `src/raft1/raft.go` end to end before writing anything: `Make(peers, me, persister, applyCh)`, `Start(command) (index, term, isLeader)`, `GetState()`, the stub `ticker()` goroutine, and the example `sendRequestVote`/`RequestVote` pair. Then read `raftapi/raftapi.go` for the `ApplyMsg` fields and `tester1/persister.go` for `Save(raftstate, snapshot)`, `ReadRaftState()` and `ReadSnapshot()`. Know that peers may only communicate through labrpc — no shared variables, no files — and that the tester can delay, reorder, duplicate and drop every RPC.",
    "minutes": 40,
    "resource": {
-    "label": "Vaswani et al., \"Attention Is All You Need\" (arXiv)",
-    "url": "https://arxiv.org/abs/1706.03762"
+    "label": "6.5840 Lab 3: Raft — handout, Getting Started and 'The code'",
+    "url": "https://pdos.csail.mit.edu/6.824/labs/lab-raft1.html"
    }
   },
   {
-   "name": "The decoder-only stack and parameter arithmetic",
-   "learn": "Assemble the block: pre-norm (RMSNorm or LayerNorm) -> multi-head attention -> residual add -> norm -> MLP (usually SwiGLU, ~4x or 8/3x d_model wide) -> residual add, repeated n_layer times, then a final norm and an unembedding projection to vocab logits. Read `nanoGPT`'s `model.py` until you can point at each of those lines. Then do the arithmetic yourself: for a model with n_layer, d_model and vocab V, estimate parameters as roughly 12 * n_layer * d_model^2 plus V * d_model, and memory at bf16 as 2 bytes per parameter — so a 70B model needs ~140 GB of weights before any activations or KV cache. This one calculation lets you answer 'can we self-host this in our VPC on the GPUs we already own?' in a meeting, which is a question FDEs get constantly.",
-   "minutes": 30,
+   "name": "Figure 2 as an executable checklist",
+   "learn": "Transcribe Figure 2 of the extended paper into comments in raft.go and treat it as a spec you must satisfy line by line: persistent state (currentTerm, votedFor, log[]), volatile state (commitIndex, lastApplied), leader volatile state (nextIndex[] initialised to lastLogIndex+1, matchIndex[] to 0), the two RPC argument/reply structs, and the Rules for Servers. The rules that get skipped and cost days are: 'If RPC request or response contains term T > currentTerm: set currentTerm = T, convert to follower' (applies to replies too, and must clear votedFor), and 'If commitIndex > lastApplied: increment lastApplied, apply log[lastApplied]'. Write each rule as a named helper or an explicit branch so you can point at the line that implements it.",
+   "minutes": 55,
    "resource": {
-    "label": "karpathy/nanoGPT (reference decoder-only implementation)",
-    "url": "https://github.com/karpathy/nanoGPT"
+    "label": "In Search of an Understandable Consensus Algorithm (extended) — Figure 2",
+    "url": "https://pdos.csail.mit.edu/6.824/papers/raft-extended.pdf"
    }
   },
   {
-   "name": "Decoding and sampling: temperature, top_p, top_k, stop, seed, logprobs",
-   "learn": "Understand generation as a loop: logits -> optional repetition/frequency penalty -> divide by temperature -> softmax -> truncate with top_k and/or top_p (nucleus) -> sample -> append -> repeat until an EOS or stop sequence or max_tokens. Know exactly what each knob does: temperature < 1 sharpens the distribution (T -> 0 approaches greedy), top_p=0.9 keeps the smallest set of tokens whose cumulative probability exceeds 0.9, top_k caps the candidate count, and `stop`/`stop_sequences` truncate without consuming budget. Know that greedy decoding is not 'more accurate', it is lower-variance and more repetitive, and that beam search is wrong for open-ended generation. Learn to request logprobs and use the top-token probability as a cheap, real confidence signal for routing to human review.",
-   "minutes": 35,
+   "name": "Go concurrency primitives and the race detector",
+   "learn": "Be fluent in `sync.Mutex` with `defer rf.mu.Unlock()`, `sync.Cond` for the applier, and why `time.Sleep` in a loop is what the handout wants instead of `time.Timer`/`time.Ticker`. Understand the Go memory model well enough to know that an unsynchronised read of `rf.currentTerm` is a data race even if it 'looks atomic', and run everything with `go test -race` (the Makefile already builds with -race; graders run without it, so both must pass). Know that Go 1.22+ scopes loop variables per iteration, which kills the classic `for i := range rf.peers { go func(){ use i }() }` bug — but that capturing `rf.currentTerm` inside a goroutine still snapshots a value that may be stale by the time the RPC returns.",
+   "minutes": 55,
    "resource": {
-    "label": "Hugging Face Transformers - Generation strategies",
-    "url": "https://huggingface.co/docs/transformers/generation_strategies"
+    "label": "Go — Data Race Detector",
+    "url": "https://go.dev/doc/articles/race_detector"
    }
   },
   {
-   "name": "KV cache, prefill vs decode, and why TTFT and throughput are different problems",
-   "learn": "Know that without a cache, generating token n would recompute attention over all n-1 previous tokens; the KV cache stores per-layer key and value tensors so each new token does O(n) work instead of O(n^2). Split inference into prefill (the whole prompt processed in one compute-bound, highly parallel pass -> time to first token) and decode (one token at a time, memory-bandwidth-bound -> tokens per second). Size the cache: roughly 2 (K and V) * n_layer * n_kv_heads * head_dim * 2 bytes * sequence_length per request, which is why long contexts and high concurrency blow up GPU memory long before FLOPs run out, and why GQA/MQA exist. Understand that provider prompt caching is this cache persisted across calls, which is why a stable prefix is worth engineering for.",
-   "minutes": 40,
-   "resource": {
-    "label": "Hugging Face Transformers - Cache strategies (KV cache)",
-    "url": "https://huggingface.co/docs/transformers/kv_cache"
-   }
-  },
-  {
-   "name": "Context windows: advertised length vs effective length",
-   "learn": "Learn that the advertised window is a hard architectural cap on input plus output tokens (and that `max_tokens` is carved out of it), while the *effective* window — where accuracy stays flat — is usually much shorter. Internalise the 'lost in the middle' result: retrieval accuracy is U-shaped in position, best at the start and end of the context, materially worse in the middle, so stuffing 80 documents in and hoping is a design error. Know what overflow actually does: a hard API error, not silent truncation, on most providers — so your app needs explicit budgeting and a truncation policy. Be able to compute a context budget for a real engagement: system prompt + tool schemas + retrieved chunks + conversation history + reserved output, with a named policy for what gets dropped first.",
-   "minutes": 30,
-   "resource": {
-    "label": "Claude Platform Docs - Context windows",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/context-windows"
-   }
-  },
-  {
-   "name": "Pretraining: the objective, the corpus, and what perplexity measures",
-   "learn": "Understand that pretraining is one objective — predict the next token, cross-entropy loss over the vocabulary — run over trillions of tokens of web crawl, code, books and curated data, with deduplication and quality filtering doing more for final quality than most architecture tweaks. Learn perplexity as exp(mean negative log-likelihood) and be able to say precisely what it does and does not tell you: it measures fit to a held-out distribution, is not comparable across tokenizers, and correlates only loosely with usefulness on a customer's task. Know that the corpus distribution is the single best predictor of where the model is strong: it is excellent at Python and Wikipedia-shaped facts, weak at your customer's internal jargon and their 2024 pricing table, and that no prompt fixes a knowledge gap that grounding should fix.",
-   "minutes": 30,
-   "resource": {
-    "label": "Hugging Face Transformers - Perplexity of fixed-length models",
-    "url": "https://huggingface.co/docs/transformers/perplexity"
-   }
-  },
-  {
-   "name": "Scaling laws: Kaplan vs Chinchilla, and compute-optimal vs inference-optimal",
-   "learn": "Know the shape of the result: test loss falls as a smooth power law in parameters, data and compute, with no discontinuity — which is why capability forecasts are possible at all. Know the correction Chinchilla made to Kaplan: for a fixed training-compute budget, parameters and training tokens should scale roughly in proportion (~20 tokens per parameter), so the earlier generation of models was badly undertrained rather than too small. Then know the practical twist that matters to your customer: nobody trains compute-optimal any more, because inference cost dominates over a model's lifetime, so vendors deliberately overtrain small models. That is the mechanism behind 'the 8B model this year beats last year's 70B' — and it is the honest argument for a cascade or router design instead of always calling the frontier model.",
-   "minutes": 25,
-   "resource": {
-    "label": "Hoffmann et al., \"Training Compute-Optimal Large Language Models\" (Chinchilla, arXiv)",
-    "url": "https://arxiv.org/abs/2203.15556"
-   }
-  },
-  {
-   "name": "Post-training I: SFT and instruction tuning",
-   "learn": "Understand that a base model is a document completer, not an assistant: prompted with a question it may continue with more questions. Supervised fine-tuning on tens of thousands of (instruction, response) pairs, formatted with a chat template that inserts role markers and special tokens, is what creates the turn-taking behaviour you take for granted. Know that the chat template is part of the contract — using the wrong template on a self-hosted model produces quietly worse output with no error — and that loss is masked so only response tokens contribute. Know that SFT teaches format and style far more than it teaches facts, which is the core of the argument you will make again in topic 50 about when fine-tuning is the wrong tool.",
-   "minutes": 25,
-   "resource": {
-    "label": "Hugging Face LLM Course - Supervised Fine-Tuning",
-    "url": "https://huggingface.co/learn/llm-course/chapter11/1"
-   }
-  },
-  {
-   "name": "Post-training II: RLHF, DPO, and RLAIF/Constitutional AI",
-   "learn": "Walk the classic InstructGPT pipeline: SFT, then collect human rankings over sampled completions, then train a reward model to score responses, then optimise the policy with PPO against that reward plus a KL penalty to keep it near the SFT model. Understand what this buys (helpfulness, instruction-following, refusals) and what it costs: reward hacking, sycophancy — agreeing with a confidently wrong user because agreement was rewarded — verbosity bias, and an 'alignment tax' on some raw capabilities. Know DPO as the simpler alternative that skips the explicit reward model and optimises a closed-form preference loss directly, and RLAIF/Constitutional AI as replacing most human labels with model critiques against a written principle set. This is the layer that explains why models sound confident when they are wrong: confident, fluent answers were preferred by labellers.",
-   "minutes": 40,
-   "resource": {
-    "label": "Ouyang et al., \"Training language models to follow instructions with human feedback\" (InstructGPT, arXiv)",
-    "url": "https://arxiv.org/abs/2203.02155"
-   }
-  },
-  {
-   "name": "Why models hallucinate: five distinct mechanisms, named separately",
-   "learn": "Stop treating hallucination as one phenomenon and learn to diagnose which of these you are looking at, because each has a different fix. (1) Objective mismatch: the model is trained to produce a likely continuation, and there is no term in the loss for 'I don't know'. (2) Parametric recall failure: facts are lossily compressed into weights, so rare entities, exact numbers, dates, citations and URLs get plausibly reconstructed rather than recalled. (3) Preference-tuning pressure: hedging was scored lower than a confident answer, so calibration was trained out. (4) Context failure: the right evidence is absent, buried mid-context, or contradicted by the model's prior — and the model splits the difference. (5) Tokenizer and format artefacts: character counting, digit arithmetic and exact-string echoing fail for reasons that have nothing to do with reasoning. Practise labelling 20 real failures from your own transcripts with one of these five.",
-   "minutes": 40,
-   "resource": {
-    "label": "Prompt Engineering Guide - Factuality (risks)",
-    "url": "https://www.promptingguide.ai/risks/factuality"
-   }
-  },
-  {
-   "name": "What actually reduces hallucination, ranked by effect size",
-   "learn": "Build the ranked list you will defend in front of a customer, with the mechanism for each. Highest leverage: ground the answer in retrieved source text and require verbatim citations that a system can check against the source (provider citation features return character/page spans you can validate programmatically — a fabricated span fails the check). Next: constrain the output space with JSON schema / structured outputs so the model cannot free-associate a field. Next: give an explicit abstention path ('answer only from the provided documents; if the answer is not there, return {\"answer\": null}') and reward it in your evals. Then: decompose and verify — a second pass that checks each claim against the source, or self-consistency across n samples. Know what does *not* work: 'do not hallucinate' in the system prompt, temperature 0 alone, and a bigger model. Know the honest ceiling: you reduce the rate and make failures detectable; you do not reach zero.",
+   "name": "The locking protocol, applied to raft.go",
+   "learn": "Internalise the course's five locking rules and decide, before you write code, exactly where the mutex is held. The rules: hold the lock for every access to shared state; hold it across a whole multi-step invariant update (e.g. incrementing currentTerm, setting votedFor = me, and resetting the election timer must be atomic); never hold it while sending an RPC, sleeping, or sending on a channel; after re-acquiring, re-check every assumption — currentTerm may have advanced and you may no longer be leader; and prefer one coarse lock over clever fine-grained locking for this codebase. The concrete pattern: lock, copy the args you need into local variables, unlock, call `peer.Call(...)`, re-lock, then guard the reply with `if rf.currentTerm != argsTerm || rf.state != Leader { return }`.",
    "minutes": 45,
    "resource": {
-    "label": "Claude Platform Docs - Citations",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/citations"
+    "label": "6.5840 — Advice on locking in the labs",
+    "url": "https://pdos.csail.mit.edu/6.824/labs/raft-locking.txt"
    }
   },
   {
-   "name": "Reasoning models and inference-time compute",
-   "learn": "Understand the newer axis: rather than scaling training, spend more tokens at inference on an internal reasoning trace, trained with RL against verifiable outcomes (maths, code, tests). Know the operational consequences that hit your architecture: thinking tokens are billed and count against the context window, latency goes from seconds to tens of seconds, streaming semantics change, and a thinking budget becomes a tuning parameter you set per task. Know the honest scoping rule for a customer: reasoning models help on multi-step derivation, planning and code where a verifier exists; they do not help on extraction, classification, or anything where the bottleneck is missing information rather than missing computation — spending 8k thinking tokens on 'what is this invoice number' is pure waste.",
-   "minutes": 25,
+   "name": "Goroutine structure: ticker, heartbeater, applier",
+   "learn": "Settle on the canonical structure before coding: one long-lived `ticker()` goroutine that sleeps ~10ms and starts an election when now-lastHeard exceeds a randomised timeout; one goroutine per election that fans out RequestVote to every peer in its own goroutine and counts votes; a leader loop that fires AppendEntries to each peer every heartbeat interval; and a dedicated applier goroutine that is the only thing that ever writes to applyCh. Know why the applier must be separate: sending on applyCh can block on the service, and if you do it while holding rf.mu the whole peer deadlocks. Every goroutine must exit when `rf.killed()` is true, or the test binary accumulates leaked goroutines across the suite.",
+   "minutes": 45,
    "resource": {
-    "label": "Claude Platform Docs - Extended thinking",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/extended-thinking"
+    "label": "6.5840 — Advice on structuring your Raft lab",
+    "url": "https://pdos.csail.mit.edu/6.824/labs/raft-structure.txt"
    }
   },
   {
-   "name": "Reading a model card critically",
-   "learn": "Learn the intended anatomy of a model card — intended use, out-of-scope use, training data, evaluation, ethical considerations, caveats — then read three real cards (a frontier vendor card, an open-weights card such as Llama or Qwen, and a small fine-tune on the Hub) and grade each against it. Build a fixed checklist of questions you ask every time: what is the exact knowledge cutoff and does it match the marketing page; which context length is supported versus tested; are evals reported at 0-shot or few-shot, with or without CoT, and with what decoding parameters; is there a contamination analysis; what is the licence and does it permit your customer's use; what safety evaluations were run and on which languages. The senior move is naming what the card *omits*: an eval table with no error bars and no per-domain breakdown is a marketing asset, not evidence.",
-   "minutes": 30,
+   "name": "Part 3A: leader election and heartbeats",
+   "learn": "Implement RequestVote and empty-entry AppendEntries until TestInitialElection3A, TestReElection3A and TestManyElections3A pass. The vote handler: reject if args.Term < currentTerm; step down if args.Term > currentTerm; grant only if (votedFor == nil || votedFor == candidateId) AND the candidate's log is at least as up to date (compare lastLogTerm first, then lastLogIndex). The discipline that decides whether 3A is one hour or six: reset your election timer on exactly three events — granting a vote, receiving a valid AppendEntries from the current leader, and starting your own election — and on nothing else. Resetting on a rejected vote or a stale-term heartbeat is the most common 3A bug and it hides until TestManyElections3A.",
+   "minutes": 110,
    "resource": {
-    "label": "Mitchell et al., \"Model Cards for Model Reporting\" (arXiv)",
-    "url": "https://arxiv.org/abs/1810.03993"
+    "label": "6.5840 lecture notes — Raft part 1 (elections)",
+    "url": "https://pdos.csail.mit.edu/6.824/notes/l-raft.txt"
    }
   },
   {
-   "name": "Benchmarks and contamination: why a leaderboard number does not transfer",
-   "learn": "Learn how public evals are actually scored so you can read a claim precisely: multiple-choice with log-likelihood ranking (MMLU) versus generative exact-match versus pass@k with an executed test suite (HumanEval, SWE-bench). Know that the same model scores several points differently depending on prompt format, few-shot count and normalisation, which is why harness-reported numbers and vendor-reported numbers diverge legitimately. Know contamination: benchmark test sets leak into web-scale pretraining corpora, so a high score can be memorisation, and n-gram overlap analyses are the standard (partial) defence. Run at least one task with `lm-evaluation-harness` to see the machinery. The takeaway you sell to a customer: public benchmarks pick a shortlist, a 50-example eval on their own data picks the model (topic 53).",
-   "minutes": 30,
-   "resource": {
-    "label": "EleutherAI lm-evaluation-harness (official repo)",
-    "url": "https://github.com/EleutherAI/lm-evaluation-harness"
-   }
-  },
-  {
-   "name": "Hard limits: determinism, arithmetic, self-knowledge, cutoffs",
-   "learn": "Be able to state each limit with its mechanism, because customers ask for guarantees you cannot give. Determinism: even with temperature=0 and a fixed seed, hosted inference is not bit-reproducible — batching changes floating-point reduction order, MoE routing depends on batch composition, and the served model version changes under you; so your contract language is 'stable behaviour under eval', never 'identical output'. Arithmetic and counting: digits are tokens, there is no ALU, so exact computation belongs in a tool call. Self-knowledge: a model cannot reliably report its own confidence, training data, or version — ask the API, not the model. Knowledge cutoff: fixed at pretraining, so anything after it must be retrieved. Also know sensitivity to prompt order and formatting, and that these are properties of the architecture, not bugs a vendor will patch.",
+   "name": "Timeout arithmetic, and the same arithmetic in etcd",
+   "learn": "Derive your constants rather than copying someone's: the tester caps heartbeats at 10 per second and demands a new leader within 5 seconds, so the paper's 150-300ms range is unusable — a heartbeat of ~100ms with an election timeout randomised over ~400-800ms (fresh random draw every time you reset) fits both constraints. Understand the invariant behind it, broadcastTime << electionTimeout << MTBF, and then map it to a real cluster: etcd defaults to --heartbeat-interval 100ms and --election-timeout 1000ms, recommends the 10x ratio, and recommends election-timeout be at least 5-10x the round-trip time between members — which is why a cross-region etcd with default flags flaps leaders under load.",
    "minutes": 35,
    "resource": {
-    "label": "Hugging Face Transformers - GenerationConfig / text generation parameters",
-    "url": "https://huggingface.co/docs/transformers/main_classes/text_generation"
+    "label": "etcd — Tuning (heartbeat interval and election timeout)",
+    "url": "https://etcd.io/docs/v3.5/tuning/"
    }
   },
   {
-   "name": "Model-level safety: refusals, jailbreaks, and why injection is architectural",
-   "learn": "Understand that refusal behaviour is a post-training artefact, not a filter bolted on top, which explains both over-refusal on benign customer content (medical, security, legal, financial domains are common false positives) and the fact that jailbreaks work by shifting the input distribution away from where refusals were trained. Understand prompt injection at the fundamentals level: the model sees one flat token sequence, so 'instructions' and 'data' are a convention enforced by training, not a boundary enforced by the architecture — which is why retrieved documents, tool outputs and user files are all executable-by-accident. Read the OWASP LLM Top 10 categories so you have shared vocabulary with a customer's security team; the hands-on defences come in topic 51.",
-   "minutes": 25,
+   "name": "Part 3B: Start(), AppendEntries and the log-matching check",
+   "learn": "Implement `Start()` (append locally, return index/term immediately, never block) and full AppendEntries until all ten 3B tests pass, including TestBackup3B. Follow the handout's advice to make the log 0-indexed with a dummy entry at index 0, term 0, so the first RPC can legally carry PrevLogIndex 0. The follower's five steps in order: reject on stale term; reject if there is no entry at prevLogIndex with prevLogTerm; on a conflict at an existing index delete that entry and everything after it; append only entries not already present; and set commitIndex = min(leaderCommit, index of last new entry). Step 3 and step 4 must be a single careful loop — truncating unconditionally is the bug that eats committed entries.",
+   "minutes": 140,
    "resource": {
-    "label": "OWASP Top 10 for Large Language Model Applications",
-    "url": "https://owasp.org/www-project-top-10-for-large-language-model-applications/"
+    "label": "Ongaro, Consensus: Bridging Theory and Practice — §3.5 Log replication and the Log Matching Property",
+    "url": "https://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf"
    }
   },
   {
-   "name": "Translating all of this into client language, with sources",
-   "learn": "Convert each mechanism above into one claim a non-technical stakeholder can repeat, paired with a citable source and an explicit scope. Practise the four sentences you will use most: what an LLM is (a next-token predictor over a frozen corpus, tuned by human preference), why it invents citations (lossy parametric recall plus a preference for confident answers), what grounding actually changes (moves facts from weights into checkable context), and what you can and cannot guarantee (a measured error rate on their eval set, not zero errors and not identical outputs). Write the can/cannot table with a third column — 'what we would need to build to change this' — so the document opens scope rather than closing doors. Every claim gets a link; no claim gets an adjective.",
-   "minutes": 30,
+   "name": "Commit rules: majority matchIndex plus the current-term restriction",
+   "learn": "Implement the leader's advance rule exactly: find N > commitIndex such that a majority of matchIndex[i] >= N AND log[N].Term == rf.currentTerm, then set commitIndex = N. Be able to explain, from Figure 8, why dropping the term check lets a replicated-on-a-majority entry from an old term be overwritten later, breaking State Machine Safety. Pair it with the election restriction (5.4.1) and show why the two together give Leader Completeness: the restriction guarantees a new leader holds every entry committed under the old rule, and the term check guarantees nothing is called committed before that guarantee applies. Know the consequence for entries from prior terms: they commit indirectly, once any current-term entry above them commits.",
+   "minutes": 55,
    "resource": {
-    "label": "Hugging Face Hub - Model Cards (structure and metadata for sourcing claims)",
-    "url": "https://huggingface.co/docs/hub/model-cards"
+    "label": "6.5840 lecture notes — Raft part 2 (commit, persistence, snapshots)",
+    "url": "https://pdos.csail.mit.edu/6.824/notes/l-raft2.txt"
+   }
+  },
+  {
+   "name": "The applier goroutine and applyCh ordering",
+   "learn": "Write one applier that waits on a `sync.Cond` signalled whenever commitIndex advances, then, in a loop, copies the entries between lastApplied and commitIndex out under the lock, releases the lock, and sends them on applyCh. Guarantee the two invariants the tester checks: every peer applies the same command at the same index (a mismatch prints 'apply error' and fails the run), and indices arrive strictly in order with no gaps or repeats. Understand why `for i := lastApplied+1; i <= commitIndex; i++ { applyCh <- ApplyMsg{...rf.log[i]...} }` while holding the lock deadlocks, and why re-reading rf.log after re-acquiring the lock can read a trimmed log once 3D lands.",
+   "minutes": 45,
+   "resource": {
+    "label": "6.5840 lecture notes — lab 3 A+B Q&A: applier thread, condvar signalling and locking",
+    "url": "https://pdos.csail.mit.edu/6.824/notes/l-raft-QA.txt"
+   }
+  },
+  {
+   "name": "The catalogue of Figure 2 misreadings",
+   "learn": "Read the Students' Guide once you have 3B passing and audit your code against every item: don't reset the election timer on a stale-term AppendEntries; don't truncate the log just because entries were sent; don't return early from RequestVote without persisting; do step down on a higher term seen in a *reply*, and then ignore the rest of that reply; don't set matchIndex = nextIndex-1 from stale state — derive it from the args you sent (prevLogIndex + len(entries)); don't let a stale AppendEntries reply lower nextIndex twice. Each one you find here is a day you don't spend on TestFigure8Unreliable3C.",
+   "minutes": 45,
+   "resource": {
+    "label": "Students' Guide to Raft (Jon Gjengset)",
+    "url": "https://thesquareplanet.com/blog/students-guide-to-raft/"
+   }
+  },
+  {
+   "name": "Part 3C: persistence and 'persist before you reply'",
+   "learn": "Implement `persist()` and `readPersist()` with labgob, encoding exactly currentTerm, votedFor and log[] (plus the snapshot bookkeeping in 3D) into `persister.Save(state, nil)`. Know that gob only serialises exported fields — lowercase fields in your log-entry struct silently vanish and labgob will warn you — and that decoding into a value that was never encoded leaves it zeroed. The rule that makes 3C pass and makes real systems safe: call persist() before you send any RPC reply that depends on the changed state, so a crash immediately after replying can never let the restarted node vote twice in one term or forget an entry it acknowledged. Insert persist() calls at every mutation of the three persistent fields, then grep to prove no mutation is missed.",
+   "minutes": 85,
+   "resource": {
+    "label": "Go standard library — encoding/gob (exported fields, zero values)",
+    "url": "https://pkg.go.dev/encoding/gob"
+   }
+  },
+  {
+   "name": "Fast log backup and the Figure 8 tests",
+   "learn": "Decrementing nextIndex one entry per RPC round trip is too slow for TestBackup3B and the 3C churn tests, so implement the handout's rejection payload: XTerm (term of the conflicting entry), XIndex (index of the first entry with that term) and XLen (log length). Leader logic: if the leader has no entry with XTerm, nextIndex = XIndex; if it has XTerm, nextIndex = (index of its last entry with XTerm) + 1; if the follower's log is simply too short, nextIndex = XLen. Then grind TestFigure83C and TestFigure8Unreliable3C — these take ~50s each and are where a wrong commit rule, a missing persist, or election timeouts that are too tight surface as intermittent failures. Run them with `-count 10` before believing they pass.",
+   "minutes": 70,
+   "resource": {
+    "label": "etcd-io/raft — log.go, findConflictByTerm (production fast log backup)",
+    "url": "https://github.com/etcd-io/raft/blob/main/log.go"
+   }
+  },
+  {
+   "name": "Part 3D: log compaction, Snapshot() and InstallSnapshot",
+   "learn": "Rewrite the log to store only the tail after lastIncludedIndex, with every array access going through explicit index-conversion helpers — this refactor, not the RPC, is where 3D is won or lost. Implement `Snapshot(index, snapshot []byte)` (called on every peer, not just the leader; discard entries before index; persist state and snapshot together via `persister.Save(state, snapshot)`) and the InstallSnapshot RPC sent whenever nextIndex[i] <= lastIncludedIndex, in one shot with no Figure 13 offset splitting. Deliver the snapshot to the service through applyCh, never move the service backwards, and after restart make sure the first applyCh message is either a higher snapshot or the command immediately after the restored index. Discard trimmed entries so the GC can free them: reslicing keeps the old backing array alive, so copy into a fresh slice.",
+   "minutes": 140,
+   "resource": {
+    "label": "6.5840 — diagram of Raft interactions: Start, applyCh, Snapshot and InstallSnapshot",
+    "url": "https://pdos.csail.mit.edu/6.824/notes/raft_diagram.pdf"
+   }
+  },
+  {
+   "name": "Debugging distributed Go: annotations, timelines, repetition",
+   "learn": "Build a debugging rig on day one rather than day five: a `DPrintf` gated by an env var, every line stamped with peer id, term, state, commitIndex and lastApplied, plus `tester.Annotate(\"Server 0\", \"short\", \"details\")` calls so the tester's generated HTML timeline shows your events alongside its partitions, crashes and checks. Learn to read that timeline for the moment the invariant first breaks rather than the moment the test reports failure. Run failing tests in a loop — `go test -race -run 3C -count 20` piped to a file — because most Raft bugs appear in one run in twenty, and 'it passed once' is not evidence.",
+   "minutes": 65,
+   "resource": {
+    "label": "6.5840 — tester visualization of a failing run",
+    "url": "https://pdos.csail.mit.edu/6.824/labs/vis.html"
+   }
+  },
+  {
+   "name": "Performance budget: RPC counts, bytes, goroutines",
+   "learn": "Treat the tester's numbers as a performance spec, not decoration: each passing line reports elapsed time, peers, RPC count, RPC bytes and committed ops, and TestCount3B and TestRPCBytes3B fail outright on excess. The grader fails any submission where all of lab 3 exceeds 600 seconds or a single test exceeds 120; the reference solution is about 6 minutes without -race and 10 with. Hunt the usual causes of blowing the budget: loops that spin without sleeping or waiting on a cond, sending the entire log in every AppendEntries instead of the suffix from nextIndex, retrying an in-flight RPC before the previous one returns, and goroutines leaked per election. Use `go test -cpuprofile`/`-blockprofile` or a SIGQUIT goroutine dump when a run hangs.",
+   "minutes": 45,
+   "resource": {
+    "label": "Go — Diagnostics (profiling, tracing, goroutine dumps)",
+    "url": "https://go.dev/doc/diagnostics"
+   }
+  },
+  {
+   "name": "Linearizability and what Porcupine actually checks",
+   "learn": "Understand the layer above your Raft: the tester records a history of client operations with invocation and response intervals and asks whether some sequential ordering consistent with real time explains it — that is linearizability, and Porcupine is the checker that decides it (it writes an HTML visualisation on failure). Be able to say precisely what Raft gives you (a single totally ordered replicated log) and what it does not (linearizable *reads*, which need a log entry, a ReadIndex round trip, or a lease), and to read a Porcupine diagram to find the operation whose return value is impossible under every valid ordering.",
+   "minutes": 40,
+   "resource": {
+    "label": "Porcupine — linearizability checker for Go",
+    "url": "https://github.com/anishathalye/porcupine"
+   }
+  },
+  {
+   "name": "Section 8 client interaction: exactly-once and read paths",
+   "learn": "Read section 8 of the paper and design what lab 4 will need: clients tag every command with a clientId and a monotonically increasing seqNo, the state machine keeps a last-applied-seq table per client so a retried command after a leader change is deduplicated rather than applied twice, and that table is part of the snapshot. Know why a new leader commits a no-op entry from its own term at election time (to learn its true commitIndex before serving reads) and the three read strategies with their costs: put the read in the log (safe, one round trip of consensus), ReadIndex (confirm leadership with a heartbeat quorum, then read locally), or a leader lease (fastest, but correctness depends on bounded clock drift).",
+   "minutes": 45,
+   "resource": {
+    "label": "Raft extended paper — Section 8, Client interaction",
+    "url": "https://raft.github.io/raft.pdf"
+   }
+  },
+  {
+   "name": "From lab Raft to the consensus in a customer's stack",
+   "learn": "Close the loop by reading etcd's raft library README and mapping every lab concept onto a production knob: the `Node` interface and `Ready` struct that make persistence and message sending the application's job; PreVote and CheckQuorum, which stop a partitioned node from bumping the term and disrupting a healthy leader (your lab Raft has this bug by design); learners (non-voting members) for safe node replacement; ReadIndex for linearizable reads; and the WAL plus snapshot-count settings that decide restart time. Then look at the operational failure surface you will actually be paged for: losing quorum in a 3-node cluster, `etcdctl snapshot save` / restore, `--force-new-cluster`, and why fsync latency on the etcd disk shows up as apiserver timeouts.",
+   "minutes": 80,
+   "resource": {
+    "label": "etcd-io/raft — production Raft library README",
+    "url": "https://github.com/etcd-io/raft"
+   }
+  },
+  {
+   "name": "Quorum loss, recovery and cluster sizing for customers",
+   "learn": "Work the operational drill: for 2f+1 members you survive f failures, so 3 tolerates 1 and 5 tolerates 2, while 4 tolerates the same as 3 and is strictly slower — be able to shut down that 'let's add a fourth node for HA' request in one sentence. Walk etcd's documented failure modes: minority failure (self-heals when the member returns), majority failure (cluster is unavailable for writes and must be restored from a snapshot), and a partitioned member that returns with a higher term. Know the recovery sequence — stop members, `etcdutl snapshot restore` on each with a new cluster token, restart, verify with `etcdctl endpoint status --cluster` — and that a restore loses everything written after the snapshot, which is the number your customer actually needs to hear.",
+   "minutes": 45,
+   "resource": {
+    "label": "etcd — Failure modes and disaster recovery",
+    "url": "https://etcd.io/docs/v3.5/op-guide/failures/"
    }
   }
  ],
  "outcomes": [
-  "You can take a customer's real document, tokenize it with two different tokenizers, and state tokens-per-KB and the resulting per-1000-document cost within 10% of the actual billed amount.",
-  "You can draw scaled dot-product attention on a whiteboard from memory — Q/K/V projections, sqrt(d_k), softmax over keys, causal mask — and derive from the drawing why context is O(n^2) and why a KV cache exists.",
-  "You can size a self-hosted deployment on the spot: given parameter count, precision, concurrency and context length, you produce weight memory and KV-cache memory and say whether it fits the customer's GPUs.",
-  "You can take 20 logged failures from a running system and classify each into objective mismatch, parametric recall failure, preference-tuning pressure, context failure, or tokenizer artefact — and name the different fix for each class.",
-  "You can explain why temperature=0 does not give reproducible output, and write contract or SLA language that promises stable eval-measured behaviour instead of identical strings.",
-  "You can read a model card in ten minutes and produce a written list of what it omits — missing error bars, untested context length, unstated few-shot setting, no contamination analysis — and say which omissions block the customer's use case.",
-  "You can defend a ranked list of hallucination mitigations with a mechanism for each, and explicitly tell a customer that 'do not hallucinate' in the system prompt and a bigger model are not on the list.",
-  "You can explain Chinchilla scaling and the inference-cost twist well enough to justify a small-model-plus-router architecture to an economic buyer who was expecting 'use the biggest model'."
+  "You can run `make RUN=\"-run 3A\" raft1` through `-run 3D` and pass all of 3A, 3B, 3C and 3D with `-race`, repeated with `-count 10`, with the whole suite under the 600-second grading limit and no individual test over 120 seconds",
+  "You can point at the specific line in your raft.go that implements each numbered rule in Figure 2, including the two easily-skipped ones (step down on a higher term seen in a reply; apply while commitIndex > lastApplied)",
+  "You can reproduce the Figure 8 scenario on a whiteboard in under five minutes and state exactly which line of your commit-advance code prevents it",
+  "You can explain, without notes, the three and only three events that reset your election timer, and demonstrate a test that fails when you add a fourth",
+  "You can take a failing run's tester timeline plus your own annotated logs and name the first violated invariant and the peer that violated it, rather than the test that reported it",
+  "You can translate any lab constant into its production equivalent — heartbeat interval, election timeout, snapshot trigger, quorum size — and defend those values for a customer's cluster given their RTT and disk fsync latency",
+  "You can describe three implementations of a linearizable read (log entry, ReadIndex, leader lease), rank them by latency, and name the assumption each one can violate",
+  "You can diagnose an etcd cluster that has lost quorum and give the exact recovery sequence plus the data-loss window it implies"
  ],
  "failureModes": [
-  "Quoting a project cost from a '4 characters per token' estimate when the customer's corpus is Japanese contracts, JSON payloads or scanned-PDF text, then discovering the real bill is 2-3x the number in the SOW.",
-  "Promising deterministic output because the config sets temperature=0, then having a customer's QA team open a defect when two identical requests return different strings on a batched endpoint.",
-  "Diagnosing a retrieval failure as a model failure and burning three weeks on prompt tuning or a fine-tune, when the correct chunk was never in the context window in the first place.",
-  "Stuffing 60 retrieved chunks into a long context and reporting the system as working because spot checks passed, while accuracy on evidence placed in the middle of the context has quietly collapsed.",
-  "Shipping a model whose refusal behaviour over-triggers on the customer's actual domain — clinical notes, security incident reports, credit decisions — so the pilot looks broken to the exact users who matter.",
-  "Selecting a model from public leaderboard scores, then finding it loses to a cheaper model on the customer's own 50-example eval because the benchmark was contaminated or measured a different task shape.",
-  "Letting a model's own self-report — its claimed version, cutoff, or confidence — into a status update or a client email, and being contradicted later by the API's actual model metadata."
+  "Replying to a RequestVote or AppendEntries before persisting currentTerm/votedFor/log, so a crash-restart in the same term votes twice or forgets an acknowledged entry — in the lab it is an intermittent 3C failure, in production it is two leaders writing divergent history",
+  "Truncating the follower's log on every AppendEntries instead of only at a genuine conflict, so a delayed or duplicated RPC deletes entries that were already committed and the peers diverge — the tester calls this 'apply error', a customer calls it lost writes",
+  "Advancing commitIndex by counting replicas without checking log[N].Term == currentTerm, which commits a previous-term entry that a later leader can legally overwrite (Figure 8) — silent, rare, and only reproducible under partitions",
+  "Holding rf.mu across a peer.Call or an applyCh send, which deadlocks the peer; the cluster keeps electing leaders that never make progress, and the production analogue is an etcd member that answers heartbeats but stalls every write",
+  "Election timeouts tuned too aggressively for the environment — a node whose fsync latency spikes (EBS burst credits exhausted, noisy-neighbour NVMe) misses heartbeats, terms climb, and the cluster flaps leaders every few seconds while the apiserver above it times out",
+  "Log compaction that reslices instead of copying, so trimmed entries stay reachable and never get freed; memory grows for days until the process is OOM-killed, mirroring an etcd cluster that hits its DB quota, raises a NOSPACE alarm and goes read-only",
+  "Retrying a client command against a new leader without a clientId/seqNo dedup table, so an operation that timed out is applied twice — harmless for an idempotent Put, corrupting for an increment, a debit, or an append"
  ],
  "interviewQuestions": [
-  "A customer says the assistant invented a policy number that looks exactly like their real format. Walk me through your diagnosis: what are the candidate mechanisms, what would you log or measure to distinguish them, and what do you change first?",
-  "Explain the KV cache to a customer's platform architect who is deciding whether to buy 8xA100 or 8xH100. Derive the memory arithmetic and tell them which of context length, concurrency, or model size hurts them most.",
-  "Your customer's legal team wants a contractual guarantee of reproducible outputs for an audit trail. What can you actually commit to, what can you not, and what would you build to satisfy the underlying audit requirement?",
-  "Chinchilla says compute-optimal training uses roughly 20 tokens per parameter. Vendors deliberately violate that. Explain why, and then use the reasoning to argue for or against a cascaded small-model architecture for a 10M-document-per-month classification pipeline.",
-  "Here is a model card for an open-weights model a customer wants to self-host in their VPC. Read it and tell me the three things you would refuse to sign off on until you had run your own tests.",
-  "Rank the interventions that reduce hallucination on a document-QA product from highest to lowest effect, give the mechanism for each, and name two commonly-suggested interventions you would refuse to spend the customer's money on.",
-  "A security reviewer asks why you cannot just tell the model to ignore instructions inside uploaded documents. Answer at the level of the architecture, not the product, and then say what you would build instead."
+  "Walk me through why a Raft leader may not mark an entry from a previous term committed just because it is stored on a majority. Draw the Figure 8 sequence and tell me what your code does instead.",
+  "Exactly where in the protocol must state hit stable storage before you reply, and what concretely breaks if you reply first? Now estimate the write throughput ceiling that rule imposes given a 6ms fsync.",
+  "A customer's five-node etcd behind their Kubernetes control plane is electing a new leader every couple of minutes and apiserver p99 latency has gone from 20ms to 2s. What do you look at, in what order, and which of heartbeat-interval, election-timeout, snapshot-count, disk or network do you expect to be the cause?",
+  "Give me three ways to serve a linearizable read from a Raft cluster, in order of increasing latency, and tell me the specific failure each one can exhibit.",
+  "A client issues a write, gets no response, and retries against a different node that is now leader. How do you guarantee the command applies exactly once, and where does that dedup state have to live so it survives a snapshot and a restart?",
+  "The customer's platform team wants to go from three to four members 'for more redundancy' across two datacentres. What do you tell them, and what would you propose instead?",
+  "How do snapshots interact with AppendEntries and the applyCh contract? What invariants must hold about the order and indices of messages the service sees after a follower installs a snapshot?"
  ],
- "proofOfWork": "Build a small public repo, `llm-mechanics-lab`, that turns each claim in your client one-pager into a reproducible experiment with committed outputs. It should contain: (1) a tokenizer study that runs tiktoken and a SentencePiece/HF tokenizer over five content types (English prose, JSON, SQL, Japanese, base64) and emits a tokens-per-KB table plus a cost projection at current published prices; (2) a KV-cache and weight-memory calculator that takes n_layer, n_kv_heads, head_dim, precision, context length and concurrency and prints the GPU memory envelope, validated against one real open-weights config.json; (3) a determinism harness that fires the same request 50 times at temperature 0 against a hosted endpoint and reports the exact-match rate, the first divergent token position, and the distribution of top-token logprobs; (4) a hallucination taxonomy notebook that runs a closed-book vs grounded vs grounded-with-citations vs grounded-with-abstention comparison over 30 questions where you know the ground truth, reporting error rate and, critically, detected-error rate per condition; and (5) a `MODEL_CARD_REVIEW.md` applying your checklist to three real model cards with a written list of omissions. The README should state each finding as a one-line claim with a link to the script that produced it, so the client one-pager can cite your own measurements rather than vendor marketing."
+ "proofOfWork": "Beyond the passing test suite, build a fault-injection harness and a written failure atlas on top of your own implementation. Add a debug build flag that lets you deliberately break one invariant at a time — persist after reply instead of before, drop the current-term check in the commit rule, truncate the log unconditionally on AppendEntries, reset the election timer on stale-term RPCs, remove the election restriction from RequestVote — then, for each mutation, run the suite with `-count 20` and record which tests fail, at what rate, and what the first divergence looks like in the tester timeline. Write it up as a short document (kept private since it contains lab code, or published with the solution stripped to diagrams and log excerpts) where each entry has the broken invariant, the safety property it violates from the paper, the observed symptom, the failure rate across twenty runs, and the equivalent production symptom in etcd or Consul — leader flapping, apiserver timeouts, a stale read, a double-applied command. That document is both the artifact that proves you understand Raft as a set of enforced invariants rather than a pile of RPCs, and the thing you can hand an interviewer or a customer's platform team when they ask why a consensus tuning change is risky."
 }

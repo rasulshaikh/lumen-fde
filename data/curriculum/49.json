@@ -1,227 +1,227 @@
 {
  "i": 49,
- "topic": "RAG at depth: chunking, embeddings, hybrid retrieval, reranking, contextual retrieval, caching",
+ "topic": "LLM fundamentals: tokens, attention, pretraining, RLHF, scaling, limits",
  "track": "G. AI Engineering",
  "month": 6,
  "hours": 10,
- "why": "Every enterprise AI deployment an FDE lands on is a retrieval problem wearing a model's clothes: answer quality is capped by whether the right paragraph of the customer's MSA, runbook or ticket history actually reached the prompt. Customers do not report 'low nDCG', they report 'it could not find the liability cap in our own contract', and the fix is almost never a bigger model - it is parsing, chunking, hybrid retrieval, reranking and context assembly, each of which you must defend with a before/after number in front of their architect. It is also the highest-leverage thing you can change on site in a single week without asking anyone for GPUs, a fine-tune or a new budget line.",
+ "why": "An FDE is the person a customer's VP of Ops corners after the demo and asks \"why did it make that up, and can you guarantee it won't?\" — and the answer has to be mechanistic, honest, and scoped, not a shrug or a sales line. Everything else in this track (prompting, tool use, RAG, evals, fine-tuning) is a set of levers whose behaviour only makes sense once you can say which part of the stack each lever touches: tokenizer, attention, pretraining distribution, or post-training preference model. Getting this wrong in front of a customer costs you the engagement — you either overpromise a determinism the architecture cannot deliver, or you kill a viable use case because you could not explain that the failure was retrieval, not the model.",
  "prerequisites": [
-  "PostgreSQL at depth (topic 29): EXPLAIN (ANALYZE, BUFFERS), btree vs GIN index choice, planner row estimates, CREATE INDEX CONCURRENTLY, maintenance_work_mem - you tune pgvector as a Postgres problem, not as a vector-database problem.",
-  "Data modelling for multi-tenant AI systems (topic 30): tenant_id everywhere, row-level security, PII classification and audit trails, because a retrieval index is the easiest place in the stack to leak one customer's documents into another's answer.",
-  "Prompt engineering as code (topic 46): versioned prompt files, structured outputs, and a regression set you can re-run - the RAG ablation table is the same discipline applied to retrieval.",
-  "LLM fundamentals (topic 45): tokenisation, context windows, what an embedding actually is, and cost/latency per 1k tokens, so 'add a contextual preamble to every chunk' is a number you can compute rather than a vibe.",
-  "Production Python (topics 25 and 26): batched, resumable jobs with exponential backoff and jitter, connection pooling, and a FastAPI service boundary to put the retriever behind.",
-  "Enough evaluation literacy to know that 60 labelled questions gives you wide confidence intervals, so a 1-point recall move is noise and a 10-point move is a result."
+  "The LLM serving mental model from 'LLM-era system design' (topic 43): tokens-per-second rate limits, seconds-not-milliseconds p99, streaming responses, and queue-plus-worker rather than synchronous calls — this topic explains *why* those constraints exist.",
+  "Working Python and the ability to run a script against a hosted API (topic 25): you will call a tokenizer, count tokens, sweep temperature, and read logprobs, so `uv`/`venv`, `pip install tiktoken transformers`, and an API key in an env var must be non-events.",
+  "Basic linear algebra vocabulary: matrix multiply, dot product, vector norm, softmax. You do not need to derive backprop, but you must be able to read `softmax(QK^T / sqrt(d_k))V` and say what each symbol is and what shape it has.",
+  "Napkin-maths fluency from topic 42's estimation drills: powers of two, GB/s versus GFLOP/s, and the habit of writing the number down before arguing about the architecture — scaling laws and KV-cache sizing are pure napkin maths.",
+  "Enough statistics to distinguish a sampled distribution from a point estimate: what a probability distribution over 100k+ classes means, what sampling from it does, and why a single benchmark score without a confidence interval is close to meaningless.",
+  "The writing discipline from topic 69 in draft form: this topic's deliverable is a client-facing one-pager, so you need to be able to compress a mechanism into two sentences a non-engineer can repeat to their boss."
  ],
  "subtopics": [
   {
-   "name": "Freeze a naive baseline and a one-command harness",
-   "learn": "Build the dumbest thing that works and then never change it: fixed 512-token chunks, no overlap, one embedding model, cosine top-5, one prompt, temperature 0. Put it behind two functions - retrieve(query, k) -> list[Chunk] and answer(query) -> (text, cited_chunk_ids) - so every later improvement is a swap of exactly one component. Persist run_config (model ids, chunk params, k, prompt hash, git sha) and write every retrieval result row-level to a runs table keyed by (run_id, question_id, rank, chunk_id); without those rows you cannot later say which questions a change fixed and which it broke. Ban notebook-only experiments from day one: if the ablation is not re-runnable with one command on the held-out set, the numbers are anecdote.",
+   "name": "Tokenization: BPE merges, byte-level fallback, and the bugs they cause",
+   "learn": "Understand byte-pair encoding end to end: start from a byte-level alphabet, count adjacent pair frequencies in the training corpus, greedily merge the most frequent pair, repeat until you hit vocab size, and store the ordered merge list. Know that encoding at inference replays those merges in order, which is why the tokenizer is frozen with the model and why a fine-tune cannot add a token without resizing the embedding matrix. Learn the concrete consequences: leading whitespace makes ' the' and 'the' different tokens; digits split unpredictably so arithmetic and ID matching are brittle; non-Latin scripts and code inflate token counts 2-4x; a trailing space before a completion boundary silently degrades quality. Be able to run a tokenizer on a customer's actual document and show which fields fragment badly.",
+   "minutes": 35,
+   "resource": {
+    "label": "Hugging Face LLM Course - Byte-Pair Encoding tokenization",
+    "url": "https://huggingface.co/learn/llm-course/chapter6/5"
+   }
+  },
+  {
+   "name": "Token accounting: measuring, not guessing, before you quote a price",
+   "learn": "Get hands-on with at least two tokenizers and prove to yourself that '4 characters per token' is a Latin-prose-only heuristic. Use `tiktoken.encoding_for_model()` or `tiktoken.get_encoding('cl100k_base')` / `o200k_base` to count, and the provider's own token-counting endpoint for the model you will actually bill against, because vocabularies differ and a cross-vendor estimate can be 30% off. Measure the same 10 KB of the customer's real content in English prose, JSON, SQL, Japanese, and a base64 blob, and record the tokens-per-KB for each. Know that images and tool schemas also consume input tokens, and that a system prompt plus tool definitions is a fixed per-call tax you pay on every request.",
    "minutes": 25,
    "resource": {
-    "label": "Claude Docs - Define success criteria and build evaluations",
-    "url": "https://platform.claude.com/docs/en/test-and-evaluate/develop-tests"
+    "label": "tiktoken (official OpenAI BPE tokenizer repository)",
+    "url": "https://github.com/openai/tiktoken"
    }
   },
   {
-   "name": "Build the golden eval set before touching retrieval",
-   "learn": "Write 50-80 real questions against the Dokeo corpus, sampled by shape rather than convenience: single-fact lookup, multi-hop across two documents, comparative ('what changed between v2 and v3'), negation, acronym/jargon, and 5-10 deliberately unanswerable questions that must produce a refusal. For each answerable question, label the chunk ids or (doc_id, span) that genuinely contain the answer - that ground truth is what makes recall@k computable and is roughly 80% of the total effort. Split into dev (tune freely) and held-out (touch once per milestone) so you do not overfit chunk size to thirty questions. Store it as versioned JSONL in the repo, never a spreadsheet, and make 'add the question that broke in production' the standing maintenance ritual.",
-   "minutes": 40,
-   "resource": {
-    "label": "Ragas - RAG evaluation framework (repo and docs)",
-    "url": "https://github.com/vibrantlabsai/ragas"
-   }
-  },
-  {
-   "name": "Retrieval metrics vs generation metrics",
-   "learn": "Compute recall@k, precision@k, MRR and nDCG@10 on retrieval alone, separately from any answer-quality score, and always report recall at the k you feed the model and at a much larger k (5 and 50). The gap between them is the single most useful diagnostic you own: high recall@50 with low recall@5 is a ranking problem (buy a reranker), low recall@50 is a representation problem (fix parsing, chunking, hybrid, embeddings). Know why end-to-end answer accuracy alone is a trap - a strong model papers over bad retrieval on easy questions and you end up optimising noise. Break every metric down by question type so one aggregate number can never hide that multi-hop sits at 20%.",
-   "minutes": 30,
-   "resource": {
-    "label": "Introduction to Information Retrieval - 8.4 Evaluation of ranked retrieval results (precision/recall at k, MAP, NDCG)",
-    "url": "https://nlp.stanford.edu/IR-book/html/htmledition/evaluation-of-ranked-retrieval-results-1.html"
-   }
-  },
-  {
-   "name": "Parsing: getting text out without destroying structure",
-   "learn": "Extract per-page text with coordinates, preserve heading levels, keep table cells as rows instead of smashed whitespace, and strip repeated headers, footers and nav chrome. Know the standard failure set cold: two-column PDFs that interleave lines, scanned pages with no text layer (needs OCR, and OCR errors poison embeddings silently), ligatures and soft hyphens breaking tokenisation, and tables that degrade into unreadable prose. Emit a normalised intermediate (markdown or JSON with doc_id, section_path, page, text) so the chunker never touches a raw PDF. Log extracted character count per document and alert when a 40-page contract yields 200 characters - you want that caught at ingest, not six weeks later when the customer asks why clause 9 is invisible.",
-   "minutes": 30,
-   "resource": {
-    "label": "PyMuPDF documentation (text, blocks and table extraction)",
-    "url": "https://pymupdf.readthedocs.io/en/latest/"
-   }
-  },
-  {
-   "name": "Chunking: structure first, tokens second",
-   "learn": "Split on structure first (heading boundaries, list items, table rows), then split oversize sections by token count using the real tokenizer, not len(text)/4. Tune exactly three knobs against the eval set: target size (start at 300-800 tokens), overlap (0-20%), and whether to prepend the section path ('Billing > Refunds > Partial refunds') to every chunk. Understand both failure directions - chunks too small lose the antecedent so the embedding is about nothing, chunks too large dilute the vector and blow the reranker budget - and that tables and code blocks must never be split mid-structure. Run at least three configs through the identical harness and report recall@5 for each; the win here is usually several points, not a rounding error.",
-   "minutes": 40,
-   "resource": {
-    "label": "Microsoft Learn - Chunking large documents for vector search",
-    "url": "https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-chunk-documents"
-   }
-  },
-  {
-   "name": "Chunk schema and metadata that the planner can use",
-   "learn": "Design the chunks table deliberately: chunk_id, doc_id, tenant_id, ordinal, section_path, text, token_count, content_hash, embedding vector(1024), tsv tsvector, metadata jsonb, model_version, created_at. Put filterable high-selectivity fields (tenant_id, doc_type, effective_date) in real typed columns with btree indexes rather than burying them in jsonb, because the planner estimates jsonb predicates badly and you will get a Seq Scan you did not budget for; keep jsonb for the long tail and index it with GIN jsonb_path_ops only if you actually query it. Store content_hash (sha256 of normalised text) so re-ingest is idempotent and re-embedding touches only changed rows, and keep ordinal or prev/next chunk ids so a hit can be expanded into its neighbours at answer time.",
+   "name": "Embeddings and position: why order is not free",
+   "learn": "Understand that the token ID indexes a row of an embedding matrix of shape [vocab_size, d_model], and that attention itself is permutation-equivariant — without position information, 'A caused B' and 'B caused A' are the same input. Learn the three families you will see in model configs: learned absolute positions (GPT-2), sinusoidal, and rotary (RoPE), which rotates Q and K by an angle proportional to position so attention scores depend on relative distance. Know that RoPE's `theta`/`rope_scaling` config is what vendors change to extend context, and that a naively extended context degrades before it breaks. Separately, do not confuse these internal token embeddings with the sentence-embedding models you will use in topic 49 for retrieval — different objective, different output.",
    "minutes": 25,
    "resource": {
-    "label": "PostgreSQL docs - JSON types and jsonb indexing",
-    "url": "https://www.postgresql.org/docs/current/datatype-json.html"
+    "label": "Hugging Face LLM Course - How do Transformers work?",
+    "url": "https://huggingface.co/learn/llm-course/chapter1/4"
    }
   },
   {
-   "name": "Choosing an embedding model on your corpus, not a leaderboard",
-   "learn": "Run two or three candidates (a strong general model, a domain or multilingual one, a small local one) through the identical harness and compare recall@5, index size and p95 embed latency on your documents. Know the axes that decide the outcome: dimensionality (768 vs 1536 vs 3072 changes index memory and HNSW build time roughly linearly), max sequence length (chunks over it are silently truncated), asymmetric training where query and passage need different prefixes such as 'query: ' (omitting them quietly costs you double-digit recall), and whether the model targets cosine (normalise) or raw dot product. Price it out - embedding 5M chunks is a real invoice line, and every model upgrade is that invoice again plus a migration.",
-   "minutes": 30,
-   "resource": {
-    "label": "MTEB - Massive Text Embedding Benchmark (repo)",
-    "url": "https://github.com/embeddings-benchmark/mteb"
-   }
-  },
-  {
-   "name": "Embedding pipeline mechanics: batching, limits, idempotency",
-   "learn": "Build ingestion as a batched, resumable job: 64-256 texts per request, a token-bucket that respects the provider's tokens-per-minute limit, retries on 429 and 5xx with exponential backoff plus jitter, and checkpointing by content_hash so a crash at 80% resumes instead of restarting. Normalise vectors to unit length when using cosine so you can switch to the cheaper inner-product operator, and only use a reduced dimensions parameter (Matryoshka truncation) after you have measured the recall cost on your eval set. Two silent killers to guard against: preprocessing that differs between ingest and query time (different prefix, casing or truncation), and vectors from two model versions coexisting in one index - enforce a model_version column and refuse to search across versions.",
-   "minutes": 35,
-   "resource": {
-    "label": "OpenAI Platform docs - Embeddings guide",
-    "url": "https://developers.openai.com/api/docs/guides/embeddings"
-   }
-  },
-  {
-   "name": "pgvector internals: HNSW vs IVFFlat and the operators",
-   "learn": "Know the storage and index model exactly: types vector and halfvec (2 bytes per dimension, roughly halves index size), operators <-> (L2), <=> (cosine) and <#> (negative inner product), and the fact that the index is only used when the ORDER BY expression matches the opclass exactly - one mismatched operator silently gives you a full scan. HNSW takes m and ef_construction at build time and hnsw.ef_search at query time, supports incremental inserts, and gives better recall/latency; IVFFlat takes lists at build and ivfflat.probes at query, builds far faster, but needs representative data present at build time and degrades as the table grows past it. Rehearse the operations: raise maintenance_work_mem and max_parallel_maintenance_workers before CREATE INDEX or a 5M-row HNSW build runs for hours, build CONCURRENTLY on live tables, and keep the index inside RAM or p95 collapses.",
+   "name": "Self-attention: Q, K, V and the causal mask, at the level where you can draw it",
+   "learn": "Be able to derive and draw scaled dot-product attention: project each token into query, key and value vectors; score every query against every key with a dot product; divide by sqrt(d_k) to keep the softmax out of saturation; softmax over the key axis to get weights that sum to 1; take the weighted sum of values. Understand multi-head attention as running h of these in parallel on d_model/h dimensions and concatenating, so different heads can track different relations. Know the causal mask concretely: positions j > i are set to -inf before the softmax so a decoder-only model can be trained on every position of a sequence in one pass. From this, derive two things you will use constantly: attention is O(n^2) in sequence length, and every output token attends to every prior token, which is why the whole prompt is re-read (from cache) at each step.",
    "minutes": 40,
    "resource": {
-    "label": "pgvector README - Indexing section (HNSW vs IVFFlat, operators, build/query parameters)",
-    "url": "https://github.com/pgvector/pgvector#indexing"
+    "label": "Vaswani et al., \"Attention Is All You Need\" (arXiv)",
+    "url": "https://arxiv.org/abs/1706.03762"
    }
   },
   {
-   "name": "Measuring ANN recall against exact search",
-   "learn": "ANN is an approximation and a senior engineer quantifies the approximation rather than trusting it. Compute exact top-k on a sample with a brute-force scan (SET enable_indexscan = off, or a table without the index) and measure overlap with the index result to get true recall@k for a given hnsw.ef_search. Sweep ef_search across 40, 100, 200, 400 and plot recall against p95 latency, then pick the knee rather than the maximum. Learn to read EXPLAIN (ANALYZE, BUFFERS) on a vector query: a Seq Scan means the operator or ORDER BY does not match your opclass, and rows-removed-by-filter far above k means the planner is filtering after the index rather than before it.",
+   "name": "The decoder-only stack and parameter arithmetic",
+   "learn": "Assemble the block: pre-norm (RMSNorm or LayerNorm) -> multi-head attention -> residual add -> norm -> MLP (usually SwiGLU, ~4x or 8/3x d_model wide) -> residual add, repeated n_layer times, then a final norm and an unembedding projection to vocab logits. Read `nanoGPT`'s `model.py` until you can point at each of those lines. Then do the arithmetic yourself: for a model with n_layer, d_model and vocab V, estimate parameters as roughly 12 * n_layer * d_model^2 plus V * d_model, and memory at bf16 as 2 bytes per parameter — so a 70B model needs ~140 GB of weights before any activations or KV cache. This one calculation lets you answer 'can we self-host this in our VPC on the GPUs we already own?' in a meeting, which is a question FDEs get constantly.",
    "minutes": 30,
    "resource": {
-    "label": "ANN-Benchmarks: A Benchmarking Tool for Approximate Nearest Neighbor Algorithms (paper: recall vs QPS methodology)",
-    "url": "https://arxiv.org/abs/1807.05614"
+    "label": "karpathy/nanoGPT (reference decoder-only implementation)",
+    "url": "https://github.com/karpathy/nanoGPT"
    }
   },
   {
-   "name": "Lexical retrieval in Postgres: tsvector, GIN, ranking, trigrams",
-   "learn": "Implement the keyword half properly: to_tsvector('english', text) in a generated column with a GIN index, query with websearch_to_tsquery (handles quoted phrases, OR and leading minus), and rank with ts_rank_cd plus a normalisation flag so long documents do not win purely by length. Be clear on what lexical search gives you that no embedding will - exact error codes, SKUs, API names, rare acronyms, version strings - and where it fails (synonyms, paraphrase, cross-lingual). Add pg_trgm with a GIN index for typo and identifier fuzzy matching. Know that Postgres full-text search is not true BM25 (no IDF-weighted term saturation), so if lexical recall turns out to be decisive on your eval set, measure whether a real BM25 engine or a BM25 extension justifies the extra operational surface for this customer.",
+   "name": "Decoding and sampling: temperature, top_p, top_k, stop, seed, logprobs",
+   "learn": "Understand generation as a loop: logits -> optional repetition/frequency penalty -> divide by temperature -> softmax -> truncate with top_k and/or top_p (nucleus) -> sample -> append -> repeat until an EOS or stop sequence or max_tokens. Know exactly what each knob does: temperature < 1 sharpens the distribution (T -> 0 approaches greedy), top_p=0.9 keeps the smallest set of tokens whose cumulative probability exceeds 0.9, top_k caps the candidate count, and `stop`/`stop_sequences` truncate without consuming budget. Know that greedy decoding is not 'more accurate', it is lower-variance and more repetitive, and that beam search is wrong for open-ended generation. Learn to request logprobs and use the top-token probability as a cheap, real confidence signal for routing to human review.",
    "minutes": 35,
    "resource": {
-    "label": "PostgreSQL docs - Controlling Text Search (tsquery, ts_rank_cd)",
-    "url": "https://www.postgresql.org/docs/current/textsearch-controls.html"
+    "label": "Hugging Face Transformers - Generation strategies",
+    "url": "https://huggingface.co/docs/transformers/generation_strategies"
    }
   },
   {
-   "name": "Hybrid fusion: RRF versus weighted score fusion",
-   "learn": "Run the vector and lexical queries independently to depth 50-100 each, then fuse. Default to Reciprocal Rank Fusion - score = sum over lists of 1/(k + rank) with k around 60 - because it needs no score calibration and stays robust when one retriever returns garbage. Use weighted score fusion (min-max or z-score normalise each list first, then alpha*dense + (1-alpha)*sparse) only when you have the eval set to tune alpha and the score distributions are stable across queries. Know the three traps: fusing raw cosine against raw ts_rank is meaningless because the scales are unrelated; RRF throws away score magnitude so a dramatically better top hit gets no extra credit; and fusing at depth 10 wastes the recall you just paid for - fuse deep, then rerank.",
-   "minutes": 35,
-   "resource": {
-    "label": "Microsoft Learn - Relevance scoring in hybrid search using RRF",
-    "url": "https://learn.microsoft.com/en-us/azure/search/hybrid-search-ranking"
-   }
-  },
-  {
-   "name": "Filtered vector search and multi-tenant isolation",
-   "learn": "Get filtered ANN right or you ship either a data leak or a latency cliff. Understand pre-filter versus post-filter: post-filtering runs ANN over everything then drops non-matching rows, so a tenant holding 0.1% of the corpus can get zero results even though its documents are indexed. In pgvector, know that a highly selective btree predicate can push the planner off the HNSW index entirely, that partial indexes (one per large tenant) and table partitioning are the practical escapes, and that iterative scan exists for filtered queries. Layer row-level security on tenant_id with a per-request SET LOCAL so a forgotten WHERE clause fails closed rather than open, and add a permanent eval case asserting that tenant A can never retrieve a tenant B chunk.",
-   "minutes": 30,
-   "resource": {
-    "label": "PostgreSQL docs - Row Security Policies",
-    "url": "https://www.postgresql.org/docs/current/ddl-rowsecurity.html"
-   }
-  },
-  {
-   "name": "Cross-encoder reranking and the retrieval funnel",
-   "learn": "Add a cross-encoder that scores (query, chunk) pairs jointly and reorders: retrieve 50-100 candidates from hybrid, rerank, keep the top 5-8. Understand the economics - unlike a bi-encoder there are no precomputed document vectors, so cost and latency scale linearly with candidate count; batch the pairs, truncate candidate text, and set a hard timeout with a fallback to the fusion order so a slow reranker degrades ranking instead of returning a 504. Measure nDCG@10 improvement and added p95 latency as two separate numbers, and compare a hosted reranker, a local cross-encoder and an LLM-as-reranker at your actual budget. Use the reranker score as a confidence signal: below a threshold calibrated on your eval set, answer 'I do not have that in the provided documents'.",
-   "minutes": 35,
-   "resource": {
-    "label": "Sentence Transformers - Retrieve & Re-Rank (bi-encoder recall then cross-encoder reranking)",
-    "url": "https://www.sbert.net/examples/sentence_transformer/applications/retrieve_rerank/README.html"
-   }
-  },
-  {
-   "name": "Contextual retrieval: situating every chunk before indexing",
-   "learn": "Implement Anthropic's contextual retrieval: for each chunk, call a cheap model with the whole document plus that chunk and ask for a 50-100 token situating preamble ('This section of the 2024 Acme MSA describes the liability cap...'), then prepend it before both embedding and tsvector generation, so the chunk stops being an orphaned 'it' and starts carrying its own context. The cost only survives contact with reality because of prompt caching - cache the document once per document rather than paying for it once per chunk, which means understanding cache_control placement, the minimum cacheable prefix length and the cache TTL; without it the ingest bill is an order of magnitude higher. Anthropic report roughly a 35% reduction in top-20 retrieval failures from contextual embeddings plus contextual BM25 and around 67% with reranking added; reproduce the direction on your corpus and quote your own numbers, never theirs.",
+   "name": "KV cache, prefill vs decode, and why TTFT and throughput are different problems",
+   "learn": "Know that without a cache, generating token n would recompute attention over all n-1 previous tokens; the KV cache stores per-layer key and value tensors so each new token does O(n) work instead of O(n^2). Split inference into prefill (the whole prompt processed in one compute-bound, highly parallel pass -> time to first token) and decode (one token at a time, memory-bandwidth-bound -> tokens per second). Size the cache: roughly 2 (K and V) * n_layer * n_kv_heads * head_dim * 2 bytes * sequence_length per request, which is why long contexts and high concurrency blow up GPU memory long before FLOPs run out, and why GQA/MQA exist. Understand that provider prompt caching is this cache persisted across calls, which is why a stable prefix is worth engineering for.",
    "minutes": 40,
    "resource": {
-    "label": "Anthropic - Introducing Contextual Retrieval",
-    "url": "https://www.anthropic.com/engineering/contextual-retrieval"
+    "label": "Hugging Face Transformers - Cache strategies (KV cache)",
+    "url": "https://huggingface.co/docs/transformers/kv_cache"
    }
   },
   {
-   "name": "Query-side transformation: rewrite, decompose, HyDE",
-   "learn": "Fix the query, not just the index. Strip conversational framing, expand acronyms from a corpus-derived glossary, and for multi-hop questions decompose into two or three sub-queries, retrieve each and RRF the union. Implement HyDE (generate a hypothetical answer paragraph and embed that instead of the raw question) and measure it honestly - it tends to help short keyword-ish queries and to hurt when the model invents entities that anchor retrieval on the wrong documents. In any chat surface, rewrite follow-ups into standalone queries using the last few turns, because 'what about the second one?' is unretrievable on its own. Every transform adds an LLM call to the critical path, so log its latency and keep each one only if it earned measurable recall.",
+   "name": "Context windows: advertised length vs effective length",
+   "learn": "Learn that the advertised window is a hard architectural cap on input plus output tokens (and that `max_tokens` is carved out of it), while the *effective* window — where accuracy stays flat — is usually much shorter. Internalise the 'lost in the middle' result: retrieval accuracy is U-shaped in position, best at the start and end of the context, materially worse in the middle, so stuffing 80 documents in and hoping is a design error. Know what overflow actually does: a hard API error, not silent truncation, on most providers — so your app needs explicit budgeting and a truncation policy. Be able to compute a context budget for a real engagement: system prompt + tool schemas + retrieved chunks + conversation history + reserved output, with a named policy for what gets dropped first.",
    "minutes": 30,
    "resource": {
-    "label": "HyDE paper - Precise Zero-Shot Dense Retrieval without Relevance Labels (Gao et al.)",
-    "url": "https://arxiv.org/abs/2212.10496"
+    "label": "Claude Platform Docs - Context windows",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/context-windows"
    }
   },
   {
-   "name": "Three caches: embedding, prompt prefix, semantic answer",
-   "learn": "They have different keys, different lifetimes and very different blast radii. Embedding cache: key on sha256(model_version + normalised text), effectively permanent, removes most re-ingest cost. Prompt cache: put the stable system prompt and any long shared context in the cached prefix and place retrieved chunks after it, because any change before a cache breakpoint invalidates everything after it - prompt ordering is why teams report a 0% cache hit rate. Semantic answer cache: embed the query and return a stored answer when cosine similarity exceeds a threshold you calibrated on real query pairs (usually 0.95+); this is the only one of the three that can confidently serve a wrong answer, so scope keys by tenant and by document-set version and invalidate on ingest.",
+   "name": "Pretraining: the objective, the corpus, and what perplexity measures",
+   "learn": "Understand that pretraining is one objective — predict the next token, cross-entropy loss over the vocabulary — run over trillions of tokens of web crawl, code, books and curated data, with deduplication and quality filtering doing more for final quality than most architecture tweaks. Learn perplexity as exp(mean negative log-likelihood) and be able to say precisely what it does and does not tell you: it measures fit to a held-out distribution, is not comparable across tokenizers, and correlates only loosely with usefulness on a customer's task. Know that the corpus distribution is the single best predictor of where the model is strong: it is excellent at Python and Wikipedia-shaped facts, weak at your customer's internal jargon and their 2024 pricing table, and that no prompt fixes a knowledge gap that grounding should fix.",
    "minutes": 30,
    "resource": {
-    "label": "Claude Docs - prompt caching and API reference",
-    "url": "https://platform.claude.com/docs/en/home"
+    "label": "Hugging Face Transformers - Perplexity of fixed-length models",
+    "url": "https://huggingface.co/docs/transformers/perplexity"
    }
   },
   {
-   "name": "Context assembly, ordering and enforceable citations",
-   "learn": "What lands in the prompt is a design decision, not a concatenation. Deduplicate near-identical chunks, merge adjacent chunks from the same document into one contiguous block carrying its section path, cap total context by tokens and drop from the tail rather than truncating mid-chunk, and order deliberately - models attend worse to the middle of a long context, so put the strongest evidence first and the next strongest last. Give every chunk a stable inline id, require the model to cite those ids, then verify programmatically that each cited id was actually in the context and that the numbers in the claim appear in the cited text; that check turns hallucination into a catchable eval failure instead of a customer escalation. Include an explicit 'if the context does not contain the answer, say so' instruction and keep unanswerable questions in the eval set to prove it holds.",
-   "minutes": 30,
+   "name": "Scaling laws: Kaplan vs Chinchilla, and compute-optimal vs inference-optimal",
+   "learn": "Know the shape of the result: test loss falls as a smooth power law in parameters, data and compute, with no discontinuity — which is why capability forecasts are possible at all. Know the correction Chinchilla made to Kaplan: for a fixed training-compute budget, parameters and training tokens should scale roughly in proportion (~20 tokens per parameter), so the earlier generation of models was badly undertrained rather than too small. Then know the practical twist that matters to your customer: nobody trains compute-optimal any more, because inference cost dominates over a model's lifetime, so vendors deliberately overtrain small models. That is the mechanism behind 'the 8B model this year beats last year's 70B' — and it is the honest argument for a cascade or router design instead of always calling the frontier model.",
+   "minutes": 25,
    "resource": {
-    "label": "Lost in the Middle: How Language Models Use Long Contexts (Liu et al.) - why context ordering matters",
-    "url": "https://arxiv.org/abs/2307.03172"
+    "label": "Hoffmann et al., \"Training Compute-Optimal Large Language Models\" (Chinchilla, arXiv)",
+    "url": "https://arxiv.org/abs/2203.15556"
    }
   },
   {
-   "name": "The ablation table and a CI regression gate",
-   "learn": "Produce the artifact that makes all of this credible: one table, one row per change (baseline, chunking v2, better embeddings, hybrid, rerank, contextual), with columns recall@5, recall@20, nDCG@10, answer accuracy, p95 latency and cost per 1k queries. Change one variable at a time and re-run the whole held-out set - if two changes ship together you cannot attribute the gain and you cannot roll back intelligently. Then wire it into CI: a GitHub Actions job that runs the eval on every PR touching retrieval code, prompts or chunking config, fails when recall@5 drops more than two points or p95 rises more than 20%, and uploads the run artifact so the delta is visible in the PR rather than discovered by the customer.",
-   "minutes": 30,
+   "name": "Post-training I: SFT and instruction tuning",
+   "learn": "Understand that a base model is a document completer, not an assistant: prompted with a question it may continue with more questions. Supervised fine-tuning on tens of thousands of (instruction, response) pairs, formatted with a chat template that inserts role markers and special tokens, is what creates the turn-taking behaviour you take for granted. Know that the chat template is part of the contract — using the wrong template on a self-hosted model produces quietly worse output with no error — and that loss is masked so only response tokens contribute. Know that SFT teaches format and style far more than it teaches facts, which is the core of the argument you will make again in topic 50 about when fine-tuning is the wrong tool.",
+   "minutes": 25,
    "resource": {
-    "label": "GitHub Actions documentation (workflows, artifacts, required checks)",
-    "url": "https://docs.github.com/en/actions"
+    "label": "Hugging Face LLM Course - Supervised Fine-Tuning",
+    "url": "https://huggingface.co/learn/llm-course/chapter11/1"
    }
   },
   {
-   "name": "Index operations: incremental ingest, deletes, re-embedding migrations",
-   "learn": "Treat the index as a production database, not a build artifact. Support incremental ingest with upsert by content_hash and hard deletion of chunks whose document version disappeared - orphaned chunks answering from a terminated contract is a compliance incident, not a staleness bug - and know that HNSW deletes leave tombstones so recall and latency drift until you REINDEX CONCURRENTLY. Plan the re-embedding migration you will inevitably run: add a second embedding column or a shadow table, backfill in rate-limited batches, build the new index CONCURRENTLY, compare recall on the held-out set, then flip the read path behind a feature flag with a tested rollback. Track ingest lag (document change to searchable) as an SLI and alert on it, because 'the answer is out of date' is the most common customer complaint about a working RAG system.",
+   "name": "Post-training II: RLHF, DPO, and RLAIF/Constitutional AI",
+   "learn": "Walk the classic InstructGPT pipeline: SFT, then collect human rankings over sampled completions, then train a reward model to score responses, then optimise the policy with PPO against that reward plus a KL penalty to keep it near the SFT model. Understand what this buys (helpfulness, instruction-following, refusals) and what it costs: reward hacking, sycophancy — agreeing with a confidently wrong user because agreement was rewarded — verbosity bias, and an 'alignment tax' on some raw capabilities. Know DPO as the simpler alternative that skips the explicit reward model and optimises a closed-form preference loss directly, and RLAIF/Constitutional AI as replacing most human labels with model critiques against a written principle set. This is the layer that explains why models sound confident when they are wrong: confident, fluent answers were preferred by labellers.",
+   "minutes": 40,
+   "resource": {
+    "label": "Ouyang et al., \"Training language models to follow instructions with human feedback\" (InstructGPT, arXiv)",
+    "url": "https://arxiv.org/abs/2203.02155"
+   }
+  },
+  {
+   "name": "Why models hallucinate: five distinct mechanisms, named separately",
+   "learn": "Stop treating hallucination as one phenomenon and learn to diagnose which of these you are looking at, because each has a different fix. (1) Objective mismatch: the model is trained to produce a likely continuation, and there is no term in the loss for 'I don't know'. (2) Parametric recall failure: facts are lossily compressed into weights, so rare entities, exact numbers, dates, citations and URLs get plausibly reconstructed rather than recalled. (3) Preference-tuning pressure: hedging was scored lower than a confident answer, so calibration was trained out. (4) Context failure: the right evidence is absent, buried mid-context, or contradicted by the model's prior — and the model splits the difference. (5) Tokenizer and format artefacts: character counting, digit arithmetic and exact-string echoing fail for reasons that have nothing to do with reasoning. Practise labelling 20 real failures from your own transcripts with one of these five.",
+   "minutes": 40,
+   "resource": {
+    "label": "Prompt Engineering Guide - Factuality (risks)",
+    "url": "https://www.promptingguide.ai/risks/factuality"
+   }
+  },
+  {
+   "name": "What actually reduces hallucination, ranked by effect size",
+   "learn": "Build the ranked list you will defend in front of a customer, with the mechanism for each. Highest leverage: ground the answer in retrieved source text and require verbatim citations that a system can check against the source (provider citation features return character/page spans you can validate programmatically — a fabricated span fails the check). Next: constrain the output space with JSON schema / structured outputs so the model cannot free-associate a field. Next: give an explicit abstention path ('answer only from the provided documents; if the answer is not there, return {\"answer\": null}') and reward it in your evals. Then: decompose and verify — a second pass that checks each claim against the source, or self-consistency across n samples. Know what does *not* work: 'do not hallucinate' in the system prompt, temperature 0 alone, and a bigger model. Know the honest ceiling: you reduce the rate and make failures detectable; you do not reach zero.",
+   "minutes": 45,
+   "resource": {
+    "label": "Claude Platform Docs - Citations",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/citations"
+   }
+  },
+  {
+   "name": "Reasoning models and inference-time compute",
+   "learn": "Understand the newer axis: rather than scaling training, spend more tokens at inference on an internal reasoning trace, trained with RL against verifiable outcomes (maths, code, tests). Know the operational consequences that hit your architecture: thinking tokens are billed and count against the context window, latency goes from seconds to tens of seconds, streaming semantics change, and a thinking budget becomes a tuning parameter you set per task. Know the honest scoping rule for a customer: reasoning models help on multi-step derivation, planning and code where a verifier exists; they do not help on extraction, classification, or anything where the bottleneck is missing information rather than missing computation — spending 8k thinking tokens on 'what is this invoice number' is pure waste.",
+   "minutes": 25,
+   "resource": {
+    "label": "Claude Platform Docs - Extended thinking",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/extended-thinking"
+   }
+  },
+  {
+   "name": "Reading a model card critically",
+   "learn": "Learn the intended anatomy of a model card — intended use, out-of-scope use, training data, evaluation, ethical considerations, caveats — then read three real cards (a frontier vendor card, an open-weights card such as Llama or Qwen, and a small fine-tune on the Hub) and grade each against it. Build a fixed checklist of questions you ask every time: what is the exact knowledge cutoff and does it match the marketing page; which context length is supported versus tested; are evals reported at 0-shot or few-shot, with or without CoT, and with what decoding parameters; is there a contamination analysis; what is the licence and does it permit your customer's use; what safety evaluations were run and on which languages. The senior move is naming what the card *omits*: an eval table with no error bars and no per-domain breakdown is a marketing asset, not evidence.",
    "minutes": 30,
    "resource": {
-    "label": "PostgreSQL docs - REINDEX (including REINDEX CONCURRENTLY for rebuilding live indexes)",
-    "url": "https://www.postgresql.org/docs/current/sql-reindex.html"
+    "label": "Mitchell et al., \"Model Cards for Model Reporting\" (arXiv)",
+    "url": "https://arxiv.org/abs/1810.03993"
+   }
+  },
+  {
+   "name": "Benchmarks and contamination: why a leaderboard number does not transfer",
+   "learn": "Learn how public evals are actually scored so you can read a claim precisely: multiple-choice with log-likelihood ranking (MMLU) versus generative exact-match versus pass@k with an executed test suite (HumanEval, SWE-bench). Know that the same model scores several points differently depending on prompt format, few-shot count and normalisation, which is why harness-reported numbers and vendor-reported numbers diverge legitimately. Know contamination: benchmark test sets leak into web-scale pretraining corpora, so a high score can be memorisation, and n-gram overlap analyses are the standard (partial) defence. Run at least one task with `lm-evaluation-harness` to see the machinery. The takeaway you sell to a customer: public benchmarks pick a shortlist, a 50-example eval on their own data picks the model (topic 53).",
+   "minutes": 30,
+   "resource": {
+    "label": "EleutherAI lm-evaluation-harness (official repo)",
+    "url": "https://github.com/EleutherAI/lm-evaluation-harness"
+   }
+  },
+  {
+   "name": "Hard limits: determinism, arithmetic, self-knowledge, cutoffs",
+   "learn": "Be able to state each limit with its mechanism, because customers ask for guarantees you cannot give. Determinism: even with temperature=0 and a fixed seed, hosted inference is not bit-reproducible — batching changes floating-point reduction order, MoE routing depends on batch composition, and the served model version changes under you; so your contract language is 'stable behaviour under eval', never 'identical output'. Arithmetic and counting: digits are tokens, there is no ALU, so exact computation belongs in a tool call. Self-knowledge: a model cannot reliably report its own confidence, training data, or version — ask the API, not the model. Knowledge cutoff: fixed at pretraining, so anything after it must be retrieved. Also know sensitivity to prompt order and formatting, and that these are properties of the architecture, not bugs a vendor will patch.",
+   "minutes": 35,
+   "resource": {
+    "label": "Hugging Face Transformers - GenerationConfig / text generation parameters",
+    "url": "https://huggingface.co/docs/transformers/main_classes/text_generation"
+   }
+  },
+  {
+   "name": "Model-level safety: refusals, jailbreaks, and why injection is architectural",
+   "learn": "Understand that refusal behaviour is a post-training artefact, not a filter bolted on top, which explains both over-refusal on benign customer content (medical, security, legal, financial domains are common false positives) and the fact that jailbreaks work by shifting the input distribution away from where refusals were trained. Understand prompt injection at the fundamentals level: the model sees one flat token sequence, so 'instructions' and 'data' are a convention enforced by training, not a boundary enforced by the architecture — which is why retrieved documents, tool outputs and user files are all executable-by-accident. Read the OWASP LLM Top 10 categories so you have shared vocabulary with a customer's security team; the hands-on defences come in topic 51.",
+   "minutes": 25,
+   "resource": {
+    "label": "OWASP Top 10 for Large Language Model Applications",
+    "url": "https://owasp.org/www-project-top-10-for-large-language-model-applications/"
+   }
+  },
+  {
+   "name": "Translating all of this into client language, with sources",
+   "learn": "Convert each mechanism above into one claim a non-technical stakeholder can repeat, paired with a citable source and an explicit scope. Practise the four sentences you will use most: what an LLM is (a next-token predictor over a frozen corpus, tuned by human preference), why it invents citations (lossy parametric recall plus a preference for confident answers), what grounding actually changes (moves facts from weights into checkable context), and what you can and cannot guarantee (a measured error rate on their eval set, not zero errors and not identical outputs). Write the can/cannot table with a third column — 'what we would need to build to change this' — so the document opens scope rather than closing doors. Every claim gets a link; no claim gets an adjective.",
+   "minutes": 30,
+   "resource": {
+    "label": "Hugging Face Hub - Model Cards (structure and metadata for sourcing claims)",
+    "url": "https://huggingface.co/docs/hub/model-cards"
    }
   }
  ],
  "outcomes": [
-  "You can re-run the full retrieval eval on the held-out set with a single command and produce a table showing recall@5, recall@20, nDCG@10, answer accuracy, p95 latency and cost per 1k queries for every variant, with one variable changed per row.",
-  "You can beat your frozen naive baseline by a stated margin (target: at least +15 points recall@5 or a halving of top-20 retrieval failures) and name which specific change produced which part of the gain.",
-  "You can write the hybrid SQL from memory - a pgvector ORDER BY embedding <=> $1 arm and a websearch_to_tsquery/ts_rank_cd arm, each to depth 50, fused with RRF at k=60 - and explain why fusing raw scores instead would be wrong.",
-  "You can tune an HNSW index with measured evidence: report true recall@10 against exact search for at least four ef_search values with the matching p95 latency, and justify the value you shipped.",
-  "You can diagnose a bad answer to a specific stage - parsing, chunking, embedding, ranking, or context assembly - in under fifteen minutes using stored per-question retrieval rows, rather than guessing and re-prompting.",
-  "You can implement contextual retrieval with prompt caching and state the ingest cost per 1,000 chunks with and without caching, plus the measured retrieval-failure reduction on your own corpus.",
-  "You can demonstrate tenant isolation under filtered ANN: a test proving a small tenant still returns results (no post-filter starvation) and a test proving tenant A never retrieves tenant B's chunk even with RLS bypassed in application code.",
-  "You can gate a pull request on retrieval quality: a CI job that fails when recall@5 regresses by more than two points and publishes the before/after table as a PR artifact."
+  "You can take a customer's real document, tokenize it with two different tokenizers, and state tokens-per-KB and the resulting per-1000-document cost within 10% of the actual billed amount.",
+  "You can draw scaled dot-product attention on a whiteboard from memory — Q/K/V projections, sqrt(d_k), softmax over keys, causal mask — and derive from the drawing why context is O(n^2) and why a KV cache exists.",
+  "You can size a self-hosted deployment on the spot: given parameter count, precision, concurrency and context length, you produce weight memory and KV-cache memory and say whether it fits the customer's GPUs.",
+  "You can take 20 logged failures from a running system and classify each into objective mismatch, parametric recall failure, preference-tuning pressure, context failure, or tokenizer artefact — and name the different fix for each class.",
+  "You can explain why temperature=0 does not give reproducible output, and write contract or SLA language that promises stable eval-measured behaviour instead of identical strings.",
+  "You can read a model card in ten minutes and produce a written list of what it omits — missing error bars, untested context length, unstated few-shot setting, no contamination analysis — and say which omissions block the customer's use case.",
+  "You can defend a ranked list of hallucination mitigations with a mechanism for each, and explicitly tell a customer that 'do not hallucinate' in the system prompt and a bigger model are not on the list.",
+  "You can explain Chinchilla scaling and the inference-cost twist well enough to justify a small-model-plus-router architecture to an economic buyer who was expecting 'use the biggest model'."
  ],
  "failureModes": [
-  "Filtering is applied after the ANN search, so the tenant holding 0.1% of the corpus gets zero results while their documents sit correctly indexed, and the customer concludes the product is broken for them specifically.",
-  "A batch of scanned PDFs has no text layer and the ingest pipeline extracts a few hundred characters per document instead of failing loudly, so an entire class of contracts is invisible to retrieval and nobody notices until legal asks why a clause cannot be found.",
-  "An IVFFlat index was built when the table held 5,000 rows and the corpus grew to 5,000,000; the lists value is now wildly wrong, recall silently collapses, and the symptom presents as 'the model got worse' after a model upgrade that was actually irrelevant.",
-  "An embedding model upgrade is rolled out to the query path but the corpus backfill is still running, so queries and documents live in different vector spaces for six hours and every answer is confidently assembled from unrelated chunks.",
-  "The semantic answer cache has a threshold set by intuition rather than calibration, and a 0.93-similarity match serves one customer's pricing answer to a different question - or, worse, is scoped without tenant_id and serves it to a different customer.",
-  "A document is deleted or superseded in the source system but its chunks remain in the index, so the assistant cites a terminated agreement or a retracted policy and the incident becomes a compliance finding rather than a bug ticket.",
-  "The reranker is added to the critical path with no timeout and no fallback ordering; under a load spike its p99 doubles, request threads pile up, and the whole retrieval endpoint returns 504s instead of returning slightly worse-ordered results."
+  "Quoting a project cost from a '4 characters per token' estimate when the customer's corpus is Japanese contracts, JSON payloads or scanned-PDF text, then discovering the real bill is 2-3x the number in the SOW.",
+  "Promising deterministic output because the config sets temperature=0, then having a customer's QA team open a defect when two identical requests return different strings on a batched endpoint.",
+  "Diagnosing a retrieval failure as a model failure and burning three weeks on prompt tuning or a fine-tune, when the correct chunk was never in the context window in the first place.",
+  "Stuffing 60 retrieved chunks into a long context and reporting the system as working because spot checks passed, while accuracy on evidence placed in the middle of the context has quietly collapsed.",
+  "Shipping a model whose refusal behaviour over-triggers on the customer's actual domain — clinical notes, security incident reports, credit decisions — so the pilot looks broken to the exact users who matter.",
+  "Selecting a model from public leaderboard scores, then finding it loses to a cheaper model on the customer's own 50-example eval because the benchmark was contaminated or measured a different task shape.",
+  "Letting a model's own self-report — its claimed version, cutoff, or confidence — into a status update or a client email, and being contradicted later by the API's actual model metadata."
  ],
  "interviewQuestions": [
-  "A customer says your assistant 'cannot find things in our documents'. Walk me through how you localise the failure to parsing, chunking, embedding, ranking, or context assembly, and tell me exactly what you measure at each stage and in what order.",
-  "Design retrieval for a single deployment serving 200 tenants where the largest has 40 million chunks and the smallest has 2,000, with hard isolation guarantees. Cover pre- versus post-filtering, index layout, what degrades first, and how you would prove isolation to their security team.",
-  "Your eval shows recall@50 of 0.92 but recall@5 of 0.48. What do you do next, and how would your answer change if instead recall@50 were 0.50?",
-  "Explain reciprocal rank fusion versus weighted score fusion for combining dense and lexical results. When is RRF the wrong choice, and what would you need in place before switching?",
-  "You have 15% of your p99 latency budget left. Do you spend it on reranking 100 candidates or on a larger embedding model, and how do you decide with data rather than opinion?",
-  "Contextual retrieval costs an extra LLM call per chunk at ingest. Justify that to a customer who is already unhappy about token spend: how do you make it affordable, and how do you prove after the fact that it was worth it?",
-  "A vector query that ran in 20ms now takes 4 seconds after you added a WHERE clause on tenant_id and document_type. What happened inside Postgres, what does EXPLAIN show, and what are your options to fix it without moving to a dedicated vector database?"
+  "A customer says the assistant invented a policy number that looks exactly like their real format. Walk me through your diagnosis: what are the candidate mechanisms, what would you log or measure to distinguish them, and what do you change first?",
+  "Explain the KV cache to a customer's platform architect who is deciding whether to buy 8xA100 or 8xH100. Derive the memory arithmetic and tell them which of context length, concurrency, or model size hurts them most.",
+  "Your customer's legal team wants a contractual guarantee of reproducible outputs for an audit trail. What can you actually commit to, what can you not, and what would you build to satisfy the underlying audit requirement?",
+  "Chinchilla says compute-optimal training uses roughly 20 tokens per parameter. Vendors deliberately violate that. Explain why, and then use the reasoning to argue for or against a cascaded small-model architecture for a 10M-document-per-month classification pipeline.",
+  "Here is a model card for an open-weights model a customer wants to self-host in their VPC. Read it and tell me the three things you would refuse to sign off on until you had run your own tests.",
+  "Rank the interventions that reduce hallucination on a document-QA product from highest to lowest effect, give the mechanism for each, and name two commonly-suggested interventions you would refuse to spend the customer's money on.",
+  "A security reviewer asks why you cannot just tell the model to ignore instructions inside uploaded documents. Answer at the level of the architecture, not the product, and then say what you would build instead."
  ],
- "proofOfWork": "Publish a self-contained 'retrieval ablation report' repository over the Dokeo documentation corpus: a versioned JSONL eval set of 60-80 labelled questions (including unanswerable ones), a single `make eval` entrypoint that runs any named configuration against the held-out split, and a generated README containing the ablation table with one row per change - naive baseline, structure-aware chunking, alternate embedding model, hybrid RRF, cross-encoder reranking, contextual retrieval - and columns for recall@5, recall@20, nDCG@10, citation-verified answer accuracy, p95 end-to-end latency and cost per 1,000 queries, each cell reproducible from a stored run_id. Include the two plots that show you measured rather than assumed: true ANN recall versus p95 latency across hnsw.ef_search values, and recall@5 broken down by question type across configurations. Add a GitHub Actions workflow that re-runs the eval on every PR touching retrieval and fails the build on a >2-point recall@5 regression, plus a short RUNBOOK.md covering the re-embedding migration procedure, the delete/tombstone reindex policy, and the ingest-lag SLI - so the artifact reads as a production retrieval system with evidence, not a demo notebook."
+ "proofOfWork": "Build a small public repo, `llm-mechanics-lab`, that turns each claim in your client one-pager into a reproducible experiment with committed outputs. It should contain: (1) a tokenizer study that runs tiktoken and a SentencePiece/HF tokenizer over five content types (English prose, JSON, SQL, Japanese, base64) and emits a tokens-per-KB table plus a cost projection at current published prices; (2) a KV-cache and weight-memory calculator that takes n_layer, n_kv_heads, head_dim, precision, context length and concurrency and prints the GPU memory envelope, validated against one real open-weights config.json; (3) a determinism harness that fires the same request 50 times at temperature 0 against a hosted endpoint and reports the exact-match rate, the first divergent token position, and the distribution of top-token logprobs; (4) a hallucination taxonomy notebook that runs a closed-book vs grounded vs grounded-with-citations vs grounded-with-abstention comparison over 30 questions where you know the ground truth, reporting error rate and, critically, detected-error rate per condition; and (5) a `MODEL_CARD_REVIEW.md` applying your checklist to three real model cards with a written list of omissions. The README should state each finding as a one-line claim with a link to the script that produced it, so the client one-pager can cite your own measurements rather than vendor marketing."
 }

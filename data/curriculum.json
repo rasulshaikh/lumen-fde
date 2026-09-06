@@ -2606,8 +2606,8 @@
    ],
    "proofOfWork": "A public repository named vllm-on-k8s containing a Kustomize or Helm deployment of vLLM (Deployment with GPU limit, shm emptyDir, staged probes, Recreate strategy, Secret-fed HF_TOKEN, PVC weight cache with a fill Job, Service, Ingress with streaming timeouts, PodMonitor, KEDA ScaledObject) that a reviewer can apply to any cluster with an NVIDIA GPU Operator; a capacity.py script that reads a Hugging Face config.json plus GPU memory, dtype, max-model-len and gpu-memory-utilization and prints KV bytes per token, KV budget, max in-flight sequences at a given conversation length, and USD per million output tokens from a supplied hourly price, with a test asserting its prediction is within 15% of the 'GPU KV cache size' line captured from a real vLLM startup log checked into the repo; a bench/ directory with the raw --save-result JSON from a vllm bench serve sweep at concurrency 1, 8, 16, 32, 50 and 64 on one GPU type, a script that renders them into a markdown table and a throughput-versus-p99-TTFT plot with the knee marked; and a runbook.md with five incident drills (Pending after kernel upgrade, CUDA OOM, stuck rollout, 60-second stream cutoff, Xid 79) each with the exact commands and the expected output that confirms the diagnosis. The plan deliverable's benchmark table and capacity plan link to this repo as their evidence."
   },
-  "12": {
-   "i": 12,
+  "13": {
+   "i": 13,
    "topic": "Terraform: state, modules, workspaces, drift, CI",
    "track": "C. Cloud and IaC",
    "month": 2,
@@ -2815,8 +2815,8 @@
    ],
    "proofOfWork": "A public repository, tf-aws-foundation, laid out as modules/network and modules/compute plus envs/dev and envs/prod roots, each root with its own .s3.tfbackend, assume_role target and allowed_account_ids, and a bootstrap/ root that creates the versioned SSE-KMS state bucket and OIDC provider. GitHub Actions plan on PR under a read-only role and apply on merge under a separate role behind a protected environment and a concurrency group; conftest policies that deny untagged resources and any delete on aws_db_instance or aws_s3_bucket; tflint and trivy in the same pipeline. A recorded terminal session (asciinema or pasted output in the README) demonstrates three things end to end: (1) a VPC created by hand with the AWS CLI is adopted with import blocks and -generate-config-out until plan says No changes; (2) a count-based subnet set is migrated to for_each with moved blocks and the plan shows zero destroys; (3) a security group rule added in the console is caught by the nightly plan -detailed-exitcode job and reverted by the next apply. A one-page ADR in the repo explains the choice of directory-per-environment over workspaces and the network/data/compute state layering, in language a customer platform lead could sign off on."
   },
-  "13": {
-   "i": 13,
+  "14": {
+   "i": 14,
    "topic": "AWS networking and compute: VPC, subnets, SG, NACL, ALB across AZs, EC2, Lambda",
    "track": "C. Cloud and IaC",
    "month": 2,
@@ -3033,8 +3033,8 @@
    ],
    "proofOfWork": "A public repository `aws-two-az-breakfix-lab` that extends the plan's Terraform with a `faults/` directory of six deliberately broken variants selected via `terraform apply -var fault=<name>`: missing NAT route in one AZ, NACL ephemeral-port block on the app subnet, app SG allowing from a CIDR rather than the ALB SG, health check on a placeholder path, Lambda in a subnet without egress, and a single-AZ NAT. For each fault the README records the exact evidence that identifies it (the flow-log line with tcp-flags, the Reachability Analyzer blocking component, the ALB access-log fields, or the CloudWatch metric) and the one-line fix, plus a `cost.md` estimating the monthly bill for the reference architecture with and without endpoints. Finish with a ten-minute recorded walkthrough in which you terminate every instance in one AZ while running a load generator against the ALB and show the access logs registering zero ELB-generated 5XX during recovery."
   },
-  "14": {
-   "i": 14,
+  "15": {
+   "i": 15,
    "topic": "AWS data: RDS Postgres, S3, ElastiCache, DynamoDB",
    "track": "C. Cloud and IaC",
    "month": 2,
@@ -3259,8 +3259,8 @@
    ],
    "proofOfWork": "A public repository named aws-data-restore-drill that extends the plan's Terraform-plus-RTO deliverable into a repeatable, evidence-backed exercise. It contains a Terraform module that stands up a Multi-AZ RDS Postgres instance on gp3 with a customer-managed KMS key, deletion protection, a Secrets Manager-managed password, a custom parameter group loading pg_stat_statements and auto_explain, log exports to CloudWatch, Enhanced Monitoring and the alarms from the observability subtopic, alongside an S3 bucket module with Bucket Keys, the deny-non-TLS and deny-unencrypted policies, a lifecycle configuration with noncurrent-version expiry and multipart abort, and gateway endpoints for S3 and DynamoDB. A drill.sh seeds the database with pgbench, inserts a timestamped marker row, drops a table, performs a point-in-time restore via the CLI with the correct parameter and security groups, waits for availability, measures first-query lazy-load latency, renames instances so the endpoint is unchanged, verifies the marker row, and appends a line to RTO_LOG.md with every timestamp; the log shows at least three runs with RTO and RPO and a paragraph on what dominated each. A failover.py drives reboot --force-failover and records, per second, connection success from a pooled psycopg client with and without DNS caching disabled, plotted into a PNG. A policy_tests.sh proves each S3 deny statement with aws s3api calls that return 403 and one that succeeds. Finally, a dynamodb/ directory holds a single-table model for a sample multi-tenant workload with eight access patterns, a Terraform aws_dynamodb_table with two GSIs, a small load generator that reproduces a hot-partition throttle on tenant_id and then eliminates it with write sharding, screenshots of the ThrottledRequests metric before and after, and a one-page DECISION.md recommending DynamoDB or Postgres for that workload with a monthly cost estimate for each."
   },
-  "15": {
-   "i": 15,
+  "16": {
+   "i": 16,
    "topic": "IAM and cloud security: least privilege, roles, IRSA, no long-lived keys",
    "track": "C. Cloud and IaC",
    "month": 2,
@@ -3477,8 +3477,8 @@
    ],
    "proofOfWork": "A public repository named keyless-aws-lab containing Terraform that expresses every identity in a small stack as a role with a hand-written data.aws_iam_policy_document: the queue worker's IRSA role and its validated policy, an equivalent EKS Pod Identity association, a GitHub OIDC deploy role pinned to one repo and environment, a developer role that can only create roles under a permissions boundary, and a cross-account integration role with ExternalId and aws:PrincipalArn. A `make audit` target runs the credential report and fails if any user has an active access key, runs `aws accessanalyzer validate-policy` over every policy file and fails on ERROR or SECURITY_WARNING, checks `describe-instances` for any instance with HttpTokens not required, and lists any role with iam:PassRole on Resource *. A `make prove` target execs into the worker pod, prints `aws sts get-caller-identity`, decodes the projected token's sub and aud, and shows the matching AssumeRoleWithWebIdentity event from CloudTrail. The README carries the flaws.cloud and flaws2.cloud debrief as a table (level, misconfiguration, preventive control, detective signal) and a ten-minute recorded walkthrough of converting a container that had an AKIA key to IRSA, ending with the key's deactivation and deletion in the credential report."
   },
-  "16": {
-   "i": 16,
+  "17": {
+   "i": 17,
    "topic": "EKS: cluster design, node groups, IRSA, ingress, cert-manager, Route 53",
    "track": "C. Cloud and IaC",
    "month": 3,
@@ -3706,8 +3706,8 @@
    ],
    "proofOfWork": "A public repository named eks-lab containing two Terraform root modules, infra/ (VPC with tagged subnets and one NAT, EKS with access entries, a Spot-plus-on-demand AL2023 managed node group behind a launch template with IMDSv2 hop limit 1 and a gp3 root volume, the five add-ons with pinned versions, IRSA roles for the LB controller, cert-manager, external-dns and the EBS CSI driver, a delegated Route 53 zone and an aws_budgets_budget) and platform/ (Helm releases for the LB controller, ingress-nginx behind an NLB, cert-manager with staging and production ClusterIssuers, external-dns, the gp3 default StorageClass, and the Dokeo chart from topic 9), driven by a Makefile with up, verify, cost and down targets. verify curls https://dokeo.lab.<domain>, asserts the chain via openssl s_client shows a Let's Encrypt production issuer, runs aws sts get-caller-identity from inside the cert-manager pod and shows the same call denied from an unannotated pod plus a timed-out curl to 169.254.169.254, and prints max pods per node next to the CNI's actual allocatable count. cost/ holds the Infracost breakdown produced before apply and the Cost Explorer CSV pulled after a 48-hour run, side by side with the variance explained line by line. down runs the ordered teardown (Ingresses and LoadBalancer Services, PVCs, Route 53 records, platform/ then infra/) followed by a sweep script whose AWS CLI queries for load balancers, EBS volumes, available ENIs, controller security groups, log groups and non-NS/SOA records must all return empty for the target to exit 0. A RUNBOOK.md contains five drills with the exact commands and expected output for IP exhaustion, an IRSA trust policy mismatch, a Challenge stuck on split-horizon DNS, a destroy hang on DependencyViolation and a node group that fails to join, and a one-page 'EKS landing zone review' written for a customer platform team stating endpoint mode, IP budget, identity model, TLS termination point, monthly cost and upgrade policy in the shape you would attach to a kickoff."
   },
-  "17": {
-   "i": 17,
+  "18": {
+   "i": 18,
    "topic": "GCP and the multi-cloud Rosetta stone",
    "track": "C. Cloud and IaC",
    "month": 3,
@@ -3934,8 +3934,8 @@
    ],
    "proofOfWork": "A public repository, `dokeo-rosetta`, that a reviewer can run cold against three empty accounts. `make gcp` applies Terraform (project services, Artifact Registry, runtime SA, Secret Manager, Cloud SQL, `google_cloud_run_v2_service` with invoker IAM, all additive `_member` bindings) and ends with an authenticated `curl` against `/health` and a canary traffic split demonstrated with `gcloud run services update-traffic`; `make aws` deploys the same image to ECS Fargate behind an ALB using the topic 13 to 16 modules; `make azure` runs `az containerapp up` with a user-assigned managed identity and Key Vault secret. A single GitHub Actions workflow deploys to all three through OIDC (WIF, `configure-aws-credentials`, `azure/login`) with repo-and-branch-pinned trust conditions and SHA-pinned actions. The README holds the one-page service map with analogy-strength and gotcha columns, a side-by-side 'same failure, three clouds' table (wrong port, missing secret permission, public ingress blocked by policy) showing the exact error text in each cloud and the fix, and a twenty-question GCP landing-zone questionnaire (org policies in force, Shared VPC host project, allowed regions, SA key policy, Domain Restricted Sharing, egress path to Cloud SQL, logging sinks, quota ceilings) written to be sent to a customer platform team before the kickoff call."
   },
-  "18": {
-   "i": 18,
+  "19": {
+   "i": 19,
    "topic": "CI/CD and supply chain: build, test, scan, sign, deploy",
    "track": "C. Cloud and IaC",
    "month": 3,
@@ -4152,8 +4152,8 @@
    ],
    "proofOfWork": "A recorded red-to-green walkthrough plus a written chain-of-custody sheet. Open three pull requests against Dokeo: one that breaks a test, one that pins a dependency or base image with a known HIGH CVE, and one clean change. Show the first two stopped at the test and scan jobs respectively with the merge button disabled, and the third flowing through push, signing, GitOps commit and `argocd app wait` to Healthy. Then produce a one-page document for that third change listing commit SHA, run URL, image digest, `cosign verify` output with the certificate identity, `gh attestation verify` output, the GitOps commit SHA, the Argo CD revision, and the `imageID` from the running pod, with a short paragraph on what would need to be compromised to break the chain. Finish by extracting the pipeline into a reusable workflow and onboarding DefenderMate with a caller of under 25 lines, showing both repositories' runs side by side."
   },
-  "19": {
-   "i": 19,
+  "20": {
+   "i": 20,
    "topic": "Cloud cost and FinOps",
    "track": "C. Cloud and IaC",
    "month": 3,
@@ -4325,8 +4325,8 @@
    ],
    "proofOfWork": "A public repository `defendermate-cost-model` containing the reproducible model behind the CFO sheet: a `model.csv` (or a short Python script with the same rows) listing every line item with its unit, unit price, fixed-or-per-tenant classification and step thresholds, which prints total cost, cost per tenant and gross margin at 1, 5, 20 and 100 tenants; an `infracost-usage.yml` plus a GitHub Actions workflow that posts `infracost diff` on every Terraform PR in the plan's infra repo, with one merged PR showing a real cost comment; Terraform for the guardrails (a `tenant`/`env`/`service` `default_tags` block, an AWS Budget with a stop-instances action on the non-prod account, and a Cost Anomaly Detection monitor per tag delivering to an SNS topic); a `reconcile.sh` that pulls thirty days of `aws ce get-cost-and-usage` by USAGE_TYPE and by `tenant` tag and diffs it against the model with a variance column; and a one-page `VARIANCE.md` written after the first full billing month explaining every line that missed by more than 10 percent and what changed in the model as a result. A reviewer should be able to change the tenant count or one unit price in a single cell and watch the three recommended levers re-rank."
   },
-  "20": {
-   "i": 20,
+  "21": {
+   "i": 21,
    "topic": "SRE fundamentals: SLIs, SLOs, error budgets, toil, on-call",
    "track": "D. Reliability and Observability",
    "month": 3,
@@ -4535,8 +4535,8 @@
    ],
    "proofOfWork": "A public repository, `defendermate-slo`, that a reviewer can run cold with `make up && make burn`. It contains a Sloth spec (`slo/defendermate.yaml`) declaring four SLOs (API availability 99.9, dashboard latency 99.5 under 500 ms, webhook acceptance 99.95, classification freshness 99 within 300 s), the generated recording and alerting rules committed alongside it, and a `promtool test rules` suite that ramps synthetic error series and asserts the page alert fires at 14.4x and stays silent at 1x. A Docker Compose file brings up Prometheus, Alertmanager, Grafana and a small traffic generator with an `--error-rate` flag; `make burn` injects 1.5% 5xx for ten minutes and captures screenshots of the remaining-budget stat dropping, the burn-rate panel crossing the 14.4 line, and the page arriving in Alertmanager, then shows the alert clearing after injection stops. The repo also holds the signed SLO document and error budget policy as Markdown, a runbook per paging alert linked via `runbook_url`, and a `report.py` that queries `/api/v1/query` to produce a calendar-month attainment report alongside the rolling-window dashboard, with a README paragraph explaining why the two numbers legitimately differ."
   },
-  "21": {
-   "i": 21,
+  "22": {
+   "i": 22,
    "topic": "Observability: OpenTelemetry, Prometheus, Grafana, logs, traces, metrics",
    "track": "D. Reliability and Observability",
    "month": 3,
@@ -4763,8 +4763,8 @@
    ],
    "proofOfWork": "A public repository named defendermate-observability containing a docker-compose stack (otel-collector-contrib, Tempo, Prometheus with exemplar storage enabled, Loki, Alertmanager, Grafana with provisioned datasources and a RED dashboard) and a 'make demo' target that replays 200 synthetic HubSpot webhooks with 5 percent injected classifier exceptions and 5 percent HubSpot 429 responses, then prints the trace_id of one failed request. The README walks a reviewer in six clicks from the latency panel's exemplar dot to the trace to the log line holding the 429 body, with a screen recording of the same path. A 'make verify' target asserts, via the Collector's :8888 metrics and Tempo's API, that refused and send_failed counters are zero, that every worker CONSUMER span has a parent in the API service, that no span attribute matches an email or phone regex, and that 'promtool test rules' passes for the two burn-rate alerts. A one-page DECISIONS.md records why each span attribute and each metric label was chosen, with the series-count arithmetic for every label, so a customer's SRE can review the cardinality budget before the pilot goes live."
   },
-  "22": {
-   "i": 22,
+  "23": {
+   "i": 23,
    "topic": "Load testing and chaos",
    "track": "D. Reliability and Observability",
    "month": 3,
@@ -4981,8 +4981,8 @@
    ],
    "proofOfWork": "A public repository `kaupex-loadchaos` containing: the k6 scripts (smoke, average-load, ramping-arrival-rate breakpoint, and a mixed two-scenario run) with thresholds derived from the Kaupex SLOs and a `handleSummary` that emits a markdown table; Chaos Mesh manifests for PodChaos, NetworkChaos to Postgres, NetworkChaos to the Temporal frontend, and StressChaos, plus a Makefile that installs Chaos Mesh on k3s with the correct containerd socket, runs each experiment while k6 is live, and tears everything down; and a `REPORT.md` with the breakpoint number before and after the single fix, Grafana panels over identical time ranges, the observed timeout chain to Postgres, and a Temporal recovery timeline measured with `temporal workflow describe` for a worker killed mid-activity, showing detection time falling from the original Start-To-Close timeout to under 30 s after adding a heartbeat timeout and an idempotency key. A reviewer should be able to clone it, point it at any FastAPI plus Temporal deployment through `BASE_URL` and a namespace, and reproduce all three findings in under an hour."
   },
-  "23": {
-   "i": 23,
+  "24": {
+   "i": 24,
    "topic": "Incident response and postmortems",
    "track": "D. Reliability and Observability",
    "month": 3,
@@ -5181,8 +5181,8 @@
    ],
    "proofOfWork": "A public `incident-kit` directory in the Dokeo repository that a hiring manager can read in ten minutes and a friend can use to run a drill in thirty. It contains: (1) a one-page incident playbook with the SEV ladder, role cards, the IC decision-loop script, the status-update templates and the Kubernetes / Postgres / Temporal mitigation menu with exact commands; (2) three Wheel of Misfortune scenario scripts derived from the topic 22 chaos experiments, each with the game master's hidden timeline, the information-release triggers and the scoring rubric; (3) a recorded 30-minute drill (screen and audio) in which you are IC and a friend is game master, with the exported incident channel timeline and the Grafana dashboard screenshot showing detection, mitigation and recovery annotations; (4) the resulting postmortem written to the Google template, redlined by a second reader for blame language and counterfactuals, with every action item linked to an issue in the repo and a `postmortem-review.md` recording what the reviewer challenged; and (5) the Alertmanager or Grafana alerting config diff that came out of the postmortem, showing the symptom-based rule, the `runbook_url` annotation, and the inhibition rule, plus a `promtool test rules` or equivalent unit test proving the new alert would have fired on the recorded incident data."
   },
-  "24": {
-   "i": 24,
+  "25": {
+   "i": 25,
    "topic": "High availability and disaster recovery",
    "track": "D. Reliability and Observability",
    "month": 3,
@@ -5380,8 +5380,8 @@
    ],
    "proofOfWork": "A public repository named kaupex-dr that turns the plan's DR document into reproducible evidence. It holds a pgbackrest.conf targeting an S3-compatible bucket in a separate account whose IAM policy allows PutObject and GetObject but denies DeleteObject, with versioning and a lifecycle rule, and a policy_test.sh showing the denied delete. A drill.sh seeds a Kaupex clone with pgbench, inserts a timestamped marker row, runs a destructive migration, then restores to a scratch cluster with pgbackrest restore --type=time --target-action=pause, checks the marker, promotes, and appends every phase timestamp to DRILL_LOG.md, which contains at least three runs with RTO and RPO and a sentence on what dominated each. A standby/ directory has a docker-compose with a primary and a synchronous standby plus kill_primary.py, which runs a write loop, kills the primary, promotes, and reports lost commits under remote_apply and under asynchronous replication. A k8s/ directory has a StatefulSet with topologySpreadConstraints and a percentage PDB, and zone_loss.sh cordons and drains one zone on a kind or EKS cluster and records how many pods kept serving versus went Pending. DR_PLAN.md contains the tier table with objective versus measured, declaration criteria, the literal runbook, the DR-region prerequisites checklist, failback steps and an explicit list of untested scenarios; a ten-minute recorded walkthrough presents it to an imagined customer CTO as a cost-versus-RTO menu."
   },
-  "25": {
-   "i": 25,
+  "27": {
+   "i": 27,
    "topic": "Production Python architecture: domain models, repositories, DI, packaging",
    "track": "E. Backend and Data",
    "month": 3,
@@ -5607,8 +5607,8 @@
    ],
    "proofOfWork": "A recorded 'second-engineer drill' on the restructured Kaupex Task Compiler. Before recording, tag the repo and check in a CI pipeline that runs `lint-imports`, `mypy`, `ruff check`, `ruff format --check`, `uv lock --check`, the unit tier with a two-second wall-clock budget asserted via `--durations=0` in the log, and the integration tier against a Postgres service container. Then hand the repo to a peer who has never seen it (or, failing that, to yourself after a week away with the diff hidden) and record them adding a new compiler step, for example 'reject any step whose prompt exceeds the tenant's token budget', using only `CONTRIBUTING.md`: they must touch the domain rule, a service function, the fake, a unit test and an integration test, and CI must go green. Alongside the recording, publish the diffstat of a second PR that swaps the LLM adapter from Anthropic direct to LiteLLM, showing that only `bootstrap.py`, `config.py` and one new file under `adapters/` changed and that the test suite ran unchanged, plus the five ADRs that explain why the architecture is shaped the way it is. The timing of the drill, the diffstat and the ADRs together are the evidence that a stranger can extend the service in a day and that you can say why."
   },
-  "26": {
-   "i": 26,
+  "28": {
+   "i": 28,
    "topic": "FastAPI in production: DI, settings, lifespan, background tasks, workers, deployment",
    "track": "E. Backend and Data",
    "month": 4,
@@ -5834,8 +5834,8 @@
    ],
    "proofOfWork": "A public repository, `kaupex-api-prod`, that a reviewer can run cold with `make up && make load && make chaos`. `make up` starts the FastAPI service, Postgres and an LLM stub under Compose and includes a recorded three-second clip of the service exiting non-zero with a `ValidationError` when `KAUPEX_DATABASE_URL` is removed. `make load` runs the k6 matrix (workers 1/2/4 x `--limit-concurrency` 64/256/unset) against the IO-bound and CPU-bound endpoints on a 2 vCPU host and writes `LOAD_REPORT.md` with p50/p95/p99, RPS, 503 rate and RSS per worker, ending in a one-paragraph decision that is reflected verbatim in the Dockerfile `CMD`. `make chaos` starts a 20 s in-flight request, sends SIGTERM, and a pytest asserts that the request returned 200, `/readyz` flipped to 503 before accepting stopped, lifespan teardown logged `engine disposed`, and total shutdown fit inside a 30 s budget; it then rebuilds with a shell-form `CMD` to demonstrate the ten-second hang and SIGKILL. Alongside sits a `k8s/` folder with a Deployment carrying all three probes, `preStop`, `terminationGracePeriodSeconds`, requests and limits, plus a one-page `RUNBOOK.md` a customer SRE could follow to size workers and pools for their node type and Postgres `max_connections`."
   },
-  "27": {
-   "i": 27,
+  "29": {
+   "i": 29,
    "topic": "Auth: OAuth2, OIDC, JWT, RBAC, multi-tenant claims",
    "track": "E. Backend and Data",
    "month": 4,
@@ -6052,8 +6052,8 @@
    ],
    "proofOfWork": "A public `auth-kit` directory in the DefenderMate repository that a customer's security reviewer could read in fifteen minutes and a new engineer could run in five. It contains: (1) a `docker-compose.yml` bringing up Keycloak, Postgres, the API and the BFF with a committed `realm-export.json` that reproduces two tenants (acme, globex), three roles, the Audience mapper and the `tenant_id` mapper, imported automatically with `--import-realm`; (2) a `SECURITY-REVIEW.md` written for a non-vendor reviewer with a sequence diagram of authorization code + PKCE + BFF, token lifetimes, cookie attributes, logout behaviour, key-rotation handling and an explicit list of what is and is not revocable before `exp`, where every claim in the document links to the test that proves it; (3) an authorization-matrix suite (`pytest -m authz`) that mints real tokens from Keycloak for 2 tenants x 3 roles and asserts the status code of every route, plus negative tests for `alg=none`, HS256 key confusion, wrong `aud`, wrong `iss`, expired, future `nbf`, tampered payload, an ID token used as an access token, `X-Tenant-Id` spoofing and URL tenant swaps, and an RLS test that drops the application filter and proves zero foreign rows; (4) a recorded key-rotation drill in which realm keys are rotated while `k6` traffic runs, with the Grafana panel showing a flat 401 line and the verifier's JWKS refetch visible in logs; and (5) a five-minute recording in which you explain PKCE and the BFF cookie model to a non-engineer using only the diagram, followed by them repeating it back."
   },
-  "28": {
-   "i": 28,
+  "30": {
+   "i": 30,
    "topic": "TypeScript and Node for FDEs",
    "track": "E. Backend and Data",
    "month": 4,
@@ -6279,8 +6279,8 @@
    ],
    "proofOfWork": "A public repository `defendermate-ts-client` containing: (1) `src/api/schema.d.ts` generated from DefenderMate's `/openapi.json` with a `npm run gen && git diff --exit-code` CI step that fails on drift; (2) a `DefenderMateClient` class wrapping the MCP TypeScript SDK with a generic `callTyped<N>()` whose argument and return types derive from per-tool Zod schemas, plus a test asserting that each `z.toJSONSchema` output deep-equals the server's `tools/list` `inputSchema`; (3) a Vitest suite at or above 85 percent coverage that mocks the transport, uses fake timers to verify exponential backoff on `-32000` errors and `AbortSignal.timeout` paths, and includes `expectTypeOf` type tests run under `vitest --typecheck`; (4) `docs/EVENT_LOOP.md` with a captured `--cpu-prof` profile showing a deliberately introduced `JSON.parse` stall, its fix via a worker thread, and before/after `monitorEventLoopDelay` p99 numbers; and (5) a Dockerfile plus a SIGTERM drain test proving zero failed requests during a rolling restart under k6, with `keepAliveTimeout`, drain deadline and `terminationGracePeriodSeconds` documented in one table. The README explains every design choice in terms a Python-first team can map to Pydantic, mypy, pip lockfiles and pytest."
   },
-  "29": {
-   "i": 29,
+  "31": {
+   "i": 31,
    "topic": "PostgreSQL at depth: planner, indexes, EXPLAIN, locks, transactions, window functions",
    "track": "E. Backend and Data",
    "month": 4,
@@ -6497,8 +6497,8 @@
    ],
    "proofOfWork": "A public repository, pg-autopsy, that anyone can clone and run with docker compose up: a postgres:16 container preloaded with pg_stat_statements and auto_explain, a seed.sql that builds a realistic multi-tenant schema (tenants, users, documents, events, jobs) with 10M rows and Zipf-skewed tenant sizes, and a queries/ directory holding ten slow queries drawn from Dokeo patterns, each with its before.explain and after.explain (ANALYZE, BUFFERS) captured verbatim, the DDL that changed the plan, and a paragraph naming the exact node and mechanism that was wrong. A locks/ lab contains two-session scripts that reproduce a deadlock, an ALTER TABLE lock-queue freeze and an INVALID index, with the pg_locks and pg_blocking_pids() queries that diagnose each. A migrations/ lab runs a NOT NULL column, a foreign key and a unique index onto the 10M-row table while pgbench -c 16 -T 120 writes to it, using a lock_timeout retry wrapper, and commits the pgbench summary showing zero failed transactions. A 12-minute recorded screencast shows you reading three of the plans cold and narrating the fix, and a one-page INDEX-DECISION-CARD.md distils the column-order rule, when to go partial, expression, INCLUDE, GIN or BRIN, and the lock mode of every DDL statement you are likely to run on a customer's database."
   },
-  "30": {
-   "i": 30,
+  "32": {
+   "i": 32,
    "topic": "Data modelling for multi-tenant AI systems: RLS, PII, encryption, audit trails",
    "track": "E. Backend and Data",
    "month": 4,
@@ -6705,8 +6705,8 @@
    ],
    "proofOfWork": "A public repository containing DefenderMate's multi-tenant schema as versioned migrations (tenants, users, conversations, messages, llm_calls, tool_calls, embeddings, audit_log) with RLS enabled and forced on every table, composite tenant foreign keys, pgcrypto-encrypted PII columns with HMAC blind indexes, an envelope-encryption module with per-tenant data keys (a local KEK stub for CI, KMS in production), and a generic audit trigger with hash chaining and an append-only guard. The CI workflow spins up Postgres 16 behind PgBouncer in transaction mode, runs the catalog-generated RLS test matrix across every table, runs the catalog invariant queries, demonstrates the pooled-connection tenant leak failing before the `set_config` fix and passing after, and crypto-shreds one tenant while asserting the others still decrypt. Alongside the code sits a six-page security review document with a data-flow diagram, threat-to-control table, framework mapping, evidence links to the green CI run and a residual-risk section, written so a client CISO could sign it without a call."
   },
-  "31": {
-   "i": 31,
+  "33": {
+   "i": 33,
    "topic": "Redis: caching, rate limiting, idempotency, streams",
    "track": "E. Backend and Data",
    "month": 4,
@@ -6905,8 +6905,8 @@
    ],
    "proofOfWork": "A public repository `redis-edge-kit` containing a FastAPI service with three middleware components (token-bucket limiter, idempotency layer, webhook receiver with Streams hand-off) and a `docker compose` file that runs the service, Redis 7 with a committed `redis.conf`, Postgres, redis_exporter and Prometheus. The README shows, with pasted terminal output, five experiments you ran: (1) 20 concurrent workers against one bucket with the admitted count matching capacity plus refill; (2) `kill -9` of the API between idempotency claim and completion followed by a retry, with Postgres showing one row; (3) the same Stripe event replayed 50 times through the receiver producing one Stream entry and one DB row; (4) `docker kill` of one consumer mid-batch with XAUTOCLAIM recovery visible in `XPENDING` before and after; (5) `docker pause redis` during traffic showing the documented fail-closed 503 on the public route and fail-open on the internal route, then recovery. A one-page `DURABILITY.md` table lists each of the four stores against crash, RDB restart, AOF restart and async failover, with what is lost and which Postgres constraint catches it. This is what you walk a reviewer through in a take-home defence."
   },
-  "32": {
-   "i": 32,
+  "34": {
+   "i": 34,
    "topic": "Real-time transports: SSE, WebSockets, streaming at scale",
    "track": "E. Backend and Data",
    "month": 4,
@@ -7114,8 +7114,8 @@
    ],
    "proofOfWork": "A short screen recording plus a written runbook, checked into the DefenderMate repo, showing a chaos-style resume drill: start a long Claude generation streaming over SSE through a local Nginx with default settings, observe the buffering, fix it with the documented header and config; then `kill -TERM` the uvicorn worker mid-stream and show the browser reconnecting onto a different worker and continuing from the exact missed token via the Redis Stream replay, with `resume_total{outcome=replayed}` incrementing in the Prometheus endpoint. The runbook lists the four proxy/LB timeouts in the path, the heartbeat interval chosen to stay under each, the close-code interpretation table for WebSocket, and the k6 knee-finding numbers (p95 TTFT and tokens/sec at 50/200/500 concurrent streams), so a customer platform team could reproduce the drill in their own environment."
   },
-  "33": {
-   "i": 33,
+  "35": {
+   "i": 35,
    "topic": "Kafka and event-driven design",
    "track": "E. Backend and Data",
    "month": 4,
@@ -7332,8 +7332,8 @@
    ],
    "proofOfWork": "A public repository with a `make prove` target that runs six named, self-asserting chaos scenarios against a three-broker Redpanda cluster, Postgres 16 with `wal_level=logical`, Debezium Connect and the rebuilt DefenderMate ingestion consumers: (1) broker kill under `acks=1` versus `acks=all` with idempotence, printing lost and reordered record counts per key; (2) consumer SIGKILL between database commit and offset commit, printing duplicate counts with and without the processed-events table; (3) a 90-second handler under default versus tuned poll settings, printing whether the member was evicted; (4) a poison-pill record, asserting it lands in the DLQ with source topic, partition, offset and exception headers while the group keeps moving; (5) outbox atomicity, killing the API between commit and any produce call and asserting the event still arrives exactly once downstream; (6) a breaking Avro change rejected by the schema registry with a 409 while an old consumer keeps reading new records. Each scenario ends with PASS or FAIL against a numeric assertion, the run writes a results table into the README, and a Grafana dashboard JSON in the repo shows per-partition lag, under-replicated partitions and end-to-end trace latency during the run. Alongside it sits a two-page 'consuming from the customer's Kafka' runbook covering credentials, ACL requests, schema registry access, offset reset procedure and the questions to ask before the first connection."
   },
-  "34": {
-   "i": 34,
+  "36": {
+   "i": 36,
    "topic": "Temporal at depth: signals, queries, versioning, sagas, worker tuning",
    "track": "E. Backend and Data",
    "month": 4,
@@ -7550,8 +7550,8 @@
    ],
    "proofOfWork": "A public repository plus a fifteen-minute recorded walkthrough titled 'Change Kaupex while it runs'. The repo holds the Kaupex compile-and-publish saga (forward activities with idempotency keys derived from `workflow_id` and `activity_id`, a heartbeat-resumable batch step, reverse-order compensation with shielded cleanup under cancellation), a `histories/` corpus of real histories covering every patch state, a cancellation and a signal burst, and a CI pipeline with three gates: pytest under `start_time_skipping()` asserting compensation order and idempotency, a replay job that replays the corpus plus the last seven days of live `CompileTask` executions through the candidate image, and a load stage that runs the topic 22 k6 script against a kind cluster and asserts `temporal_activity_schedule_to_start_latency` p95 under a threshold. The recording shows, on the live k3s deployment: ten compile workflows started; a patched worker image rolled out mid-flight with old and new runs finishing on their respective branches; a deliberately non-deterministic image rolled out, the resulting `WorkflowTaskFailed` events, and the heal on rollback; one execution recovered with `temporal workflow reset --type LastWorkflowTask`; a saga forced to fail at step three with its compensations visible in history; and one worker-tuning change chosen from the Grafana panels with the before/after p95. A one-page `VERSIONING_POLICY.md` records, per workflow type, whether Kaupex uses patching or pinned Worker Versioning and the exact conditions under which a patch may be deprecated and then deleted."
   },
-  "35": {
-   "i": 35,
+  "39": {
+   "i": 39,
    "topic": "Testing and contracts: pytest, property tests, OpenAPI contract tests",
    "track": "E. Backend and Data",
    "month": 5,
@@ -7777,8 +7777,8 @@
    ],
    "proofOfWork": "A pull request against the Kaupex Task Compiler repository that intentionally introduces one breaking API change (renaming `status` to `state` in the task response) and one behavioural regression (allowing `cancel` from `completed`), with the CI run attached showing exactly which gates caught which defect: the committed `openapi.json` snapshot test and `oasdiff breaking --fail-on ERR` fail on the rename, the Hypothesis `RuleBasedStateMachine` prints the minimal counterexample for the illegal transition, and the Schemathesis stateful phase reports `use_after_free` or a schema conformance failure with the reproducing curl command. The PR description contains a short table mapping each defect to the job that caught it, the time to first red check, and a one-paragraph note on why branch coverage stayed above the `fail_under` threshold for both defects, demonstrating in one artefact why contracts and properties are gates and coverage is only a floor."
   },
-  "36": {
-   "i": 36,
+  "40": {
+   "i": 40,
    "topic": "Warehouse layer: dbt, DuckDB, dimensional modelling",
    "track": "E. Backend and Data",
    "month": 5,
@@ -7995,8 +7995,8 @@
    ],
    "proofOfWork": "A reproducible customer-handover package for the DefenderMate warehouse, checked into the repo alongside the dbt project: a single make nightly target that, from a fresh clone plus a Postgres DSN, extracts to Parquet via the DuckDB postgres extension, runs dbt source freshness and dbt build --select tag:nightly, publishes the marts, and appends the parsed run_results.json to an ops.dbt_runs table; a recorded drift drill in which you change a tenant's plan tier and insert a back-dated llm_call in Postgres, rerun the pipeline, and show dim_tenant with two versions, the corrected fct_tenant_daily row, the singular reconciliation test passing, and dbt docs lineage terminating at the weekly-email exposure; and a one-page ops runbook stating the mart SLA, the DuckDB memory_limit/threads/temp_directory settings for the customer's box, the single-writer constraint and how the email service avoids it, and the exact rerun command (dbt build --select result:error+ --state ...) after a partial failure. Finish with a rendered weekly email for one sample tenant generated from the mart, showing week-over-week token, cost and p95 deltas."
   },
-  "37": {
-   "i": 37,
+  "41": {
+   "i": 41,
    "topic": "React and Next.js for FDE demos and internal tools",
    "track": "E. Backend and Data",
    "month": 5,
@@ -8222,8 +8222,8 @@
    ],
    "proofOfWork": "A recorded ten-minute 'customer demo' plus a public repo that a platform team could clone and run. The repo contains the Next 16 app over DefenderMate built as a standalone, non-root Docker image behind an Nginx container with default settings; a one-page architecture diagram in the README marking the server/client boundary, the session-cookie auth flow through the Data Access Layer, and the streaming path from Claude to the browser; a `docs/streaming-drill.md` with before/after HAR captures showing the buffered stream and the fix (headers and `compress: false`); a `docs/runtime-config.md` proving the same image digest runs against two different FastAPI base URLs and issuers without rebuilding; a Playwright suite (login via `storageState`, table pagination via URL, stream with Stop asserting the FastAPI log line for the aborted generation, form validation with `javaScriptEnabled: false`) running in GitHub Actions against the built container; and a `docs/digest-to-trace.md` walkthrough with screenshots going from an `error.digest` in the UI to the `onRequestError` log entry to the trace in the collector that includes the FastAPI span, so a customer support engineer could repeat the lookup unaided."
   },
-  "38": {
-   "i": 38,
+  "42": {
+   "i": 42,
    "topic": "PySpark (optional: Databricks- or Palantir-style roles only)",
    "track": "E. Backend and Data",
    "month": 5,
@@ -8422,8 +8422,8 @@
    ],
    "proofOfWork": "A public repository `defendermate-spark-usage` containing: (1) an exporter that dumps `llm_calls`, `messages` and `tenants` from DefenderMate's Postgres to Parquet partitioned by `dt`; (2) `jobs/usage_daily.py` written as pure-function transforms with an argparse `main()` taking `--input`, `--output` and `--run-date`, writing with dynamic partition overwrite so any day can be rerun; (3) `sql/usage_daily.sql`, the reference query run in Postgres, and a pytest that asserts the PySpark output equals it with `assertDataFrameEqual`; (4) `NOTES.md` holding the annotated `explain(mode=\"formatted\")` output with every Exchange and the join strategy labelled, a before-and-after table of stage summary metrics (median versus max task duration, shuffle read, spill) from salting a synthetically skewed tenant given 40 percent of rows, and a memory table listing the four OOM scenarios you actually triggered (`collect()`, oversized broadcast, `applyInPandas` on the skewed tenant, shuffle spill) with the exact error text and which process died; (5) a Delta variant of the writer that absorbs a replayed batch of late events via MERGE, with the `DESCRIBE HISTORY` output showing the commit and a `versionAsOf` read proving the previous state is recoverable. This is the artefact you open when a Databricks or Palantir interviewer says 'show me Spark you have written'."
   },
-  "39": {
-   "i": 39,
+  "43": {
+   "i": 43,
    "topic": "Designing Data-Intensive Applications and Kleppmann's lectures",
    "track": "F. Distributed Systems and System Design",
    "month": 5,
@@ -8640,8 +8640,8 @@
    ],
    "proofOfWork": "A recorded 'consistency anomaly lab' checked into the portfolio repo next to the Glomers solutions: a docker-compose with a Postgres primary and one streaming replica plus a set of scripted demonstrations, each captured as a terminal recording with the exact commands and output. Demo one reproduces a stale read-after-write on the replica and then fixes it with the pg_current_wal_lsn / pg_last_wal_replay_lsn wait and separately with synchronous_commit = remote_apply, timing the latency cost of each. Demo two shows write skew on a slot-booking table at REPEATABLE READ in two psql sessions, then the SERIALIZABLE retry loop catching SQLSTATE 40001, and finally the unique-index alternative. Demo three kills the primary with synchronous_commit = off versus on, promotes the replica with pg_promote(), and counts the acknowledged rows that were lost in each case. Alongside it sits a Maelstrom results table for challenges 3d, 3e and 4 showing msgs-per-op and the stable-latency quantiles with and without --nemesis partition, and the recorded 20-minute architect explanation with its one-page decision table (use case, required guarantee, cost). A reviewer should be able to clone, run make lab, and reproduce every anomaly and every fix in under fifteen minutes."
   },
-  "40": {
-   "i": 40,
+  "44": {
+   "i": 44,
    "topic": "MIT 6.824 selected lectures: Raft, linearizability, transactions",
    "track": "F. Distributed Systems and System Design",
    "month": 5,
@@ -8867,8 +8867,8 @@
    ],
    "proofOfWork": "A public 'stale read lab' repository: a docker-compose file that stands up a 3-member etcd 3.5 cluster plus Prometheus, a small Go or Python driver that runs N concurrent clients issuing put/get against a handful of keys while recording invocation and response timestamps and values, and a fault script that pauses the current leader (docker pause, simulating a stop-the-world) and partitions one member (docker network disconnect) during the run. The driver is run twice, once with reads at --consistency=s and once at --consistency=l, and both histories are fed to Porcupine with a register model; the repository commits the two checker outputs (the serializable run fails with the minimal violating sub-history highlighted, the linearizable run passes), Grafana screenshots of etcd_server_leader_changes_seen_total and etcd_disk_wal_fsync_duration_seconds across the fault window, and a one-page README that names the exact Raft mechanism (ReadIndex) responsible for the difference, what the same misconfiguration looks like in a customer's Kubernetes or ZooKeeper setup, and the flag or code change an operator should make. As a bonus, include annotated RaftScope screenshots reproducing the Figure 8 scenario step by step."
   },
-  "41": {
-   "i": 41,
+  "45": {
+   "i": 45,
    "topic": "MIT 6.824 Raft lab (optional deep dive)",
    "track": "F. Distributed Systems and System Design",
    "month": 5,
@@ -9094,8 +9094,8 @@
    ],
    "proofOfWork": "Beyond the passing test suite, build a fault-injection harness and a written failure atlas on top of your own implementation. Add a debug build flag that lets you deliberately break one invariant at a time — persist after reply instead of before, drop the current-term check in the commit rule, truncate the log unconditionally on AppendEntries, reset the election timer on stale-term RPCs, remove the election restriction from RequestVote — then, for each mutation, run the suite with `-count 20` and record which tests fail, at what rate, and what the first divergence looks like in the tester timeline. Write it up as a short document (kept private since it contains lab code, or published with the solution stripped to diagrams and log excerpts) where each entry has the broken invariant, the safety property it violates from the paper, the observed symptom, the failure rate across twenty runs, and the equivalent production symptom in etcd or Consul — leader flapping, apiserver timeouts, a stale read, a double-applied command. That document is both the artifact that proves you understand Raft as a set of enforced invariants rather than a pile of RPCs, and the thing you can hand an interviewer or a customer's platform team when they ask why a consensus tuning change is risky."
   },
-  "42": {
-   "i": 42,
+  "46": {
+   "i": 46,
    "topic": "System design playbook: load balancing, caching, sharding, queues, rate limits, IDs, search",
    "track": "F. Distributed Systems and System Design",
    "month": 5,
@@ -9322,8 +9322,8 @@
    ],
    "proofOfWork": "A public 'design dossier' repository that goes beyond the six written designs: (1) a numbers workbook for DefenderMate at 500 tenants in which every capacity figure is derived from a named assumption cell, with a sensitivity column showing what changes at 5,000 tenants and which component saturates first at each scale; (2) an executable slice in docker-compose: Nginx with `least_conn`, upstream `keepalive` and a documented drain sequence, Redis running a Lua sliding-window per-tenant limiter that returns 429 with `Retry-After` and `RateLimit` headers, Postgres with a range-partitioned `llm_calls` table, a streaming replica, and a lag probe reading `pg_stat_replication`, plus an outbox table drained into Redpanda; (3) three k6 scripts that reproduce three failure stories (cache-flush stampede, replica-lag read-your-writes, layered retry storm) with before/after Grafana screenshots showing the mitigation working; and (4) a recorded 45-minute self-run of the DefenderMate design against a timer, scored on a written rubric (requirements, numbers, diagram, two deep dives, failure story) with timestamps for each section. A reviewer can clone the repo, run `make demo`, and watch each failure story happen and then not happen."
   },
-  "43": {
-   "i": 43,
+  "47": {
+   "i": 47,
    "topic": "LLM-era system design: serving, caching, batching, rate limits, retries, latency budgets",
    "track": "F. Distributed Systems and System Design",
    "month": 5,
@@ -9531,8 +9531,8 @@
    ],
    "proofOfWork": "A public `llm-load-lab` repository that turns the two written designs into something a reviewer can run. It contains a docker-compose stack with the Kaupex API in front of a deliberately hostile fake provider: a small FastAPI service that emulates a model endpoint with configurable TTFT and per-token delay, a token-bucket RPM/TPM quota that returns real 429s with `retry-after` and `anthropic-ratelimit-*`-style headers, a 529 injection rate, and a mid-stream error mode. Against it run four k6 `ramping-arrival-rate` scenarios that each reproduce one failure and then its fix, with before/after Grafana panels committed as PNGs: (1) a layered-retry storm showing 27x amplification collapsing to ~1.1x once full jitter, a single retry layer and a 10% retry budget are enabled; (2) an unbounded queue showing every request completing after its client deadline, fixed by a bounded semaphore plus deadline-aware LIFO shedding; (3) a prompt-cache regression where a timestamp in the system block drops the hit ratio to zero and doubles cost per request, caught by a hit-ratio alert rule checked into the repo; (4) an HPA-on-CPU non-event replaced by a KEDA Prometheus scaler on in-flight requests. Alongside the code sit the two design documents themselves, each with an assumptions table, a per-hop budget, a cost model with a prompt-caching sensitivity row, a degradation ladder with kill switches, and a dated failure timeline. The README opens with a one-paragraph summary written for a customer architect, and `make demo` reproduces every chart from scratch in under ten minutes."
   },
-  "44": {
-   "i": 44,
+  "48": {
+   "i": 48,
    "topic": "System design mocks (six, timed, recorded)",
    "track": "F. Distributed Systems and System Design",
    "month": 5,
@@ -9758,8 +9758,8 @@
    ],
    "proofOfWork": "A public `system-design-mocks` repository (or a section of the FDE dashboard) that a hiring manager can read in ten minutes and a peer can reuse in one. It contains: (1) `rubric.md` with the 1-5 definitions per dimension written as observable behaviours, plus the score table for all six mocks showing self-score, peer score and the gap per dimension, with the three consecutive 4/5 sessions highlighted; (2) six `.excalidraw` files and PNG exports, each with the requirements and estimation boxes filled in on the canvas, and a `scorecard-NN.md` per mock listing phase-transition timestamps against budget, the curveball cards drawn and the three fixes carried into the next session; (3) `interviewer-cards.md`, the deck of twelve curveballs with the 'hard part' for each of the six archetypes, usable by anyone running a mock for you or for themselves; (4) `pattern-ledger.md` with the 'reached for' and 'should have reached for' columns across all six mocks and the drills that resulted; and (5) a two-page `design-doc-tenant-platform.md` written from the mock-six diagram in the form a customer architect would review: requirements as SLOs, container diagram, the two deep dives, the managed-to-self-hosted swap table for the VPC tenant, a phased delivery plan with what ships in six weeks, and the failure modes you are least comfortable with and how each is detected."
   },
-  "45": {
-   "i": 45,
+  "49": {
+   "i": 49,
    "topic": "LLM fundamentals: tokens, attention, pretraining, RLHF, scaling, limits",
    "track": "G. AI Engineering",
    "month": 6,
@@ -9985,8 +9985,8 @@
    ],
    "proofOfWork": "Build a small public repo, `llm-mechanics-lab`, that turns each claim in your client one-pager into a reproducible experiment with committed outputs. It should contain: (1) a tokenizer study that runs tiktoken and a SentencePiece/HF tokenizer over five content types (English prose, JSON, SQL, Japanese, base64) and emits a tokens-per-KB table plus a cost projection at current published prices; (2) a KV-cache and weight-memory calculator that takes n_layer, n_kv_heads, head_dim, precision, context length and concurrency and prints the GPU memory envelope, validated against one real open-weights config.json; (3) a determinism harness that fires the same request 50 times at temperature 0 against a hosted endpoint and reports the exact-match rate, the first divergent token position, and the distribution of top-token logprobs; (4) a hallucination taxonomy notebook that runs a closed-book vs grounded vs grounded-with-citations vs grounded-with-abstention comparison over 30 questions where you know the ground truth, reporting error rate and, critically, detected-error rate per condition; and (5) a `MODEL_CARD_REVIEW.md` applying your checklist to three real model cards with a written list of omissions. The README should state each finding as a one-line claim with a link to the script that produced it, so the client one-pager can cite your own measurements rather than vendor marketing."
   },
-  "46": {
-   "i": 46,
+  "50": {
+   "i": 50,
    "topic": "Prompt engineering as code: versioning, regression sets, structured outputs",
    "track": "G. AI Engineering",
    "month": 6,
@@ -10203,8 +10203,8 @@
    ],
    "proofOfWork": "A public repository (`defendermate-prompts`, or the `prompts/` package extracted from DefenderMate) that a stranger can clone and exercise in under five minutes with a single `make eval`, including a fake-provider mode that needs no API key so a reviewer can run it for free. It contains: `prompts/<id>/vN.md` files with YAML front-matter (dated model snapshot, sampling params, declared variables, token budget, output schema reference) and a per-prompt `CHANGELOG.md`; `schemas/` with Pydantic v2 models that generate the JSON Schemas used as tool `input_schema`, so parser and schema cannot drift; `evals/cases/*.jsonl` with at least 120 labelled cases tagged by tenant, document type and difficulty, each carrying a `source` field so the handful that originated in real bug reports are traceable, all scrubbed or synthesised; a grader module implementing the deterministic assertion ladder with per-tag precision and recall; `baseline.json` plus a `bin/eval` runner with response caching, bounded concurrency, a USD cost ceiling and an explicit `--accept-baseline` path; and a GitHub Actions workflow that runs the smoke suite on `pull_request` behind path filters and posts a sticky score-delta comment. The README shows one real pull request where the gate failed, the failure message naming the regressed case IDs, and the follow-up commit that fixed it, alongside a short `MIGRATION.md` recording an actual model-snapshot swap with the old-versus-new table for accuracy per tag, p95 latency, tokens and USD per 1,000 documents. The thing that convinces an interviewer is not the harness - it is the CHANGELOG showing eight prompt versions, each with a metric delta and the customer ticket that motivated it."
   },
-  "47": {
-   "i": 47,
+  "51": {
+   "i": 51,
    "topic": "Tool use, structured outputs and MCP servers",
    "track": "G. AI Engineering",
    "month": 6,
@@ -10422,8 +10422,8 @@
    ],
    "proofOfWork": "A written security and integration review of somebody else's MCP server - pick a non-trivial one from the modelcontextprotocol/servers repository or any public server your target companies would plausibly deploy - published as a repo or dashboard page, in the form a customer would receive from an FDE. It contains: (1) a one-page trust-boundary diagram with every arrow labelled by what crosses it, who authenticates it, and the concrete attack it enables if unprotected; (2) a tool-surface audit table listing every tool with its annotations, whether the inputSchema actually constrains (additionalProperties, enums, bounds) or merely documents, the token cost of the full tools/list payload, and a recommended cut list with reasoning; (3) reproducible findings driven by the Inspector CLI and a small pytest harness using the in-memory Client - each finding with the exact command, the raw JSON-RPC frames, and a pass/fail assertion, covering at minimum audience validation, Origin handling, error-class correctness (isError versus JSON-RPC error), result size, and behaviour on a malformed argument; (4) one deliberate injection test where a fixture puts instruction-shaped text in an upstream field and you show whether the result is delimited and labelled or passed through raw; (5) a protocol-era compatibility note stating which revisions the server serves and what breaks on the others; and (6) an upstream pull request or issue implementing or reporting the highest-severity finding, linked from the review. The review must be readable by a security engineer who has never used MCP, and it demonstrates the FDE skill the deliverable repo alone does not: evaluating and defending someone else's integration in front of a customer."
   },
-  "48": {
-   "i": 48,
+  "52": {
+   "i": 52,
    "topic": "Agents: workflows vs agents, planning, memory, multi-agent, human-in-the-loop",
    "track": "G. AI Engineering",
    "month": 6,
@@ -10648,8 +10648,8 @@
    ],
    "proofOfWork": "A small `workflow-vs-agent-bench` repository that settles the single most contested classification in the written map with numbers instead of opinion. Take one step - the DefenderMate inbound-webhook classify-and-route step is the right candidate - and implement it twice against the same tool interface and the same model: (a) as a deterministic workflow, a router call constrained to one of five categories by a strict tool schema followed by a hand-written code path per category; and (b) as an agent, identical tools, no fixed path, capped at twelve iterations, a sixty-second deadline and a fifty-thousand-token budget, with the same approval gate in front of the CRM write. Build a sixty-case labelled set from real webhook payloads where each expected outcome is an end state (category, exact CRM fields written, whether a human was paged), and include ten deliberately hostile cases: a genuinely ambiguous payload, one carrying an injection string in a free-text note, one where the CRM returns 429 then 500 then succeeds, one that is a duplicate delivery of an already-processed webhook id, and one whose payload is large enough to force compaction. Run both implementations ten times over the set and emit a single `results.md` table: end-state accuracy, p50 and p95 wall clock, mean and p95 tokens per case split into cache-read and cache-write, dollars per correct outcome, tool error rate by tool, and - for the agent only - the distribution of step counts and how many runs hit each cap. Attach the Langfuse traces for the ten worst agent runs with a one-line diagnosis on each, and a `DECISION.md` stating the threshold you would have needed to see to choose the agent, which one you would actually deploy to a customer next week, and what you would re-measure in ninety days. A reviewer should be able to clone it, run `make bench`, and reproduce the table."
   },
-  "49": {
-   "i": 49,
+  "53": {
+   "i": 53,
    "topic": "RAG at depth: chunking, embeddings, hybrid retrieval, reranking, contextual retrieval, caching",
    "track": "G. AI Engineering",
    "month": 6,
@@ -10875,8 +10875,8 @@
    ],
    "proofOfWork": "Publish a self-contained 'retrieval ablation report' repository over the Dokeo documentation corpus: a versioned JSONL eval set of 60-80 labelled questions (including unanswerable ones), a single `make eval` entrypoint that runs any named configuration against the held-out split, and a generated README containing the ablation table with one row per change - naive baseline, structure-aware chunking, alternate embedding model, hybrid RRF, cross-encoder reranking, contextual retrieval - and columns for recall@5, recall@20, nDCG@10, citation-verified answer accuracy, p95 end-to-end latency and cost per 1,000 queries, each cell reproducible from a stored run_id. Include the two plots that show you measured rather than assumed: true ANN recall versus p95 latency across hnsw.ef_search values, and recall@5 broken down by question type across configurations. Add a GitHub Actions workflow that re-runs the eval on every PR touching retrieval and fails the build on a >2-point recall@5 regression, plus a short RUNBOOK.md covering the re-embedding migration procedure, the delete/tombstone reindex policy, and the ingest-lag SLI - so the artifact reads as a production retrieval system with evidence, not a demo notebook."
   },
-  "50": {
-   "i": 50,
+  "54": {
+   "i": 54,
    "topic": "Fine-tuning vs prompting: LoRA, PEFT, when not to",
    "track": "G. AI Engineering",
    "month": 6,
@@ -11102,8 +11102,8 @@
    ],
    "proofOfWork": "Build a public repo, `lora-or-not`, that is a single reproducible bake-off rather than a notebook. It takes one real labelled dataset of roughly 1000 examples from a customer-like domain, splits it by entity (not by row) after MinHash deduplication, and runs four arms through one shared eval harness: (1) the prompted baseline with a pinned prompt hash and model snapshot, (2) few-shot plus strict output schema, (3) a QLoRA SFT of a 7B-class open-weights model, and (4) a cheap discriminative arm — embeddings plus logistic regression, or a fine-tuned encoder. `RESULTS.md` reports every arm on the same untouched test set with task metric, bootstrap 95% CI, McNemar p-value against the baseline, format-validity rate, p95 latency, and cost per 1000 calls, plus a break-even monthly volume where the tune's inference savings repay its build cost. Add three things that make it a senior artefact rather than a tutorial: an ablation sweeping `r` in {4, 8, 16, 64} and attention-only versus attention-plus-MLP `target_modules`, with the trainable-parameter count and eval delta for each; a catastrophic-forgetting holdout of 50 off-distribution tasks scored before and after tuning; and a `serving/` benchmark comparing `merge_and_unload()` against vLLM runtime adapters at 1, 4, and 16 concurrent distinct adapters. Finally commit a `FAILURES.md` where you deliberately reproduce two of this topic's classic bugs — a chat-template mismatch between training and serving, and a `target_modules` list that matches nothing — with the loss curves, `print_trainable_parameters()` output, and eval scores each one produces, so you can recognise them from the symptom alone in front of a customer. Ship a `MODEL_CARD.md` for the adapter with the pinned base revision, data provenance, eval numbers, and retraining trigger."
   },
-  "51": {
-   "i": 51,
+  "55": {
+   "i": 55,
    "topic": "Guardrails, prompt injection, red-teaming",
    "track": "G. AI Engineering",
    "month": 6,
@@ -11301,8 +11301,8 @@
    ],
    "proofOfWork": "Build and publish a small deliberately-vulnerable reference app plus its hardened twin: a FastAPI service with a retrieval index, two tools (a read-only `search_records` and a write-capable `send_email`), and a web UI that renders markdown. Version A is the naive build - single broad credential, prompt-only defence, unsanitised markdown rendering - and ships with a scripted demo that plants a payload in a document and shows the agent exfiltrating a secret through a rendered image URL and calling `send_email` unprompted. Version B is the same app with the controls layered in one commit at a time, each commit message naming the OWASP LLM ID it addresses: NFKC normalisation and an input classifier, delimiters plus spotlighting, per-tenant scoped credentials, tool narrowing with human confirmation on send, JSON Schema output validation, CSP and markdown sanitisation, and an egress domain allowlist. The repo contains the labelled injection corpus (including benign near-misses), a promptfoo config and a garak run script pointed at both versions, and a GitHub Actions workflow that publishes an attack-success-rate table for A and B side by side. The README is the artifact that matters: a one-page threat model, the before/after ASR and false-refusal numbers, and an honest paragraph on what remains exploitable - that is what you send a prospective employer or a customer's security team."
   },
-  "52": {
-   "i": 52,
+  "56": {
+   "i": 56,
    "topic": "Hermes Agent (Nous Research) in production",
    "track": "G. AI Engineering",
    "month": 6,
@@ -11528,8 +11528,8 @@
    ],
    "proofOfWork": "A public hermes-hubspot-ops repository plus a recorded twelve-minute teardown that proves you operated the system rather than demoed it. The repo contains a version-pinned docker-compose.yml and a Makefile whose bootstrap target takes a bare Hetzner instance to a responding gateway in one command (firewall rules, non-root user, state volume, container, hermes doctor); a redacted config.yaml checked in and diffable, showing the mcp_servers.hubspot block, the read-only tools.include allowlist, the approvals.deny globs and the terminal docker-backend resource limits; the HubSpot MCP server itself with typed enum-constrained schemas, cursor pagination, a confirm-gated write path and a dry-run mode that returns the diff it would apply; three cron jobs exported from jobs.json - an agentful morning digest, a no-agent poller with a wakeAgent gate, and a chained context_from roll-up; a scripts directory holding the poller; and a RUNBOOK.md naming the state directory, backup and restore commands, the upgrade sequence, the pairing and revoke commands, and two escalation paths. The teardown video shows four things on camera: hermes mcp test listing exactly the intended tools and not one more; a deliberately planted injection in a sandbox deal note being read by the agent and failing to reach the network; one cron job broken three ways so blocked_config, failed and delivery_failed are visibly distinguished in hermes cron doctor; and a before-and-after token-cost table for the poller once the wakeAgent gate lands. The 1,500-word write-up links the repo, opens with the threat model and the monthly bill, and closes with the three things you would not let a customer run unattended."
   },
-  "53": {
-   "i": 53,
+  "58": {
+   "i": 58,
    "topic": "Evals as infrastructure: eval sets, LLM-as-judge, human review, CI gates",
    "track": "H. AI in Production",
    "month": 7,
@@ -11755,8 +11755,8 @@
    ],
    "proofOfWork": "A public repository, `defendermate-evals`, that a stranger can clone and run end to end in five minutes with `make eval` against a recorded-response fixture mode requiring no API key, so a reviewer can reproduce every number in the README for free. It contains the frozen 200-case dataset as JSONL with the schema above (real cases scrubbed or synthesised, `source` distinguishing production, bug-report and adversarial origins), the versioned `LABELLING_GUIDE.md` with worked boundary examples, and an `agreement/` directory holding the double-labelled subset plus the script that computes Cohen's kappa and prints the adjudication log for every disagreement. It ships the failure taxonomy as `TAXONOMY.md` with counts from a real open-coding session over 50 traces and a disposition column mapping each category to a deterministic assertion, a judge, or a documented limitation; a `judges/` package with one binary judge per open-ended category, each pinned to a dated model snapshot and accompanied by its own validation set of human-labelled judge decisions and a reported TPR/TNR/kappa table plus the bias-corrected pass rate; and a `stats.py` implementing Wilson intervals, McNemar and the paired bootstrap, with a test that fails if any published number in the README lacks an interval. The GitHub Actions workflow runs the 30-case smoke tier on `pull_request` behind path filters and posts a sticky per-class delta comment, with the repository history showing at least one real PR where the gate failed on a single class's recall, the comment naming the flipped case ids, and the follow-up commit that fixed it. Finally, `REPORT.md` is the customer-facing one-pager - per-class table with support and intervals, confusion matrix, top three failure categories with examples, the human-agreement ceiling, the chosen operating point and coverage, and a 'what this does not measure' section - rendered from the results file by a script, so it can never drift from the run that produced it."
   },
-  "54": {
-   "i": 54,
+  "59": {
+   "i": 59,
    "topic": "LLM observability: traces, cost, latency, datasets",
    "track": "H. AI in Production",
    "month": 7,
@@ -11946,8 +11946,8 @@
    ],
    "proofOfWork": "Ship an 'LLM trace forensics kit' as a small repository plus a five-minute recorded walkthrough over Kaupex and DefenderMate. The repo contains a single instrumentation module both apps import (tracer setup, propagation, masking hook, sampling config, `as_type` conventions, prompt-version stamping) and a `tracectl` CLI with three commands: `tracectl explain <trace_id>` printing the span tree with per-span self-time, TTFT, tokens by usage type and USD cost; `tracectl cost --group-by tenant --since 30d` calling the Metrics API to produce the chargeback table; and `tracectl promote <trace_id>` turning a bad production trace into a dataset item with an expected output. Include a `load/` script that drives synthetic traffic with deliberate faults - a 429 storm, a streaming call that returns usage only in the final chunk, a request with an unpriced custom model name, and a prompt containing a synthetic national ID - and a `FINDINGS.md` recording, with screenshots, what each fault looked like in the trace before and after the fix, the measured p95 overhead of instrumentation on and off, and the storage growth per 1,000 traces. Finish with a one-page `SLO.md` defining availability, p95 TTFT, judge-score and cost-per-answer SLIs with thresholds, the alert wired to each, and the runbook step it triggers - so the artifact reads as an operable system a customer's platform team could adopt, not a screenshot of a demo dashboard."
   },
-  "55": {
-   "i": 55,
+  "60": {
+   "i": 60,
    "topic": "Model gateway, routing, fallbacks, canaries",
    "track": "H. AI in Production",
    "month": 7,
@@ -12146,8 +12146,8 @@
    ],
    "proofOfWork": "Ship a reusable `canary-kit` against the Kaupex stack: a LiteLLM proxy deployed on the cluster with a single `chat` alias fronting three deployments (incumbent, candidate, and a deliberately hostile fake provider you write as a small FastAPI service with configurable latency, 429 rate, content-policy refusals and over-length errors), a pure `assign_arm(unit_id, salt) -> str` bucketing module with tests asserting stickiness and allocation accuracy over 100k synthetic ids, and a `canary.py` CLI with three verbs - `start --pct 10`, `report`, `rollback` - where `rollback` is timed and its execution time recorded. The report verb queries Prometheus for per-`model_id` request count, error rate, p50/p95/p99 total latency, p95 TTFT, fallback and cooldown counts and cost per successful request, joins them to per-request quality signals (JSON validity, refusal rate, tool-schema validity, and a sampled paired LLM-as-judge run with randomised position) keyed on `x-litellm-call-id`, and emits a markdown report with a pre-registered decision rule at the top and a PROMOTE / HOLD / ROLLBACK verdict at the bottom. Include a Grafana dashboard JSON with the arm-split panels, a chaos script that drives the fake provider through each of the three fallback classes and captures the resulting `litellm_deployment_successful_fallbacks` deltas as evidence each path works, and a RUNBOOK.md giving the abort thresholds, the one-command rollback, the break-glass direct-to-provider path, and a short 'what I would tell the customer' section written for a non-engineer."
   },
-  "56": {
-   "i": 56,
+  "61": {
+   "i": 61,
    "topic": "Serving at scale: vLLM, quantisation, KV cache, batching, GPU maths",
    "track": "H. AI in Production",
    "month": 7,
@@ -12354,8 +12354,8 @@
    ],
    "proofOfWork": "Publish a small open repository - call it gpu-serving-calculator - that pairs a deterministic model with measured evidence for a single open-weight model on one rented GPU. The calculator half is a single Python module plus CLI that takes a model config (layers, KV heads, head_dim, params), a GPU spec (VRAM, HBM bandwidth, bf16 TFLOP/s), a dtype and a context length, and emits: KV bytes per token, the KV pool remaining after weights and overhead at a given --gpu-memory-utilization, maximum concurrent sequences, the roofline ridge point and the theoretical batch-1 decode ceiling in tokens/s. The evidence half is a benchmarks/ directory containing raw vllm bench serve JSON for at least five configurations (bf16 baseline, FP8 weights, FP8 KV cache, chunked prefill off vs on, and one replica-vs-tensor-parallel comparison) swept across four request rates each, with a generated results.md whose table shows p50/p95 TTFT, p95 TPOT, output tokens/s per GPU and goodput at a declared SLO, plus two plots: p95 TTFT versus offered load with the knee annotated, and predicted-versus-measured max concurrency so the reader can see how close the calculator got and where it was wrong. Close with a CAPACITY_PLAN.md written for a non-engineer - assumptions table, derived GPU counts for 50 and 500 users, cost per user per month, sensitivity to a doubled output length, and the computed monthly token volume at which self-hosting beats the API - and a short 'what I got wrong' section naming at least one prediction the benchmark falsified, because the calibration story is what makes the artefact credible rather than the numbers."
   },
-  "57": {
-   "i": 57,
+  "62": {
+   "i": 62,
    "topic": "Drift, feedback loops, registries, rollout",
    "track": "H. AI in Production",
    "month": 7,
@@ -12554,8 +12554,8 @@
    ],
    "proofOfWork": "Ship a small repository, `defendermate-drift-watch`, that runs as a real scheduled job rather than a demo. It compares a frozen, committed reference window (parquet plus a manifest recording row count, date range, git sha and the explicit reason this period was chosen) against a rolling current window, computes prediction drift on the class distribution, input drift on cheap text descriptors, and label-free quality proxies on the same time axis - writing one JSON snapshot per (run_date, segment) plus a flat metrics table, so a twelve-week trend chart is a query and not a screenshot. It must break the results out per tenant with a minimum-n gate and produce a triage table ranked by effect size times volume, demonstrating at least one segment where the global number and the segment number disagree. Alongside it, register the classifier prompt as a versioned object with `champion` and `challenger` aliases resolved at request time behind a TTL cache with a last-known-good fallback, and include a rollout log covering shadow, 10%, 50% and 100% with the guardrail metrics recorded at each stage, plus the pre-registered abort thresholds you set before traffic moved. Finish with a recorded rollback drill: timestamps for the alias flip and for the observed crossover of prompt_version in live traces, and a RUNBOOK.md listing the five caches, queues and warm processes checked afterwards. The deliverable that makes it credible is a two-page drift report written for the customer's operations lead - three charts, the thresholds crossed, the segment ranking, and the decision taken - with every number in it reproducible from a stored run_id."
   },
-  "58": {
-   "i": 58,
+  "63": {
+   "i": 63,
    "topic": "Experiment tracking and prompt versioning as CI",
    "track": "H. AI in Production",
    "month": 7,
@@ -12745,8 +12745,8 @@
    ],
    "proofOfWork": "A public repository, `prompt-registry-ci`, that demonstrates the full loop against a self-hosted registry brought up by `docker compose up` so a reviewer needs no vendor account and no API key - the model calls run against a recorded-fixture provider by default. It contains a `prompts/` package whose only public surface is `get(name, env)` returning a compiled prompt plus its resolved version, model snapshot and decoding config, with a compiled-in fallback template and a unit test that asserts the process still serves a prompt when the registry is unreachable and that no call site anywhere resolves `@latest`. The CI workflow runs the eval gate on `pull_request` with path filters, third-party actions pinned to release SHAs, `concurrency: cancel-in-progress`, a hard USD ceiling in the harness, and a `repository_dispatch` twin triggered by a signature-verifying webhook receiver (`receiver/`, with tests for HMAC verification, replay dedupe and rate limiting) so a version created in the registry UI is scored without a PR. The repository history is the evidence: one merged PR where the gate passed with the paired delta and interval in the comment, one PR where it failed on a per-class floor with the flipped case ids named and the baseline run id shown, and one commit reverting a promoted version. `RUNBOOK.md` documents the rollback with the real measured convergence time from a rehearsal (stopwatch value, the verification query counting generations by prompt version, and the graph before and after), and `scripts/changelog.py` renders `CHANGELOG.md` - date, version, intent, promoter, eval delta with interval, rollbacks - purely from the append-only run ledger in `runs/`, with a CI check that fails if the committed changelog differs from the regenerated one, so the customer-facing document cannot drift from the runs that produced it."
   },
-  "59": {
-   "i": 59,
+  "64": {
+   "i": 64,
    "topic": "Cost and latency engineering: prompt caching, batching, smaller models",
    "track": "H. AI in Production",
    "month": 7,
@@ -12954,8 +12954,8 @@
    ],
    "proofOfWork": "Build `llm-cost-lab`: a small repository that runs one fixed workload from the Kaupex Task Compiler under six named configurations - baseline, caching only, caching plus structured output, small model only, cascade with escalation, and batch for the offline half - through a single `make bench CONFIG=<name>` entrypoint that writes every call to a SQLite ledger and emits a generated markdown report. The report must contain one row per configuration with columns for cost per unit of work, total input/cache-write/cache-read/output tokens, cache hit rate, p50 and p95 TTFT, p95 end-to-end latency, eval score overall and by category, escalation rate where applicable, and n - every cell traceable to a stored run_id. Include three things that prove you measured rather than assumed: a plot of cost per request against cache hit rate as the inter-request gap sweeps past the 5-minute TTL boundary; a break-even chart for 5-minute versus 1-hour TTL as a function of reuse count for your actual prefix size; and a deliberate negative result documented in the README, such as a configuration where caching or cascading cost more, with the arithmetic explaining why. Add a CI job that fails the build if cost per unit rises more than 10% or any eval category drops more than 5 points, plus a two-page COST-REVIEW.md written for a non-engineer stakeholder that leads with cost per resolved unit and the quality delta, not with tokens."
   },
-  "60": {
-   "i": 60,
+  "65": {
+   "i": 65,
    "topic": "Platform fluency for take-homes: Anthropic and OpenAI APIs side by side",
    "track": "H. AI in Production",
    "month": 7,
@@ -13163,8 +13163,8 @@
    ],
    "proofOfWork": "Beyond the two per-API repos, publish a third repo called `llm-api-parity` whose entire purpose is to prove the two are interchangeable and to document precisely where they are not. It contains one provider-neutral scenario file of roughly thirty cases — plain completion, single tool call, parallel tool calls, a tool that raises and must come back as `is_error` / an error string, strict-schema extraction, a deliberately unsupported schema feature, an oversized image, a forced stop at `max_tokens`, a cache-warm then cache-hit pair, and a ten-item batch — plus two thin adapters and a single `pytest` suite that runs every scenario against both providers and asserts the same parsed result object. `PARITY.md` is generated by the run, not hand-written: a table with one row per scenario and columns for both providers showing pass/fail, the exact request field names used, latency p50 and TTFT, input/output/cached/reasoning token counts, and cost, with a footnote for each behavioural divergence you found (for example which schema keywords 400 on which side, and what each returns when a tool result is missing). Add `CHEATSHEET.md`: a one-page side-by-side of endpoint, auth header, required fields, tool envelope, tool-result envelope, structured-output field, streaming event names, batch submission shape, and error taxonomy — short enough to read in ninety seconds before an interview. Add `PORT_LOG.md` recording the timed drill: start time, stop time, every point where you had to look something up, and the snippet you added to your scaffold so it never costs you a lookup again. Finally include `scripts/verify.sh` that runs the whole suite against live keys in under five minutes and prints a spend total, so anyone — a grader, a customer architect, a future you — can reproduce the parity claims rather than take your word for them."
   },
-  "61": {
-   "i": 61,
+  "66": {
+   "i": 66,
    "topic": "Application security: OWASP Top 10 hands-on",
    "track": "I. Security and Compliance",
    "month": 7,
@@ -13390,8 +13390,8 @@
    ],
    "proofOfWork": "Publish an internal-pentest dossier repository for Dokeo and DefenderMate that reads like a professional engagement rather than a lab notebook. It contains: a scoped test plan mapped to OWASP ASVS Level 2 controls with each control marked pass, fail or not-applicable and a one-line justification; a generated authorization matrix of every endpoint crossed with every role and both seeded tenants, produced by a committed script that authenticates as each principal, replays each request and records the status code, so the matrix is regenerable on any commit rather than hand-typed; at least one genuine finding written up with a CVSS v3.1 vector string, a copy-pasteable `curl` reproduction, evidence, business impact and remediation; the patch itself as a linked pull request; and a pytest regression test proving the fix, demonstrated by a short recording or CI log showing the test red on the vulnerable commit and green on the patched one. Add the CI wiring that keeps it true - Semgrep with at least two custom rules written for your own footguns, secret scanning with push protection, a ZAP baseline scan against an ephemeral environment, and a documented gate policy explaining exactly what blocks a merge and how suppressions expire - plus a one-page `SECURITY.md` covering the disclosure contact, supported versions and expected response times, which is the document every enterprise procurement review asks for."
   },
-  "62": {
-   "i": 62,
+  "67": {
+   "i": 67,
    "topic": "Threat modelling and secrets lifecycle",
    "track": "I. Security and Compliance",
    "month": 7,
@@ -13601,8 +13601,8 @@
    ],
    "proofOfWork": "Build a rotation game-day harness as a small repository: docker-compose brings up Vault (dev mode with the database and transit secrets engines enabled), Postgres, a FastAPI service that reads its database credential through a refreshable accessor, and a load generator holding steady traffic through a connection pool. A single make rotate-drill target then executes three rotations back to back - the database password using the alternating-users pattern, the JWT signing key with a kid overlap and a JWKS cache TTL, and a transit encryption key with a rewrap pass over existing rows - while recording request count, error count by class, p99 latency and the exact second of each cutover. The harness emits a one-page markdown report with the before/after graphs, the Vault audit log lines proving the old credentials were revoked and never read afterwards, and a verification probe showing the retired credential now fails. Ship a second, deliberately broken branch that reproduces the module-level-global caching failure so the report can show the same drill producing a visible outage, which is the artifact that makes a customer's platform team believe the runbook."
   },
-  "63": {
-   "i": 63,
+  "69": {
+   "i": 69,
    "topic": "Cloud and Kubernetes security games",
    "track": "I. Security and Compliance",
    "month": 8,
@@ -13792,8 +13792,8 @@
    ],
    "proofOfWork": "Produce a 'break-and-harden' report on a local Kubernetes Goat cluster and the flaws2.cloud ranges: for at least eight scenarios (SSRF-to-IMDS, privileged-Pod escape, mounted Docker socket, RBAC token escalation, secrets in image layers, exposed kubelet/NodePort, secret-in-etcd, and a lateral-movement path), document the exact attacker commands and captured evidence (the stolen credential, the node root shell, the auth can-i --list output), then remediate each and prove the fix - re-run the attack and show it now fails, with the securityContext, Pod Security label, RBAC Role, NetworkPolicy or Kyverno policy that blocked it. Attach machine-generated evidence: kube-bench, Trivy and Prowler reports before and after, plus a screenshot of a Falco alert and a CloudTrail/Athena query reconstructing the flaws2 attack. Conclude with the deployable one-to-two page client hardening checklist (cloud identity, cluster, workload, detection layers), where every line is a risk, a control, and the verification command a customer's engineer can run themselves."
   },
-  "64": {
-   "i": 64,
+  "70": {
+   "i": 70,
    "topic": "Compliance: SOC 2, GDPR, HIPAA, PCI, what FDEs actually do",
    "track": "I. Security and Compliance",
    "month": 8,
@@ -13983,8 +13983,8 @@
    ],
    "proofOfWork": "Ship a public repository, compliance-pack, that turns the control map from theatre into running code for DefenderMate. It contains: (1) controls.yaml, one entry per control with framework crosswalk references (SOC 2 CC-series, GDPR articles, HIPAA 45 CFR 164 citations, PCI requirements), implementation, owner, frequency and status, rendered into the reviewable spreadsheet by a script; (2) an evidence/ collector - a make evidence target that hits the GitHub API for the merge population, dumps pg_policies and pg_roles, pulls the IAM credential report and AWS Config rule compliance, and writes dated JSON per control so evidence is generated, not screenshotted; (3) a data-flow diagram plus a one-page Art 30 record of processing and a subprocessor table listing every vendor that touches personal data, with region and retention; (4) a runnable erasure runbook, erase_subject.py, that deletes a test subject across Postgres, Redis, versioned S3, the search index and the CRM sandbox, and emits a signed proof-of-deletion report naming what was deleted, what was crypto-shredded and what remains in backups until the retention window expires; and (5) a two-page customer-facing security overview written in the register a CISO reads, ending with an honest gaps table carrying owners and dates. The test of the artifact is that a compliance lead can pick any row and you can produce its evidence live in under a minute."
   },
-  "65": {
-   "i": 65,
+  "71": {
+   "i": 71,
    "topic": "Incident tabletop and security briefing",
    "track": "I. Security and Compliance",
    "month": 8,
@@ -14174,8 +14174,8 @@
    ],
    "proofOfWork": "Publish a public incident-readiness pack for one of your own deployments (Dokeo or DefenderMate) that a customer's security team could adopt as-is. It contains four linked pieces. First, an incident response plan: declaration threshold, a SEV1-SEV5 table where each level names an observable condition and its notification obligation, the role definitions with the explicit rule for how the FDE hands off IC or SME when they cannot hold both, and a contact and escalation tree with the break-glass access path named. Second, an executable containment runbook - a real script or documented command sequence with a dry-run mode that revokes an API key, attaches a deny policy covering already-issued sessions, forces IdP re-authentication, applies a deny-all NetworkPolicy to the workload namespace, and snapshots a node before isolating it - with evidence you actually ran it against a staging environment and the wall-clock time each step took. Third, the tabletop artifacts: the scenario and inject schedule with timestamps, the observer notes, the recording or transcript of the 45-60 minute exercise you ran with someone playing the customer, and an after-action report whose findings are each classified as a documentation, tooling, access or decision-authority gap with an owner, a due date and a link to the ticket that closed it. Fourth, the blameless postmortem written from the exercise with time-to-detect, declare, scope, contain and communicate recorded as numbers, alongside the customer-facing short version and an explicit note on what was omitted from it and why. Then re-run the same scenario six to eight weeks later and add a one-page delta showing which timings improved, which findings recurred, and what you changed in the plan as a result - a second run is the part almost nobody does, and it is the part that proves the pack is real."
   },
-  "66": {
-   "i": 66,
+  "72": {
+   "i": 72,
    "topic": "Discovery: finding the real problem",
    "track": "J. FDE Craft and Communication",
    "month": 8,
@@ -14374,8 +14374,8 @@
    ],
    "proofOfWork": "A public `discovery-kit` repository that a hiring manager can evaluate in fifteen minutes and another engineer can pick up and use on a live engagement. It contains: (1) the versioned discovery script with its git history visible, so the diffs between interview one and interview five are themselves the evidence of learning, plus the consent line, the role-specific question branches, the constraint checklist and the closing-ask menu; (2) five write-ups against a fixed template, each with its filled-in scorecard (talk ratio, leading questions per hour, specific past events obtained, numbers obtained, commitment obtained or explicitly absent) and a summary chart showing those metrics trending across the five; (3) one fully annotated transcript with every question tagged open / closed / leading / loaded / hypothetical and a short written self-critique of the three worst moments; (4) a `baseline/` folder containing one real (anonymised) data export, the DuckDB queries that turn it into three baseline numbers, and a note on which number is weakest and why; (5) a one-page problem statement for the strongest of the five engagements, written in the interviewee's own quoted language, that they confirmed on a read-back call, with the confirmation email or note included; and (6) a `delta.md` comparing the hypothesis you wrote down before interview one with the final problem statement, naming precisely what you were wrong about and which question surfaced it - the last file being the one that actually demonstrates the skill."
   },
-  "67": {
-   "i": 67,
+  "73": {
+   "i": 73,
    "topic": "Engagement documents: site survey, PRD-lite, SOW, ADRs, design docs, runbooks",
    "track": "J. FDE Craft and Communication",
    "month": 8,
@@ -14583,8 +14583,8 @@
    ],
    "proofOfWork": "Run and publish a cold-start audit of your own engagement pack. Recruit an engineer who has never seen the system, give them nothing but the repository containing the design doc, ADRs and runbooks, and ask them to do three timed tasks on a live sandbox deployment while you stay silent and screen-record: perform a fresh deploy from scratch, resolve two simulated incidents triggered by real alerts (one dependency failure, one bad release requiring rollback with a migration in play), and answer three architecture questions the design doc should already cover. Log every stall as a numbered documentation defect with a timestamp, the exact sentence or missing step that caused it, and the severity, then ship a v2 of the pack that closes every defect and publish the before-and-after diff alongside the defect log and the timings. Add a small CI job in the same repository that enforces the freshness rules you learned - Markdown and prose linting, a link checker, a failure when a runbook lacks a verified-on date inside the window, and a failure when an alert rule has no runbook_url annotation - so the artifact proves not only that you can write the pack but that you can keep it true after you leave."
   },
-  "68": {
-   "i": 68,
+  "74": {
+   "i": 74,
    "topic": "Demos, executive communication, defending trade-offs",
    "track": "J. FDE Craft and Communication",
    "month": 8,
@@ -14783,8 +14783,8 @@
    ],
    "proofOfWork": "Ship a public 'demo kit' repository that makes the four recorded demos reproducible and defensible by someone who was not in the room. It contains a one-command cold-start environment (Compose file with digest-pinned images, a checked-in synthetic seed dump, a documented DEMO_REPLAY mode that serves cached model responses with realistic simulated latency) tagged per demo date so any recording can be re-run byte-for-byte; a defence pack holding the one-page unit-economics sheet with its sensitivity block, three ADRs covering the decisions most likely to be attacked, a one-page data-flow and retention diagram, and an objection matrix of twenty questions each with a written sub-60-second answer; a failure kit with the pre-recorded fallback clip, an asciinema capture of the terminal path, and a written 30-second recovery script; and a RUBRIC.md plus a scores table showing all four takes graded on the ten dimensions with the delta and the specific change that produced it. The README opens with the one-sentence claim and a 90-second architecture sketch in three boxes, so the repo itself demonstrates the skill it documents."
   },
-  "69": {
-   "i": 69,
+  "75": {
+   "i": 75,
    "topic": "Technical writing and public write-ups",
    "track": "J. FDE Craft and Communication",
    "month": 8,
@@ -14992,8 +14992,8 @@
    ],
    "proofOfWork": "Beyond the three published case studies, build and open-source a 'write-up kit' repo that turns your process into something another engineer can adopt in an afternoon. It contains four Markdown templates (case study, incident postmortem, design doc / ADR, and customer runbook) with inline commentary explaining what each section is for and the failure it prevents; a Vale style package with a vocabulary file plus a rules set that flags banned hedges ('simply', 'just', 'obviously'), bare averages for latency, undefined acronyms and passive-voice hot spots; a markdownlint config and a GitHub Actions workflow that runs both plus a link checker on every pull request; a redaction and clearance checklist covering screenshot scrubbing, credential rotation, git-history scanning and the written-approval step; and a short README that links each of your three published pieces to the template it was built from. Prove it works, not just that it exists: include the CI run on your own posts, a before/after diff of one draft showing the word count drop and the specific lint findings you fixed, and one piece of evidence that a real reader acted on the writing - a forwarded thread, an issue someone opened against your snippets, or a customer sign-off email (redacted) approving publication."
   },
-  "70": {
-   "i": 70,
+  "76": {
+   "i": 76,
    "topic": "Negotiation and offers",
    "track": "J. FDE Craft and Communication",
    "month": 8,
@@ -15192,8 +15192,8 @@
    ],
    "proofOfWork": "Build a negotiation dossier for your live pipeline and keep it as a private, versioned artifact you can walk an interviewer through. It has four parts. First, a comparison model - a spreadsheet with one row per live or target company and columns for sourced band and its three sources, level and ladder, year-one cash, four-year total, risk-adjusted equity expected value under three exit scenarios with the assumptions visible, and the non-cash terms priced explicitly (travel days per year, on-call weeks, notice-period gap, forfeited unvested equity); every private-company row must compute from strike, 409A FMV, fully diluted shares and the preference stack rather than a headline number. Second, a one-page plan per top-five company containing your floor, target and stretch, the level you will ask for with the two pieces of public evidence you will cite, the literal first three sentences of your counter, your three asks in priority order with a fallback for each, and the walk-away with its arithmetic. Third, six recorded role-play sessions - each under fifteen minutes, each with a written role card for the counterparty covering a different pressure move (expectations question, top-of-band refusal, exploding deadline, equity-for-base swap, competing-offer probe, sign-today close) - plus a self-scored rubric per recording tracking whether you named a number first, seconds of silence you filled, dimensions conceded that were not in the plan, and time from objection to capitulation, with a visible trend across the six. Fourth, a clause-by-clause annotation of one real offer letter and one real equity plan document (redact the employer) marking the sign-on clawback, exercise window, vesting shape and conversion date, invention-assignment and outside-activities language, non-solicit, arbitration and change-of-control treatment, with the specific redline you would request on each. Once the negotiation actually happens, add a two-page delta memo: what you asked for, what you got, what you left on the table, which sentence changed the outcome, and what you will do differently next time - that memo is the part that turns a lucky outcome into a repeatable skill."
   },
-  "71": {
-   "i": 71,
+  "77": {
+   "i": 77,
    "topic": "Domain fluency: fintech ops, healthcare intake, procurement, logistics",
    "track": "J. FDE Craft and Communication",
    "month": 8,
@@ -15419,8 +15419,8 @@
    ],
    "proofOfWork": "Ship a public 'demo-safe data kit and domain risk register' covering all four domains, built as working code rather than documents. The core is a machine-readable data-class policy per domain - YAML or JSON declaring restricted field patterns and the rule that forbids each one - enforced by a linter you wire into CI against one of your own agent projects: a PAN detector with a Luhn check plus BIN and last-four allowance, MRN and account-number patterns, a clinical free-text detector that flags dates finer than year and ages over 89, ECCN and ITAR keyword patterns, and supplier bank-detail fields. The linter runs in three places and must fail the build in each: on any prompt payload before it leaves the process, on OpenTelemetry span attributes and log records, and on every eval fixture in the repository, with a test suite proving each rule catches a crafted violation. Alongside it, ship a synthetic data generator per domain producing realistic but non-real records - test PANs that pass Luhn but are not issuable, HL7 v2 ADT^A04 and X12 271 and 835 fixtures with realistic CARC codes, PO/goods-receipt/invoice triples with deliberate price and quantity variances that exercise a tolerance check, and 856 ASNs including intentionally broken SSCC hierarchies - so that no customer data is ever needed to demo anything. Wrap it with the four one-pagers (three workflows, data-never-move table, sign-off matrix, autonomy line) and, for each domain, a recorded twenty-minute mock discovery call with someone who actually works in it, plus a short diff listing every correction they made and how you changed the one-pager in response. The corrections list is the part that proves fluency, because it shows where you were wrong and that you found out before a customer did."
   },
-  "72": {
-   "i": 72,
+  "80": {
+   "i": 80,
    "topic": "Narrative: why FDE, why this company, travel, comp",
    "track": "K. Interview Loop and Mocks",
    "month": 8,
@@ -15610,8 +15610,8 @@
    ],
    "proofOfWork": "Beyond the three recordings, build a private 'narrative kit' repo that turns the answers into a system you can run against any company in thirty minutes. It contains: a filled one-page dossier for each of your top ten targets, each with the delivery motion, the strategic bet in their own words with the primary source cited, the named competitor and the honest reason a buyer picks them, and the week-one deployment constraint you would hit; a comp model spreadsheet with a row per target showing level assumption, base, bonus, equity with the price assumption made explicit, an equity-at-zero column, and your walk-away, target and ask, with every cell traceable to at least two independent sources; a one-page travel and authorisation constraint sheet with the arithmetic behind the percentage, the hard limits, and your work-authorisation status in one sentence; and a rehearsal log recording every take with its transcript, filler count per minute, time to first substantive claim, longest sentence, and total word count, plus a short note on the single edit that moved a metric between takes. Prove the loop closed rather than that the folder exists: include the take-1 and take-final transcripts side by side with the metric deltas, the recording of the interrupt drill where you were cut off and recovered without restarting, and a dated log of every real recruiter or interview conversation where you used a number from the kit, what you said, and what came back - including the ones where the band came in lower than your model, and what you changed in the model afterwards."
   },
-  "73": {
-   "i": 73,
+  "81": {
+   "i": 81,
    "topic": "Resume defence: every line",
    "track": "K. Interview Loop and Mocks",
    "month": 8,
@@ -15810,8 +15810,8 @@
    ],
    "proofOfWork": "Beyond the per-bullet defence notes, publish a redacted 'metrics provenance' repository that reconstructs two of your headline numbers from raw evidence to claim. For each one, include the actual query or script that computes it against a synthetic or anonymised dataset with the same schema as production (signal_events, accounts, outreach_sends, replies), a README stating the numerator, denominator, window, sample size and instrument, a section listing every confounder present in the original window and what you would have held constant, and a sensitivity table showing how the number moves under three defensible alternative definitions - for example reply rate over sent versus delivered versus deduped-by-contact, so a reader sees the honest range rather than the flattering endpoint. Commit alongside it a diff of your resume before and after this session, with a short note per deleted line explaining what evidence was missing, and a 20-minute recording of a peer grilling you on the surviving bullets, with a timestamped list of every question you could not answer and a follow-up commit that closes each gap by either producing the evidence or cutting the claim. The artifact people will remember is the sensitivity table: it demonstrates that you understand your own numbers well enough to attack them before anyone else does."
   },
-  "74": {
-   "i": 74,
+  "82": {
+   "i": 82,
    "topic": "Take-home rehearsals (four, five hours each, recorded walkthrough)",
    "track": "K. Interview Loop and Mocks",
    "month": 9,
@@ -16010,8 +16010,8 @@
    ],
    "proofOfWork": "Beyond the four repos and videos, publish a fifth repo - fde-takehome-kit - that turns your process into something another engineer can run tomorrow, and prove it was used rather than merely written. It contains the clone-and-go scaffold (uv pyproject, src layout, typed settings with .env.example, typer CLI, structured logging, pytest with fixture data, ruff/mypy pre-commit, a Makefile with setup/test/lint/run/eval, a docker-compose with Postgres, and a GitHub Actions workflow), the five-axis rubric you reverse-engineered from real prompts, the five-hour clock protocol as a printable checklist with the hard 2:30 end-to-end checkpoint, the README and LIMITATIONS templates, and the ten-minute walkthrough script. The evidence section is what makes it credible: a RUNS.md logging all four timed runs with planned-versus-actual phase timings, the timestamp at which each run first had end-to-end output, the cut list made in the moment, the self-graded rubric score, and a short retro naming the one change to the template or protocol that the run caused - so the file reads as a visible improvement curve from run one to run four. Add a fresh-machine verification record for each repo (the commands run in a clean container and their output), the secret-scan and key-rotation confirmation, and a single index page linking the four repos, their videos, and their headline numbers, so the whole set can be sent as one link within an hour of a recruiter asking what you have built."
   },
-  "75": {
-   "i": 75,
+  "83": {
+   "i": 83,
    "topic": "Decomposition drills (ten)",
    "track": "K. Interview Loop and Mocks",
    "month": 9,
@@ -16220,8 +16220,8 @@
    ],
    "proofOfWork": "Beyond the ten drill write-ups, publish a decomposition kit as a public repo that another engineer could pick up and run in an afternoon: the two-page drill template, the 10-point rubric, a clarification question bank grouped by the six axes with a note on which branch each question opens, and a calibrated reference-class table listing the durations you assigned to environment access, ingestion, eval-set creation, integration and handoff, with the real durations from your own delivered engagements next to them and the multiplier between the two. Include all ten completed drills as filled-in instances of the template with the honest self-scores visible, plus a regrade pass in which drills one through five are re-scored against the final rubric and the diff is written up in a short 'what I was systematically wrong about' note. Anchor it with one unedited 30-minute video of a drill run against a live opponent who injects a curveball at minute 18 - timeline halved or production data revoked - showing the timer, the board artifacts and you changing the plan out loud, plus the write-up produced within ten minutes of the recording ending. The kit proves the process is repeatable and calibrated, not that a single plan happened to be good."
   },
-  "76": {
-   "i": 76,
+  "84": {
+   "i": 84,
    "topic": "LLM system design mocks (four)",
    "track": "K. Interview Loop and Mocks",
    "month": 9,
@@ -16447,8 +16447,8 @@
    ],
    "proofOfWork": "A public `llm-design-mocks` repository (or a section of the FDE dashboard) that a hiring manager can skim in ten minutes and a peer can reuse in one, built around a reusable LLM Design Kit rather than four one-off recordings. It contains `rubric.md` with the six dimensions defined as observable behaviours at each of 1-5, plus a score table for all four mocks showing self-score, peer score and the per-dimension gap, with the three consecutive 4/5 sessions highlighted; four exported Excalidraw diagrams, each with the requirements, token maths and cost-per-request written on the canvas as they were during the session, alongside a `scorecard-NN.md` listing phase-transition timestamps against the planned budget and the 'said / should have said / did not know' table; and the kit itself - a one-page latency budget template with the TTFT and TPOT decomposition, a cost-per-request spreadsheet with cache-hit, batch and model-tier levers wired as formulas, a curveball card deck with the eight scenarios and your three-minute answers, and a constraint swap table mapping each hosted component to its in-VPC equivalent with the capability lost. The differentiator is a short `calibration.md` showing one small runnable artifact: a judge prompt scored against 50 hand-labelled examples with the agreement number reported, which turns the eval section of every mock from an assertion into something you have actually measured."
   },
-  "77": {
-   "i": 77,
+  "85": {
+   "i": 85,
    "topic": "Coding drills: data manipulation and AI-assisted production builds",
    "track": "K. Interview Loop and Mocks",
    "month": 9,
@@ -16647,8 +16647,8 @@
    ],
    "proofOfWork": "Beyond the eight recorded drills, publish a repository called fde-drill-kit that turns your practice into a reusable, evidence-backed system another engineer could run tomorrow. It ships three synthetic-but-realistic corpora (payments, CRM and event-stream) generated by a seeded script so the defects are reproducible and documented - a defects.md naming each planted trap (mixed date formats, currency-symbol numerics, CDC duplicates with non-unique updated_at, whitespace in join keys, a tz-skewed clock, orphan foreign keys) and the query or cell that exposes it. It ships a docker compose that loads the same data into Postgres so every prompt exists in both pandas and SQL form, a prompts/ directory with all eight drill prompts written the way an interviewer would write them (underspecified, with the ambiguity deliberate), and a solutions/ directory with a reference answer plus an assert-based grader using pandas.testing.assert_frame_equal and SQL count assertions, so anyone can self-score without your judgement. The credibility comes from the evidence section: a GRADES.md with one row per drill recording minutes-to-first-partial-answer, longest silence in seconds, bug classes hit, and rubric score across all five axes, plus the second-pass rows for the two worst drills showing the measured delta; an ERRORS.md distilling the taxonomy down to your two dominant failure classes with the specific drill timestamps where each occurred; and an index page linking the eight unedited recordings. Send that one link when a recruiter asks how you prepare, and it answers the coding question and the self-improvement question at once."
   },
-  "78": {
-   "i": 78,
+  "86": {
+   "i": 86,
    "topic": "Client simulations (four) and learning interviews (four)",
    "track": "K. Interview Loop and Mocks",
    "month": 9,
@@ -16874,8 +16874,8 @@
    ],
    "proofOfWork": "Beyond the eight recordings and the promises ledger, publish a redacted 'deployment call kit' repository that turns this month into a reusable instrument rather than a set of memories. It contains: the four scenario packs, written so any partner can run them cold - persona brief, hidden constraint, three timed landmines, and the explicit pass bar per scenario; the two scoring rubrics with behavioural anchors and a CSV of your own scores across all eight reps, plus a small chart showing the six countable metrics (questions before first solution, discovery talk ratio, dead-air seconds after hardest pushback, unhedged commitments, time-to-first-working-call, guessed-versus-checked ratio) trending across reps, including the ones that did not improve; a de-escalation phrasebook built from your own transcripts, where each entry is the objection as it was actually spoken, the response you actually gave with a timestamp, and the rewritten response, so the improvement is traceable to a specific moment on tape; the promises ledger with every future-tense statement classified as in-control, dependent, false, or ambiguous, with a per-rep rate and replacement phrasing; and one 20-minute unedited screen recording of a learning rep on a tool you had never used, ending in a working artifact and a committed 'what I got wrong first' note listing each wrong assumption and the minutes it cost. The part a hiring manager will actually read is the phrasebook and the ledger - together they show someone who instruments their own behaviour under pressure, which is precisely the trait that keeps a deployment from quietly overcommitting itself to death."
   },
-  "79": {
-   "i": 79,
+  "87": {
+   "i": 87,
    "topic": "STAR stories (ten) and two full-loop simulations",
    "track": "K. Interview Loop and Mocks",
    "month": 9,
@@ -17066,8 +17066,8 @@
    ],
    "proofOfWork": "Beyond the story bank and the two loop debriefs, assemble a private evidence dossier that turns the bank from claims into an auditable record, and a public sanitised subset of it. For each of the ten stories, the dossier holds the artifact set that proves it: commit SHAs or PR links for the change, the dashboard screenshot or query showing the before and after values with visible axes and dates, the actual postmortem or ADR document, the cost graph with the run-rate delta annotated, the runbook you handed over with its git history showing who edited it after you left, and the message you sent the customer when things broke. Each card carries a one-line provenance note stating how each number was produced and what could confound it, plus a redaction policy line naming what you will not disclose about the client and how you will say so in the room. Add a ten-clip playlist of the 60-second versions recorded in one sitting, a follow-up ledger listing every probe question you were asked across both loops with a self-score and whether you could defend the number, and a short 'retired stories' note explaining which two stories were cut and what pattern of weak follow-ups killed them. The dossier proves the bank is calibrated and sourced rather than rehearsed, and the follow-up ledger - not the stories themselves - is the artifact a hiring manager would find most convincing if you ever chose to show it."
   },
-  "80": {
-   "i": 80,
+  "88": {
+   "i": 88,
    "topic": "Public proof: three case studies and repos",
    "track": "L. Portfolio, Positioning, Pipeline",
    "month": 2,
@@ -17266,8 +17266,8 @@
    ],
    "proofOfWork": "A public `case-studies` repository that is the operating system behind the three live pages, so a reader can see not just the output but the standard it was held to. It contains: (1) `TEMPLATE.md`, the locked section order with word budgets and the rules for each section, plus `STYLE.md` with the voice rules and the ban list; (2) `claims.md`, one row per quantitative statement across all three pages with the metric, window, measurement point, source artifact (Grafana panel, SQL query, k6 run, cloud invoice) and the date it was last re-verified, including the claims you deleted and why; (3) `docs/adr/` with the backfilled architecture decision records for all three systems, superseded records kept and marked; (4) `diagrams/` with the committed Mermaid sources and exported SVGs, and a note in each repo's PR checklist requiring the diagram to change in the same commit as the architecture; (5) `incidents/` with the three long-form postmortems the case study sections were compressed from, blameless, with real timestamps and time-to-detect; (6) `review/comprehension-test.md`, the 90-second test results from three readers per page (senior engineer, non-engineer, recruiter) with their verbatim answers to 'what does it do, what was hard, what would they change', the rewrites each failure triggered, and a clean-machine run log from one engineer who tried `make demo` cold, with every step where they had to think; and (7) `security/publication-checklist.md`, the pre-publish gate you ran for each repo — full-history gitleaks output, rotation log, `.env.example` coverage, license decision, screenshot and cast scrub — signed off with a date, so the whole thing doubles as a reusable process another engineer could run on their own portfolio."
   },
-  "81": {
-   "i": 81,
+  "89": {
+   "i": 89,
    "topic": "Hermes write-up and LinkedIn positioning",
    "track": "L. Portfolio, Positioning, Pipeline",
    "month": 3,
@@ -17457,8 +17457,8 @@
    ],
    "proofOfWork": "Beyond the live write-up and the updated profile, build a dated positioning readout - a single page written to be shown to an interviewer, closing the loop between what you published and what it caused. It contains four parts. First, the before and after of the profile as screenshots plus an explicit diff of headline, About opener, job titles and Skills order, with one line on why each change was made. Second, the exact list of the ten to fifteen people you sent the piece to directly, the one-sentence note used for each, and the reply. Third, a two-week funnel table from profile-view and post analytics: viewers by company and title, inbound messages that named the write-up, forwards from strangers, and the referral conversations that resulted, each row carrying an outcome so it can be pasted straight into next month's target sheet. Fourth, an objection ledger with one row per hard question the piece received - the question, whether it exposed a real gap in the deployment or only in the writing, the paragraph or config change made in response, and the commit or edit link proving it landed. Close it with an eight-minute recorded screen teardown in which you clone the tagged repo onto a clean instance, run the bootstrap, show the health check green, trigger one scheduled job, and narrate the blast radius directly from the config file. That recording is what you send when a hiring manager asks whether you can show them something you actually operate, and it is most of the answer to the design question you will get in the loop."
   },
-  "82": {
-   "i": 82,
+  "90": {
+   "i": 90,
    "topic": "Target list: 40 companies, referrals, warm intros",
    "track": "L. Portfolio, Positioning, Pipeline",
    "month": 4,
@@ -17666,8 +17666,8 @@
    ],
    "proofOfWork": "Build a small private pipeline repo that turns the forty-row sheet into a system rather than a document, and prove the loop ran rather than that the folder exists. It contains a refresh script that reads a config of (company, ats_vendor, board_token), pulls the public job-board JSON for each, writes a dated snapshot to disk, diffs it against the previous snapshot, and emits three things: a machine-written changelog of closed / reposted / newly-opened requisitions with req ids and dates, a write-back into the tracker that flips status and last_seen automatically, and a one-page weekly markdown digest listing every row whose next_step_due has passed or whose last_touch is more than fourteen days old. Alongside it, keep a referral graph file with a node per person (relationship, company, degree, tie strength, last_asked date) and an edge per way you know them, plus a rendered image of the graph with your forty target companies highlighted so the gaps are visible at a glance. Add a redacted outreach log with the exact text of every intro ask you sent, the broker, the date, the response and the time-to-response, and the exact text of any ask that got no reply so you can diff the ones that worked against the ones that did not. Finish with a six-week retro that states your predicted funnel conversion at each transition beside the observed one, names the two sourcing surfaces and the two referral path types that actually produced screens, and lists the rows you killed with the criterion that killed each - including at least one row you kept too long and what that cost you in weeks."
   },
-  "83": {
-   "i": 83,
+  "91": {
+   "i": 91,
    "topic": "Application pipeline: apply in waves, run three or four loops in parallel",
    "track": "L. Portfolio, Positioning, Pipeline",
    "month": 6,

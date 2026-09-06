@@ -1,229 +1,218 @@
 {
-  "i": 16,
-  "topic": "EKS: cluster design, node groups, IRSA, ingress, cert-manager, Route 53",
-  "track": "C. Cloud and IaC",
-  "month": 3,
-  "hours": 10,
-  "why": "Most enterprise customers you will land at already run EKS, and the first week of an FDE engagement is usually 'get our thing running in their cluster': you inherit a VPC you did not size, a node group someone else tuned, an IAM boundary that forbids long-lived keys, and a security team that wants to know exactly how your pod got AWS credentials and who terminates TLS. If you cannot read a customer's Terraform for EKS, explain why their pods are stuck ContainerCreating on IP exhaustion, wire IRSA for a controller, get a real certificate on a real hostname and tell the platform lead what the cluster costs per month, you are a passenger on the engagement instead of the person driving it. This topic also produces the single most reused artefact in your career: a Terraform EKS landing zone you can stand up in 25 minutes and tear down cleanly.",
-  "prerequisites": [
-    "Terraform at depth (topic 12): remote state, modules, provider configuration, targeted plan/apply/destroy and how unknown values break provider blocks",
-    "AWS networking and compute (topic 13): VPC, public and private subnets, route tables, NAT gateway, security groups, ALB/NLB behaviour across AZs",
-    "IAM and cloud security (topic 15): roles vs users, trust policies, STS AssumeRole, the reasoning behind 'no long-lived keys'",
-    "Kubernetes core and production ops (topics 7 and 8): Ingress and IngressClass, Service types, probes, PodDisruptionBudget, StorageClass and PVC binding, RBAC",
-    "The Dokeo Helm chart from GitOps (topic 9), with a non-root image from topic 6 pushed to a registry the cluster can pull from",
-    "Networking fundamentals (topic 2): how DNS delegation, TTLs and negative caching work; what the ACME protocol proves and how TLS termination points differ",
-    "An AWS account with a billing alert already set, and a registered domain (or a subdomain you can delegate) whose NS records you control"
-  ],
-  "subtopics": [
-    {
-      "name": "Cluster anatomy: what AWS runs, what lands in your VPC, and the endpoint access modes",
-      "learn": "The control plane (API server, etcd, scheduler, controller manager) runs in an AWS-owned account across AZs; what appears in your VPC is 2-4 cross-account ENIs in the subnets you passed at creation, carrying the cluster security group (eks-cluster-sg-<name>-<id>), through which the control plane reaches kubelets for exec/logs/port-forward and webhooks. Understand the three endpoint modes and their consequences: public only (default) means nodes reach the API over the internet via your NAT gateway, so every kubelet heartbeat is billed NAT data processing; private only requires you to be inside the VPC or on a VPN/bastion to run kubectl; public+private with a restricted public_access_cidrs list is the usual production answer. Know that you pay $0.10 per cluster-hour (about $73 a month) for the control plane regardless of size, that a cluster takes 10-15 minutes to create and about 10 to delete, and that the platform version (eks.N) is AWS's own revision counter, distinct from the Kubernetes minor.",
-      "minutes": 30,
-      "resource": {
-        "label": "EKS User Guide: Cluster API server endpoint access",
-        "url": "https://docs.aws.amazon.com/eks/latest/userguide/cluster-endpoint.html"
-      }
-    },
-    {
-      "name": "VPC layout for EKS: subnet sizing, AZ spread, and the load balancer discovery tags",
-      "learn": "Lay out a VPC with public subnets (route to an internet gateway) for load balancers only and private subnets (route to NAT) for nodes, in at least two AZs, and size the private subnets for pods, not nodes: with the VPC CNI every pod consumes a VPC IP, so a /24 per AZ is exhausted by roughly 250 pods including the CNI's warm pool. Tag public subnets kubernetes.io/role/elb=1 and private subnets kubernetes.io/role/internal-elb=1, because the AWS Load Balancer Controller auto-discovers subnets by those tags and fails with 'couldn't auto-discover subnets' without them; the older kubernetes.io/cluster/<name>=shared tag is no longer required by current controller versions. Use one NAT gateway (single_nat_gateway = true in the community VPC module) for a lab or dev cluster and one per AZ for production, and be able to state the trade-off: about $33 a month plus $0.045/GB per gateway versus an AZ outage taking all egress down. The VPC must have DNS hostnames and DNS resolution enabled or nodes never register.",
-      "minutes": 30,
-      "resource": {
-        "label": "EKS User Guide: VPC and subnet requirements",
-        "url": "https://docs.aws.amazon.com/eks/latest/userguide/network-reqs.html"
-      }
-    },
-    {
-      "name": "VPC CNI internals: ENI and IP math, warm pools, prefix delegation, IP exhaustion",
-      "learn": "Compute max pods for any instance from the ENI and IP-per-ENI limits with the formula ENIs x (IPv4 per ENI - 1) + 2: t3.medium is 3 x (6 - 1) + 2 = 17, t3.large is 3 x (12 - 1) + 2 = 35, m5.large is 3 x (10 - 1) + 2 = 29, and system DaemonSets (aws-node, kube-proxy, ebs-csi-node, pod-identity-agent) eat four of those on every node. Know the ipamd knobs set as env on the aws-node DaemonSet (or via the add-on's configuration_values): WARM_ENI_TARGET (default 1, keeps a whole spare ENI's worth of IPs allocated), WARM_IP_TARGET and MINIMUM_IP_TARGET (tighter control for small subnets), and ENABLE_PREFIX_DELEGATION=true which assigns /28 prefixes so nitro instances reach 110 pods; prefix mode requires a new node group and kubelet --max-pods to be recomputed. Recognise IP exhaustion instantly: pods stuck ContainerCreating with 'failed to assign an IP address to container' in kubectl describe, nodes showing free CPU and memory, and ipamd logs at /var/log/aws-routed-eni/ipamd.log on the node. Know the escape hatch when the customer's VPC CIDR is full: custom networking (AWS_VPC_K8S_CNI_CUSTOM_NETWORK_CFG=true plus ENIConfig objects per AZ) puts pods in a secondary 100.64.0.0/16 CIDR.",
-      "minutes": 35,
-      "resource": {
-        "label": "EKS User Guide: Assign more IP addresses to nodes with prefixes (VPC CNI settings)",
-        "url": "https://docs.aws.amazon.com/eks/latest/userguide/cni-increase-ip-addresses.html"
-      }
-    },
-    {
-      "name": "Cluster authentication: access entries, the legacy aws-auth ConfigMap, and kubeconfig via get-token",
-      "learn": "Set authentication_mode to API (or API_AND_CONFIG_MAP while migrating) and grant humans and CI roles with access entries plus AWS-managed access policies (AmazonEKSClusterAdminPolicy, AmazonEKSAdminPolicy, AmazonEKSEditPolicy, AmazonEKSViewPolicy) scoped to cluster or namespaces, instead of hand-editing the aws-auth ConfigMap where a typo in mapRoles locks everyone out. Know that the IAM identity that created the cluster is not automatically admin any more unless the module's enable_cluster_creator_admin_permissions is set, and that managed node groups get an EC2_LINUX access entry for the node role created for you. Generate kubeconfig with aws eks update-kubeconfig --name <cluster> --region <r> --alias <name> and read what it wrote: an exec plugin running aws eks get-token --cluster-name <cluster>, producing a token valid about 15 minutes, signed with whatever AWS_PROFILE is active, which is why 'kubectl works for me but not in CI' is almost always a different IAM principal. Debug 'error: You must be logged in to the server (Unauthorized)' by turning on the authenticator control plane log and reading which ARN was presented.",
-      "minutes": 30,
-      "resource": {
-        "label": "EKS User Guide: Grant IAM users access to Kubernetes with EKS access entries",
-        "url": "https://docs.aws.amazon.com/eks/latest/userguide/access-entries.html"
-      }
-    },
-    {
-      "name": "Terraform layout: the community EKS module, two root modules, and the provider bootstrap trap",
-      "learn": "Use terraform-aws-modules/vpc and terraform-aws-modules/eks pinned to exact versions and read their variables before writing any resource by hand; in module v20 you set cluster_version, cluster_endpoint_public_access, cluster_addons, eks_managed_node_groups, access_entries and enable_irsa (v21 dropped the cluster_ prefix on many of these, so check the version you pin). Split into two root modules with two state files: infra/ (VPC, cluster, node groups, IAM roles for controllers, hosted zone) and platform/ (kubernetes and helm provider releases for the LB controller, cert-manager, external-dns, ingress-nginx and Dokeo). Understand why: the kubernetes and helm providers must be configured with host, cluster_ca_certificate and an exec block running aws eks get-token, and if those values come from a cluster resource in the same state, a plan that replaces the cluster produces unknown provider config and fails, and a destroy has to delete Helm releases through a provider whose endpoint is disappearing. Set create_cloudwatch_log_group and cluster_enabled_log_types deliberately, tag everything through the provider default_tags block with Project=eks-lab so Cost Explorer can find it later, and expect a cold apply to take 20-25 minutes end to end.",
-      "minutes": 45,
-      "resource": {
-        "label": "terraform-aws-modules/terraform-aws-eks (official module repository and examples)",
-        "url": "https://github.com/terraform-aws-modules/terraform-aws-eks"
-      }
-    },
-    {
-      "name": "Managed node groups: AMI family, capacity type, scaling, update_config and the PDB interaction",
-      "learn": "Define aws_eks_node_group (or the module's eks_managed_node_groups map) with ami_type AL2023_x86_64_STANDARD or BOTTLEROCKET_x86_64 (AL2 AMIs stopped being published in November 2025), instance_types as a list, capacity_type SPOT or ON_DEMAND, scaling_config min/max/desired, labels, and taint blocks; for Spot always give several instance types so Capacity Rebalancing has somewhere to go, and read the eks.amazonaws.com/capacityType node label to schedule accordingly. Know the node IAM role's minimum policies (AmazonEKSWorkerNodePolicy, AmazonEC2ContainerRegistryPullOnly) and why AmazonEKS_CNI_Policy should be moved off the node role onto the aws-node service account via IRSA or Pod Identity. Understand how a node group update works: EKS launches new instances from the new AMI or launch template version, cordons and drains old ones respecting PodDisruptionBudgets with max_unavailable or max_unavailable_percentage from update_config, and fails after roughly 15 minutes with PodEvictionFailure if a PDB cannot be satisfied, after which the only options are fixing the PDB or --force. Be able to place the other compute options on one slide: Fargate profiles (no DaemonSets, no EBS, per-pod pricing), Karpenter (NodePool and EC2NodeClass, bin-packing and consolidation, interruption handling via SQS) and EKS Auto Mode (Karpenter built in, AWS-managed Bottlerocket nodes with a 21-day max lifetime and an extra per-instance management fee).",
-      "minutes": 35,
-      "resource": {
-        "label": "EKS User Guide: Simplify node lifecycle with managed node groups",
-        "url": "https://docs.aws.amazon.com/eks/latest/userguide/managed-node-groups.html"
-      }
-    },
-    {
-      "name": "Launch templates: IMDSv2 hop limit, disk, and nodeadm NodeConfig user data",
-      "learn": "Attach a custom aws_launch_template to the node group when you need anything beyond defaults, and treat metadata_options as a security control: http_tokens = \"required\" forces IMDSv2 and http_put_response_hop_limit = 1 makes the node's instance-profile credentials unreachable from pods, because pod traffic to 169.254.169.254 crosses one extra hop through the veth. Know the default trap: managed node groups without a launch template already default the hop limit to 1 on AL2023, but any custom launch template defaults it to 2, silently re-exposing the node role to every container. Set block_device_mappings (device /dev/xvda, gp3, encrypted, 50-100 GB, because image layers and emptyDir share it) and remember the rules of the game: never put subnets or an IAM instance profile in the template, and on AL2023 pass extra kubelet settings not with bootstrap.sh --kubelet-extra-args but as a MIME multipart user data part of Content-Type application/node.eks.aws containing a NodeConfig with spec.kubelet.config.maxPods or spec.kubelet.flags. Understand that a template version change recycles every node in the group, so it is a rollout, not a config edit.",
-      "minutes": 30,
-      "resource": {
-        "label": "EKS User Guide: Customize managed nodes with launch templates",
-        "url": "https://docs.aws.amazon.com/eks/latest/userguide/launch-templates.html"
-      }
-    },
-    {
-      "name": "EKS add-ons: vpc-cni, coredns, kube-proxy, pod-identity-agent, ebs-csi as managed resources",
-      "learn": "Manage the cluster's system components as aws_eks_addon resources rather than raw manifests so AWS owns their upgrade path: query compatible versions with aws eks describe-addon-versions --addon-name vpc-cni --kubernetes-version 1.34, pin addon_version explicitly, and set resolve_conflicts_on_create = OVERWRITE (to adopt the self-managed copies EKS installs by default) and resolve_conflicts_on_update = PRESERVE (so your configuration_values survive). Pass CNI env such as ENABLE_PREFIX_DELEGATION through configuration_values as JSON, and give add-ons that call AWS (vpc-cni, aws-ebs-csi-driver) an identity through service_account_role_arn (IRSA) or a pod_identity_association block. Know the ordering constraint the module encodes as before_compute = true for vpc-cni: if nodes come up before the CNI config lands, the first pods get IPs under the old settings and you have a mixed node. Recognise the symptom of a version mismatch after a control plane upgrade: coredns or kube-proxy stuck with an addon status of DEGRADED and health issues listing an incompatible version.",
-      "minutes": 25,
-      "resource": {
-        "label": "EKS User Guide: Amazon EKS add-ons",
-        "url": "https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html"
-      }
-    },
-    {
-      "name": "IRSA mechanics: OIDC provider, projected tokens, the mutating webhook, and trust policy conditions",
-      "learn": "Trace one credential end to end: the cluster exposes an OIDC issuer (aws eks describe-cluster --query cluster.identity.oidc.issuer), you register it once as an aws_iam_openid_connect_provider with client_id_list [\"sts.amazonaws.com\"], and you annotate a ServiceAccount with eks.amazonaws.com/role-arn. The EKS-run pod-identity-webhook mutates new pods using that SA to add a projected service account token volume (audience sts.amazonaws.com, default expiry 86400s) mounted at /var/run/secrets/eks.amazonaws.com/serviceaccount/token, plus AWS_ROLE_ARN and AWS_WEB_IDENTITY_TOKEN_FILE env vars, and the SDK's default credential chain calls sts:AssumeRoleWithWebIdentity with that JWT. The role's trust policy must have Principal Federated = the provider ARN and StringEquals conditions on both <issuer-host>:sub = system:serviceaccount:<ns>:<sa> and <issuer-host>:aud = sts.amazonaws.com; leaving out aud or wildcarding sub to system:serviceaccount:* is the classic privilege-escalation finding. Debug in order: kubectl exec into the pod and run env | grep AWS_ (no vars means the webhook did not fire, usually because the pod predates the annotation and needs a restart), decode the token's sub and aud claims with cut -d. -f2 | base64 -d, then aws sts get-caller-identity; 'Not authorized to perform sts:AssumeRoleWithWebIdentity' is a trust policy mismatch, not a permissions policy problem. For private clusters set eks.amazonaws.com/sts-regional-endpoints: \"true\" so the SDK uses the STS VPC endpoint.",
-      "minutes": 40,
-      "resource": {
-        "label": "EKS User Guide: IAM roles for service accounts",
-        "url": "https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html"
-      }
-    },
-    {
-      "name": "EKS Pod Identity: the agent, associations, session tags, and when to prefer it over IRSA",
-      "learn": "Install the eks-pod-identity-agent add-on (a hostNetwork DaemonSet listening on 169.254.170.23) and create aws_eks_pod_identity_association resources binding cluster + namespace + service account to a role whose trust policy names Principal Service pods.eks.amazonaws.com with Actions sts:AssumeRole and sts:TagSession; no OIDC provider per cluster and the same role reusable across clusters, which is why platform teams prefer it for fleets. The agent injects AWS_CONTAINER_CREDENTIALS_FULL_URI and AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE, so the SDK fetches credentials from the node agent instead of calling STS itself, and every session carries tags (kubernetes-namespace, kubernetes-service-account, eks-cluster-name, kubernetes-pod-name) you can use in ABAC conditions such as aws:PrincipalTag/kubernetes-namespace. Know the limits that decide the choice: Pod Identity does not work on Fargate, Windows nodes or non-EKS clusters, cannot federate cross-account directly (chain a second AssumeRole), and needs a minimum SDK version; IRSA remains the answer for those and for tooling that wants a plain web identity token. Be ready to explain both to a customer security reviewer in two minutes with a diagram.",
-      "minutes": 25,
-      "resource": {
-        "label": "EKS User Guide: Learn how EKS Pod Identity grants pods access to AWS services",
-        "url": "https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html"
-      }
-    },
-    {
-      "name": "AWS Load Balancer Controller: install with IRSA, IngressClass alb, the annotations that matter",
-      "learn": "Install from the eks Helm repo with serviceAccount.create=false pointing at an IRSA-annotated SA whose role carries the controller's published iam_policy.json, and pass clusterName, vpcId and region explicitly because with the IMDS hop limit at 1 the controller cannot discover them. Write an Ingress with spec.ingressClassName: alb and be able to explain each annotation you set: alb.ingress.kubernetes.io/scheme internet-facing or internal, target-type ip (registers pod IPs directly, required for Fargate and avoids the extra kube-proxy hop of instance mode), listen-ports '[{\"HTTP\":80},{\"HTTPS\":443}]' with ssl-redirect '443', certificate-arn from ACM, healthcheck-path and success-codes, load-balancer-attributes idle_timeout.timeout_seconds=600 for long streaming responses, target-group-attributes deregistration_delay.timeout_seconds=30, and group.name to make several Ingresses share one ALB instead of paying for one each. Label the namespace elbv2.k8s.aws/pod-readiness-gate-inject=enabled so rollouts wait for target registration and you stop seeing 502s during deploys. For Services, use spec.loadBalancerClass service.k8s.aws/nlb with service.beta.kubernetes.io/aws-load-balancer-nlb-target-type ip and -scheme internet-facing to get an NLB instead of the legacy in-tree classic ELB.",
-      "minutes": 45,
-      "resource": {
-        "label": "AWS Load Balancer Controller docs: Ingress annotations",
-        "url": "https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/ingress/annotations/"
-      }
-    },
-    {
-      "name": "Ingress topology decision: ALB per IngressGroup with ACM versus NLB plus ingress-nginx with cert-manager",
-      "learn": "Be able to draw both production patterns and price them. Pattern A: the LB controller provisions an ALB per IngressGroup, TLS terminates at the ALB with an ACM certificate validated by a Route 53 CNAME, WAF attaches natively, and cert-manager is not needed for public TLS; each ALB costs about $16 a month plus LCUs and you get the ALB's 60-second default idle timeout on every streaming endpoint unless you raise it. Pattern B: one NLB (about $16 a month plus NLCUs) fronts ingress-nginx, TLS terminates inside the cluster with certificates cert-manager obtains, you keep nginx's rewrite, rate-limit and header features portable to non-AWS clusters, and client IP preservation requires either externalTrafficPolicy: Local with instance targets or proxy protocol (service.beta.kubernetes.io/aws-load-balancer-proxy-protocol: \"*\" plus use-proxy-protocol: \"true\" in the nginx ConfigMap). Know why this plan uses Pattern B for Dokeo (it exercises cert-manager and Route 53 and matches what you built on k3s in topic 7) and when you would still choose A for a customer: they already standardised on ACM, want WAF and Shield, or their security team forbids private keys inside the cluster. Mention that the LB controller now also implements Gateway API for customers moving off Ingress.",
-      "minutes": 30,
-      "resource": {
-        "label": "ingress-nginx docs: Installation guide (AWS NLB section)",
-        "url": "https://kubernetes.github.io/ingress-nginx/deploy/"
-      }
-    },
-    {
-      "name": "cert-manager with ACME DNS-01 on Route 53 through IRSA",
-      "learn": "Install the jetstack/cert-manager chart with crds.enabled=true and an eks.amazonaws.com/role-arn annotation on its service account, and give that role the exact policy the docs specify: route53:GetChange on arn:aws:route53:::change/*, route53:ChangeResourceRecordSets and route53:ListResourceRecordSets on arn:aws:route53:::hostedzone/<ID>, and route53:ListHostedZonesByName on *. Write a ClusterIssuer whose acme.server is the Let's Encrypt staging directory first (https://acme-staging-v02.api.letsencrypt.org/directory), with privateKeySecretRef for the account key and a dns01.route53 solver carrying region and hostedZoneID plus a selector.dnsZones list; ClusterIssuers may use ambient credentials (IRSA) by default whereas a namespaced Issuer needs the --issuer-ambient-credentials controller flag. Understand why DNS-01 and not HTTP-01: it works for wildcard certificates and for Ingresses that are internal or not yet reachable on port 80, and it does not depend on the load balancer being healthy. Use the ingress-shim annotation cert-manager.io/cluster-issuer on the Ingress with spec.tls[].secretName so the Certificate is created for you, then watch the Secret appear with tls.crt and tls.key; switch the issuer to production only after staging issues cleanly, because production enforces 50 certificates per registered domain per week and 5 duplicates per week.",
-      "minutes": 45,
-      "resource": {
-        "label": "cert-manager docs: ACME DNS-01 Route53 solver (IAM policy, IRSA, ambient credentials)",
-        "url": "https://cert-manager.io/docs/configuration/acme/dns01/route53/"
-      }
-    },
-    {
-      "name": "Debugging certificate issuance: the Certificate to Challenge chain, split-horizon DNS, rate limits",
-      "learn": "Walk the object chain the way cert-manager does: Certificate creates CertificateRequest, which creates Order, which creates one Challenge per identifier; kubectl get certificate,certificaterequest,order,challenge -A tells you which link is stuck and kubectl describe challenge shows the reason. The most common stall is 'Waiting for DNS-01 challenge propagation' when the TXT record is clearly in Route 53: cert-manager self-checks by resolving the record through the cluster's resolvers, and inside a VPC with a private hosted zone of the same name (split-horizon) the Route 53 Resolver answers from the private zone where the TXT does not exist, so it waits forever; fix with the controller flags --dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53 and --dns01-recursive-nameservers-only. Other causes you should be able to name from the event text: a missing route53:GetChange permission (the solver polls the change status), a CAA record on the domain that does not include letsencrypt.org, an account-level rate limit or 5 failed validations per hostname per hour, and a hostedZoneID pointing at the parent zone when the record lives in a delegated child. Know renewal behaviour: renewBefore defaults to a third of the certificate lifetime (30 days before a 90-day Let's Encrypt expiry), renewals reuse the private key only if rotationPolicy is Never, and cmctl status certificate and cmctl renew are the operator's tools.",
-      "minutes": 30,
-      "resource": {
-        "label": "cert-manager docs: Troubleshooting problems with ACME / Let's Encrypt certificates",
-        "url": "https://cert-manager.io/docs/troubleshooting/acme/"
-      }
-    },
-    {
-      "name": "Route 53 for the lab: a delegated subdomain zone, alias records, TTLs and negative caching",
-      "learn": "Create a dedicated aws_route53_zone for lab.<yourdomain> and delegate it by adding an NS record in the parent (at the registrar or the parent hosted zone) with the four name_servers Route 53 assigned; verify delegation with dig +trace dokeo.lab.<domain> and by querying one authoritative server directly with dig @ns-xxx.awsdns-xx.org. Point hostnames at the load balancer with an alias A record (aws_route53_record with an alias block carrying the load balancer's dns_name and its zone_id, which is the ELB hosted zone id, not yours) rather than a CNAME: aliases work at the zone apex, follow the load balancer's IP changes, honour evaluate_target_health and are free to query, while CNAME queries are billed. Understand negative caching so you stop confusing yourself: if you query a name before its record exists, resolvers cache the NXDOMAIN for the SOA minimum TTL (900 seconds by default on Route 53), so create the record first and test from an authoritative server, not your laptop's cache. Cost model: $0.50 per hosted zone per month and $0.40 per million standard queries.",
-      "minutes": 30,
-      "resource": {
-        "label": "Route 53 Developer Guide: Choosing between alias and non-alias records",
-        "url": "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resource-record-sets-choosing-alias-non-alias.html"
-      }
-    },
-    {
-      "name": "external-dns: records from Ingress hosts, TXT ownership, upsert-only versus sync",
-      "learn": "Run external-dns with --provider=aws, --source=ingress and --source=service, a --domain-filter=lab.<domain> so it can never touch other zones, --registry=txt with a unique --txt-owner-id per cluster and a --txt-prefix so the ownership TXT does not collide with a CNAME of the same name, on an IRSA role limited to route53:ChangeResourceRecordSets on the one hosted zone plus route53:ListHostedZones, ListResourceRecordSets and ListTagsForResource. It reads spec.rules[].host from Ingresses (and the external-dns.alpha.kubernetes.io/hostname annotation from Services) and writes alias A records to the ALB or NLB hostname. Understand the policy choice: upsert-only never deletes, so decommissioned hostnames linger but nothing you did not create can be removed; sync deletes records it owns when the Ingress goes, which is what makes teardown clean but is also how two clusters sharing an owner id flip-flop a record every reconcile. Be able to read its logs to prove a record change and to spot 'zone not found' from a bad domain filter or a policy denied on the change API.",
-      "minutes": 25,
-      "resource": {
-        "label": "external-dns docs: AWS tutorial (IAM policy, Route 53 setup, flags)",
-        "url": "https://kubernetes-sigs.github.io/external-dns/latest/docs/tutorials/aws/"
-      }
-    },
-    {
-      "name": "Storage for Dokeo's Postgres: EBS CSI, a gp3 default StorageClass, and the AZ affinity trap",
-      "learn": "Install aws-ebs-csi-driver as an add-on with its own IRSA or Pod Identity role carrying AmazonEBSCSIDriverPolicyV2, then create a StorageClass with provisioner ebs.csi.aws.com, parameters type gp3 and encrypted \"true\", volumeBindingMode WaitForFirstConsumer, allowVolumeExpansion true, mark it default with the storageclass.kubernetes.io/is-default-class annotation and remove that annotation from the legacy in-tree gp2 class. Understand why WaitForFirstConsumer is not optional: an EBS volume lives in one AZ, the PV gets a nodeAffinity on topology.ebs.csi.aws.com/zone, and if the only node in that AZ is replaced in another AZ (a common Spot or scale-to-zero outcome) the pod sits Pending with 'volume node affinity conflict' until a node appears in the right zone; production answers are one node group per AZ, a StatefulSet with zonal anti-affinity, or moving the database to RDS as in topic 14. Know the failure text when the driver has no permissions ('could not create volume in EC2: UnauthorizedOperation' on the PVC) and that reclaimPolicy Delete on a PVC is what lets your teardown remove the volume, whereas Retain leaves $0.08/GB-month orphans.",
-      "minutes": 25,
-      "resource": {
-        "label": "EKS User Guide: Use Kubernetes volume storage with Amazon EBS (CSI driver)",
-        "url": "https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html"
-      }
-    },
-    {
-      "name": "Day-2 operations: version lifecycle and extended support, the upgrade sequence, and nodes-not-joining triage",
-      "learn": "Know the lifecycle cold: each Kubernetes minor gets 14 months of standard support at $0.10 per cluster-hour, then 12 months of extended support at $0.60 per cluster-hour (about $438 a month, a 6x jump that finance notices), then a forced upgrade; aws eks describe-cluster-versions gives the dates. Upgrade in this order and one minor at a time: check aws eks list-insights for UPGRADE_READINESS findings and kubectl get --raw /metrics | grep apiserver_requested_deprecated_apis, update the control plane (aws eks update-cluster-version), update add-ons to the versions describe-addon-versions lists as compatible, then roll node groups (aws eks update-nodegroup-version) knowing kubelets may lag the API server by up to three minors but should not. Triage a node group stuck CREATE_FAILED or a node that never appears in kubectl get nodes with aws eks describe-nodegroup --query nodegroup.health.issues: NodeCreationFailure 'Instances failed to join the kubernetes cluster' means one of no route from the private subnet to NAT or the required VPC endpoints (ecr.api, ecr.dkr, s3, ec2, sts), a custom launch template security group that dropped the cluster SG, a node role missing AmazonEKSWorkerNodePolicy or its access entry, or VPC DNS hostnames disabled. Get onto the instance without SSH via aws ssm start-session (AmazonSSMManagedInstanceCore on the node role) and read journalctl -u kubelet and journalctl -u nodeadm-run.",
-      "minutes": 35,
-      "resource": {
-        "label": "EKS User Guide: Understand the Kubernetes version lifecycle on EKS",
-        "url": "https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html"
-      }
-    },
-    {
-      "name": "The cost model: itemise it before apply, measure it after, and put a budget alarm in front of it",
-      "learn": "Build the monthly estimate line by line for the lab and be able to reproduce it on a whiteboard: control plane $73; two t3.large on-demand about $120 (or roughly a third of that on Spot); one NAT gateway $33 plus $0.045/GB processed (image pulls and kubelet traffic on a public-only endpoint both count); one NLB or ALB about $16 plus capacity units; public IPv4 addresses at $0.005 per hour each for the NAT's EIP and the load balancer's per-AZ addresses, around $10; Route 53 zone $0.50; gp3 volumes $0.08/GB; CloudWatch Logs ingestion at $0.50/GB if you enable audit and api control plane logs. That lands near $250 a month, or about $0.35 an hour, so a full build-verify-teardown session costs a few dollars and leaving it running over a weekend costs $25. Run infracost breakdown --path infra/ before apply, then after 48 hours of running compare with aws ce get-cost-and-usage grouped by SERVICE and filtered on the Project tag (activate it as a cost allocation tag first; data lags about 24 hours). Put an aws_budgets_budget with an 80 percent forecast notification in the infra root so the alarm exists before the cluster does, and know the EKS Auto Mode management fee and the extended support surcharge as the two line items customers most often miss.",
-      "minutes": 25,
-      "resource": {
-        "label": "Amazon EKS pricing (control plane, extended support, Auto Mode fees)",
-        "url": "https://aws.amazon.com/eks/pricing/"
-      }
-    },
-    {
-      "name": "Teardown that actually finishes: ordering, controller-created orphans, and the sweep script",
-      "learn": "terraform destroy on an EKS stack hangs or fails with DependencyViolation on subnets and security groups because resources created by in-cluster controllers are not in state: ALBs and NLBs and their security groups from the LB controller, ENIs from the VPC CNI, EBS volumes from the CSI driver, and Route 53 records from external-dns or cert-manager. Script the order: kubectl delete ing --all -A and delete every Service of type LoadBalancer, then poll aws elbv2 describe-load-balancers until none carry the elbv2.k8s.aws/cluster tag; kubectl delete pvc --all -A and confirm aws ec2 describe-volumes --filters Name=tag-key,Values=kubernetes.io/created-for/pvc/name is empty; let external-dns (policy sync) remove records or delete everything but NS and SOA yourself, because a hosted zone with other records cannot be deleted; destroy the platform/ root (Helm releases) before infra/; then sweep for what is left with aws ec2 describe-network-interfaces --filters Name=vpc-id,Values=<vpc> Name=status,Values=available, security groups tagged elbv2.k8s.aws/cluster, the /aws/eks/<name>/cluster log group if it was not Terraform-managed, the OIDC provider, and the KMS key the module created (scheduled deletion has a 7-30 day window and bills about $1 a month until it is gone). Finish with a checklist that a reviewer can run: zero load balancers, zero volumes, zero ENIs, zero non-NS/SOA records, and a Cost Explorer daily total that drops to cents the next day.",
-      "minutes": 35,
-      "resource": {
-        "label": "EKS User Guide: Delete a cluster (prerequisite steps for load balancers and Ingress)",
-        "url": "https://docs.aws.amazon.com/eks/latest/userguide/delete-cluster.html"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can stand up VPC, EKS control plane, a managed node group, the five core add-ons and the IRSA roles for four controllers from two Terraform root modules with a cold apply under 25 minutes, and terraform plan is clean immediately afterwards.",
-    "You can compute the maximum pods for any EC2 instance type from its ENI and IP limits in under a minute, state how many pods a given private subnet can hold, and name the two CNI changes (prefix delegation, custom networking) that fix exhaustion and what each requires.",
-    "You can wire IRSA and Pod Identity for a controller with a least-privilege trust policy and prove it from inside a pod with aws sts get-caller-identity, then show the same call denied from an unannotated pod and from a pod trying to reach IMDS with the hop limit at 1.",
-    "You can get a valid Let's Encrypt certificate issued for a fresh hostname via DNS-01 on Route 53 within five minutes of applying the Ingress, and diagnose a stuck Challenge to its root cause (split-horizon DNS, IAM, CAA, rate limit) from kubectl describe output alone.",
-    "You can present the ALB-plus-ACM and NLB-plus-nginx-plus-cert-manager topologies with monthly cost, TLS termination point, client IP behaviour and streaming timeout implications, and recommend one for a stated customer constraint.",
-    "You can produce an itemised monthly estimate for a cluster before apply that lands within 15 percent of the Cost Explorer total after a 48-hour run, and explain the extended support and Auto Mode line items to a finance stakeholder.",
-    "You can tear the whole environment down with a scripted preflight so that AWS CLI queries for load balancers, EBS volumes, available ENIs, controller security groups and non-NS/SOA Route 53 records all return empty, and the next day's Cost Explorer total is under one dollar.",
-    "You can triage a node group that fails to join, or a cluster that returns Unauthorized, to one of the five standard causes in under ten minutes using describe-nodegroup health issues, SSM session, kubelet logs and the authenticator control plane log."
-  ],
-  "failureModes": [
-    "A customer's /24 private subnets were sized for nodes, not pods; the VPC CNI's default WARM_ENI_TARGET pre-allocated a spare ENI's worth of IPs per node, the subnet hit zero free addresses at 40 percent CPU utilisation, and every new pod sat ContainerCreating with 'failed to assign an IP address to container' while the dashboard showed a healthy cluster.",
-    "Someone added a custom launch template to set the root volume size, which silently reset the IMDS hop limit from 1 to 2; a pentest six months later showed any container could curl 169.254.169.254 and walk away with the node role's ECR and CNI permissions.",
-    "An IRSA trust policy was written with a StringLike on sub of system:serviceaccount:*:* to 'make it work', so every service account in the cluster could assume the S3 role; the fix required a rotation and an incident write-up because CloudTrail showed a dev namespace had actually used it.",
-    "terraform destroy ran for 20 minutes and failed on the VPC because the LB controller's ALB and security group and the CNI's ENIs were not in state; the engineer deleted the cluster manually, the ALB kept serving a dead target group and billing $16 a month for five months before FinOps found it.",
-    "The production Let's Encrypt issuer was used while iterating on the Ingress; after the fifth re-issue in a week the duplicate certificate limit tripped and the demo hostname had no certificate for the customer's Monday review because nobody had started with the staging directory.",
-    "Two clusters (blue and green) ran external-dns with --policy=sync and the same --txt-owner-id, so the A record for the API flipped between two load balancers every minute and users saw intermittent 503s that no single cluster's logs could explain.",
-    "A managed node group update to a new AMI stalled at one node for 15 minutes and failed with PodEvictionFailure because a single-replica Postgres had a PDB with minAvailable 1; the on-call ran it again with --force, which evicted the database mid-write and turned a routine patch into a data recovery.",
-    "A cluster quietly crossed into extended support and the control plane line jumped from $73 to $438 a month; the customer's finance team caught it before the platform team did, and the upgrade then had to be done under pressure across two minors with deprecated APIs still in use."
-  ],
-  "interviewQuestions": [
-    "A customer gives you a VPC with two /24 private subnets and asks you to run a 60-pod application on EKS with room to double. Walk me through the IP budget with real numbers, what breaks first, the two ways you would fix it and what each fix costs in terms of node group changes and cluster downtime.",
-    "Explain exactly what happens from the moment a pod annotated for IRSA calls s3:GetObject to the moment it gets a 200: every component, file, environment variable and STS call. Then tell me what changes under EKS Pod Identity, and give me two concrete situations where you would still choose IRSA.",
-    "cert-manager's Challenge has been 'pending' for 40 minutes; the TXT record is visible in the Route 53 console. Debug it out loud: what do you look at first, what are the four root causes you would rule out in order, and which one is specific to running inside a VPC with private hosted zones?",
-    "Design the ingress and TLS layer for a customer with twelve internal services and three public ones. Compare one ALB per Ingress, a shared ALB via IngressGroup, and an NLB in front of ingress-nginx on cost, blast radius, where private keys live and what happens to a 90-second streaming response on each. What do you recommend and what would change your mind?",
-    "A new managed node group is CREATE_FAILED with 'Instances failed to join the kubernetes cluster' and no nodes appear in kubectl. Give me your ordered diagnostic sequence with the exact commands, the five most likely causes, and how you would get onto an instance in a customer account where SSH is forbidden.",
-    "Your terraform destroy of an EKS environment has been sitting on the VPC for fifteen minutes. Explain why, list the categories of resources that are almost certainly orphaned, describe the teardown script you would have written to prevent this, and tell me how you would prove to the customer's FinOps team that nothing is still billing.",
-    "A customer's cluster enters extended support in three weeks and runs a stateful application with a PodDisruptionBudget. Plan the upgrade end to end: what you check first, the order of control plane, add-ons and node groups, how you handle the PDB, how you know the deprecated API check is clean, and what the cost of doing nothing is per month."
-  ],
-  "proofOfWork": "A public repository named eks-lab containing two Terraform root modules, infra/ (VPC with tagged subnets and one NAT, EKS with access entries, a Spot-plus-on-demand AL2023 managed node group behind a launch template with IMDSv2 hop limit 1 and a gp3 root volume, the five add-ons with pinned versions, IRSA roles for the LB controller, cert-manager, external-dns and the EBS CSI driver, a delegated Route 53 zone and an aws_budgets_budget) and platform/ (Helm releases for the LB controller, ingress-nginx behind an NLB, cert-manager with staging and production ClusterIssuers, external-dns, the gp3 default StorageClass, and the Dokeo chart from topic 9), driven by a Makefile with up, verify, cost and down targets. verify curls https://dokeo.lab.<domain>, asserts the chain via openssl s_client shows a Let's Encrypt production issuer, runs aws sts get-caller-identity from inside the cert-manager pod and shows the same call denied from an unannotated pod plus a timed-out curl to 169.254.169.254, and prints max pods per node next to the CNI's actual allocatable count. cost/ holds the Infracost breakdown produced before apply and the Cost Explorer CSV pulled after a 48-hour run, side by side with the variance explained line by line. down runs the ordered teardown (Ingresses and LoadBalancer Services, PVCs, Route 53 records, platform/ then infra/) followed by a sweep script whose AWS CLI queries for load balancers, EBS volumes, available ENIs, controller security groups, log groups and non-NS/SOA records must all return empty for the target to exit 0. A RUNBOOK.md contains five drills with the exact commands and expected output for IP exhaustion, an IRSA trust policy mismatch, a Challenge stuck on split-horizon DNS, a destroy hang on DependencyViolation and a node group that fails to join, and a one-page 'EKS landing zone review' written for a customer platform team stating endpoint mode, IP budget, identity model, TLS termination point, monthly cost and upgrade policy in the shape you would attach to a kickoff."
+ "i": 16,
+ "topic": "IAM and cloud security: least privilege, roles, IRSA, no long-lived keys",
+ "track": "C. Cloud and IaC",
+ "month": 2,
+ "hours": 6.0,
+ "why": "Every FDE deployment into a customer's AWS account ends at the same gate: their security team opens your Terraform, finds the role your workers run as, and asks 'why does this need s3:* and where do the credentials live?' If the answer involves an access key in an environment variable, the pilot stalls for weeks and you are now the vendor who put an AKIA key in a container. The FDE also owns the other side of the boundary: your product assuming a role in the customer's account, CI deploying without stored secrets, and the ExternalId conversation with their CISO. Being able to write the worker policy by hand, wire IRSA correctly the first time, and read an AccessDenied message to its root cause in ten minutes is what separates the engineer who unblocks go-live from the one who files a ticket with the platform team.",
+ "prerequisites": [
+  "Kubernetes from topics 7 and 8: what a ServiceAccount is, how a projected volume mounts a token into a pod, that a mutating admission webhook rewrites the Pod spec at creation time (IRSA is exactly those three things glued to STS), and enough RBAC to keep 'Kubernetes RBAC' and 'AWS IAM' straight when a customer conflates them in a review",
+  "AWS networking and compute from topic 13: EC2 instance lifecycle, Lambda, VPC endpoints (aws:SourceVpce), security groups, and the link-local 169.254.0.0/16 range where IMDS and container credential endpoints live",
+  "AWS data from topic 14: S3 bucket versus object ARNs, SSE-KMS, Secrets Manager, and DynamoDB table ARNs, since those are the resources every worker policy scopes",
+  "Terraform from topic 12: data.aws_iam_policy_document, aws_iam_role, aws_iam_openid_connect_provider, and why a secret in state is a secret in plaintext",
+  "Networking from topic 2: TLS, HTTP headers, and enough JWT to base64-decode a token payload and read iss, sub, aud, exp; every keyless mechanism in this topic is an OIDC JWT exchanged for STS credentials",
+  "An AWS account you control with a billing alarm, AWS CLI v2, and either a small EKS cluster for two or three hours (about $0.10/hour for the control plane plus one t3.small node) or eksctl to create one on demand; flaws.cloud needs only the CLI"
+ ],
+ "subtopics": [
+  {
+   "name": "Policy evaluation order: why an Allow is never the whole story",
+   "learn": "Trace a request through the evaluation logic in the order AWS applies it: implicit deny by default, any explicit Deny anywhere wins, then the request must be allowed by (in a single account) the SCP, the permissions boundary if one is attached, the session policy if one was passed to AssumeRole, and finally either an identity-based policy or a resource-based policy. Know the same-account shortcut (a resource policy that names the principal is sufficient on its own) and the cross-account rule (identity policy in the caller's account AND resource policy in the resource's account must both allow). Know the two nuances that bite: a resource policy that names a role ARN also matches that role's sessions, but one that names a specific assumed-role session ARN does not match the role; and KMS key policies are the one resource policy that is required even for same-account access. Be able to say which document you would open first for a given AccessDenied.",
+   "minutes": 25,
+   "resource": {
+    "label": "IAM User Guide: Policy evaluation logic",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic.html"
+   }
+  },
+  {
+   "name": "Policy grammar and ARN shapes you must write without a reference",
+   "learn": "Write the JSON from memory: Version 2012-10-17 (without it, policy variables like ${aws:username} are treated as literals), Statement array, Sid, Effect, Action or NotAction, Resource or NotResource, Condition, and Principal only in resource-based and trust policies. Know the ARN format arn:partition:service:region:account-id:resource and the per-service quirks: S3 bucket ARNs have no region or account, s3:ListBucket targets the bucket ARN while s3:GetObject targets bucket/*, Secrets Manager secret ARNs end in a six-character random suffix so you match them with -??????, and actions such as ec2:DescribeInstances or s3:ListAllMyBuckets do not support resource-level permissions and require Resource *. Treat iam:PassRole as the privilege-escalation action it is: whoever can pass an admin role to Lambda or ECS is an admin, so scope it by Resource and by the iam:PassedToService condition. Know the limits: 6144 characters for a managed policy, 10240 for inline on a role, 10 managed policies per role by default.",
+   "minutes": 30,
+   "resource": {
+    "label": "IAM User Guide: IAM JSON policy elements reference",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements.html"
+   }
+  },
+  {
+   "name": "Condition keys and operators: the difference between scoped and theatre",
+   "learn": "Use the global keys that actually constrain blast radius: aws:SourceArn and aws:SourceAccount in service trust policies, aws:PrincipalOrgID in resource policies, aws:PrincipalTag and aws:ResourceTag for ABAC, aws:SecureTransport for TLS-only buckets, aws:SourceVpce to pin access to a VPC endpoint, aws:RequestedRegion in SCPs, aws:CalledVia and aws:ViaAWSService for service-mediated calls, and service keys such as kms:ViaService, s3:prefix, sts:ExternalId and iam:PassedToService. Know the operators (StringEquals, StringLike, ArnLike, Bool, Null, IpAddress, DateGreaterThan) and the two modifiers that change semantics: the ...IfExists suffix, and ForAllValues/ForAnyValues for multi-valued keys such as aws:TagKeys. Memorise the classic trap: aws:MultiFactorAuthPresent is absent, not false, on requests signed with long-term keys, so a Deny with Bool false never matches and you must write BoolIfExists or use Null. Know that a wrongly typed key in a Condition is not an error; it just silently never matches, which is why validate-policy matters.",
+   "minutes": 25,
+   "resource": {
+    "label": "IAM User Guide: AWS global condition context keys",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html"
+   }
+  },
+  {
+   "name": "Exercise: write the worker policy by hand and validate it",
+   "learn": "Write, from a blank file, the identity policy for a queue worker: sqs:ReceiveMessage, sqs:DeleteMessage, sqs:ChangeMessageVisibility and sqs:GetQueueAttributes on one queue ARN; s3:GetObject on arn:aws:s3:::bucket/input/* and s3:ListBucket on the bucket ARN with a s3:prefix condition; s3:PutObject on bucket/output/*; secretsmanager:GetSecretValue on one secret ARN with the -?????? suffix; kms:Decrypt on the customer-managed key constrained by kms:ViaService secretsmanager.<region>.amazonaws.com; and logs:CreateLogStream plus logs:PutLogEvents on one log group and its streams. Run `aws accessanalyzer validate-policy --policy-type IDENTITY_POLICY --policy-document file://worker.json` and drive the findings to zero ERROR and zero SECURITY_WARNING, then run parliament locally for the same check offline. Know what validate-policy catches (invalid actions, mismatched action and resource types, overly permissive wildcards, unsupported condition keys) and what it cannot (whether the policy is more than the job needs). Keep this policy: the proof-of-work repo and the interview whiteboard both reuse it.",
+   "minutes": 35,
+   "resource": {
+    "label": "IAM User Guide: Validate policies with IAM Access Analyzer",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-policy-validation.html"
+   }
+  },
+  {
+   "name": "Roles, trust policies and STS sessions",
+   "learn": "A role is two documents: a trust policy (who may call sts:AssumeRole, sts:AssumeRoleWithWebIdentity or sts:AssumeRoleWithSAML) and one or more permission policies. AssumeRole returns an ASIA access key, a secret, a session token and an Expiration; DurationSeconds runs from 900 seconds up to the role's MaxSessionDuration (1 hour by default, 12 hours maximum), and any session obtained through role chaining is capped at 1 hour regardless. The RoleSessionName you pass becomes the CloudTrail identity arn:aws:sts::acct:assumed-role/RoleName/SessionName, so make it meaningful (pod name, CI run id, human username); SourceIdentity does the same across chains and cannot be changed downstream. Know the trust-policy footgun: naming a specific role ARN as Principal stores the role's unique AROA id, so deleting and recreating that role silently breaks the trust; name the account root and constrain with the identity policy on the other side, or use aws:PrincipalArn in a Condition. Confirm what you are with `aws sts get-caller-identity` before debugging anything else.",
+   "minutes": 25,
+   "resource": {
+    "label": "IAM User Guide: Roles terms and concepts",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles.html#id_roles_terms-and-concepts"
+   }
+  },
+  {
+   "name": "The credential provider chain and how to see which link fired",
+   "learn": "Know the order the SDKs walk: explicit code parameters, environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN), web identity (AWS_ROLE_ARN plus AWS_WEB_IDENTITY_TOKEN_FILE), shared config profiles (role_arn with source_profile or credential_source, sso-session, credential_process), container credentials (AWS_CONTAINER_CREDENTIALS_RELATIVE_URI on 169.254.170.2 for ECS, or AWS_CONTAINER_CREDENTIALS_FULL_URI plus AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE for EKS Pod Identity on 169.254.170.23), and finally IMDS; the exact ordering differs slightly per SDK, so check the table for the language you ship. Know that temporary credentials are refreshed by the SDK in the background before expiry, so a long-running process never needs to restart for rotation. Debug with `aws configure list` (shows the source of each value), `aws sts get-caller-identity`, `--debug` to watch providers being tried, and AWS_EC2_METADATA_DISABLED=true to stop a laptop from hanging on IMDS. Half of all production 'AccessDenied' tickets are a process that picked up a stale env var ahead of the role you intended.",
+   "minutes": 20,
+   "resource": {
+    "label": "AWS SDKs and Tools Reference Guide: Standardized credential providers",
+    "url": "https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html"
+   }
+  },
+  {
+   "name": "Why a key in a container is a finding",
+   "learn": "Be able to explain, in the customer's security review, exactly what is wrong with an AKIA key in an image or env var: it never expires, it is bound to an IAM user rather than the workload, it is indistinguishable in CloudTrail from anyone who copied it, it cannot be rotated without a redeploy, and it leaks through `docker inspect`, `docker history` (ENV layers persist), `/proc/<pid>/environ`, crash dumps, CI logs and any registry the image is pushed to. Contrast with ASIA credentials from a role: short-lived, scoped, auto-refreshed, attributed to a session name. Know the compliance hooks the customer will cite: CIS AWS Foundations Benchmark on root keys and 90-day rotation, SOC 2 CC6 logical access, and that AWS itself attaches an AWSCompromisedKeyQuarantine policy within minutes of a key appearing in a public repository. Know the detection tooling you will run on their repos and images: trufflehog and gitleaks for AKIA[0-9A-Z]{16} patterns, `aws iam list-access-keys` and `aws iam get-access-key-last-used` for the account side.",
+   "minutes": 20,
+   "resource": {
+    "label": "IAM User Guide: Manage access keys for IAM users",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html"
+   }
+  },
+  {
+   "name": "EC2 instance profiles and IMDSv2 as the SSRF firewall",
+   "learn": "An instance profile is the container for exactly one role attached to an EC2 instance; the SDK fetches ASIA credentials from http://169.254.169.254/latest/meta-data/iam/security-credentials/<role-name>. IMDSv1 answers any GET, which is how an SSRF bug in a web app on the instance (the Capital One breach, and flaws.cloud level 5) becomes stolen role credentials. IMDSv2 requires a PUT to /latest/api/token with X-aws-ec2-metadata-token-ttl-seconds (max 21600) and then that token in the X-aws-ec2-metadata-token header; PUT requests carrying X-Forwarded-For are rejected, and the response hop limit (default 1) means a packet from a container on a bridge network cannot get the token. Enforce with `aws ec2 modify-instance-metadata-options --instance-id i-xxx --http-tokens required --http-put-response-hop-limit 1`, set the account default with `modify-instance-metadata-defaults --http-tokens required`, and prove it with a plain curl returning 401. In Terraform this is metadata_options { http_tokens = \"required\" } on every aws_instance and launch template.",
+   "minutes": 20,
+   "resource": {
+    "label": "EC2 User Guide: Configure the Instance Metadata Service options",
+    "url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html"
+   }
+  },
+  {
+   "name": "ECS task roles and Lambda execution roles: two identities per workload",
+   "learn": "Separate the ECS taskRoleArn (what your code is allowed to do) from the executionRoleArn (what the ECS agent needs: ecr:GetAuthorizationToken and pulls, logs:CreateLogStream and PutLogEvents, secretsmanager:GetSecretValue for secrets injected into env); mixing them is the most common over-permissioning in customer task definitions. Task credentials are served at 169.254.170.2 through AWS_CONTAINER_CREDENTIALS_RELATIVE_URI, and on the EC2 launch type you must block tasks from reaching the instance role with ECS_AWSVPC_BLOCK_IMDS=true in ecs.config or an iptables rule, otherwise every task inherits the node's permissions. Lambda's execution role credentials arrive as temporary AWS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN env vars, and the function needs only its own log group. Whoever registers the task definition or creates the function needs iam:PassRole on that specific role with iam:PassedToService set to ecs-tasks.amazonaws.com or lambda.amazonaws.com, never PassRole on *.",
+   "minutes": 15,
+   "resource": {
+    "label": "Amazon ECS Developer Guide: Task IAM role",
+    "url": "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html"
+   }
+  },
+  {
+   "name": "IRSA mechanics end to end, and debugging it when the pod cannot assume",
+   "learn": "Wire it by hand once: read the cluster's issuer with `aws eks describe-cluster --query cluster.identity.oidc.issuer`, create an IAM OIDC identity provider for it (aws_iam_openid_connect_provider with the thumbprint, or `eksctl utils associate-iam-oidc-provider`), write a trust policy with Principal Federated set to that provider ARN, Action sts:AssumeRoleWithWebIdentity, and StringEquals on <issuer-host>:sub = system:serviceaccount:<namespace>:<sa-name> and <issuer-host>:aud = sts.amazonaws.com, then annotate the ServiceAccount with eks.amazonaws.com/role-arn. The amazon-eks-pod-identity-webhook mutates pods at creation, injecting AWS_ROLE_ARN, AWS_WEB_IDENTITY_TOKEN_FILE=/var/run/secrets/eks.amazonaws.com/serviceaccount/token, AWS_STS_REGIONAL_ENDPOINTS=regional and a projected volume with audience sts.amazonaws.com and expirationSeconds 86400; the SDK's web identity provider then exchanges the JWT for ASIA credentials. Debug in order: `kubectl describe pod` shows the env vars (if not, the annotation was added after the pod existed or the SA is wrong; restart the pod); `kubectl exec ... -- cat $AWS_WEB_IDENTITY_TOKEN_FILE | cut -d. -f2 | base64 -d` shows the sub and aud you must match exactly in the trust policy; 'Not authorized to perform sts:AssumeRoleWithWebIdentity' means the trust policy condition does not match (namespace typo, wrong OIDC id, StringLike wildcard that does not cover it). Never write sub as system:serviceaccount:*:* with StringLike; that is every pod in the cluster.",
+   "minutes": 35,
+   "resource": {
+    "label": "Amazon EKS User Guide: IAM roles for service accounts",
+    "url": "https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html"
+   }
+  },
+  {
+   "name": "EKS Pod Identity versus IRSA: when to pick which",
+   "learn": "Pod Identity replaces the per-cluster OIDC provider with a single service principal: the trust policy allows pods.eks.amazonaws.com to sts:AssumeRole and sts:TagSession, and the mapping lives in `aws eks create-pod-identity-association --cluster-name X --namespace ns --service-account sa --role-arn ...` rather than a ServiceAccount annotation. The eks-pod-identity-agent add-on (a DaemonSet) serves credentials on 169.254.170.23 and the SDK reaches it through the container credential provider with AWS_CONTAINER_CREDENTIALS_FULL_URI and AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE, so it needs SDK versions from late 2023 or newer. Sessions carry tags (eks-cluster-name, kubernetes-namespace, kubernetes-service-account, kubernetes-pod-name) you can use in aws:PrincipalTag conditions for ABAC, and one role can serve many clusters without editing trust. Limits to state in a design review: EC2 nodes only (no Fargate at time of writing), Linux first, and cross-account access via role chaining. Pick IRSA when the customer already runs it, has Fargate, or uses older SDKs; pick Pod Identity for new clusters where you want to stop managing OIDC providers per cluster.",
+   "minutes": 15,
+   "resource": {
+    "label": "Amazon EKS User Guide: EKS Pod Identities",
+    "url": "https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html"
+   }
+  },
+  {
+   "name": "Keyless CI: GitHub Actions to AWS with OIDC",
+   "learn": "Create an IAM OIDC provider for https://token.actions.githubusercontent.com with audience sts.amazonaws.com, give the job `permissions: id-token: write` and `contents: read`, and use aws-actions/configure-aws-credentials with role-to-assume; the action requests a JWT from GitHub and calls sts:AssumeRoleWithWebIdentity. The trust policy must have two conditions: StringEquals on token.actions.githubusercontent.com:aud = sts.amazonaws.com AND a StringEquals or tight StringLike on :sub, e.g. repo:org/repo:ref:refs/heads/main or repo:org/repo:environment:production. A trust policy with only the aud condition lets any GitHub repository on the internet assume your deploy role, and sub set to repo:org/* lets any repo in the org; both are real findings. Know that pull_request events from forks produce a different sub, that reusable workflows expose job_workflow_ref for pinning, and that you can customise the sub claim format per repo through the GitHub API when you need environment plus branch. Session duration comes from role-duration-seconds and is bounded by MaxSessionDuration.",
+   "minutes": 20,
+   "resource": {
+    "label": "GitHub Docs: Configuring OpenID Connect in Amazon Web Services",
+    "url": "https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws"
+   }
+  },
+  {
+   "name": "Humans without keys: Identity Center profiles, MFA conditions, root hygiene",
+   "learn": "Humans use IAM Identity Center permission sets, not IAM users: `aws configure sso` writes an sso-session block into ~/.aws/config, `aws sso login --profile x` caches a short-lived token under ~/.aws/sso/cache, and the CLI mints role credentials per profile for 1 to 12 hours as set on the permission set. For legacy accounts that still have user keys, aws-vault keeps them in the OS keychain and hands processes only session tokens. Where IAM users still exist, the MFA guard is a Deny on everything except the MFA and password actions with BoolIfExists aws:MultiFactorAuthPresent false. Root: hardware MFA, no access keys, and `aws iam get-account-summary` showing AccountAccessKeysPresent 0 is the line you paste into the customer's evidence folder.",
+   "minutes": 10,
+   "resource": {
+    "label": "AWS CLI User Guide: Configuring IAM Identity Center authentication",
+    "url": "https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html"
+   }
+  },
+  {
+   "name": "Cross-account roles, ExternalId and the confused deputy",
+   "learn": "The standard FDE integration is your product's role in your account assuming a role the customer creates in theirs: their trust policy names your account (or your specific role ARN via aws:PrincipalArn) and requires sts:ExternalId equal to a value you generated and showed them; your identity policy allows sts:AssumeRole on their role ARN. Be able to explain confused deputy in one breath: without ExternalId, a malicious customer of yours could hand you the ARN of a different customer's role, and your service would happily assume it because your account is trusted; the ExternalId you generate per tenant is the proof that the caller was actually the one who set up the integration, which is why the vendor, not the customer, must mint it. Apply the same defence to service principals: any trust or resource policy with Principal Service (cloudtrail.amazonaws.com, sns.amazonaws.com, events.amazonaws.com) must carry aws:SourceArn or aws:SourceAccount, or another account's CloudTrail can write into your bucket. Know which resource policies you will touch in customer accounts (S3 bucket, KMS key, SQS, SNS, Lambda, Secrets Manager), that aws:PrincipalOrgID is the clean way to say 'anyone in our org', and that the S3 AuthenticatedUsers grantee means every AWS account on earth.",
+   "minutes": 20,
+   "resource": {
+    "label": "IAM User Guide: The confused deputy problem",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/confused-deputy.html"
+   }
+  },
+  {
+   "name": "Guardrails that let developers create roles safely: boundaries and SCPs",
+   "learn": "A permissions boundary is a managed policy attached to a user or role that caps what its identity policies can grant; the effective permission is the intersection, and the boundary itself grants nothing. The delegated-admin pattern you will propose to customers who refuse to let you create roles: your deploy role may iam:CreateRole, iam:AttachRolePolicy and iam:PutRolePolicy only when iam:PermissionsBoundary equals the approved boundary ARN, and the boundary denies iam:DeleteRolePermissionsBoundary and iam:PutRolePermissionsBoundary, so nothing you create can escalate. SCPs are the organisation-level ceiling: they apply to every principal in member accounts including root, never grant, and are commonly used to deny leaving the org, deny regions outside an allow-list with aws:RequestedRegion (exempting global services), deny disabling CloudTrail or GuardDuty, and deny iam:CreateUser and iam:CreateAccessKey so no new long-lived keys appear. Resource control policies extend the same idea to the resource side, for example denying S3 access to principals outside aws:PrincipalOrgID. When an AccessDenied cites 'an explicit deny in a service control policy' you are done debugging and start negotiating.",
+   "minutes": 20,
+   "resource": {
+    "label": "IAM User Guide: Permissions boundaries for IAM entities",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html"
+   }
+  },
+  {
+   "name": "Right-sizing from evidence: CloudTrail, Access Analyzer generation, last-accessed, iamlive",
+   "learn": "Never guess a policy down; measure it. `aws accessanalyzer start-policy-generation` reads up to 90 days of CloudTrail for a role and emits a policy of the actions actually used (action-level for services that report it, service-level otherwise). `aws iam generate-service-last-accessed-details --arn <role> --granularity ACTION_LEVEL` then `get-service-last-accessed-details` tells you which of the granted services and actions were touched and when, so you can delete the rest with evidence; the paid unused-access analyzer does the same continuously and flags roles and keys idle for 90 days. For a workload you can run locally, iamlive sits as a proxy (or via AWS_CSM_ENABLED=true client-side monitoring) and writes the least-privilege policy from the calls the SDK actually makes. Run `aws iam generate-credential-report` then `get-credential-report --query Content --output text | base64 -d` for the CSV of every user's key ages and last-used dates; it is the first artifact you produce in a customer account.",
+   "minutes": 20,
+   "resource": {
+    "label": "IAM User Guide: Generate policies based on access activity",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/access-analyzer-policy-generation.html"
+   }
+  },
+  {
+   "name": "Debugging AccessDenied in fifteen minutes",
+   "learn": "Read the message before anything else: since 2021 it names the policy type, e.g. 'because no identity-based policy allows the s3:GetObject action', 'with an explicit deny in a service control policy', 'because no resource-based policy allows', 'with an explicit deny in a permissions boundary'; each clause tells you which document to open. Then `aws sts get-caller-identity` to confirm the principal is the one you think, then CloudTrail (errorCode AccessDenied with the same errorMessage; remember S3 and DynamoDB data events are not in a default management trail), then `aws iam simulate-principal-policy --policy-source-arn <role> --action-names s3:GetObject --resource-arns <arn>` to see EvalDecision and MatchedStatements; the simulator cannot see resource policies unless you pass --resource-policy and cannot see anything in another account. Know the disguised cases: S3 returns 403 instead of 404 for a missing object when you lack s3:ListBucket, a GetObject denial on an SSE-KMS bucket is usually kms:Decrypt, EC2 encoded messages need `aws sts decode-authorization-message`, and IAM is eventually consistent so a policy you attached five seconds ago may not be live yet.",
+   "minutes": 20,
+   "resource": {
+    "label": "IAM User Guide: Troubleshoot access denied error messages",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/troubleshoot_access-denied.html"
+   }
+  },
+  {
+   "name": "The migration runbook: every key in the stack replaced by a role",
+   "learn": "Inventory first: the credential report plus `aws iam list-users` and `list-access-keys`, then trufflehog or gitleaks across repos, CI variable stores, Helm values, .env files and Terraform state for AKIA patterns. Map each consumer to its keyless mechanism: EC2 to instance profile, ECS to task role, Lambda to execution role, EKS to IRSA or Pod Identity, CI to OIDC, humans to Identity Center, third-party SaaS to cross-account role with ExternalId, on-prem servers to IAM Roles Anywhere with X.509. Cut over one consumer at a time: attach the role, deploy, confirm `sts get-caller-identity` inside the workload shows an assumed-role ARN, watch `get-access-key-last-used` go stale for a week, `aws iam update-access-key --status Inactive` (reversible), wait another week, then `delete-access-key` and delete the user. In Terraform express everything as data.aws_iam_policy_document for trust and permissions and never create an aws_iam_access_key resource, because the secret lands in state in plaintext.",
+   "minutes": 15,
+   "resource": {
+    "label": "IAM User Guide: Find unused credentials",
+    "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_finding-unused.html"
+   }
+  },
+  {
+   "name": "Attacker's view: the flaws.cloud kill chain mapped to controls",
+   "learn": "Work every level with the CLI and, for each, write down the misconfiguration, the preventive control and the detective signal: level 1 is a public ListBucket on a static-site bucket found from its DNS name (S3 Block Public Access at the account level); level 2 grants to AuthenticatedUsers, which is any AWS account (same fix, plus Access Analyzer external-access findings); level 3 is an AKIA key in a .git directory uploaded to S3 (secret scanning, rotation, no keys at all); level 4 is a public EBS snapshot containing credentials on disk (`aws ec2 describe-snapshots --owner-ids self --restorable-by-user-ids all`, and again no keys on disk); level 5 is an open HTTP proxy on EC2 used for SSRF to IMDSv1 (IMDSv2 required, hop limit 1); level 6 is a key holding SecurityAudit used to enumerate Lambda and API Gateway (least privilege, unused-access findings). flaws2.cloud adds the container case you are here for: task credentials readable at 169.254.170.2 through an over-trusting app, then the defender path reading CloudTrail for the whole chain. Your write-up of this mapping is what you hand a customer when they ask why your review found their setup wanting.",
+   "minutes": 20,
+   "resource": {
+    "label": "flaws.cloud: AWS security CTF (levels 1-6)",
+    "url": "http://flaws.cloud/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can write, from a blank file and without documentation, a least-privilege identity policy for a queue worker touching SQS, an S3 prefix, one Secrets Manager secret and its KMS key, and it passes `aws accessanalyzer validate-policy` with zero ERROR or SECURITY_WARNING findings on the first run.",
+  "You can convert a container that ships an AKIA key in its environment to IRSA or EKS Pod Identity, show `aws sts get-caller-identity` inside the pod returning an assumed-role ARN with a meaningful session name, and decode the projected token to show the exact sub and aud claims the trust policy matches.",
+  "You can take an AccessDenied from a customer's Slack message and, using only the error text, CloudTrail and simulate-principal-policy, name the policy type and statement responsible within fifteen minutes, including the disguised KMS and S3 403-for-404 cases.",
+  "You can write the cross-account trust policy for a SaaS integration with ExternalId and aws:PrincipalArn, and explain to a CISO in two sentences which attack ExternalId prevents and why the vendor must generate it.",
+  "You can make a GitHub Actions workflow deploy to an AWS account with no stored secrets, with a trust policy pinned to one repository and one branch or environment, and demonstrate that a workflow from another repository is refused.",
+  "You can enforce IMDSv2 on an instance and as the account default, prove with curl that an untokened GET returns 401, and prove from a pod that the node's credentials are unreachable.",
+  "You can produce a credential report for an account, list every long-lived key with its last-used date, and execute the deactivate, observe, delete sequence with a documented rollback for each key.",
+  "You can complete all six flaws.cloud levels plus flaws2.cloud and hand over a one-page table mapping each level to the misconfiguration, the preventive control and the CloudTrail or GuardDuty signal that would have detected it."
+ ],
+ "failureModes": [
+  "A GitHub OIDC trust policy that conditions only on aud, or on sub with repo:org/*: any repository on GitHub (or any repo in the org) can assume the production deploy role, and the first sign is CloudTrail showing AssumeRoleWithWebIdentity from a workflow nobody recognises.",
+  "The IRSA annotation is added to a ServiceAccount after its pods were created; the webhook only mutates at admission, so half the fleet keeps using the node role, which works because the node role is over-permissioned, and everything breaks six months later when the platform team finally tightens the node role.",
+  "EKS nodes run with an IMDS hop limit of 2 for Docker-bridge compatibility, so every pod can read the node role's credentials; one SSRF in one tenant's app becomes cluster-wide access to ECR, autoscaling and every bucket the node role was ever granted.",
+  "A worker policy names a Secrets Manager secret by the exact ARN copied from the console; Terraform recreates the secret with a new six-character suffix during a refactor and the worker starts failing with AccessDenied at 03:00 while the secret visibly exists.",
+  "A long batch job assumes the customer role through a CI role and requests DurationSeconds 14400; STS rejects it with the one-hour role-chaining limit, so someone 'fixes' it by baking a user key into the job, and the key is still there at the next audit.",
+  "The customer's MFA-required deny is written with Bool aws:MultiFactorAuthPresent false; the key is absent on long-term-key requests so the deny never fires, and every IAM user with keys has been bypassing MFA since the policy was written.",
+  "A CI role holds iam:PassRole on Resource *; a contributor with push access passes the account's admin role to a throwaway Lambda, invokes it, and has full control of the account without a single access key ever leaving the building."
+ ],
+ "interviewQuestions": [
+  "The customer's security team flagged an AWS access key in the environment of the worker we deployed on their EKS cluster. Explain to me, as if I were their CISO, why that is a finding, what you will replace it with, and what evidence you will send them to close the finding.",
+  "Walk through IAM evaluation for a request from an IRSA-assumed role in account A reading an object in account B's SSE-KMS bucket. Which documents have to agree, in what order are they evaluated, and where do you look first when it returns AccessDenied?",
+  "Design the identity model for a multi-tenant pilot where our control plane in our account reads each customer's S3 data in their account. What do their roles and trust policies look like, what stops customer X's ARN from being used to read customer Y's data, and who generates the ExternalId and why?",
+  "A pod on the customer's cluster logs 'Not authorized to perform sts:AssumeRoleWithWebIdentity'. Give me the ordered checks you run with kubectl and the AWS CLI, and the three most likely root causes in order of frequency.",
+  "You inherit a nightly ETL role with AdministratorAccess. How do you shrink it to least privilege without breaking the job, how long does that take, and how do you know when you are done?",
+  "Whiteboard the policy for a worker that reads one SQS queue, reads objects under one S3 prefix and one Secrets Manager secret encrypted with a customer-managed KMS key. Then tell me what is still wrong with it and what you would need from the customer to fix it.",
+  "Design CI that deploys into a customer's account with zero stored secrets. Show me the trust policy, tell me which sub condition you choose and why, and describe what an attacker could do if you got it wrong."
+ ],
+ "proofOfWork": "A public repository named keyless-aws-lab containing Terraform that expresses every identity in a small stack as a role with a hand-written data.aws_iam_policy_document: the queue worker's IRSA role and its validated policy, an equivalent EKS Pod Identity association, a GitHub OIDC deploy role pinned to one repo and environment, a developer role that can only create roles under a permissions boundary, and a cross-account integration role with ExternalId and aws:PrincipalArn. A `make audit` target runs the credential report and fails if any user has an active access key, runs `aws accessanalyzer validate-policy` over every policy file and fails on ERROR or SECURITY_WARNING, checks `describe-instances` for any instance with HttpTokens not required, and lists any role with iam:PassRole on Resource *. A `make prove` target execs into the worker pod, prints `aws sts get-caller-identity`, decodes the projected token's sub and aud, and shows the matching AssumeRoleWithWebIdentity event from CloudTrail. The README carries the flaws.cloud and flaws2.cloud debrief as a table (level, misconfiguration, preventive control, detective signal) and a ten-minute recorded walkthrough of converting a container that had an AKIA key to IRSA, ending with the key's deactivation and deletion in the credential report."
 }

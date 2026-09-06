@@ -1,209 +1,209 @@
 {
-  "i": 3,
-  "topic": "Performance and troubleshooting on a single box",
-  "track": "A. Linux, Networking, Shell",
-  "month": 1,
-  "hours": 5.0,
-  "why": "An FDE is the person on the customer's VM, pod or on-prem box when their own team says 'it's slow' and there is no dashboard, no APM and often no root. You have to name the saturated resource in minutes using only what is already installed, do it while a customer engineer watches over your shoulder, and then explain the cause in one sentence they will repeat to their CTO. The systems you ship (Kaupex, DefenderMate) will be judged by their worst hour, and the worst hour is almost always a disk that filled, a core that pinned, a cgroup that throttled, or an OOM kill nobody read.",
-  "prerequisites": [
-    "Shell fluency from 'Shell mastery and scripting' (topic 0): pipes, awk column extraction, watch, sudo, reading man pages fast",
-    "Linux internals from topic 1: process lifecycle and states, /proc layout, systemd units and journalctl -u/-k, file permissions and mounts",
-    "TCP basics from 'Networking' (topic 2): socket states, LISTEN backlog, what a retransmit is, ss and tcpdump at a beginner level",
-    "Virtual memory vocabulary: page, page cache, swap, RSS vs virtual size, page fault (major vs minor)",
-    "A Linux box you are allowed to break with sudo (the Hetzner VPS from topic 1 or a local VM) with sysstat, strace, linux-tools/perf, bcc-tools and py-spy installed",
-    "Enough Python to read a py-spy dump of your own uvicorn/gunicorn worker and recognise which frame is yours"
-  ],
-  "subtopics": [
-    {
-      "name": "USE method and the three anti-methods",
-      "learn": "For every physical and logical resource (each CPU, memory, each disk, each NIC, the storage controller, mutexes, connection pools) check Utilization (fraction of the interval it was busy), Saturation (queue length or wait time beyond capacity) and Errors (counts), in the order errors, saturation, utilization because errors are cheap to check and often decisive. Understand why utilization hides bursts: 50% over one second can be 100% for 500 ms, which is why you sample at 1 s and trust saturation over utilization. Name the anti-methods you will be tempted into on a live customer call: streetlight (only looking where your favourite tool shines), random-change (restart it and see), blame-someone-else (it's the network).",
-      "minutes": 15,
-      "resource": {
-        "label": "ACM Queue: Brendan Gregg, 'Thinking Methodically about Performance' (the USE method and the anti-methods it replaces)",
-        "url": "https://queue.acm.org/detail.cfm?id=2413037"
-      }
-    },
-    {
-      "name": "USE checklist for Linux: resource to metric to command",
-      "learn": "Memorise the map so you never hunt for a tool under pressure: CPU utilization = vmstat us+sy, mpstat -P ALL; CPU saturation = vmstat r greater than nproc, /proc/pressure/cpu, runqlat; memory utilization = free -m 'available'; memory saturation = vmstat si/so, sar -B pgscan, /proc/pressure/memory; disk utilization = iostat -xz %util (with caveats); disk saturation = aqu-sz and await; NIC utilization = sar -n DEV rxkB/s against ethtool Speed; NIC errors and saturation = sar -n EDEV rxdrop/txdrop, nstat ListenOverflows. Know which checks need root (perf, /proc/PID/stack, bcc) and which you can run as an unprivileged customer account, because that is often what you will be given.",
-      "minutes": 15,
-      "resource": {
-        "label": "Brendan Gregg: USE Method Linux Performance Checklist",
-        "url": "https://www.brendangregg.com/USEmethod/use-linux.html"
-      }
-    },
-    {
-      "name": "The 60-second triage sequence, run from memory",
-      "learn": "Run ten commands in a fixed order and read one field in each: uptime (three load averages, is it rising or falling), dmesg -T | tail (OOM kills, I/O errors, hung_task, conntrack table full), vmstat 1 (r, si/so, us sy id wa st; discard the first line because it is the since-boot average), mpstat -P ALL 1 (a single hot core), pidstat 1 (which PID, %usr vs %system), iostat -xz 1 (r/s w/s await aqu-sz), free -m (available), sar -n DEV 1 (rxkB/s vs link speed), sar -n TCP,ETCP 1 (active/s passive/s retrans/s), top (confirm). Have a fallback one-liner for boxes without sysstat: cat /proc/loadavg /proc/pressure/*; grep -E 'MemAvailable|SwapFree|Dirty' /proc/meminfo. Time yourself: the whole pass should take under two minutes including reading.",
-      "minutes": 20,
-      "resource": {
-        "label": "Netflix Tech Blog: Linux Performance Analysis in 60,000 Milliseconds (the ten-command first-minute checklist, field by field)",
-        "url": "https://netflixtechblog.com/linux-performance-analysis-in-60-000-milliseconds-accc10403c55"
-      }
-    },
-    {
-      "name": "Load average and pressure stall information",
-      "learn": "Linux load average counts runnable tasks plus tasks in uninterruptible sleep (TASK_UNINTERRUPTIBLE, shown as D in ps) since a 1993 patch, exponentially damped over 1, 5 and 15 minutes. So load 40 on 4 cores with 5% CPU means disk, NFS, driver or lock waits, not CPU. Find them: ps -eo pid,stat,wchan:32,comm | awk '$2 ~ /D/' then cat /proc/PID/stack (root) to see the kernel function it is stuck in. On kernels 4.20 and later prefer /proc/pressure/cpu, /proc/pressure/memory and /proc/pressure/io: 'some avg10' is the percentage of the last 10 s in which at least one task stalled on that resource, 'full avg10' is when all non-idle tasks stalled; any sustained non-zero 'full' for memory or io is a saturation you can quote to the customer.",
-      "minutes": 15,
-      "resource": {
-        "label": "Brendan Gregg: Linux Load Averages: Solving the Mystery",
-        "url": "https://www.brendangregg.com/blog/2017-08-08/linux-load-averages.html"
-      }
-    },
-    {
-      "name": "CPU: top, mpstat -P ALL and pidstat columns",
-      "learn": "Read the top summary line as eight distinct signals: us user, sy kernel (high sy = syscall storm, spinning on locks, or memory reclaim), ni niced, id idle, wa iowait (idle CPU while I/O is outstanding, a disk signal not a CPU one), hi/si hard and soft IRQ (si high on one core = network packet processing on a single RX queue), st steal (the hypervisor took cycles: noisy neighbour or burstable-credit exhaustion on shared vCPUs). In top press 1 for per-core, H for threads, P and M to sort. mpstat -P ALL 1 exposes a single saturated core that the average hides: a GIL-bound Python worker, a single-threaded Node process, or an IRQ pinned to one core (check /proc/interrupts and /proc/irq/*/smp_affinity). pidstat -u 1 for per-process, pidstat -t for threads, pidstat -w for context switches per second. vmstat r at or above nproc sustained is CPU saturation regardless of what %idle says.",
-      "minutes": 25,
-      "resource": {
-        "label": "man7.org: mpstat(1)",
-        "url": "https://man7.org/linux/man-pages/man1/mpstat.1.html"
-      }
-    },
-    {
-      "name": "vmstat 1 line by line",
-      "learn": "Know every column of vmstat 1 cold: procs r (runnable, compare to nproc) and b (blocked in uninterruptible sleep); memory swpd free buff cache; swap si so (KB/s swapped in and out, any sustained non-zero value is memory saturation and explains 'everything is slow'); io bi bo (blocks in/out per second); system in cs (interrupts and context switches, cs far above 100k/s on a small box points at lock contention or a futex storm); cpu us sy id wa st. Use vmstat -w for aligned wide output and vmstat -SM for megabytes, vmstat -s for lifetime counters, vmstat -d for per-disk. Pattern-match: r high plus us high = CPU bound; b high plus wa high = I/O bound; si/so plus high sy = swapping; cs and in both spiking with low us = interrupt or scheduler storm.",
-      "minutes": 15,
-      "resource": {
-        "label": "man7.org: vmstat(8)",
-        "url": "https://man7.org/linux/man-pages/man8/vmstat.8.html"
-      }
-    },
-    {
-      "name": "Memory: what free, /proc/meminfo and smaps_rollup actually say",
-      "learn": "free -m 'used' is not what a customer thinks it is; 'buff/cache' is reclaimable page cache and 'available' (MemAvailable in /proc/meminfo, kernel 3.14 and later) is the only number that decides whether adding RAM helps: low free with high available is a healthy box. Per-process, VSZ is useless for leaks; use RSS from ps -o rss and, when shared libraries skew it, Pss and Pss_Anon from /proc/PID/smaps_rollup. Watch Dirty and Writeback in /proc/meminfo for write-back stalls, Slab and SReclaimable (slabtop) for dentry/inode caches blown up by millions of files, and Shmem for tmpfs (a /dev/shm or tmpfs /tmp full of files is RAM you are paying for). Track major faults with ps -o maj_flt or sar -B majflt/s; a rising rate with si/so non-zero is the box paging its working set.",
-      "minutes": 20,
-      "resource": {
-        "label": "Kernel docs: The /proc Filesystem (meminfo, vmstat, PID entries)",
-        "url": "https://www.kernel.org/doc/html/latest/filesystems/proc.html"
-      }
-    },
-    {
-      "name": "OOM killer: reading the report and steering the victim",
-      "learn": "Read the dmesg block top to bottom: the trigger ('X invoked oom-killer', or 'Memory cgroup out of memory' which means a container limit, not the host), the per-process table with rss and oom_score_adj, then 'Out of memory: Killed process PID (comm) total-vm, anon-rss, file-rss, shmem-rss'. The victim is the highest oom_badness, roughly rss plus oom_score_adj scaled by total pages, so a database with adj 0 loses to a leaking worker someone set to -500. Steer it with OOMScoreAdjust= in systemd units (-1000 exempts entirely, 1000 volunteers) or by writing /proc/PID/oom_score_adj. Know the sysctls that change who gets hurt: vm.overcommit_memory (0 heuristic, 1 always, 2 strict with vm.overcommit_ratio), vm.swappiness, vm.oom_kill_allocating_task, vm.panic_on_oom for hosts you would rather have rebooted than limping. In cgroups check memory.events oom_kill and memory.max before blaming the host.",
-      "minutes": 20,
-      "resource": {
-        "label": "Kernel docs: Documentation for /proc/sys/vm/",
-        "url": "https://www.kernel.org/doc/html/latest/admin-guide/sysctl/vm.html"
-      }
-    },
-    {
-      "name": "Disk I/O: iostat -xz, await vs aqu-sz, and why %util lies",
-      "learn": "Run iostat -xz 1 and ignore the first sample. r/s w/s rkB/s wkB/s give the load; rareq-sz wareq-sz the I/O size (tiny writes with high count = fsync-heavy workload such as a Postgres WAL or SQLite); r_await w_await are milliseconds per completed I/O including queue time (baseline: HDD about 10 ms, SATA SSD under 1 ms, NVMe about 0.1 ms, EBS gp3 1 to 2 ms); aqu-sz is average outstanding requests, above 1 on a single HDD or far above queue depth on NVMe is saturation. %util is only the fraction of time any I/O was outstanding: SSD, NVMe and RAID can sit at 100% while serving far more, so never call saturation from %util alone. Find the process with pidstat -d 1 (kB_rd/s kB_wr/s iodelay) or iotop -oPa. Check dmesg for 'task X blocked for more than 120 seconds' (hung_task) and I/O error or reset lines; a D-state process plus these lines is a storage or NFS problem, not an application bug.",
-      "minutes": 25,
-      "resource": {
-        "label": "man7.org: iostat(1)",
-        "url": "https://man7.org/linux/man-pages/man1/iostat.1.html"
-      }
-    },
-    {
-      "name": "Disk full: space, inodes and deleted-but-open files",
-      "learn": "Three different 'no space left on device' causes, three commands: df -h (blocks), df -i (inodes, exhausted by millions of tiny session, cache or mail files while df -h shows 30%), and du -xsh --max-depth=1 / (-x stays on one filesystem). When df is far above du a deleted file is still held open: lsof +L1, or find /proc/[0-9]*/fd -lname '*(deleted)' -printf '%p -> %l\\n' 2>/dev/null; reclaim it with : > /proc/PID/fd/N (truncate through the fd, do not kill the service). Other places space hides: files shadowed under a mount point (mount --bind / /mnt/root and look), ext4 5% reserved blocks (tune2fs -m), journald (journalctl --disk-usage, --vacuum-size=500M), Docker overlay2 and dangling images (docker system df), core dumps in /var/lib/systemd/coredump. Verify the fix with the same df line you started with.",
-      "minutes": 15,
-      "resource": {
-        "label": "man7.org: lsof(8)",
-        "url": "https://man7.org/linux/man-pages/man8/lsof.8.html"
-      }
-    },
-    {
-      "name": "Process states and the /proc/PID files that explain them",
-      "learn": "Read ps -eo pid,ppid,stat,wchan:30,etime,comm: R running, S sleeping, D uninterruptible (cannot be killed, almost always disk, NFS or a driver), Z zombie (parent has not called wait(); kill or restart the parent, not the zombie), T stopped (a tracer died or someone sent SIGSTOP), l multithreaded. Then go to /proc/PID: status (State, VmRSS, Threads, voluntary_ctxt_switches vs nonvoluntary_ctxt_switches where high nonvoluntary means CPU contention), stack (kernel stack, root), wchan, fd (ls | wc -l against the 'Max open files' line in limits), io (read_bytes, write_bytes), cgroup (which container or slice it belongs to), cwd and exe (a '(deleted)' exe means the binary was replaced under a running process, the classic 'we upgraded but nothing changed'), environ and cmdline (what config it actually started with).",
-      "minutes": 20,
-      "resource": {
-        "label": "man7.org: proc(5)",
-        "url": "https://man7.org/linux/man-pages/man5/proc.5.html"
-      }
-    },
-    {
-      "name": "strace: attach, read, detach, and know the cost",
-      "learn": "Attach with strace -f -tt -T -p PID -o /tmp/st.txt (follow threads, wall-clock timestamps, per-syscall duration, write to file so your terminal does not slow the tracee). Narrow with -e trace=network,file or -e trace=%desc, decode fds to paths and socket endpoints with -yy, widen strings with -s 256, get a syscall count and time summary with -c, and a user stack per syscall with -k. Read the patterns: stuck in futex() is a lock or GIL; read(7, ...) blocked for seconds with fd 7 resolving to a socket is an upstream not answering; connect() EINPROGRESS then poll() timing out is a firewall or dead host; EAGAIN storms are a busy loop; openat() ENOENT loops are a library hunting for config or certificates. Understand the cost: ptrace stops the tracee on every syscall, 10x to 100x slowdown on syscall-heavy servers, so never leave it attached, never on the only database primary at peak, and know that a tracer killed with -9 can leave the tracee stopped. Lower-overhead alternatives are perf trace -p PID and bpftrace.",
-      "minutes": 25,
-      "resource": {
-        "label": "man7.org: strace(1)",
-        "url": "https://man7.org/linux/man-pages/man1/strace.1.html"
-      }
-    },
-    {
-      "name": "perf and flame graphs, including Python via py-spy",
-      "learn": "perf top -p PID for live hottest symbols; perf stat -e task-clock,cycles,instructions,cache-misses,context-switches -p PID -- sleep 10 for IPC (below 1 the process is stalled on memory, above 2 it is genuinely computing; this is why 100% CPU does not mean 'needs more CPU'); perf record -F 99 -g -p PID -- sleep 30 then perf report --stdio --no-children, or perf script | stackcollapse-perf.pl | flamegraph.pl > out.svg with the FlameGraph repo. Stacks break without frame pointers: use --call-graph dwarf for C, C++ and Rust binaries. For Python perf only shows _PyEval_EvalFrameDefault, so use py-spy dump --pid PID (a point-in-time stack of every thread, safe on a live uvicorn or gunicorn worker) and py-spy record -o prof.svg --pid PID --native for a flame graph with your own function names. perf needs kernel.perf_event_paranoid at 1 or lower or root, and inside containers CAP_PERFMON (or CAP_SYS_ADMIN on older kernels).",
-      "minutes": 25,
-      "resource": {
-        "label": "brendangregg/FlameGraph on GitHub (perf record to flame graph: stackcollapse-perf.pl and flamegraph.pl, plus dwarf/frame-pointer caveats)",
-        "url": "https://github.com/brendangregg/FlameGraph"
-      }
-    },
-    {
-      "name": "Off-CPU analysis: slow but not busy",
-      "learn": "When a process shows 3% CPU and still misses its latency target, on-CPU profiling is the wrong tool; measure where it is blocked. Cheap first look: /proc/PID/wchan, /proc/PID/stack, and /proc/PID/schedstat (run time, time waiting on the run queue, timeslices; a large second number means CPU saturation or cgroup throttling, not I/O). perf sched record then perf sched latency shows run-queue delay per task. For the full picture offcputime-bpfcc -p PID 10 (bcc) collects stacks weighted by blocked time, which you render as an off-CPU flame graph. Classify what you find: futex (lock contention), sock_recvmsg or tcp_recvmsg (waiting on an upstream), io_schedule or blk_mq (disk), or plain run-queue wait (CPU).",
-      "minutes": 10,
-      "resource": {
-        "label": "Brendan Gregg: Off-CPU Analysis",
-        "url": "https://www.brendangregg.com/offcpuanalysis.html"
-      }
-    },
-    {
-      "name": "Network as a single-box resource: ss, nstat, conntrack, softirq",
-      "learn": "ss -s for totals and the TIME-WAIT count; ss -tlnp where Recv-Q on a LISTEN socket is the current accept backlog and Send-Q the configured backlog (net.core.somaxconn), a Recv-Q at Send-Q means the app is not calling accept() fast enough; ss -tnp state established '( dport = :5432 )' | wc -l to count a pool's real connections; ss -tni for rto, retrans, cwnd per flow. nstat -az TcpRetransSegs TcpExtListenOverflows TcpExtListenDrops TcpExtTCPSynRetrans (or netstat -s): ListenOverflows climbing is your process, retransmits are the path or the peer. dmesg 'nf_conntrack: table full, dropping packet' means intermittent connection failures under load (raise net.netfilter.nf_conntrack_max or stop tracking that traffic). Ephemeral port exhaustion shows as TIME-WAIT approaching the width of net.ipv4.ip_local_port_range; fix client pooling and keep-alive, not tcp_tw_recycle. sar -n DEV 1 rxkB/s against ethtool eth0 Speed, sar -n EDEV 1 for rxdrop, /proc/net/softnet_stat third column for backlog drops, and top si pinned to one core means a single RX queue or IRQ.",
-      "minutes": 20,
-      "resource": {
-        "label": "man7.org: ss(8)",
-        "url": "https://man7.org/linux/man-pages/man8/ss.8.html"
-      }
-    },
-    {
-      "name": "cgroups v2: the box inside the container",
-      "learn": "Inside a container top, free and nproc report the host; the limits that actually bind live in cgroup v2 under /sys/fs/cgroup (the container sees its own subtree as the root). cpu.max is 'quota period' (200000 100000 means two CPUs); cpu.stat nr_throttled and throttled_usec growing under load is CFS throttling, the reason a pod with limits equal to requests has 10x p99 while the node shows 80% idle. memory.max, memory.current, memory.stat (anon vs file, because page cache counts toward the limit and a file-heavy workload looks like a leak), memory.events oom_kill, io.stat, and per-cgroup PSI in cpu.pressure, memory.pressure, io.pressure. From the host find a pod's cgroup via /proc/PID/cgroup, systemd-cgls and systemd-cgtop. For systemd services the same knobs are CPUQuota=, MemoryMax=, TasksMax= (pids.max: a thread leak hits 'Resource temporarily unavailable' on fork long before the host runs out of anything).",
-      "minutes": 15,
-      "resource": {
-        "label": "Kernel docs: Control Group v2",
-        "url": "https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html"
-      }
-    },
-    {
-      "name": "bcc and bpftrace point tools: one question, near-zero overhead",
-      "learn": "Install bcc-tools (Ubuntu package names end in -bpfcc) and learn the eight that answer questions strace and top cannot: execsnoop (what is being exec'd: cron storms, shell-outs from your app, a health check forking curl 50 times a second), opensnoop -p PID (which files and configs it really reads, and the ENOENTs), biolatency (block I/O latency histogram; bimodal means cache hits vs misses), biosnoop (each I/O with PID and latency), tcpretrans and tcpconnect/tcpaccept (who is talking to whom and what is failing), runqlat (run-queue latency histogram, the direct evidence of CPU saturation or throttling), cachestat (page-cache hit ratio), ext4slower 10 (file operations slower than 10 ms with the process name). bpftrace one-liners cover the rest. These need root, a kernel with BTF for recent versions, and in Kubernetes a privileged debug pod on the node with the host PID namespace.",
-      "minutes": 15,
-      "resource": {
-        "label": "iovisor/bcc on GitHub (tools/ directory and tutorial)",
-        "url": "https://github.com/iovisor/bcc"
-      }
-    },
-    {
-      "name": "Writing the diagnosis note and verifying the fix",
-      "learn": "For every scenario you solve, write one page: the symptom as the customer stated it; the timeline; the resource in USE terms and the single command output line that proved it (paste the line, not a screenshot); the root cause in one sentence a non-Linux engineer can repeat; the fix with the exact command; the verification (the same metric, after, with the number); and the prevention (an alert threshold, a ulimit, log rotation, a cgroup limit). Follow the SRE book loop of hypothesis, test, refine and record the hypotheses you rejected and why, because a note that shows what it ruled out is the one a customer's platform team trusts. Keep raw outputs in an appendix. This is the format for the SadServers notes in the deliverable and for every real incident after it.",
-      "minutes": 15,
-      "resource": {
-        "label": "Google SRE Book: Effective Troubleshooting",
-        "url": "https://sre.google/sre-book/effective-troubleshooting/"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can run the 60-second checklist (uptime, dmesg -T | tail, vmstat 1, mpstat -P ALL 1, pidstat 1, iostat -xz 1, free -m, sar -n DEV 1, sar -n TCP,ETCP 1, top) from memory on a box you have never seen and name the saturated resource in under two minutes.",
-    "Given load average 40 on a 4-core box with 5% CPU, you can list the D-state processes with their wchan and say whether the wait is disk, NFS or a lock, and show the /proc/PID/stack line that proves it.",
-    "You can read one line of iostat -xz 1 and state whether the device is saturated using await and aqu-sz against a stated baseline, and explain in one sentence why %util alone is not evidence on SSD or RAID.",
-    "You can attach strace -f -tt -T -yy to a hung worker, identify the blocking syscall and what its fd points at, detach cleanly, and state the overhead you imposed and why you would not do it on a database primary at peak.",
-    "You can produce a CPU flame graph of your own running Python service with py-spy (and of a C binary with perf record -g) and point at the hottest frame that is your code, not the interpreter.",
-    "You can read an OOM-killer dmesg block and state whether it was a host or cgroup OOM, which process was killed, why it was chosen from the rss and oom_score_adj table, and what OOMScoreAdjust or memory.max change prevents a repeat.",
-    "You can explain why a pod with a 500m CPU limit is slow while the node shows 80% idle, show nr_throttled and throttled_usec climbing in cpu.stat, and say what you would change in the limit and why.",
-    "You can write a one-page diagnosis note (symptom, evidence line, cause, fix, verification, prevention, rejected hypotheses) that a customer's platform team accepts without asking for a screenshot."
-  ],
-  "failureModes": [
-    "A rotated log is deleted while a service still holds the fd: df reports 100%, du reports 40%, the API returns ENOSPC on every write and the on-call deletes unrelated files for an hour before anyone runs lsof +L1.",
-    "Inode exhaustion from millions of small session or cache files: df -h shows 30% used, writes fail with 'No space left on device', and the team resizes the disk twice before someone runs df -i.",
-    "Kubernetes CPU limits set equal to requests: the Python worker is CFS-throttled every 100 ms period, p99 latency goes 10x under a traffic bump, the node dashboard shows 70% idle, and the customer concludes the model is slow.",
-    "One core pinned at 100% by a GIL-bound worker or a single NIC RX queue while fifteen cores idle: top's summary line says 7% CPU, the team adds more replicas on the same box, and only mpstat -P ALL shows the hot core.",
-    "Memory pressure with no single culprit: MemAvailable near zero, si/so non-zero, major faults climbing, everything 'randomly slow', then the OOM killer takes Postgres instead of the leaking worker because nobody set OOMScoreAdjust.",
-    "strace left attached to a production process without -o, or attached without -f to a multi-threaded server so it shows nothing, or the tracer is killed with -9 and the worker stays in T state until someone notices it stopped serving.",
-    "nf_conntrack table full or ephemeral port exhaustion on a webhook-heavy box: intermittent connection failures only under load, retries make it worse, and the one line in dmesg that names the cause is never read."
-  ],
-  "interviewQuestions": [
-    "Load average is 60 on an 8-vCPU customer host, CPU is 10% busy and iostat %util is 5%. Walk me through your first three minutes, the exact commands, and what you expect to find.",
-    "A customer's FastAPI pod has a 500m CPU limit and its p99 tripled after a traffic increase; node metrics show 70% idle. Diagnose it, show me the evidence you would collect, and explain why raising the limit is not the whole fix.",
-    "Explain what iostat -xz 1 tells you and what does not. Which fields let you say a device is saturated, and give me a case where %util is 100% and the disk is fine.",
-    "You need to look inside a stuck worker in production. When do you reach for strace, when for perf, when for py-spy, when for bcc, and what is the cost and blast radius of each?",
-    "A box has 200 MB free out of 64 GB and the customer wants to buy RAM. How do you decide whether there is a memory problem at all? Name the exact numbers you would read and the threshold that changes your answer.",
-    "The OOM killer just killed the database instead of the leaking Python worker. Explain how the victim is chosen and how you would prevent a recurrence without adding memory.",
-    "Design what you would leave behind on a single customer VM with no Kubernetes and no cloud metrics so that next time it slows down they can hand you a diagnosis instead of a complaint. What do you sample, at what cadence, where does it go, and what is the one alert you would set?"
-  ],
-  "proofOfWork": "A 15-minute recorded screencast in which you break your own Hetzner VPS three ways without telling your future self which is which (fill the disk through a deleted-but-open log, pin one core with stress-ng --cpu 1, and throttle the Kaupex worker with a systemd CPUQuota=20% drop-in), then diagnose each one blind from the 60-second checklist while narrating what every field means and stopping the moment you have the evidence line. Alongside it, a one-page 'single-box triage card' in markdown checked into the Dokeo repo's runbooks: the ten commands, the one field to read in each, the threshold that means saturated, and the follow-up tool for each resource (strace, perf, py-spy, bcc), formatted so a customer engineer with no Linux performance background can follow it on a call with you."
+ "i": 3,
+ "topic": "Performance and troubleshooting on a single box",
+ "track": "A. Linux, Networking, Shell",
+ "month": 1,
+ "hours": 5.0,
+ "why": "An FDE is the person on the customer's VM, pod or on-prem box when their own team says 'it's slow' and there is no dashboard, no APM and often no root. You have to name the saturated resource in minutes using only what is already installed, do it while a customer engineer watches over your shoulder, and then explain the cause in one sentence they will repeat to their CTO. The systems you ship (Kaupex, DefenderMate) will be judged by their worst hour, and the worst hour is almost always a disk that filled, a core that pinned, a cgroup that throttled, or an OOM kill nobody read.",
+ "prerequisites": [
+  "Shell fluency from 'Shell mastery and scripting' (topic 0): pipes, awk column extraction, watch, sudo, reading man pages fast",
+  "Linux internals from topic 1: process lifecycle and states, /proc layout, systemd units and journalctl -u/-k, file permissions and mounts",
+  "TCP basics from 'Networking' (topic 2): socket states, LISTEN backlog, what a retransmit is, ss and tcpdump at a beginner level",
+  "Virtual memory vocabulary: page, page cache, swap, RSS vs virtual size, page fault (major vs minor)",
+  "A Linux box you are allowed to break with sudo (the Hetzner VPS from topic 1 or a local VM) with sysstat, strace, linux-tools/perf, bcc-tools and py-spy installed",
+  "Enough Python to read a py-spy dump of your own uvicorn/gunicorn worker and recognise which frame is yours"
+ ],
+ "subtopics": [
+  {
+   "name": "USE method and the three anti-methods",
+   "learn": "For every physical and logical resource (each CPU, memory, each disk, each NIC, the storage controller, mutexes, connection pools) check Utilization (fraction of the interval it was busy), Saturation (queue length or wait time beyond capacity) and Errors (counts), in the order errors, saturation, utilization because errors are cheap to check and often decisive. Understand why utilization hides bursts: 50% over one second can be 100% for 500 ms, which is why you sample at 1 s and trust saturation over utilization. Name the anti-methods you will be tempted into on a live customer call: streetlight (only looking where your favourite tool shines), random-change (restart it and see), blame-someone-else (it's the network).",
+   "minutes": 15,
+   "resource": {
+    "label": "ACM Queue: Brendan Gregg, 'Thinking Methodically about Performance' (the USE method and the anti-methods it replaces)",
+    "url": "https://queue.acm.org/detail.cfm?id=2413037"
+   }
+  },
+  {
+   "name": "USE checklist for Linux: resource to metric to command",
+   "learn": "Memorise the map so you never hunt for a tool under pressure: CPU utilization = vmstat us+sy, mpstat -P ALL; CPU saturation = vmstat r greater than nproc, /proc/pressure/cpu, runqlat; memory utilization = free -m 'available'; memory saturation = vmstat si/so, sar -B pgscan, /proc/pressure/memory; disk utilization = iostat -xz %util (with caveats); disk saturation = aqu-sz and await; NIC utilization = sar -n DEV rxkB/s against ethtool Speed; NIC errors and saturation = sar -n EDEV rxdrop/txdrop, nstat ListenOverflows. Know which checks need root (perf, /proc/PID/stack, bcc) and which you can run as an unprivileged customer account, because that is often what you will be given.",
+   "minutes": 15,
+   "resource": {
+    "label": "Brendan Gregg: USE Method Linux Performance Checklist",
+    "url": "https://www.brendangregg.com/USEmethod/use-linux.html"
+   }
+  },
+  {
+   "name": "The 60-second triage sequence, run from memory",
+   "learn": "Run ten commands in a fixed order and read one field in each: uptime (three load averages, is it rising or falling), dmesg -T | tail (OOM kills, I/O errors, hung_task, conntrack table full), vmstat 1 (r, si/so, us sy id wa st; discard the first line because it is the since-boot average), mpstat -P ALL 1 (a single hot core), pidstat 1 (which PID, %usr vs %system), iostat -xz 1 (r/s w/s await aqu-sz), free -m (available), sar -n DEV 1 (rxkB/s vs link speed), sar -n TCP,ETCP 1 (active/s passive/s retrans/s), top (confirm). Have a fallback one-liner for boxes without sysstat: cat /proc/loadavg /proc/pressure/*; grep -E 'MemAvailable|SwapFree|Dirty' /proc/meminfo. Time yourself: the whole pass should take under two minutes including reading.",
+   "minutes": 20,
+   "resource": {
+    "label": "Netflix Tech Blog: Linux Performance Analysis in 60,000 Milliseconds (the ten-command first-minute checklist, field by field)",
+    "url": "https://netflixtechblog.com/linux-performance-analysis-in-60-000-milliseconds-accc10403c55"
+   }
+  },
+  {
+   "name": "Load average and pressure stall information",
+   "learn": "Linux load average counts runnable tasks plus tasks in uninterruptible sleep (TASK_UNINTERRUPTIBLE, shown as D in ps) since a 1993 patch, exponentially damped over 1, 5 and 15 minutes. So load 40 on 4 cores with 5% CPU means disk, NFS, driver or lock waits, not CPU. Find them: ps -eo pid,stat,wchan:32,comm | awk '$2 ~ /D/' then cat /proc/PID/stack (root) to see the kernel function it is stuck in. On kernels 4.20 and later prefer /proc/pressure/cpu, /proc/pressure/memory and /proc/pressure/io: 'some avg10' is the percentage of the last 10 s in which at least one task stalled on that resource, 'full avg10' is when all non-idle tasks stalled; any sustained non-zero 'full' for memory or io is a saturation you can quote to the customer.",
+   "minutes": 15,
+   "resource": {
+    "label": "Brendan Gregg: Linux Load Averages: Solving the Mystery",
+    "url": "https://www.brendangregg.com/blog/2017-08-08/linux-load-averages.html"
+   }
+  },
+  {
+   "name": "CPU: top, mpstat -P ALL and pidstat columns",
+   "learn": "Read the top summary line as eight distinct signals: us user, sy kernel (high sy = syscall storm, spinning on locks, or memory reclaim), ni niced, id idle, wa iowait (idle CPU while I/O is outstanding, a disk signal not a CPU one), hi/si hard and soft IRQ (si high on one core = network packet processing on a single RX queue), st steal (the hypervisor took cycles: noisy neighbour or burstable-credit exhaustion on shared vCPUs). In top press 1 for per-core, H for threads, P and M to sort. mpstat -P ALL 1 exposes a single saturated core that the average hides: a GIL-bound Python worker, a single-threaded Node process, or an IRQ pinned to one core (check /proc/interrupts and /proc/irq/*/smp_affinity). pidstat -u 1 for per-process, pidstat -t for threads, pidstat -w for context switches per second. vmstat r at or above nproc sustained is CPU saturation regardless of what %idle says.",
+   "minutes": 25,
+   "resource": {
+    "label": "man7.org: mpstat(1)",
+    "url": "https://man7.org/linux/man-pages/man1/mpstat.1.html"
+   }
+  },
+  {
+   "name": "vmstat 1 line by line",
+   "learn": "Know every column of vmstat 1 cold: procs r (runnable, compare to nproc) and b (blocked in uninterruptible sleep); memory swpd free buff cache; swap si so (KB/s swapped in and out, any sustained non-zero value is memory saturation and explains 'everything is slow'); io bi bo (blocks in/out per second); system in cs (interrupts and context switches, cs far above 100k/s on a small box points at lock contention or a futex storm); cpu us sy id wa st. Use vmstat -w for aligned wide output and vmstat -SM for megabytes, vmstat -s for lifetime counters, vmstat -d for per-disk. Pattern-match: r high plus us high = CPU bound; b high plus wa high = I/O bound; si/so plus high sy = swapping; cs and in both spiking with low us = interrupt or scheduler storm.",
+   "minutes": 15,
+   "resource": {
+    "label": "man7.org: vmstat(8)",
+    "url": "https://man7.org/linux/man-pages/man8/vmstat.8.html"
+   }
+  },
+  {
+   "name": "Memory: what free, /proc/meminfo and smaps_rollup actually say",
+   "learn": "free -m 'used' is not what a customer thinks it is; 'buff/cache' is reclaimable page cache and 'available' (MemAvailable in /proc/meminfo, kernel 3.14 and later) is the only number that decides whether adding RAM helps: low free with high available is a healthy box. Per-process, VSZ is useless for leaks; use RSS from ps -o rss and, when shared libraries skew it, Pss and Pss_Anon from /proc/PID/smaps_rollup. Watch Dirty and Writeback in /proc/meminfo for write-back stalls, Slab and SReclaimable (slabtop) for dentry/inode caches blown up by millions of files, and Shmem for tmpfs (a /dev/shm or tmpfs /tmp full of files is RAM you are paying for). Track major faults with ps -o maj_flt or sar -B majflt/s; a rising rate with si/so non-zero is the box paging its working set.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kernel docs: The /proc Filesystem (meminfo, vmstat, PID entries)",
+    "url": "https://www.kernel.org/doc/html/latest/filesystems/proc.html"
+   }
+  },
+  {
+   "name": "OOM killer: reading the report and steering the victim",
+   "learn": "Read the dmesg block top to bottom: the trigger ('X invoked oom-killer', or 'Memory cgroup out of memory' which means a container limit, not the host), the per-process table with rss and oom_score_adj, then 'Out of memory: Killed process PID (comm) total-vm, anon-rss, file-rss, shmem-rss'. The victim is the highest oom_badness, roughly rss plus oom_score_adj scaled by total pages, so a database with adj 0 loses to a leaking worker someone set to -500. Steer it with OOMScoreAdjust= in systemd units (-1000 exempts entirely, 1000 volunteers) or by writing /proc/PID/oom_score_adj. Know the sysctls that change who gets hurt: vm.overcommit_memory (0 heuristic, 1 always, 2 strict with vm.overcommit_ratio), vm.swappiness, vm.oom_kill_allocating_task, vm.panic_on_oom for hosts you would rather have rebooted than limping. In cgroups check memory.events oom_kill and memory.max before blaming the host.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kernel docs: Documentation for /proc/sys/vm/",
+    "url": "https://www.kernel.org/doc/html/latest/admin-guide/sysctl/vm.html"
+   }
+  },
+  {
+   "name": "Disk I/O: iostat -xz, await vs aqu-sz, and why %util lies",
+   "learn": "Run iostat -xz 1 and ignore the first sample. r/s w/s rkB/s wkB/s give the load; rareq-sz wareq-sz the I/O size (tiny writes with high count = fsync-heavy workload such as a Postgres WAL or SQLite); r_await w_await are milliseconds per completed I/O including queue time (baseline: HDD about 10 ms, SATA SSD under 1 ms, NVMe about 0.1 ms, EBS gp3 1 to 2 ms); aqu-sz is average outstanding requests, above 1 on a single HDD or far above queue depth on NVMe is saturation. %util is only the fraction of time any I/O was outstanding: SSD, NVMe and RAID can sit at 100% while serving far more, so never call saturation from %util alone. Find the process with pidstat -d 1 (kB_rd/s kB_wr/s iodelay) or iotop -oPa. Check dmesg for 'task X blocked for more than 120 seconds' (hung_task) and I/O error or reset lines; a D-state process plus these lines is a storage or NFS problem, not an application bug.",
+   "minutes": 25,
+   "resource": {
+    "label": "man7.org: iostat(1)",
+    "url": "https://man7.org/linux/man-pages/man1/iostat.1.html"
+   }
+  },
+  {
+   "name": "Disk full: space, inodes and deleted-but-open files",
+   "learn": "Three different 'no space left on device' causes, three commands: df -h (blocks), df -i (inodes, exhausted by millions of tiny session, cache or mail files while df -h shows 30%), and du -xsh --max-depth=1 / (-x stays on one filesystem). When df is far above du a deleted file is still held open: lsof +L1, or find /proc/[0-9]*/fd -lname '*(deleted)' -printf '%p -> %l\\n' 2>/dev/null; reclaim it with : > /proc/PID/fd/N (truncate through the fd, do not kill the service). Other places space hides: files shadowed under a mount point (mount --bind / /mnt/root and look), ext4 5% reserved blocks (tune2fs -m), journald (journalctl --disk-usage, --vacuum-size=500M), Docker overlay2 and dangling images (docker system df), core dumps in /var/lib/systemd/coredump. Verify the fix with the same df line you started with.",
+   "minutes": 15,
+   "resource": {
+    "label": "man7.org: lsof(8)",
+    "url": "https://man7.org/linux/man-pages/man8/lsof.8.html"
+   }
+  },
+  {
+   "name": "Process states and the /proc/PID files that explain them",
+   "learn": "Read ps -eo pid,ppid,stat,wchan:30,etime,comm: R running, S sleeping, D uninterruptible (cannot be killed, almost always disk, NFS or a driver), Z zombie (parent has not called wait(); kill or restart the parent, not the zombie), T stopped (a tracer died or someone sent SIGSTOP), l multithreaded. Then go to /proc/PID: status (State, VmRSS, Threads, voluntary_ctxt_switches vs nonvoluntary_ctxt_switches where high nonvoluntary means CPU contention), stack (kernel stack, root), wchan, fd (ls | wc -l against the 'Max open files' line in limits), io (read_bytes, write_bytes), cgroup (which container or slice it belongs to), cwd and exe (a '(deleted)' exe means the binary was replaced under a running process, the classic 'we upgraded but nothing changed'), environ and cmdline (what config it actually started with).",
+   "minutes": 20,
+   "resource": {
+    "label": "man7.org: proc(5)",
+    "url": "https://man7.org/linux/man-pages/man5/proc.5.html"
+   }
+  },
+  {
+   "name": "strace: attach, read, detach, and know the cost",
+   "learn": "Attach with strace -f -tt -T -p PID -o /tmp/st.txt (follow threads, wall-clock timestamps, per-syscall duration, write to file so your terminal does not slow the tracee). Narrow with -e trace=network,file or -e trace=%desc, decode fds to paths and socket endpoints with -yy, widen strings with -s 256, get a syscall count and time summary with -c, and a user stack per syscall with -k. Read the patterns: stuck in futex() is a lock or GIL; read(7, ...) blocked for seconds with fd 7 resolving to a socket is an upstream not answering; connect() EINPROGRESS then poll() timing out is a firewall or dead host; EAGAIN storms are a busy loop; openat() ENOENT loops are a library hunting for config or certificates. Understand the cost: ptrace stops the tracee on every syscall, 10x to 100x slowdown on syscall-heavy servers, so never leave it attached, never on the only database primary at peak, and know that a tracer killed with -9 can leave the tracee stopped. Lower-overhead alternatives are perf trace -p PID and bpftrace.",
+   "minutes": 25,
+   "resource": {
+    "label": "man7.org: strace(1)",
+    "url": "https://man7.org/linux/man-pages/man1/strace.1.html"
+   }
+  },
+  {
+   "name": "perf and flame graphs, including Python via py-spy",
+   "learn": "perf top -p PID for live hottest symbols; perf stat -e task-clock,cycles,instructions,cache-misses,context-switches -p PID -- sleep 10 for IPC (below 1 the process is stalled on memory, above 2 it is genuinely computing; this is why 100% CPU does not mean 'needs more CPU'); perf record -F 99 -g -p PID -- sleep 30 then perf report --stdio --no-children, or perf script | stackcollapse-perf.pl | flamegraph.pl > out.svg with the FlameGraph repo. Stacks break without frame pointers: use --call-graph dwarf for C, C++ and Rust binaries. For Python perf only shows _PyEval_EvalFrameDefault, so use py-spy dump --pid PID (a point-in-time stack of every thread, safe on a live uvicorn or gunicorn worker) and py-spy record -o prof.svg --pid PID --native for a flame graph with your own function names. perf needs kernel.perf_event_paranoid at 1 or lower or root, and inside containers CAP_PERFMON (or CAP_SYS_ADMIN on older kernels).",
+   "minutes": 25,
+   "resource": {
+    "label": "brendangregg/FlameGraph on GitHub (perf record to flame graph: stackcollapse-perf.pl and flamegraph.pl, plus dwarf/frame-pointer caveats)",
+    "url": "https://github.com/brendangregg/FlameGraph"
+   }
+  },
+  {
+   "name": "Off-CPU analysis: slow but not busy",
+   "learn": "When a process shows 3% CPU and still misses its latency target, on-CPU profiling is the wrong tool; measure where it is blocked. Cheap first look: /proc/PID/wchan, /proc/PID/stack, and /proc/PID/schedstat (run time, time waiting on the run queue, timeslices; a large second number means CPU saturation or cgroup throttling, not I/O). perf sched record then perf sched latency shows run-queue delay per task. For the full picture offcputime-bpfcc -p PID 10 (bcc) collects stacks weighted by blocked time, which you render as an off-CPU flame graph. Classify what you find: futex (lock contention), sock_recvmsg or tcp_recvmsg (waiting on an upstream), io_schedule or blk_mq (disk), or plain run-queue wait (CPU).",
+   "minutes": 10,
+   "resource": {
+    "label": "Brendan Gregg: Off-CPU Analysis",
+    "url": "https://www.brendangregg.com/offcpuanalysis.html"
+   }
+  },
+  {
+   "name": "Network as a single-box resource: ss, nstat, conntrack, softirq",
+   "learn": "ss -s for totals and the TIME-WAIT count; ss -tlnp where Recv-Q on a LISTEN socket is the current accept backlog and Send-Q the configured backlog (net.core.somaxconn), a Recv-Q at Send-Q means the app is not calling accept() fast enough; ss -tnp state established '( dport = :5432 )' | wc -l to count a pool's real connections; ss -tni for rto, retrans, cwnd per flow. nstat -az TcpRetransSegs TcpExtListenOverflows TcpExtListenDrops TcpExtTCPSynRetrans (or netstat -s): ListenOverflows climbing is your process, retransmits are the path or the peer. dmesg 'nf_conntrack: table full, dropping packet' means intermittent connection failures under load (raise net.netfilter.nf_conntrack_max or stop tracking that traffic). Ephemeral port exhaustion shows as TIME-WAIT approaching the width of net.ipv4.ip_local_port_range; fix client pooling and keep-alive, not tcp_tw_recycle. sar -n DEV 1 rxkB/s against ethtool eth0 Speed, sar -n EDEV 1 for rxdrop, /proc/net/softnet_stat third column for backlog drops, and top si pinned to one core means a single RX queue or IRQ.",
+   "minutes": 20,
+   "resource": {
+    "label": "man7.org: ss(8)",
+    "url": "https://man7.org/linux/man-pages/man8/ss.8.html"
+   }
+  },
+  {
+   "name": "cgroups v2: the box inside the container",
+   "learn": "Inside a container top, free and nproc report the host; the limits that actually bind live in cgroup v2 under /sys/fs/cgroup (the container sees its own subtree as the root). cpu.max is 'quota period' (200000 100000 means two CPUs); cpu.stat nr_throttled and throttled_usec growing under load is CFS throttling, the reason a pod with limits equal to requests has 10x p99 while the node shows 80% idle. memory.max, memory.current, memory.stat (anon vs file, because page cache counts toward the limit and a file-heavy workload looks like a leak), memory.events oom_kill, io.stat, and per-cgroup PSI in cpu.pressure, memory.pressure, io.pressure. From the host find a pod's cgroup via /proc/PID/cgroup, systemd-cgls and systemd-cgtop. For systemd services the same knobs are CPUQuota=, MemoryMax=, TasksMax= (pids.max: a thread leak hits 'Resource temporarily unavailable' on fork long before the host runs out of anything).",
+   "minutes": 15,
+   "resource": {
+    "label": "Kernel docs: Control Group v2",
+    "url": "https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html"
+   }
+  },
+  {
+   "name": "bcc and bpftrace point tools: one question, near-zero overhead",
+   "learn": "Install bcc-tools (Ubuntu package names end in -bpfcc) and learn the eight that answer questions strace and top cannot: execsnoop (what is being exec'd: cron storms, shell-outs from your app, a health check forking curl 50 times a second), opensnoop -p PID (which files and configs it really reads, and the ENOENTs), biolatency (block I/O latency histogram; bimodal means cache hits vs misses), biosnoop (each I/O with PID and latency), tcpretrans and tcpconnect/tcpaccept (who is talking to whom and what is failing), runqlat (run-queue latency histogram, the direct evidence of CPU saturation or throttling), cachestat (page-cache hit ratio), ext4slower 10 (file operations slower than 10 ms with the process name). bpftrace one-liners cover the rest. These need root, a kernel with BTF for recent versions, and in Kubernetes a privileged debug pod on the node with the host PID namespace.",
+   "minutes": 15,
+   "resource": {
+    "label": "iovisor/bcc on GitHub (tools/ directory and tutorial)",
+    "url": "https://github.com/iovisor/bcc"
+   }
+  },
+  {
+   "name": "Writing the diagnosis note and verifying the fix",
+   "learn": "For every scenario you solve, write one page: the symptom as the customer stated it; the timeline; the resource in USE terms and the single command output line that proved it (paste the line, not a screenshot); the root cause in one sentence a non-Linux engineer can repeat; the fix with the exact command; the verification (the same metric, after, with the number); and the prevention (an alert threshold, a ulimit, log rotation, a cgroup limit). Follow the SRE book loop of hypothesis, test, refine and record the hypotheses you rejected and why, because a note that shows what it ruled out is the one a customer's platform team trusts. Keep raw outputs in an appendix. This is the format for the SadServers notes in the deliverable and for every real incident after it.",
+   "minutes": 15,
+   "resource": {
+    "label": "Google SRE Book: Effective Troubleshooting",
+    "url": "https://sre.google/sre-book/effective-troubleshooting/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can run the 60-second checklist (uptime, dmesg -T | tail, vmstat 1, mpstat -P ALL 1, pidstat 1, iostat -xz 1, free -m, sar -n DEV 1, sar -n TCP,ETCP 1, top) from memory on a box you have never seen and name the saturated resource in under two minutes.",
+  "Given load average 40 on a 4-core box with 5% CPU, you can list the D-state processes with their wchan and say whether the wait is disk, NFS or a lock, and show the /proc/PID/stack line that proves it.",
+  "You can read one line of iostat -xz 1 and state whether the device is saturated using await and aqu-sz against a stated baseline, and explain in one sentence why %util alone is not evidence on SSD or RAID.",
+  "You can attach strace -f -tt -T -yy to a hung worker, identify the blocking syscall and what its fd points at, detach cleanly, and state the overhead you imposed and why you would not do it on a database primary at peak.",
+  "You can produce a CPU flame graph of your own running Python service with py-spy (and of a C binary with perf record -g) and point at the hottest frame that is your code, not the interpreter.",
+  "You can read an OOM-killer dmesg block and state whether it was a host or cgroup OOM, which process was killed, why it was chosen from the rss and oom_score_adj table, and what OOMScoreAdjust or memory.max change prevents a repeat.",
+  "You can explain why a pod with a 500m CPU limit is slow while the node shows 80% idle, show nr_throttled and throttled_usec climbing in cpu.stat, and say what you would change in the limit and why.",
+  "You can write a one-page diagnosis note (symptom, evidence line, cause, fix, verification, prevention, rejected hypotheses) that a customer's platform team accepts without asking for a screenshot."
+ ],
+ "failureModes": [
+  "A rotated log is deleted while a service still holds the fd: df reports 100%, du reports 40%, the API returns ENOSPC on every write and the on-call deletes unrelated files for an hour before anyone runs lsof +L1.",
+  "Inode exhaustion from millions of small session or cache files: df -h shows 30% used, writes fail with 'No space left on device', and the team resizes the disk twice before someone runs df -i.",
+  "Kubernetes CPU limits set equal to requests: the Python worker is CFS-throttled every 100 ms period, p99 latency goes 10x under a traffic bump, the node dashboard shows 70% idle, and the customer concludes the model is slow.",
+  "One core pinned at 100% by a GIL-bound worker or a single NIC RX queue while fifteen cores idle: top's summary line says 7% CPU, the team adds more replicas on the same box, and only mpstat -P ALL shows the hot core.",
+  "Memory pressure with no single culprit: MemAvailable near zero, si/so non-zero, major faults climbing, everything 'randomly slow', then the OOM killer takes Postgres instead of the leaking worker because nobody set OOMScoreAdjust.",
+  "strace left attached to a production process without -o, or attached without -f to a multi-threaded server so it shows nothing, or the tracer is killed with -9 and the worker stays in T state until someone notices it stopped serving.",
+  "nf_conntrack table full or ephemeral port exhaustion on a webhook-heavy box: intermittent connection failures only under load, retries make it worse, and the one line in dmesg that names the cause is never read."
+ ],
+ "interviewQuestions": [
+  "Load average is 60 on an 8-vCPU customer host, CPU is 10% busy and iostat %util is 5%. Walk me through your first three minutes, the exact commands, and what you expect to find.",
+  "A customer's FastAPI pod has a 500m CPU limit and its p99 tripled after a traffic increase; node metrics show 70% idle. Diagnose it, show me the evidence you would collect, and explain why raising the limit is not the whole fix.",
+  "Explain what iostat -xz 1 tells you and what does not. Which fields let you say a device is saturated, and give me a case where %util is 100% and the disk is fine.",
+  "You need to look inside a stuck worker in production. When do you reach for strace, when for perf, when for py-spy, when for bcc, and what is the cost and blast radius of each?",
+  "A box has 200 MB free out of 64 GB and the customer wants to buy RAM. How do you decide whether there is a memory problem at all? Name the exact numbers you would read and the threshold that changes your answer.",
+  "The OOM killer just killed the database instead of the leaking Python worker. Explain how the victim is chosen and how you would prevent a recurrence without adding memory.",
+  "Design what you would leave behind on a single customer VM with no Kubernetes and no cloud metrics so that next time it slows down they can hand you a diagnosis instead of a complaint. What do you sample, at what cadence, where does it go, and what is the one alert you would set?"
+ ],
+ "proofOfWork": "A 15-minute recorded screencast in which you break your own Hetzner VPS three ways without telling your future self which is which (fill the disk through a deleted-but-open log, pin one core with stress-ng --cpu 1, and throttle the Kaupex worker with a systemd CPUQuota=20% drop-in), then diagnose each one blind from the 60-second checklist while narrating what every field means and stopping the moment you have the evidence line. Alongside it, a one-page 'single-box triage card' in markdown checked into the Dokeo repo's runbooks: the ten commands, the one field to read in each, the threshold that means saturated, and the follow-up tool for each resource (strace, perf, py-spy, bcc), formatted so a customer engineer with no Linux performance background can follow it on a call with you."
 }

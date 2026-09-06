@@ -1,0 +1,227 @@
+{
+ "i": 84,
+ "topic": "LLM system design mocks (four)",
+ "track": "K. Interview Loop and Mocks",
+ "month": 9,
+ "hours": 8,
+ "why": "The LLM design round is the one place in an FDE loop where the interviewer is explicitly checking whether you can be trusted to put a non-deterministic system in front of a paying customer: not whether you know what RAG is, but whether you can put a number on p99 latency, cost per request, and what happens when the model is wrong. In the field this exact conversation happens in the customer's architecture review, where their security lead asks where the tokens go, their finance lead asks what it costs at 10x volume, and their staff engineer asks how you know it is working - and you get one whiteboard and 45 minutes to answer all three. Topics 43 and 45-60 gave you the material; this topic trains delivering it under a clock, with four recordings so you can see the gap between what you know and what you can actually say in the room.",
+ "prerequisites": [
+  "The classic design motion from 'System design mocks' (topic 44): the 45-minute phase budget, back-of-envelope estimation, C4 container diagrams with numbered flows, and deep-dive-with-two-options is assumed muscle memory here - this topic only adds the LLM layer on top.",
+  "LLM-era serving constraints from topic 43 and 'Serving at scale' (topic 56): prefill versus decode, KV cache sizing, continuous batching, and why p99 is in seconds and depends on output length.",
+  "RAG at depth (topic 49): chunking strategies, hybrid BM25-plus-dense retrieval, reciprocal rank fusion, cross-encoder reranking, contextual retrieval, and metadata pre-filtering for tenant isolation.",
+  "Evals as infrastructure (topic 53) and LLM observability (topic 54): golden sets, LLM-as-judge with agreement measured against human labels, online scoring, and OpenTelemetry gen_ai.* spans - you must be able to draw these as boxes, not mention them as intentions.",
+  "Gateway, routing, fallbacks and canaries (topic 55), cost and latency engineering (topic 59), and guardrails and prompt injection (topic 51): prompt caching economics, batch APIs, model tiering, token-bucket admission control on RPM and TPM, and the OWASP LLM Top 10 - so 'a malicious document in the corpus' is a constraint you draw rather than a question that stalls you.",
+  "A working rig: OBS or QuickTime capturing screen plus mic, Excalidraw with a saved LLM-architecture stencil, a visible countdown timer, and a private repo to hold four 45-minute recordings, four diagrams and four scorecards."
+ ],
+ "subtopics": [
+  {
+   "name": "What the LLM round scores that the classic round does not",
+   "learn": "Tabulate the five extra dimensions an LLM design round grades and that a pure distributed-systems answer misses: (1) quality is a design output, not a given - you must name the metric and how it is measured; (2) latency is dominated by generation, so TTFT and output-token count are design variables, not implementation details; (3) unit cost is a first-class NFR with a dollar figure; (4) the failure mode is a confident wrong answer, not a 500, so monitoring and rollback look different; (5) data movement is a compliance question because the tokens leave the customer's perimeter. Write these five on a card and force yourself to hit each one in every mock. The single most common senior-level miss is a beautiful architecture with no answer to 'how do you know it is good enough to ship?'",
+   "minutes": 20,
+   "resource": {
+    "label": "Hello Interview - System Design in a Hurry: Introduction (how you are evaluated)",
+    "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/introduction"
+   }
+  },
+  {
+   "name": "The 45-minute phase budget for an LLM problem",
+   "learn": "Adapt the classic budget so the AI-specific content is not stranded at the end: 0-6 requirements including a quality bar and a cost ceiling; 6-11 estimation (QPS, tokens in and out per request, cost per request, GPU or TPM capacity); 11-16 API surface plus the data and index model; 16-24 high-level diagram with the sync path and the async path drawn separately; 24-38 two deep dives, one of which must be retrieval-or-agent-loop and the other evals-or-serving; 38-45 failure modes, rollout and the operability close. Enforce a hard rule that the evaluation story is on the board before minute 40 - if you leave it to the close it always gets cut and the interviewer reads that as you not having shipped one. Practise saying the transition sentences out loud ('that is the happy path - let me now show how we detect it degrading').",
+   "minutes": 15,
+   "resource": {
+    "label": "Hello Interview - System Design in a Hurry: Delivery Framework",
+    "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery"
+   }
+  },
+  {
+   "name": "Writing the rubric: what 4/5 means on each LLM dimension",
+   "learn": "Write your own 1-5 rubric as observable behaviours across six dimensions: requirements and quality bar, estimation with token and dollar math, architecture and data flow, LLM-specific depth (retrieval or agent loop or serving), evaluation and observability, and communication under pushback. A 4 on 'quality bar' means you defined success as a measurable criterion with a target and a measurement method before drawing any box - for example 'answer is grounded in a retrieved chunk, judged by an LLM judge with kappa above 0.6 against 150 human labels, target 95 percent on the golden set, gate at 92'. A 3 is 'we would evaluate it'. Score two of your own topic-44 recordings on this rubric first so you know your own baseline before mock 1.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude Docs - Define your success criteria (test and evaluate)",
+    "url": "https://platform.claude.com/docs/en/test-and-evaluate/develop-tests"
+   }
+  },
+  {
+   "name": "Four archetypes, interviewer cards and the recording rig",
+   "learn": "Pick four problems that cover disjoint ground rather than four flavours of RAG: (1) grounded question answering over a customer corpus, (2) an agent that takes write actions in the customer's systems, (3) an eval and observability platform for a fleet of LLM features, (4) high-volume batch extraction under a fixed cost ceiling in an air-gapped environment. For each, write an interviewer card with the deliberately vague opening prompt, three clarifying answers you will only give if asked, two curveballs to fire at minute 30, and one hard pushback on your primary choice. Configure the rig once: 1080p capture, mic tested, Excalidraw stencil containing gateway, queue, worker, vector index, object store, judge, trace store and a legend for sync versus async, plus a visible timer.",
+   "minutes": 15,
+   "resource": {
+    "label": "Exponent - Forward Deployed Engineer interview guide",
+    "url": "https://www.tryexponent.com/blog/forward-deployed-engineer-interview-the-definitive-2026-guide-fde"
+   }
+  },
+  {
+   "name": "Token and throughput math in three minutes",
+   "learn": "Rehearse until it is automatic: state tokens-in and tokens-out per request (chunks retrieved x chunk size + system prompt + history for input; a sentence is roughly 20 tokens, a page roughly 500), multiply by QPS to get input and output tokens per minute, and compare against the provider's ITPM and OTPM limits rather than only RPM. For self-hosted, size the KV cache as 2 (K and V) x layers x kv_heads x head_dim x bytes_per_element x sequence_length per sequence, subtract weights from device memory, and show how many concurrent sequences fit - that number, not the GPU count, is your concurrency. Every figure you write must be followed by the decision it changes: 'that is 4M output tokens per minute, which is over the tier limit, so we shard across two keys or move the bulk path to the batch API'.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude Docs - Token counting API",
+    "url": "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+   }
+  },
+  {
+   "name": "Latency budget: TTFT, TPOT, and every hop around the model",
+   "learn": "Draw the budget as a stacked bar before you optimise anything: auth and gateway, embedding of the query, vector search, cross-encoder rerank, prompt assembly, TTFT, then output_tokens x TPOT, then post-processing and guardrail checks. Know the shape of the two model phases - prefill is compute-bound and scales with input length, decode is memory-bandwidth-bound and scales with output length - so 'shorten the prompt' fixes TTFT while 'cap max_tokens' or 'stream' fixes perceived total. Name the three levers you will actually use: stream tokens via SSE so perceived latency equals TTFT, run reranking and guardrails concurrently rather than serially, and cache the static prefix. State a target as a pair, e.g. p50 TTFT under 800 ms and p95 full answer under 6 s, and say which component you would cut first to hold it.",
+   "minutes": 20,
+   "resource": {
+    "label": "vLLM docs - Optimization and tuning (TTFT, ITL, chunked prefill, batching)",
+    "url": "https://docs.vllm.ai/en/latest/configuration/optimization/"
+   }
+  },
+  {
+   "name": "Cost model on the whiteboard and the three levers",
+   "learn": "Compute cost per request live: (input_tokens/1M x input_price) + (output_tokens/1M x output_price), multiply by monthly volume, and compare it to whatever the customer pays for the process today - that ratio is the only cost argument that lands. Then show the three levers with their real multipliers: prompt caching (cache writes cost more than base input, cache reads a small fraction, so it only pays when the shared prefix is large and reused within the cache TTL), the batch API (roughly half price with a 24-hour completion window, therefore only for the async path), and model tiering (a small model handles the 80 percent of requests a router classifies as easy, with escalation on low confidence). Say explicitly what each lever costs you in quality or freshness; a lever with no downside signals you have not run it.",
+   "minutes": 20,
+   "resource": {
+    "label": "Claude Docs - Pricing (input, output, cache read/write, batch)",
+    "url": "https://platform.claude.com/docs/en/about-claude/pricing"
+   }
+  },
+  {
+   "name": "Retrieval architecture that survives questioning",
+   "learn": "Be able to defend, in 90 seconds each: chunking (fixed 300-600 tokens with overlap versus structure-aware splitting, and why chunk boundaries destroy tables), hybrid retrieval (BM25 for identifiers and rare tokens, dense for paraphrase, fused with RRF), reranking (retrieve top 50-100, cross-encode down to top 10-20, and its latency cost), and contextual retrieval (prepend a short generated summary of the parent document to each chunk before embedding). Draw the index refresh path as a real pipeline with a document version, a delete tombstone and a reindex job, because deletion and staleness are where customers get burned. For multi-tenant, insist on pre-filtering by tenant_id in the vector query rather than filtering after top-k, and explain the recall collapse that post-filtering causes on small tenants.",
+   "minutes": 20,
+   "resource": {
+    "label": "Anthropic Engineering - Introducing Contextual Retrieval",
+    "url": "https://www.anthropic.com/engineering/contextual-retrieval"
+   }
+  },
+  {
+   "name": "The agent loop: step budget, durability, human-in-the-loop",
+   "learn": "When the problem involves actions, draw the loop explicitly: planner or model call, tool selection, tool execution, observation, termination check. Then draw the four controls a customer will demand: a hard step and token budget with a defined behaviour at exhaustion (escalate to human, never silently truncate), idempotency keys on every write tool so a retry cannot double-charge, an approval gate on the subset of tools with irreversible effects, and durable execution so a worker crash resumes rather than replays side effects. State the workflow-versus-agent decision out loud: if the steps are known, a deterministic workflow with LLM steps inside is cheaper, more testable and easier to sell than a free-running agent, and saying so is a seniority signal.",
+   "minutes": 20,
+   "resource": {
+    "label": "Anthropic Engineering - Building effective agents",
+    "url": "https://www.anthropic.com/engineering/building-effective-agents"
+   }
+  },
+  {
+   "name": "Evals drawn as infrastructure, not promised as a slide",
+   "learn": "Put four concrete boxes on the diagram: an offline golden set (100-300 labelled cases, versioned in git, built from real customer traffic plus adversarial cases) run in CI as a required check with a regression threshold; an online scorer sampling a percentage of production traces and writing scores back to the trace; a human review queue fed by low-confidence and low-score traces, whose labels flow back into the golden set; and a dataset builder that promotes interesting production traces into fixtures. Name the judge design - pointwise with a rubric versus pairwise against a reference, why you randomise position to fight position bias, and that you report agreement with human labels before trusting the judge as a gate. Give the metric a target and a gate value, and say what you do when the gate fails on a release you must ship.",
+   "minutes": 20,
+   "resource": {
+    "label": "Langfuse Docs - Evaluation overview (datasets, experiments, scores)",
+    "url": "https://langfuse.com/docs/evaluation/overview"
+   }
+  },
+  {
+   "name": "Guardrails, injection and tenant isolation as design elements",
+   "learn": "Treat every retrieved chunk and every tool output as untrusted input in the design, not as an afterthought: the classic break is a document in the customer's own corpus containing instructions that the model follows. Draw the mitigations as boxes - structural separation of instructions from data, a tool allowlist scoped to the caller's permissions rather than the agent's, output handling that never renders model output as HTML or executes it, and an egress check on anything the model emits toward an external system. Add the tenancy layer: per-tenant index namespace or mandatory metadata filter, per-tenant keys and rate limits, PII redaction before the payload leaves the perimeter, and prompt-and-completion logging with masking so the trace store does not become the biggest PII repository the customer owns.",
+   "minutes": 15,
+   "resource": {
+    "label": "OWASP GenAI - LLM01: Prompt Injection",
+    "url": "https://genai.owasp.org/llmrisk/llm01-prompt-injection/"
+   }
+  },
+  {
+   "name": "Serving choice: hosted API versus self-hosted vLLM",
+   "learn": "Be ready to justify either direction with numbers rather than preference. Hosted wins on time to value, model quality, elasticity and no GPU ops; self-hosted wins when data cannot leave, when volume is high and steady enough to beat per-token pricing, or when the customer needs a fine-tuned or open-weight model. If self-hosted, name the knobs: tensor parallel size, gpu_memory_utilization, max_model_len, max_num_seqs and max_num_batched_tokens, prefix caching for the shared system prompt, and quantisation to fit a larger model on the same card. Say what continuous batching does to the latency-versus-throughput trade-off, and give a rough utilisation break-even so the customer's finance team sees the reasoning rather than an assertion.",
+   "minutes": 15,
+   "resource": {
+    "label": "vLLM documentation (serving, engine args, deployment)",
+    "url": "https://docs.vllm.ai/en/latest/"
+   }
+  },
+  {
+   "name": "Gateway layer: routing, fallback ladders, rate limits, canary",
+   "learn": "Draw one gateway in front of every model call and load it with the things a customer actually needs: per-tenant token buckets on both requests and tokens, a queue with admission control that sheds with a clear 429 and Retry-After rather than queueing forever, retries with exponential backoff and jitter that respect 429 and 529 differently from 500, a per-request timeout larger than p99 TTFT plus expected generation, and a fallback ladder (primary model, then a smaller or alternate-provider model, then a cached or templated response, then an honest failure). Say the dangerous part out loud: a fallback that silently degrades quality without emitting a metric is worse than an error, so every fallback fires a counter and is visible on the eval dashboard. Add canaries by tenant percentage gated on eval scores, not just error rate and latency.",
+   "minutes": 15,
+   "resource": {
+    "label": "Claude Docs - Rate limits (RPM, ITPM, OTPM, 429 and 529 handling)",
+    "url": "https://platform.claude.com/docs/en/api/rate-limits"
+   }
+  },
+  {
+   "name": "Failure modes, curveballs and the operability close",
+   "learn": "Rehearse a fixed close: the four golden signals plus four LLM-specific ones (grounding or judge score, refusal and fallback rate, tokens and dollars per request, p95 TTFT), the three alerts you would actually page on, and the rollback unit - which for an LLM system is usually a prompt version or a model pin, not a deployment. Pre-drill eight curveballs and answer each by pointing at the diagram, quantifying and choosing within three minutes: provider outage, 10x volume, one tenant is 70 percent of traffic, the customer forbids data egress, quality drops after a model version change, a document must be deleted for GDPR within 24 hours, the customer wants citations for every sentence, and the cost ceiling is halved. Understand cascading failure specifically for LLM stacks: retries on a saturated model endpoint amplify load exactly when TTFT is already degraded.",
+   "minutes": 15,
+   "resource": {
+    "label": "Google SRE Book - Addressing Cascading Failures",
+    "url": "https://sre.google/sre-book/addressing-cascading-failures/"
+   }
+  },
+  {
+   "name": "The FDE twist: designing inside the customer's constraints",
+   "learn": "Practise the swap table until the redesign takes 60 seconds on the board: hosted model to self-hosted open-weight in the customer's VPC; managed vector database to pgvector in their existing Postgres; SaaS trace store to self-hosted; provider batch API to your own queue and worker pool. Know the data-control vocabulary customers use - zero data retention, no training on inputs, regional processing, BYO key encryption, audit log of every prompt and completion - and where each is a provider setting versus your own responsibility. In the mock, ask the constraint question in the requirements phase rather than discovering it at minute 35: 'can prompts containing customer content leave your network, and does the answer differ for the pilot and for production?'",
+   "minutes": 15,
+   "resource": {
+    "label": "OpenAI Platform - Your data (retention, training, controls)",
+    "url": "https://developers.openai.com/api/docs/guides/your-data"
+   }
+  },
+  {
+   "name": "Mock 1 - grounded QA over a customer's document corpus",
+   "learn": "Prompt: 'Design an assistant that answers questions over 2 million internal documents for 40 enterprise tenants, with citations.' Solo, timed, recorded. Non-negotiables for a pass: a stated grounding metric with target and gate; ingestion drawn as a versioned pipeline with deletes and reindex; hybrid retrieval plus rerank with the latency cost accounted; tenant isolation by pre-filter; a latency budget with streaming; cost per question and the caching lever; and the answer to 'what happens when the corpus does not contain the answer' being an explicit abstain path, not a hope. Immediately after the timer, write three bullets of raw impression before watching anything.",
+   "minutes": 50,
+   "resource": {
+    "label": "Anthropic Cookbook (RAG, citations, evaluation notebooks)",
+    "url": "https://github.com/anthropics/claude-cookbooks"
+   }
+  },
+  {
+   "name": "Mock 2 - agent platform with write access to customer systems",
+   "learn": "Prompt: 'Design a system where an agent resolves support tickets by reading a knowledge base and taking actions in Zendesk and the customer's billing system.' Non-negotiables: workflow-versus-agent decision stated with a reason; tool schemas and an authorisation model tied to the requesting user, not a service account with god rights; idempotency on every write; step and token budget with a defined exhaustion behaviour; durable execution for crash recovery; an approval gate on irreversible tools; a full audit trail linking trace id to the action taken; and a prompt-injection story for the knowledge base. Expect the curveball 'a malicious ticket instructs the agent to refund itself' and answer it on the diagram.",
+   "minutes": 50,
+   "resource": {
+    "label": "Anthropic Engineering - How we built our multi-agent research system",
+    "url": "https://www.anthropic.com/engineering/multi-agent-research-system"
+   }
+  },
+  {
+   "name": "Mock 3 - eval and observability platform for a fleet of LLM features",
+   "learn": "Prompt: 'A customer has 12 teams shipping LLM features and no idea which ones are getting worse. Design the platform that tells them.' This is the archetype most candidates fumble because it has no model in the hot path. Non-negotiables: a trace data model (trace, span, generation, score, session, user) with cost and token attributes; ingestion sized for high-cardinality writes with sampling and an async collector; prompt versioning linked to traces so a regression is attributable to a change; datasets built from production traces; scheduled and CI-triggered experiments; judge calibration against human labels; masking and retention for PII; and per-team dashboards with an alert on score drift rather than only error rate.",
+   "minutes": 50,
+   "resource": {
+    "label": "Langfuse Docs (tracing data model, prompt management, experiments)",
+    "url": "https://langfuse.com/docs"
+   }
+  },
+  {
+   "name": "Mock 4 - high-volume extraction under a hard cost ceiling, air-gapped",
+   "learn": "Prompt: 'Extract 30 structured fields from 40 million scanned documents per year. It must run inside the customer's data centre and the unit cost must be under a stated ceiling.' Non-negotiables: throughput and GPU maths done live (tokens per document, batch size, tokens per second per GPU, GPUs needed for the SLA window); a self-hosted serving design with the vLLM knobs named; a cheap-model-first cascade with escalation on schema-validation failure or low confidence; structured output enforcement and what you do with a malformed response; a dead-letter path with human review; checkpointing and resumability for a multi-day job; and a sampling-based quality measurement because you cannot label 40 million documents. Then defend the ceiling with arithmetic when the interviewer halves it.",
+   "minutes": 50,
+   "resource": {
+    "label": "Exponent - free peer mock interview practice",
+    "url": "https://www.tryexponent.com/practice"
+   }
+  },
+  {
+   "name": "Self-review protocol, score table and the pattern ledger",
+   "learn": "For each recording, watch at 1.5x with the rubric open and log phase-transition timestamps against the planned budget, every filler stall longer than five seconds, every question you answered with an adjective instead of a number, and every moment you drew a box you could not defend. Maintain three columns per mock: 'said', 'should have said', 'did not know' - the third column is the only one that generates study, and if it is empty you chose problems that were too easy. Keep a running pattern ledger of reusable answers (latency budget template, cost formula, judge calibration script, fallback ladder, tenancy filter) so mock 4 costs less preparation than mock 1. Ship only when three consecutive mocks score 4 or better on all six dimensions, including LLM-specific depth and evaluation.",
+   "minutes": 40,
+   "resource": {
+    "label": "Hello Interview - System Design in a Hurry: Core Concepts",
+    "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/core-concepts"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take an underspecified LLM prompt to a written set of requirements in six minutes that includes a measurable quality bar with a target and a measurement method, a latency target expressed as TTFT and total, a cost ceiling per request, and an explicit statement of where customer data is allowed to go.",
+  "You can compute, in under four minutes and out loud, tokens in and out per request, tokens per minute against provider ITPM and OTPM limits, cost per request and per month, and - for self-hosted - concurrent sequences from KV cache maths, naming for each number the design decision it changes.",
+  "You can draw an evaluation and observability subsystem as boxes on the diagram before minute 40 in every mock, including golden set in CI with a gate value, online sampling and scoring, a human review queue feeding labels back, and judge agreement against human labels.",
+  "You can deep dive retrieval or the agent loop for at least seven minutes with two named options, a quantified reason for your choice, its dominant failure mode, and the metric you would watch to catch it.",
+  "You can answer any of eight rehearsed curveballs (provider outage, 10x volume, hot tenant, no data egress, model version regression, GDPR delete, per-sentence citations, halved cost ceiling) in three minutes by locating it on the diagram, quantifying it and committing to a choice.",
+  "You can perform the constraint swap - hosted model to in-VPC open weights, managed vector store to pgvector, SaaS tracing to self-hosted, batch API to your own queue - in under 90 seconds and state precisely what is lost in each swap.",
+  "You can score your own recording against your six-dimension rubric with timestamped evidence and land within half a point of a peer's independent score on at least four dimensions.",
+  "You can show three consecutive mocks at 4/5 or better on every dimension, evidenced by the recordings, the exported diagrams and the score table with the 'did not know' column emptying over time."
+ ],
+ "failureModes": [
+  "The design assumes a hosted provider throughout; the customer's security review then forbids prompts leaving their network, and the whole retrieval, serving and tracing stack has to be re-chosen on site because the in-VPC swap was never rehearsed.",
+  "Multi-tenant retrieval filters by tenant_id after the top-k vector search, so small tenants get near-empty result sets and their users are told the answer is not in the corpus while the documents sit in the index.",
+  "A document deleted for a GDPR request is removed from the source of truth but never tombstoned in the vector index, so the assistant keeps citing it for weeks and the customer discovers it before your monitoring does.",
+  "The fallback ladder silently drops to a smaller model during a provider incident with no counter and no eval score attached, so quality degrades for two days and the customer's first signal is an angry end user rather than a dashboard.",
+  "The agent's write tools run under a service account with broad permissions and no idempotency key, so a retried step double-refunds a customer and the audit log cannot prove which invocation did it.",
+  "Cost was estimated on average prompt length; production prompts carry conversation history and ten retrieved chunks, input tokens triple, prompt caching never hits because the prefix changes per request, and the bill lands at four times the number given to the customer's finance team.",
+  "The LLM-as-judge gate was never calibrated against human labels, so it passes a release that humans consider clearly worse, the team stops trusting the gate within a month, and it is disabled in CI without being replaced."
+ ],
+ "interviewQuestions": [
+  "Design a grounded question-answering system over two million documents for forty enterprise tenants, one of which will not allow any data to leave their network. Give me the shared architecture, then tell me exactly which components change for that tenant and what capability they lose.",
+  "You are told the assistant is 'not accurate enough'. Before touching the prompt, how do you determine whether the problem is retrieval, the generation step, the chunking, or the question distribution - and what measurement distinguishes each?",
+  "Walk me through your latency budget for a streamed answer with a p95 target of six seconds. Where does the time actually go, which component would you cut first, and how does the answer change if the customer requires reranking and a guardrail check on the output?",
+  "Your agent takes write actions in the customer's billing system. Design the boundary: authorisation model, idempotency, approval gates, step budget, audit trail, and the test that proves a malicious document in the knowledge base cannot trigger a refund.",
+  "The customer wants unit cost cut by half without a quality drop they can notice. Give me the levers in order, quantify each one, and tell me which of them you would refuse to pull and why.",
+  "I want to push back: you chose a self-hosted open-weight model on four GPUs instead of a hosted API. Defend it with arithmetic, tell me the volume at which the decision flips, and describe the migration for a live customer if it flips.",
+  "How would you gate a deployment on an LLM-as-judge score when you have 150 human labels and no baseline? Tell me the agreement number below which you would refuse to ship the gate, and what you would do instead in the meantime."
+ ],
+ "proofOfWork": "A public `llm-design-mocks` repository (or a section of the FDE dashboard) that a hiring manager can skim in ten minutes and a peer can reuse in one, built around a reusable LLM Design Kit rather than four one-off recordings. It contains `rubric.md` with the six dimensions defined as observable behaviours at each of 1-5, plus a score table for all four mocks showing self-score, peer score and the per-dimension gap, with the three consecutive 4/5 sessions highlighted; four exported Excalidraw diagrams, each with the requirements, token maths and cost-per-request written on the canvas as they were during the session, alongside a `scorecard-NN.md` listing phase-transition timestamps against the planned budget and the 'said / should have said / did not know' table; and the kit itself - a one-page latency budget template with the TTFT and TPOT decomposition, a cost-per-request spreadsheet with cache-hit, batch and model-tier levers wired as formulas, a curveball card deck with the eight scenarios and your three-minute answers, and a constraint swap table mapping each hosted component to its in-VPC equivalent with the capability lost. The differentiator is a short `calibration.md` showing one small runnable artifact: a judge prompt scored against 50 hand-labelled examples with the agreement number reported, which turns the eval section of every mock from an assertion into something you have actually measured."
+}

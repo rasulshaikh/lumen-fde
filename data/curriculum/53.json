@@ -1,227 +1,227 @@
 {
  "i": 53,
- "topic": "Evals as infrastructure: eval sets, LLM-as-judge, human review, CI gates",
- "track": "H. AI in Production",
- "month": 7,
- "hours": 12,
- "why": "At the end of every pilot an FDE has to answer one question in front of the customer's engineering lead and their exec sponsor: how do you know it works? Without a labelled set you own, per-class numbers with intervals, and a gate that blocks regressions before merge, the honest answer is a demo and a feeling - so the pilot converts on trust rather than evidence, and the first bad week kills it. Evals are also the only mechanism that lets you change a prompt, swap a model or ship a retrieval improvement on a customer's production path without gambling with their data, and the only artefact that turns 'it got worse this month' into a specific class, a specific date and a specific commit.",
+ "topic": "RAG at depth: chunking, embeddings, hybrid retrieval, reranking, contextual retrieval, caching",
+ "track": "G. AI Engineering",
+ "month": 6,
+ "hours": 10,
+ "why": "Every enterprise AI deployment an FDE lands on is a retrieval problem wearing a model's clothes: answer quality is capped by whether the right paragraph of the customer's MSA, runbook or ticket history actually reached the prompt. Customers do not report 'low nDCG', they report 'it could not find the liability cap in our own contract', and the fix is almost never a bigger model - it is parsing, chunking, hybrid retrieval, reranking and context assembly, each of which you must defend with a before/after number in front of their architect. It is also the highest-leverage thing you can change on site in a single week without asking anyone for GPUs, a fine-tune or a new budget line.",
  "prerequisites": [
-  "The prompt-as-code machinery from 'Prompt engineering as code' (topic 46): versioned prompt files with pinned model snapshots, the deterministic assertion ladder, a committed baseline.json, and an eval runner with response caching, bounded concurrency and a USD ceiling. This topic layers labels, judges and statistics on top of that runner - it does not rebuild it.",
-  "Classification metrics at working depth: confusion matrix, precision, recall, F1, class imbalance, and enough pandas/numpy to pivot a results file by class and tag. Have scikit-learn, scipy and statsmodels installed and know how to call them.",
-  "LLM mechanics from topic 45: run-to-run variance at temperature 0, dated snapshots versus moving aliases, and the fact that fluency and correctness are close to uncorrelated - which is the entire reason a judge needs validating.",
-  "pytest and GitHub Actions from topics 35 and 18: parametrize and fixtures, required status checks, path filters, workflow_dispatch, artifacts, and posting a sticky comment on a pull request.",
-  "A real system with real traffic: DefenderMate's classifier plus several hundred stored production traces (the llm_calls and audit_log tables from topic 30), and commitment from one domain expert for about four hours of labelling and adjudication. Without a domain expert this topic degenerates into statistics homework.",
-  "RAG basics from topic 49 if you intend to evaluate a retrieval path - chunking, top-k retrieval, and the difference between a retrieval failure and a generation failure."
+  "PostgreSQL at depth (topic 29): EXPLAIN (ANALYZE, BUFFERS), btree vs GIN index choice, planner row estimates, CREATE INDEX CONCURRENTLY, maintenance_work_mem - you tune pgvector as a Postgres problem, not as a vector-database problem.",
+  "Data modelling for multi-tenant AI systems (topic 30): tenant_id everywhere, row-level security, PII classification and audit trails, because a retrieval index is the easiest place in the stack to leak one customer's documents into another's answer.",
+  "Prompt engineering as code (topic 46): versioned prompt files, structured outputs, and a regression set you can re-run - the RAG ablation table is the same discipline applied to retrieval.",
+  "LLM fundamentals (topic 45): tokenisation, context windows, what an embedding actually is, and cost/latency per 1k tokens, so 'add a contextual preamble to every chunk' is a number you can compute rather than a vibe.",
+  "Production Python (topics 25 and 26): batched, resumable jobs with exponential backoff and jitter, connection pooling, and a FastAPI service boundary to put the retriever behind.",
+  "Enough evaluation literacy to know that 60 labelled questions gives you wide confidence intervals, so a 1-point recall move is noise and a 10-point move is a result."
  ],
  "subtopics": [
   {
-   "name": "The three eval levels and what each one can actually prove",
-   "learn": "Separate Level 1 (assertions on a single component: schema validity, exact match, retrieval recall@k - cheap, deterministic, runs on every commit), Level 2 (human or judge review of a whole trace, i.e. the output the user actually sees, including multi-step agent runs), and Level 3 (production outcome metrics: acceptance rate, edit distance between the model's draft and the analyst's final text, escalation rate, task completion). A Level 1 pass never licenses a Level 3 claim, and this is the most common way an FDE oversells a pilot. Write the mapping down per feature: for DefenderMate, 'retrieval recall@10' is Level 1, 'the finding summary is defensible from the evidence' is Level 2, 'the analyst accepted it without editing' is Level 3. Decide explicitly which level owns the release decision for each feature before you build anything.",
-   "minutes": 40,
+   "name": "Freeze a naive baseline and a one-command harness",
+   "learn": "Build the dumbest thing that works and then never change it: fixed 512-token chunks, no overlap, one embedding model, cosine top-5, one prompt, temperature 0. Put it behind two functions - retrieve(query, k) -> list[Chunk] and answer(query) -> (text, cited_chunk_ids) - so every later improvement is a swap of exactly one component. Persist run_config (model ids, chunk params, k, prompt hash, git sha) and write every retrieval result row-level to a runs table keyed by (run_id, question_id, rank, chunk_id); without those rows you cannot later say which questions a change fixed and which it broke. Ban notebook-only experiments from day one: if the ablation is not re-runnable with one command on the held-out set, the numbers are anecdote.",
+   "minutes": 25,
    "resource": {
-    "label": "Hamel Husain - Your AI Product Needs Evals",
-    "url": "https://hamel.dev/blog/posts/evals/"
-   }
-  },
-  {
-   "name": "Error analysis: open-coding a sample of real traces",
-   "learn": "Before any metric exists, pull a stratified sample of 50-100 real production traces, read each end to end, and write one free-text sentence naming the first thing that goes wrong - no categories, no scores, no 1-5 ratings. Do the first 30 yourself sitting next to the domain expert; delegating this step is why most eval efforts measure the wrong thing. Stop when 10-15 consecutive traces produce no new kind of note (theoretical saturation), which usually happens well before 100. The deliverable of this step is a spreadsheet with trace_id, input, output and a notes column - deliberately not a number.",
-   "minutes": 45,
-   "resource": {
-    "label": "Hamel Husain - A Field Guide to Rapidly Improving AI Products (the error analysis process)",
-    "url": "https://hamel.dev/blog/posts/field-guide/"
-   }
-  },
-  {
-   "name": "Axial coding: notes into a counted failure taxonomy",
-   "learn": "Cluster the free-text notes into 8-15 mutually exclusive, named failure categories - you can have a model propose the clustering, but you arbitrate the boundaries and the names. Count each category and sort by frequency multiplied by business cost; the distribution is almost always brutally skewed, with two categories accounting for over half the errors, which is what tells you where to spend the next fortnight. Every category then gets exactly one disposition: a deterministic assertion, a dedicated judge, or an explicitly documented known limitation in the customer report. Re-run open plus axial coding monthly on fresh traces - a frozen taxonomy is how you stop noticing new failure kinds.",
-   "minutes": 35,
-   "resource": {
-    "label": "Hamel Husain & Shreya Shankar - AI Evals FAQ: axial coding into a failure taxonomy",
-    "url": "https://hamel.dev/blog/posts/evals-faq/#axial-coding"
-   }
-  },
-  {
-   "name": "Building the 200-case set: sampling frame, stratification, provenance",
-   "learn": "Write the sampling frame down before you sample: which tenants, which date range, which document types, which languages, and what you deliberately excluded. Stratify across every dimension you intend to report on and oversample rare-but-expensive classes so each class has enough support to produce a usable interval - 8 examples of your most important class is not a measurement. Fix the case schema as {id, inputs{}, expected{}, class, tags[], source, labeller, labelled_at, notes} and populate from exactly three streams: stratified production traffic, every customer-reported bug converted into a case on the day it is reported, and deliberate degenerate/adversarial inputs. Mark synthetic cases with source='synthetic' and keep them under about a quarter of the set, or you end up measuring your own imagination.",
-   "minutes": 45,
-   "resource": {
-    "label": "OpenAI Platform docs - Evals guide",
-    "url": "https://developers.openai.com/api/docs/guides/evals"
-   }
-  },
-  {
-   "name": "Splits, contamination and freezing a held-out test set",
-   "learn": "Split stratified into dev and test (roughly 60/40 at this size), iterate only against dev, and look at test only at release. Any example used as a few-shot in the production prompt or inside a judge prompt is banned from both splits - contamination here inflates the number you will quote to a customer. Keep a counter of how many times the test set has been evaluated: every look leaks information, and after twenty looks it is a dev set with a fancy name. Version the dataset (dataset_id plus a content hash recorded in every results file), rotate fresh production cases in quarterly, and archive rather than delete old versions so historical scores stay interpretable.",
-   "minutes": 30,
-   "resource": {
-    "label": "GitHub - openai/evals (eval registry, dataset and JSONL case format)",
-    "url": "https://github.com/openai/evals"
-   }
-  },
-  {
-   "name": "Labelling guidelines, a single label owner, and a fast review UI",
-   "learn": "Write a one-to-two page guideline containing a decision procedure, a worked example at the boundary of every class, and explicit tie-break rules; version it in Git alongside the dataset. Name one principal domain expert who owns the label definition and settles disputes - labels defined by committee drift, and drifting labels silently move every metric. Build the fastest possible review surface: keyboard-only, one keystroke per class, input and model output side by side, writing straight into a table with labeller and timestamp. Do the arithmetic before you start: 200 cases at 30 seconds each is 100 minutes and will get done; at 3 minutes each it is 10 hours and will not.",
-   "minutes": 40,
-   "resource": {
-    "label": "GitHub - HumanSignal/label-studio (annotation interfaces and label config)",
-    "url": "https://github.com/HumanSignal/label-studio"
-   }
-  },
-  {
-   "name": "Inter-annotator agreement and the ceiling it sets on your metrics",
-   "learn": "Double-label 20-30% of the set with a second annotator and compute Cohen's kappa - never raw percent agreement, because with 90% negatives two coin-flippers agree 82% of the time. Read the number as a verdict on your guideline, not on the annotators: below about 0.4 the guideline is broken and must be rewritten before another label is collected; 0.6-0.8 is workable; a suspiciously perfect 1.0 usually means you are labelling something trivial that did not need a model. Human-human agreement is the hard ceiling on any score you can claim for the model, so quote it in the report. Adjudicate every disagreement with the label owner and fold each resolution back into the guideline as a new worked example.",
-   "minutes": 35,
-   "resource": {
-    "label": "scikit-learn - sklearn.metrics.cohen_kappa_score",
-    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.cohen_kappa_score.html"
-   }
-  },
-  {
-   "name": "Per-class metrics: confusion matrix, macro vs micro, support",
-   "learn": "Report a confusion matrix plus per-class precision, recall and F1 with support - a single blended accuracy on imbalanced data is a number that structurally cannot go down and therefore carries no information. Know precisely what the averages hide: macro-F1 weights every class equally so rare classes dominate the mean, micro-F1 equals accuracy in the single-label case, and weighted-F1 is the one that lets a broken rare class disappear behind a healthy common one. Use classification_report(y_true, y_pred, labels=ALL_CLASSES, zero_division=0) and always pass labels explicitly, otherwise a class the model never predicts silently vanishes from the table instead of showing as a row of zeros. For multi-label extraction, compute set precision/recall per document and micro-average across the corpus, and state which one you used.",
-   "minutes": 45,
-   "resource": {
-    "label": "scikit-learn User Guide - Metrics and scoring",
-    "url": "https://scikit-learn.org/stable/modules/model_evaluation.html"
-   }
-  },
-  {
-   "name": "Operating points: PR curve, cost-weighted thresholds, abstention",
-   "learn": "A scored classifier is not one system but a family of them; pick the operating point deliberately from a precision-recall curve computed on dev and confirm it on test, rather than inheriting whatever threshold the first prototype used. Choose it in the customer's cost units: for DefenderMate a missed critical finding is a breach-notification conversation while a false positive costs an analyst three seconds to dismiss, so gate on recall at a fixed acceptable precision and say so out loud. Add a third outcome - abstain and route to human review - and then always report coverage alongside accuracy-on-covered, because a system that answers 40% of cases perfectly is a different product from one that answers all of them. Check calibration before trusting any score: LLM verbal confidences are usually not calibrated probabilities, so bin them and plot observed correctness per bin before you threshold on 0.8.",
-   "minutes": 40,
-   "resource": {
-    "label": "scikit-learn - sklearn.metrics.precision_recall_curve",
-    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.precision_recall_curve.html"
-   }
-  },
-  {
-   "name": "Confidence intervals and how many examples you actually need",
-   "learn": "Every eval score is an estimate from a sample, so report an interval with it: proportion_confint(count, nobs, method='wilson') rather than the normal approximation, which misbehaves near 0 and 1 and at small n. Internalise the scale so you can do it in a customer meeting: about 50 examples of a class gives roughly plus or minus 13 points at 95%, 200 gives about plus or minus 7, and resolving a 3-point difference needs thousands. The direct consequence is what your 200-case set can and cannot support - it can prove 'this class is badly broken' and 'this is broadly working at the level we agreed', but it cannot prove that 94.1% beats 92.8% on its own. Put n and the interval next to every number in every report, and refuse to ship a table without them.",
-   "minutes": 40,
-   "resource": {
-    "label": "statsmodels - proportion_confint (Wilson and other binomial intervals)",
-    "url": "https://www.statsmodels.org/stable/generated/statsmodels.stats.proportion.proportion_confint.html"
-   }
-  },
-  {
-   "name": "Comparing two systems: paired bootstrap, McNemar, multiple comparisons",
-   "learn": "Run both variants over identical cases and compare per-case outcomes rather than two independent aggregate scores; pairing removes case-difficulty variance and is exactly why n=200 can detect changes an unpaired comparison would need thousands for. For binary correctness use McNemar's test on the discordant cells (b = old right and new wrong, c = old wrong and new right), with the exact binomial version when b+c is under about 25 - note that the concordant cells contribute nothing, so a change touching 6 cases is weak evidence no matter how big the set. For any other metric, use a paired bootstrap: resample case indices with replacement 10,000 times, recompute the delta each time, and report the 2.5 and 97.5 percentiles. When you slice by twelve classes you are running twelve tests, so either apply Benjamini-Hochberg or state plainly that the slice view is exploratory.",
-   "minutes": 40,
-   "resource": {
-    "label": "statsmodels - McNemar test for paired nominal data",
-    "url": "https://www.statsmodels.org/stable/generated/statsmodels.stats.contingency_tables.mcnemar.html"
-   }
-  },
-  {
-   "name": "LLM-as-judge: the three modes, and when not to use one at all",
-   "learn": "Know the modes and their reliability ordering: pairwise comparison (A vs B, the most reliable signal and how arena-style rankings work, but yields no absolute number), reference-based grading (compare against a gold answer, closest to a deterministic check), and direct scoring against a rubric (most convenient, least stable). The governing rule: never use a judge where a deterministic check exists - exact and normalised match, set F1, JSON schema validity, regex must-contain/must-not-contain, SQL execution equality, or citation-span containment are all cheaper, free to run and perfectly reproducible. Judges earn their keep only on genuinely open-ended properties: is this summary faithful to the evidence, is the tone appropriate for a regulator, does this actually answer the question asked. Reject any request for an undefined 1-10 quality scale; a binary verdict with a written definition is both more reliable and more actionable.",
-   "minutes": 35,
-   "resource": {
-    "label": "Eugene Yan - Evaluating the Effectiveness of LLM-Evaluators (direct scoring vs pairwise vs reference-based)",
-    "url": "https://eugeneyan.com/writing/llm-evaluators/"
-   }
-  },
-  {
-   "name": "Writing the judge: one failure mode, binary rubric, critique-then-verdict",
-   "learn": "Build one judge per category in your failure taxonomy, each testing a single narrowly-defined criterion and returning pass/fail - a single omnibus 'quality' judge is unstable across runs and tells you nothing you can act on. Structure the prompt as role, the exact criterion with its boundary cases spelled out, then 3-6 few-shot examples drawn from your own human-labelled disagreements including near-miss failures, and force reasoning before commitment by ordering the output schema as {\"reasoning\": ..., \"verdict\": \"pass\"|\"fail\"} so the verdict token is generated after the critique. Give the judge exactly what a human reviewer needs and nothing more - input, output, and the reference if one exists - because extra context invites the judge to invent criteria. Pin the judge's model snapshot and version the judge prompt like any other prompt (topic 46): changing the judge retroactively changes every number you have ever reported.",
-   "minutes": 45,
-   "resource": {
-    "label": "Claude docs - Define your success criteria (test and evaluate)",
+    "label": "Claude Docs - Define success criteria and build evaluations",
     "url": "https://platform.claude.com/docs/en/test-and-evaluate/develop-tests"
    }
   },
   {
-   "name": "Validating the judge against humans, and correcting its estimates",
-   "learn": "A judge is itself a classifier and must be evaluated as one: assemble a set of judge decisions with human ground truth, then compute per-class true positive rate and true negative rate plus Cohen's kappa against the human - not 'judge accuracy', which on a skewed set is meaningless. Iterate the judge prompt against this validation set until kappa clears a stated floor (0.7 is a reasonable target) and accept that you cannot beat your own human-human agreement. Once TPR and TNR are known you can debias the judge's estimate on unlabelled data with p_true = (p_observed - (1 - TNR)) / (TPR + TNR - 1), which is the difference between reporting a judge's opinion and reporting a measurement. Re-validate on a fresh 50-case sample whenever the judge model snapshot changes, the judge prompt changes, or the input distribution shifts - all three happen more often than teams expect.",
-   "minutes": 45,
+   "name": "Build the golden eval set before touching retrieval",
+   "learn": "Write 50-80 real questions against the Dokeo corpus, sampled by shape rather than convenience: single-fact lookup, multi-hop across two documents, comparative ('what changed between v2 and v3'), negation, acronym/jargon, and 5-10 deliberately unanswerable questions that must produce a refusal. For each answerable question, label the chunk ids or (doc_id, span) that genuinely contain the answer - that ground truth is what makes recall@k computable and is roughly 80% of the total effort. Split into dev (tune freely) and held-out (touch once per milestone) so you do not overfit chunk size to thirty questions. Store it as versioned JSONL in the repo, never a spreadsheet, and make 'add the question that broke in production' the standing maintenance ritual.",
+   "minutes": 40,
    "resource": {
-    "label": "Hamel Husain - Using LLM-as-a-Judge for Evaluation (critique shadowing: aligning the judge with a domain expert)",
-    "url": "https://hamel.dev/blog/posts/llm-judge/"
-   }
-  },
-  {
-   "name": "Judge pathologies: position, verbosity, self-preference, score clustering",
-   "learn": "Position bias in pairwise judging is large and systematic, so always run both orderings and count only the verdicts that survive the swap, treating flips as ties and reporting the flip rate as a health metric. Verbosity bias means longer answers score higher independent of quality, so either control for length or report token counts next to scores. Self-preference means a model favours its own generations, so never let the same model family be both generator and judge for a release decision - use a different vendor or at minimum a different family and say which in the report. Score clustering is why 1-10 rubrics fail in practice: judges pile verdicts on 7 and 8 and never use the extremes, so a two-point 'improvement' is inside the noise; this is the strongest practical argument for binary rubrics.",
-   "minutes": 35,
-   "resource": {
-    "label": "arXiv - Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (Zheng et al.)",
-    "url": "https://arxiv.org/abs/2306.05685"
-   }
-  },
-  {
-   "name": "Graders for retrieval and open-ended output",
-   "learn": "Decompose a RAG answer into separately measurable properties instead of grading it as one blob: retrieval quality (recall@k, MRR, nDCG against a labelled query-to-chunk set), groundedness/faithfulness (split the answer into atomic claims and check each against the retrieved context), answer relevance, and context precision. Prefer mechanical citation checking where you can get it - require the model to emit chunk ids and verify the quoted span appears verbatim in that chunk - over asking a judge whether the text 'is faithful'. This decomposition is what lets you attribute a score drop to the retriever rather than the prompt, which ties directly back to topic 49; without it you will spend a week rewriting a prompt to fix a chunking bug.",
-   "minutes": 35,
-   "resource": {
-    "label": "GitHub - explodinggradients/ragas (RAG evaluation metrics)",
+    "label": "Ragas - RAG evaluation framework (repo and docs)",
     "url": "https://github.com/vibrantlabsai/ragas"
    }
   },
   {
-   "name": "The harness: promptfoo config, caching, and a results schema you own",
-   "learn": "Learn the promptfoo config surface: providers, prompts, tests with vars and assert blocks, assertion types (equals, contains, is-json with a schema, javascript/python custom asserts, llm-rubric and model-graded variants), defaultTest for shared assertions, and per-test thresholds. Drive it with promptfoo eval -c evals/classifier.yaml --output results.json, use --no-cache for the authoritative pre-release run, and promptfoo view for local triage of individual failures. Whatever tool you pick, insist on the same invariants: one row per case in the results file (case id, class, expected, actual, each assertion outcome, tokens, latency, USD), deterministic case ordering, response caching keyed on model plus rendered prompt plus params, bounded concurrency with backoff on 429, and a hard spend ceiling that aborts the run. Emit your own stable results.jsonl schema on top of whatever the tool produces, so your reporting and history survive migrating harnesses - which you will do at least once.",
-   "minutes": 40,
+   "name": "Retrieval metrics vs generation metrics",
+   "learn": "Compute recall@k, precision@k, MRR and nDCG@10 on retrieval alone, separately from any answer-quality score, and always report recall at the k you feed the model and at a much larger k (5 and 50). The gap between them is the single most useful diagnostic you own: high recall@50 with low recall@5 is a ranking problem (buy a reranker), low recall@50 is a representation problem (fix parsing, chunking, hybrid, embeddings). Know why end-to-end answer accuracy alone is a trap - a strong model papers over bad retrieval on easy questions and you end up optimising noise. Break every metric down by question type so one aggregate number can never hide that multi-hop sits at 20%.",
+   "minutes": 30,
    "resource": {
-    "label": "promptfoo documentation - Introduction",
-    "url": "https://www.promptfoo.dev/docs/intro/"
+    "label": "Introduction to Information Retrieval - 8.4 Evaluation of ranked retrieval results (precision/recall at k, MAP, NDCG)",
+    "url": "https://nlp.stanford.edu/IR-book/html/htmledition/evaluation-of-ranked-retrieval-results-1.html"
    }
   },
   {
-   "name": "The CI gate: tiers, per-class floors, noise budget, and staying required",
-   "learn": "Run two tiers: a smoke suite of about 30 stratified cases finishing in under two minutes as a required check on pull_request behind path filters, and the full 200-case suite nightly on schedule plus workflow_dispatch. Gate on per-class floors and per-class deltas rather than a global mean - fail when any class's recall falls more than two sigma below its baseline, where sigma comes from actually running the suite five times against an unchanged system rather than from a number someone liked. Gate the non-accuracy budgets in the same job: p95 latency, tokens per case, and USD per 1,000 cases, so a change that doubles cost fails like any other regression. Make the failure legible - sticky PR comment with the per-class table, the delta against baseline, and the ids of the cases that flipped in each direction, plus results.jsonl as an artifact - because an unexplained red X gets overridden twice and then removed from required checks, and a gate that is not required is a runbook paragraph.",
-   "minutes": 45,
+   "name": "Parsing: getting text out without destroying structure",
+   "learn": "Extract per-page text with coordinates, preserve heading levels, keep table cells as rows instead of smashed whitespace, and strip repeated headers, footers and nav chrome. Know the standard failure set cold: two-column PDFs that interleave lines, scanned pages with no text layer (needs OCR, and OCR errors poison embeddings silently), ligatures and soft hyphens breaking tokenisation, and tables that degrade into unreadable prose. Emit a normalised intermediate (markdown or JSON with doc_id, section_path, page, text) so the chunker never touches a raw PDF. Log extracted character count per document and alert when a 40-page contract yields 200 characters - you want that caught at ingest, not six weeks later when the customer asks why clause 9 is invisible.",
+   "minutes": 30,
    "resource": {
-    "label": "GitHub Actions documentation",
+    "label": "PyMuPDF documentation (text, blocks and table extraction)",
+    "url": "https://pymupdf.readthedocs.io/en/latest/"
+   }
+  },
+  {
+   "name": "Chunking: structure first, tokens second",
+   "learn": "Split on structure first (heading boundaries, list items, table rows), then split oversize sections by token count using the real tokenizer, not len(text)/4. Tune exactly three knobs against the eval set: target size (start at 300-800 tokens), overlap (0-20%), and whether to prepend the section path ('Billing > Refunds > Partial refunds') to every chunk. Understand both failure directions - chunks too small lose the antecedent so the embedding is about nothing, chunks too large dilute the vector and blow the reranker budget - and that tables and code blocks must never be split mid-structure. Run at least three configs through the identical harness and report recall@5 for each; the win here is usually several points, not a rounding error.",
+   "minutes": 40,
+   "resource": {
+    "label": "Microsoft Learn - Chunking large documents for vector search",
+    "url": "https://learn.microsoft.com/en-us/azure/search/vector-search-how-to-chunk-documents"
+   }
+  },
+  {
+   "name": "Chunk schema and metadata that the planner can use",
+   "learn": "Design the chunks table deliberately: chunk_id, doc_id, tenant_id, ordinal, section_path, text, token_count, content_hash, embedding vector(1024), tsv tsvector, metadata jsonb, model_version, created_at. Put filterable high-selectivity fields (tenant_id, doc_type, effective_date) in real typed columns with btree indexes rather than burying them in jsonb, because the planner estimates jsonb predicates badly and you will get a Seq Scan you did not budget for; keep jsonb for the long tail and index it with GIN jsonb_path_ops only if you actually query it. Store content_hash (sha256 of normalised text) so re-ingest is idempotent and re-embedding touches only changed rows, and keep ordinal or prev/next chunk ids so a hit can be expanded into its neighbours at answer time.",
+   "minutes": 25,
+   "resource": {
+    "label": "PostgreSQL docs - JSON types and jsonb indexing",
+    "url": "https://www.postgresql.org/docs/current/datatype-json.html"
+   }
+  },
+  {
+   "name": "Choosing an embedding model on your corpus, not a leaderboard",
+   "learn": "Run two or three candidates (a strong general model, a domain or multilingual one, a small local one) through the identical harness and compare recall@5, index size and p95 embed latency on your documents. Know the axes that decide the outcome: dimensionality (768 vs 1536 vs 3072 changes index memory and HNSW build time roughly linearly), max sequence length (chunks over it are silently truncated), asymmetric training where query and passage need different prefixes such as 'query: ' (omitting them quietly costs you double-digit recall), and whether the model targets cosine (normalise) or raw dot product. Price it out - embedding 5M chunks is a real invoice line, and every model upgrade is that invoice again plus a migration.",
+   "minutes": 30,
+   "resource": {
+    "label": "MTEB - Massive Text Embedding Benchmark (repo)",
+    "url": "https://github.com/embeddings-benchmark/mteb"
+   }
+  },
+  {
+   "name": "Embedding pipeline mechanics: batching, limits, idempotency",
+   "learn": "Build ingestion as a batched, resumable job: 64-256 texts per request, a token-bucket that respects the provider's tokens-per-minute limit, retries on 429 and 5xx with exponential backoff plus jitter, and checkpointing by content_hash so a crash at 80% resumes instead of restarting. Normalise vectors to unit length when using cosine so you can switch to the cheaper inner-product operator, and only use a reduced dimensions parameter (Matryoshka truncation) after you have measured the recall cost on your eval set. Two silent killers to guard against: preprocessing that differs between ingest and query time (different prefix, casing or truncation), and vectors from two model versions coexisting in one index - enforce a model_version column and refuse to search across versions.",
+   "minutes": 35,
+   "resource": {
+    "label": "OpenAI Platform docs - Embeddings guide",
+    "url": "https://developers.openai.com/api/docs/guides/embeddings"
+   }
+  },
+  {
+   "name": "pgvector internals: HNSW vs IVFFlat and the operators",
+   "learn": "Know the storage and index model exactly: types vector and halfvec (2 bytes per dimension, roughly halves index size), operators <-> (L2), <=> (cosine) and <#> (negative inner product), and the fact that the index is only used when the ORDER BY expression matches the opclass exactly - one mismatched operator silently gives you a full scan. HNSW takes m and ef_construction at build time and hnsw.ef_search at query time, supports incremental inserts, and gives better recall/latency; IVFFlat takes lists at build and ivfflat.probes at query, builds far faster, but needs representative data present at build time and degrades as the table grows past it. Rehearse the operations: raise maintenance_work_mem and max_parallel_maintenance_workers before CREATE INDEX or a 5M-row HNSW build runs for hours, build CONCURRENTLY on live tables, and keep the index inside RAM or p95 collapses.",
+   "minutes": 40,
+   "resource": {
+    "label": "pgvector README - Indexing section (HNSW vs IVFFlat, operators, build/query parameters)",
+    "url": "https://github.com/pgvector/pgvector#indexing"
+   }
+  },
+  {
+   "name": "Measuring ANN recall against exact search",
+   "learn": "ANN is an approximation and a senior engineer quantifies the approximation rather than trusting it. Compute exact top-k on a sample with a brute-force scan (SET enable_indexscan = off, or a table without the index) and measure overlap with the index result to get true recall@k for a given hnsw.ef_search. Sweep ef_search across 40, 100, 200, 400 and plot recall against p95 latency, then pick the knee rather than the maximum. Learn to read EXPLAIN (ANALYZE, BUFFERS) on a vector query: a Seq Scan means the operator or ORDER BY does not match your opclass, and rows-removed-by-filter far above k means the planner is filtering after the index rather than before it.",
+   "minutes": 30,
+   "resource": {
+    "label": "ANN-Benchmarks: A Benchmarking Tool for Approximate Nearest Neighbor Algorithms (paper: recall vs QPS methodology)",
+    "url": "https://arxiv.org/abs/1807.05614"
+   }
+  },
+  {
+   "name": "Lexical retrieval in Postgres: tsvector, GIN, ranking, trigrams",
+   "learn": "Implement the keyword half properly: to_tsvector('english', text) in a generated column with a GIN index, query with websearch_to_tsquery (handles quoted phrases, OR and leading minus), and rank with ts_rank_cd plus a normalisation flag so long documents do not win purely by length. Be clear on what lexical search gives you that no embedding will - exact error codes, SKUs, API names, rare acronyms, version strings - and where it fails (synonyms, paraphrase, cross-lingual). Add pg_trgm with a GIN index for typo and identifier fuzzy matching. Know that Postgres full-text search is not true BM25 (no IDF-weighted term saturation), so if lexical recall turns out to be decisive on your eval set, measure whether a real BM25 engine or a BM25 extension justifies the extra operational surface for this customer.",
+   "minutes": 35,
+   "resource": {
+    "label": "PostgreSQL docs - Controlling Text Search (tsquery, ts_rank_cd)",
+    "url": "https://www.postgresql.org/docs/current/textsearch-controls.html"
+   }
+  },
+  {
+   "name": "Hybrid fusion: RRF versus weighted score fusion",
+   "learn": "Run the vector and lexical queries independently to depth 50-100 each, then fuse. Default to Reciprocal Rank Fusion - score = sum over lists of 1/(k + rank) with k around 60 - because it needs no score calibration and stays robust when one retriever returns garbage. Use weighted score fusion (min-max or z-score normalise each list first, then alpha*dense + (1-alpha)*sparse) only when you have the eval set to tune alpha and the score distributions are stable across queries. Know the three traps: fusing raw cosine against raw ts_rank is meaningless because the scales are unrelated; RRF throws away score magnitude so a dramatically better top hit gets no extra credit; and fusing at depth 10 wastes the recall you just paid for - fuse deep, then rerank.",
+   "minutes": 35,
+   "resource": {
+    "label": "Microsoft Learn - Relevance scoring in hybrid search using RRF",
+    "url": "https://learn.microsoft.com/en-us/azure/search/hybrid-search-ranking"
+   }
+  },
+  {
+   "name": "Filtered vector search and multi-tenant isolation",
+   "learn": "Get filtered ANN right or you ship either a data leak or a latency cliff. Understand pre-filter versus post-filter: post-filtering runs ANN over everything then drops non-matching rows, so a tenant holding 0.1% of the corpus can get zero results even though its documents are indexed. In pgvector, know that a highly selective btree predicate can push the planner off the HNSW index entirely, that partial indexes (one per large tenant) and table partitioning are the practical escapes, and that iterative scan exists for filtered queries. Layer row-level security on tenant_id with a per-request SET LOCAL so a forgotten WHERE clause fails closed rather than open, and add a permanent eval case asserting that tenant A can never retrieve a tenant B chunk.",
+   "minutes": 30,
+   "resource": {
+    "label": "PostgreSQL docs - Row Security Policies",
+    "url": "https://www.postgresql.org/docs/current/ddl-rowsecurity.html"
+   }
+  },
+  {
+   "name": "Cross-encoder reranking and the retrieval funnel",
+   "learn": "Add a cross-encoder that scores (query, chunk) pairs jointly and reorders: retrieve 50-100 candidates from hybrid, rerank, keep the top 5-8. Understand the economics - unlike a bi-encoder there are no precomputed document vectors, so cost and latency scale linearly with candidate count; batch the pairs, truncate candidate text, and set a hard timeout with a fallback to the fusion order so a slow reranker degrades ranking instead of returning a 504. Measure nDCG@10 improvement and added p95 latency as two separate numbers, and compare a hosted reranker, a local cross-encoder and an LLM-as-reranker at your actual budget. Use the reranker score as a confidence signal: below a threshold calibrated on your eval set, answer 'I do not have that in the provided documents'.",
+   "minutes": 35,
+   "resource": {
+    "label": "Sentence Transformers - Retrieve & Re-Rank (bi-encoder recall then cross-encoder reranking)",
+    "url": "https://www.sbert.net/examples/sentence_transformer/applications/retrieve_rerank/README.html"
+   }
+  },
+  {
+   "name": "Contextual retrieval: situating every chunk before indexing",
+   "learn": "Implement Anthropic's contextual retrieval: for each chunk, call a cheap model with the whole document plus that chunk and ask for a 50-100 token situating preamble ('This section of the 2024 Acme MSA describes the liability cap...'), then prepend it before both embedding and tsvector generation, so the chunk stops being an orphaned 'it' and starts carrying its own context. The cost only survives contact with reality because of prompt caching - cache the document once per document rather than paying for it once per chunk, which means understanding cache_control placement, the minimum cacheable prefix length and the cache TTL; without it the ingest bill is an order of magnitude higher. Anthropic report roughly a 35% reduction in top-20 retrieval failures from contextual embeddings plus contextual BM25 and around 67% with reranking added; reproduce the direction on your corpus and quote your own numbers, never theirs.",
+   "minutes": 40,
+   "resource": {
+    "label": "Anthropic - Introducing Contextual Retrieval",
+    "url": "https://www.anthropic.com/engineering/contextual-retrieval"
+   }
+  },
+  {
+   "name": "Query-side transformation: rewrite, decompose, HyDE",
+   "learn": "Fix the query, not just the index. Strip conversational framing, expand acronyms from a corpus-derived glossary, and for multi-hop questions decompose into two or three sub-queries, retrieve each and RRF the union. Implement HyDE (generate a hypothetical answer paragraph and embed that instead of the raw question) and measure it honestly - it tends to help short keyword-ish queries and to hurt when the model invents entities that anchor retrieval on the wrong documents. In any chat surface, rewrite follow-ups into standalone queries using the last few turns, because 'what about the second one?' is unretrievable on its own. Every transform adds an LLM call to the critical path, so log its latency and keep each one only if it earned measurable recall.",
+   "minutes": 30,
+   "resource": {
+    "label": "HyDE paper - Precise Zero-Shot Dense Retrieval without Relevance Labels (Gao et al.)",
+    "url": "https://arxiv.org/abs/2212.10496"
+   }
+  },
+  {
+   "name": "Three caches: embedding, prompt prefix, semantic answer",
+   "learn": "They have different keys, different lifetimes and very different blast radii. Embedding cache: key on sha256(model_version + normalised text), effectively permanent, removes most re-ingest cost. Prompt cache: put the stable system prompt and any long shared context in the cached prefix and place retrieved chunks after it, because any change before a cache breakpoint invalidates everything after it - prompt ordering is why teams report a 0% cache hit rate. Semantic answer cache: embed the query and return a stored answer when cosine similarity exceeds a threshold you calibrated on real query pairs (usually 0.95+); this is the only one of the three that can confidently serve a wrong answer, so scope keys by tenant and by document-set version and invalidate on ingest.",
+   "minutes": 30,
+   "resource": {
+    "label": "Claude Docs - prompt caching and API reference",
+    "url": "https://platform.claude.com/docs/en/home"
+   }
+  },
+  {
+   "name": "Context assembly, ordering and enforceable citations",
+   "learn": "What lands in the prompt is a design decision, not a concatenation. Deduplicate near-identical chunks, merge adjacent chunks from the same document into one contiguous block carrying its section path, cap total context by tokens and drop from the tail rather than truncating mid-chunk, and order deliberately - models attend worse to the middle of a long context, so put the strongest evidence first and the next strongest last. Give every chunk a stable inline id, require the model to cite those ids, then verify programmatically that each cited id was actually in the context and that the numbers in the claim appear in the cited text; that check turns hallucination into a catchable eval failure instead of a customer escalation. Include an explicit 'if the context does not contain the answer, say so' instruction and keep unanswerable questions in the eval set to prove it holds.",
+   "minutes": 30,
+   "resource": {
+    "label": "Lost in the Middle: How Language Models Use Long Contexts (Liu et al.) - why context ordering matters",
+    "url": "https://arxiv.org/abs/2307.03172"
+   }
+  },
+  {
+   "name": "The ablation table and a CI regression gate",
+   "learn": "Produce the artifact that makes all of this credible: one table, one row per change (baseline, chunking v2, better embeddings, hybrid, rerank, contextual), with columns recall@5, recall@20, nDCG@10, answer accuracy, p95 latency and cost per 1k queries. Change one variable at a time and re-run the whole held-out set - if two changes ship together you cannot attribute the gain and you cannot roll back intelligently. Then wire it into CI: a GitHub Actions job that runs the eval on every PR touching retrieval code, prompts or chunking config, fails when recall@5 drops more than two points or p95 rises more than 20%, and uploads the run artifact so the delta is visible in the PR rather than discovered by the customer.",
+   "minutes": 30,
+   "resource": {
+    "label": "GitHub Actions documentation (workflows, artifacts, required checks)",
     "url": "https://docs.github.com/en/actions"
    }
   },
   {
-   "name": "The production loop: online scoring, review queue, uncertainty sampling",
-   "learn": "An offline set decays the moment the customer changes what they send you, so sample production continuously: run the cheap judges online over a 1-5% sample plus 100% of high-risk classes, attach the scores to the trace, and alert on the failure rate over a window rather than on individual failures. Build a human review queue prioritised by uncertainty (scores near the operating threshold), disagreement (judge versus deterministic check, or two models disagreeing), and business impact - and make every human decision write a new labelled case with source='review_queue', which is how the eval set grows without a labelling sprint. Instrument implicit feedback as well as explicit: whether the analyst edited the draft and by how much, dismissed the finding, or escalated it, because thumbs up/down has both terrible response rates and worse calibration. Drift detection and the rollout mechanics live in topics 57 and 58; here you are building the label supply that feeds them.",
-   "minutes": 40,
-   "resource": {
-    "label": "Langfuse docs - Annotation Queues (prioritised human review of production traces)",
-    "url": "https://langfuse.com/docs/evaluation/evaluation-methods/annotation-queues"
-   }
-  },
-  {
-   "name": "The eval report the customer can forward to their exec",
-   "learn": "Write one page that an engineering lead and a non-technical sponsor can both read: what was measured, on how many examples, sampled how and from what window; a per-class table with precision, recall, support and 95% intervals; the confusion matrix; the top three failure categories with counts and one real example each; what changed since the last report; and an explicit section on what is not measured. State the chosen operating point and the human-agreement ceiling, so nobody expects 99% from a task where two experts agree 85% of the time. Frame the target as an SLO with an error budget rather than a promise of perfection - that framing is what converts an argument about a single bad output into a conversation about a budget - and never publish a number without n and an interval beside it.",
+   "name": "Index operations: incremental ingest, deletes, re-embedding migrations",
+   "learn": "Treat the index as a production database, not a build artifact. Support incremental ingest with upsert by content_hash and hard deletion of chunks whose document version disappeared - orphaned chunks answering from a terminated contract is a compliance incident, not a staleness bug - and know that HNSW deletes leave tombstones so recall and latency drift until you REINDEX CONCURRENTLY. Plan the re-embedding migration you will inevitably run: add a second embedding column or a shadow table, backfill in rate-limited batches, build the new index CONCURRENTLY, compare recall on the held-out set, then flip the read path behind a feature flag with a tested rollback. Track ingest lag (document change to searchable) as an SLI and alert on it, because 'the answer is out of date' is the most common customer complaint about a working RAG system.",
    "minutes": 30,
    "resource": {
-    "label": "Google SRE Book - Service Level Objectives",
-    "url": "https://sre.google/sre-book/service-level-objectives/"
+    "label": "PostgreSQL docs - REINDEX (including REINDEX CONCURRENTLY for rebuilding live indexes)",
+    "url": "https://www.postgresql.org/docs/current/sql-reindex.html"
    }
   }
  ],
  "outcomes": [
-  "You can produce a 200-case labelled set for DefenderMate with a written sampling frame, at least 20% double-labelled, a reported Cohen's kappa, and every case carrying source, labeller and labelled_at provenance.",
-  "You can report per-class precision, recall and F1 with support and 95% Wilson intervals plus a confusion matrix, and can explain in one sentence why you refuse to answer 'what's the accuracy?' with a single number.",
-  "You can state whether the difference between two prompt or model versions is real: paired run over identical cases, McNemar or paired bootstrap, an interval on the delta, and the sample size that would be needed to detect the effect the customer cares about.",
-  "You can build an LLM judge for one named failure mode and show its TPR, TNR and kappa against human labels on a held-out set of judge decisions, then quote the bias-corrected estimate rather than the raw judge pass rate.",
-  "You can make CI fail a pull request on a per-class recall regression beyond two sigma, with the flipped case ids named in the failure output and a sticky per-class score comment, with the smoke tier finishing under two minutes.",
-  "You can run an error-analysis session over 50 real traces and finish with a counted, mutually exclusive failure taxonomy in which the top two categories account for the majority of errors, each with an assigned disposition.",
-  "You can choose and defend an operating point from a precision-recall curve in the customer's cost units, including an abstain path, and report coverage next to accuracy-on-covered.",
-  "You can hand the customer a one-page eval report they forward to their exec unedited, including the section listing what is explicitly not measured."
+  "You can re-run the full retrieval eval on the held-out set with a single command and produce a table showing recall@5, recall@20, nDCG@10, answer accuracy, p95 latency and cost per 1k queries for every variant, with one variable changed per row.",
+  "You can beat your frozen naive baseline by a stated margin (target: at least +15 points recall@5 or a halving of top-20 retrieval failures) and name which specific change produced which part of the gain.",
+  "You can write the hybrid SQL from memory - a pgvector ORDER BY embedding <=> $1 arm and a websearch_to_tsquery/ts_rank_cd arm, each to depth 50, fused with RRF at k=60 - and explain why fusing raw scores instead would be wrong.",
+  "You can tune an HNSW index with measured evidence: report true recall@10 against exact search for at least four ef_search values with the matching p95 latency, and justify the value you shipped.",
+  "You can diagnose a bad answer to a specific stage - parsing, chunking, embedding, ranking, or context assembly - in under fifteen minutes using stored per-question retrieval rows, rather than guessing and re-prompting.",
+  "You can implement contextual retrieval with prompt caching and state the ingest cost per 1,000 chunks with and without caching, plus the measured retrieval-failure reduction on your own corpus.",
+  "You can demonstrate tenant isolation under filtered ANN: a test proving a small tenant still returns results (no post-filter starvation) and a test proving tenant A never retrieves tenant B's chunk even with RLS bypassed in application code.",
+  "You can gate a pull request on retrieval quality: a CI job that fails when recall@5 regresses by more than two points and publishes the before/after table as a PR artifact."
  ],
  "failureModes": [
-  "The eval set was assembled from cases the current system already passes, so it reads 97% every run, provides zero signal on every pull request, and the first genuinely new failure is still discovered by the customer's analyst.",
-  "A single blended accuracy figure hides that the rarest and most contractually important class has recall of 0.3 on 11 examples, and it stays hidden until the quarterly review when someone asks for the breakdown.",
-  "The judge is written, eyeballed on five examples and shipped without ever being scored against human labels, so a 'faithfulness: 92%' number goes into a QBR deck while the judge is in fact passing every fluent answer regardless of evidence.",
-  "The judge model is silently upgraded or its prompt is tweaked mid-quarter, so every historical score shifts and the longitudinal improvement chart in the customer report is entirely an artefact of the measuring instrument.",
-  "Two annotators labelled without a written guideline, kappa comes out at 0.35, and three weeks of prompt iteration turns out to have been fitting noise in the labels rather than improving the system.",
-  "Test-set cases leak into the production prompt's few-shot block (or into the judge's few-shots), so the headline score is measured on the system's own worked examples and does not survive contact with the customer's next batch of documents.",
-  "The CI gate is set exactly at the baseline with no noise allowance, produces four false failures in a fortnight, gets quietly removed from required checks, and now the only thing standing between a prompt edit and the customer's production data is code review."
+  "Filtering is applied after the ANN search, so the tenant holding 0.1% of the corpus gets zero results while their documents sit correctly indexed, and the customer concludes the product is broken for them specifically.",
+  "A batch of scanned PDFs has no text layer and the ingest pipeline extracts a few hundred characters per document instead of failing loudly, so an entire class of contracts is invisible to retrieval and nobody notices until legal asks why a clause cannot be found.",
+  "An IVFFlat index was built when the table held 5,000 rows and the corpus grew to 5,000,000; the lists value is now wildly wrong, recall silently collapses, and the symptom presents as 'the model got worse' after a model upgrade that was actually irrelevant.",
+  "An embedding model upgrade is rolled out to the query path but the corpus backfill is still running, so queries and documents live in different vector spaces for six hours and every answer is confidently assembled from unrelated chunks.",
+  "The semantic answer cache has a threshold set by intuition rather than calibration, and a 0.93-similarity match serves one customer's pricing answer to a different question - or, worse, is scoped without tenant_id and serves it to a different customer.",
+  "A document is deleted or superseded in the source system but its chunks remain in the index, so the assistant cites a terminated agreement or a retracted policy and the incident becomes a compliance finding rather than a bug ticket.",
+  "The reranker is added to the critical path with no timeout and no fallback ordering; under a load spike its p99 doubles, request threads pile up, and the whole retrieval endpoint returns 504s instead of returning slightly worse-ordered results."
  ],
  "interviewQuestions": [
-  "A customer asks 'how do you know your classifier works?' You have two weeks and one domain expert who can give you four hours total. Walk me through exactly what you build, in what order, what number you put in front of them at the end, and what you explicitly refuse to claim.",
-  "Your eval says 94% accuracy and the customer's analysts say it's wrong all the time. Both statements are true. Explain how that happens mechanically, and tell me how you find out which of the two matters for renewal.",
-  "Design an LLM-as-judge for 'is this finding summary faithful to the retrieved evidence'. Then convince a sceptical staff engineer that the judge itself is trustworthy - and tell me what you do if it agrees with your human labeller only 65% of the time.",
-  "You change a prompt and the score moves from 91.5% to 93.0% on 200 labelled cases. Is that an improvement? Show me the actual arithmetic that answers it, and tell me what would be different in your answer if the move had been 91.5% to 96.0%.",
-  "Design the eval CI gate for a customer-facing extraction pipeline end to end: what runs on every PR versus nightly, what the thresholds are and how you derived the numbers, what stops it costing four hundred dollars a day, and what specifically prevents the team from marking it non-required after the third false failure.",
-  "You inherit a system with no evals, no labels and 40,000 stored production traces. What do you do on day one? Be concrete about how you sample, what you write down, who you sit with, and what artefact you have at the end of the week.",
-  "The customer wants a single 'quality score' out of 10 on their dashboard, refreshed daily. Explain what you push back on, what you offer instead, and how you make whatever number you do publish stable enough to trend over six months without the instrument itself drifting."
+  "A customer says your assistant 'cannot find things in our documents'. Walk me through how you localise the failure to parsing, chunking, embedding, ranking, or context assembly, and tell me exactly what you measure at each stage and in what order.",
+  "Design retrieval for a single deployment serving 200 tenants where the largest has 40 million chunks and the smallest has 2,000, with hard isolation guarantees. Cover pre- versus post-filtering, index layout, what degrades first, and how you would prove isolation to their security team.",
+  "Your eval shows recall@50 of 0.92 but recall@5 of 0.48. What do you do next, and how would your answer change if instead recall@50 were 0.50?",
+  "Explain reciprocal rank fusion versus weighted score fusion for combining dense and lexical results. When is RRF the wrong choice, and what would you need in place before switching?",
+  "You have 15% of your p99 latency budget left. Do you spend it on reranking 100 candidates or on a larger embedding model, and how do you decide with data rather than opinion?",
+  "Contextual retrieval costs an extra LLM call per chunk at ingest. Justify that to a customer who is already unhappy about token spend: how do you make it affordable, and how do you prove after the fact that it was worth it?",
+  "A vector query that ran in 20ms now takes 4 seconds after you added a WHERE clause on tenant_id and document_type. What happened inside Postgres, what does EXPLAIN show, and what are your options to fix it without moving to a dedicated vector database?"
  ],
- "proofOfWork": "A public repository, `defendermate-evals`, that a stranger can clone and run end to end in five minutes with `make eval` against a recorded-response fixture mode requiring no API key, so a reviewer can reproduce every number in the README for free. It contains the frozen 200-case dataset as JSONL with the schema above (real cases scrubbed or synthesised, `source` distinguishing production, bug-report and adversarial origins), the versioned `LABELLING_GUIDE.md` with worked boundary examples, and an `agreement/` directory holding the double-labelled subset plus the script that computes Cohen's kappa and prints the adjudication log for every disagreement. It ships the failure taxonomy as `TAXONOMY.md` with counts from a real open-coding session over 50 traces and a disposition column mapping each category to a deterministic assertion, a judge, or a documented limitation; a `judges/` package with one binary judge per open-ended category, each pinned to a dated model snapshot and accompanied by its own validation set of human-labelled judge decisions and a reported TPR/TNR/kappa table plus the bias-corrected pass rate; and a `stats.py` implementing Wilson intervals, McNemar and the paired bootstrap, with a test that fails if any published number in the README lacks an interval. The GitHub Actions workflow runs the 30-case smoke tier on `pull_request` behind path filters and posts a sticky per-class delta comment, with the repository history showing at least one real PR where the gate failed on a single class's recall, the comment naming the flipped case ids, and the follow-up commit that fixed it. Finally, `REPORT.md` is the customer-facing one-pager - per-class table with support and intervals, confusion matrix, top three failure categories with examples, the human-agreement ceiling, the chosen operating point and coverage, and a 'what this does not measure' section - rendered from the results file by a script, so it can never drift from the run that produced it."
+ "proofOfWork": "Publish a self-contained 'retrieval ablation report' repository over the Dokeo documentation corpus: a versioned JSONL eval set of 60-80 labelled questions (including unanswerable ones), a single `make eval` entrypoint that runs any named configuration against the held-out split, and a generated README containing the ablation table with one row per change - naive baseline, structure-aware chunking, alternate embedding model, hybrid RRF, cross-encoder reranking, contextual retrieval - and columns for recall@5, recall@20, nDCG@10, citation-verified answer accuracy, p95 end-to-end latency and cost per 1,000 queries, each cell reproducible from a stored run_id. Include the two plots that show you measured rather than assumed: true ANN recall versus p95 latency across hnsw.ef_search values, and recall@5 broken down by question type across configurations. Add a GitHub Actions workflow that re-runs the eval on every PR touching retrieval and fails the build on a >2-point recall@5 regression, plus a short RUNBOOK.md covering the re-embedding migration procedure, the delete/tombstone reindex policy, and the ingest-lag SLI - so the artifact reads as a production retrieval system with evidence, not a demo notebook."
 }

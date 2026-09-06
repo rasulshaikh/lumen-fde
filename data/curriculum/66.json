@@ -1,200 +1,227 @@
 {
-  "i": 66,
-  "topic": "Discovery: finding the real problem",
-  "track": "J. FDE Craft and Communication",
-  "month": 8,
-  "hours": 8,
-  "why": "An FDE is handed a signed contract and a stated requirement that is almost always a solution somebody already picked - 'we need a dashboard', 'we need RAG over our SharePoint', 'we need an agent that does triage' - and building exactly that is the most common way an engagement ships on time and still fails. You are the only person on the vendor side who will sit with the analyst who does the work at 09:00 and the VP who signed the cheque at 16:00, so the single problem statement both of them will agree with does not exist until you go and manufacture it. Bad discovery does not fail loudly: you deliver in week six, adoption is zero by week ten, and the renewal conversation becomes about your product instead of their process.",
-  "prerequisites": [
-    "SLIs, SLOs and error budgets from 'SRE fundamentals' (topic 20). A discovery success metric is an SLI with a baseline, a target and a measurement method, not an adjective.",
-    "The compliance vocabulary from 'Compliance: SOC 2, GDPR, HIPAA, PCI' (topic 64): BAA, DPA, sub-processor, data residency, right to erasure. You cannot ask constraint questions in a language you do not speak.",
-    "Enough Postgres and warehouse fluency (topics 29 and 36) to ask for a schema dump or a CSV export in the interview and have three defensible numbers out of it before the follow-up call.",
-    "A running demo you can put on screen in 90 seconds - Kaupex or DefenderMate - because FDE discovery is bidirectional: you probe, they react to something concrete, and you learn from the reaction, not from the compliment.",
-    "Five real humans who will give you 45 minutes each: ex-clients, friends running small businesses, an ops manager at a company you once contracted for. Booked before you start reading, not after.",
-    "Recording and transcription set up and tested end to end, plus a git repo for the write-ups. Discovering that your recorder was muted after interview three costs you the interview."
-  ],
-  "subtopics": [
-    {
-      "name": "Three different things called 'discovery' and which one you are doing",
-      "learn": "Separate sales discovery (does a deal exist, run pre-signature by an AE), product discovery (what should the product become, run continuously by PM/design), and delivery discovery - the FDE job - which starts after money changed hands and asks: what does this specific customer actually do all day, what will they let us deploy, and what has to be true in ninety days for them to renew. Know why the third is the hardest: the contract has already named a deliverable, your champion has already told their boss what it does, and your job is to find the real problem without making anyone look wrong for having mis-stated it. Write down, for your own engagement, the one sentence you would have to change in the SOW if discovery went badly - that is your risk surface.",
-      "minutes": 25,
-      "resource": {
-        "label": "GOV.UK Service Manual - How the discovery phase works",
-        "url": "https://www.gov.uk/service-manual/agile-delivery/how-the-discovery-phase-works"
-      }
-    },
-    {
-      "name": "The Mom Test: three rules and the three signals you are being lied to",
-      "learn": "Internalise the three rules until you can apply them mid-sentence: talk about their life instead of your idea; ask about specifics in the past instead of generics or opinions about the future; talk less and listen more. Learn the three failure signals that mean the conversation produced nothing - compliments ('that's really cool', 'I love it'), fluff (generics, hypotheticals, 'I always/usually/never'), and ideas (their feature requests, which are data about a problem, never a spec). Practise the conversions out loud: 'would you use a tool that does X?' becomes 'walk me through the last time you did X'; 'how much would you pay?' becomes 'what do you spend on this today, and who signs that invoice?'; 'do you think this is a problem?' becomes 'what did you do about it last month?'",
-      "minutes": 40,
-      "resource": {
-        "label": "The Mom Test (Rob Fitzpatrick) - book site",
-        "url": "https://www.momtestbook.com/"
-      }
-    },
-    {
-      "name": "Question taxonomy and a leading-question audit you can run on your own transcript",
-      "learn": "Classify every question you ask into open ('walk me through', 'what happened next', 'who else was involved'), closed (yes/no - fine for pinning facts, useless for exploring), leading (contains the answer: 'so that's slow, right?'), loaded (assumes a fact not in evidence: 'when the sync breaks, what do you do?'), and hypothetical (worthless: 'would you', 'could you see yourself', 'if we built'). Build a grep-able red-flag list - 'would you', 'do you think', 'wouldn't it be', 'how much would you pay', 'does that make sense', 'right?' - and after each interview run it over the transcript and count hits per hour. Set a target that trends downward across the five interviews and record the number in every write-up; an unmeasured habit does not change.",
-      "minutes": 30,
-      "resource": {
-        "label": "NN/g - Open-Ended vs. Closed Questions in User Research",
-        "url": "https://www.nngroup.com/articles/open-ended-questions/"
-      }
-    },
-    {
-      "name": "Stakeholder map: buyer, champion, operator, gatekeeper, saboteur",
-      "learn": "Build a five-row map before interview one: economic buyer (owns budget, cares about the number in the board deck), champion (staked their reputation on you, will tell you what they want to hear), operator (does the work you are about to change, is the only source of ground truth about the workflow), gatekeeper (security, legal, procurement, platform - can veto and never gets invited), and the person who loses if this works (headcount, a tool they built, a fiefdom). Assign a different question set to each: the buyer gets 'what does this have to move for you to fund phase two', the operator gets 'show me the last five cases you handled', the gatekeeper gets 'what has to be true before you would sign off on a deployment in your VPC'. Explicitly answer 'who has not been in a room with us yet, and why' - the missing name is usually the one who kills the project in month three.",
-      "minutes": 30,
-      "resource": {
-        "label": "Microsoft Cloud Adoption Framework - Strategy (motivations, outcomes, stakeholders)",
-        "url": "https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/strategy/"
-      }
-    },
-    {
-      "name": "Booking, consent, recording and the 45-minute session shape",
-      "learn": "Get on the operator's calendar directly rather than through the champion, using a framing that costs them nothing: 'I want to understand how the work actually gets done so we don't build the wrong thing - 45 minutes, no prep, no slides.' Open every session with the same 60-second block: who you are, why you are there, that there are no wrong answers, that you will record for accuracy and share the write-up back, and an explicit yes/no on recording that you capture in the transcript. Then run a fixed shape - 5 minutes context, 25 minutes past-behaviour and screen-share walkthrough, 10 minutes constraints and metrics, 5 minutes commitments - and hold to it, because a session that runs long is a session the operator will not grant you twice.",
-      "minutes": 25,
-      "resource": {
-        "label": "GOV.UK Service Manual - Getting informed consent for user research",
-        "url": "https://www.gov.uk/service-manual/user-research/getting-users-consent-for-research"
-      }
-    },
-    {
-      "name": "Laddering: from raw request to decision to business metric",
-      "learn": "Treat every stated request as the top of a ladder and climb down it in the room: 'we need a dashboard' -> what decision does the dashboard support -> who makes that decision, how often, on what data today -> what happens when they get it wrong -> what does that cost per occurrence. Use one-word probes to keep them talking ('and then?', 'because?', 'walk me through that'), and stop laddering at the first number tied to money, time or risk, because that is the level at which the buyer will fund it. Learn Shape Up's distinction between the raw idea and the shaped problem, and the appetite question - 'is this a two-week thing or a two-month thing for you?' - asked of the customer rather than of yourself, so scope gets bounded by their patience, not by your ambition.",
-      "minutes": 30,
-      "resource": {
-        "label": "Shape Up (Basecamp) - Chapter 3: Set Boundaries (appetite, narrowing the problem)",
-        "url": "https://basecamp.com/shapeup/1.2-chapter-03"
-      }
-    },
-    {
-      "name": "Workflow archaeology: watch the work, do not ask about the work",
-      "learn": "Get a screen share and make them process a real case in front of you while you stay silent - 'do it exactly as you would if I weren't here, including the bits you'd normally skip'. Count and record the artefacts nobody mentions in a requirements doc: the shadow spreadsheet, the copy-paste between two systems (the swivel chair), the Slack DM that is actually an approval step, the saved email search that is actually a queue, the person they ping when it is ambiguous. Time the case end to end with a stopwatch, note every hand-off and every point where work waits, and ask 'how often is this the easy version?' - the exception path is usually 30 to 60 percent of volume and is where automation dies.",
-      "minutes": 35,
-      "resource": {
-        "label": "NN/g - Contextual Inquiry: observing and interviewing users in their context",
-        "url": "https://www.nngroup.com/articles/contextual-inquiry/"
-      }
-    },
-    {
-      "name": "Quantify the pain from their own data, not from their adjectives",
-      "learn": "Convert anecdote to arithmetic before the follow-up call: volume (cases per week), unit cost (minutes per case x loaded hourly rate), error rate, rework rate, and cost of delay (what one day of latency costs). Ask for the smallest real artefact that gets you there - a CSV export of the last 90 days of tickets, a table dump, a query result - and be specific about columns and timeframe so it can be approved as low-risk. Load it in DuckDB (`read_csv_auto`, then `SELECT date_trunc('week', created_at), count(*), median(closed_at - created_at)`), and come back with three numbers, the query that produced them, and one number you are unsure about - inviting the correction is what makes the other two credible.",
-      "minutes": 35,
-      "resource": {
-        "label": "DuckDB docs - CSV Import (read_csv and the CSV sniffer)",
-        "url": "https://duckdb.org/docs/current/data/csv/overview"
-      }
-    },
-    {
-      "name": "Read the system, not just the people: schemas, APIs and the integration inventory",
-      "learn": "In parallel with the human interviews, ask for the machine-readable truth: an OpenAPI document, a `\\d+` schema dump or ERD, five real (redacted) payloads, and a list of every system the process touches. For each system record whether it is the system of record or a system of reference, who owns it internally, whether it has an API or only a CSV export, its auth model, and its rate limits. Then ask the single highest-yield engineering question in discovery - 'what breaks today, and how do you find out?' - because the existing failure modes tell you more about the real architecture than any diagram they will draw for you.",
-      "minutes": 30,
-      "resource": {
-        "label": "OpenAPI Specification (latest)",
-        "url": "https://spec.openapis.org/oas/latest.html"
-      }
-    },
-    {
-      "name": "Constraint discovery: the questions that kill projects if asked late",
-      "learn": "Run a fixed constraint checklist in every engagement before you design anything: where may data physically live and may it leave their VPC or their country; is there egress to third-party model APIs or is this air-gapped; who owns the deploy and what is the change-freeze calendar; what identity provider and what does 'SSO' mean here concretely (Entra, Okta, Keycloak, SAML vs OIDC); what security review, pen test or vendor questionnaire stands between you and production and how long has that taken for the last vendor; what is the data-retention and deletion obligation. Capture each answer with a named owner and a date, and treat 'I think it's fine' as unanswered. Every one of these is cheap in week one and an architecture rewrite in week ten.",
-      "minutes": 30,
-      "resource": {
-        "label": "AWS Well-Architected Framework",
-        "url": "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html"
-      }
-    },
-    {
-      "name": "Define the success metric and run the pre-mortem before writing code",
-      "learn": "Write the success metric in SLI form - indicator, measurement method, current baseline, target, date, and who reads it - for example 'median analyst time-to-triage on inbound alerts, measured from webhook receipt to analyst disposition in the DefenderMate audit log, currently 22 minutes, target under 5 minutes for 80 percent of alerts by 31 March, reviewed monthly by the SOC lead'. Insist that the baseline is measured, not remembered, and that the instrumentation to measure it is part of phase one rather than an afterthought. Then run a 15-minute pre-mortem with the champion: 'it is six months from now and this was quietly switched off - write down the three most likely reasons' - and turn each reason into either a discovery question you have not asked or a risk with an owner.",
-      "minutes": 30,
-      "resource": {
-        "label": "Google SRE Workbook - Implementing SLOs",
-        "url": "https://sre.google/workbook/implementing-slos/"
-      }
-    },
-    {
-      "name": "Opportunity mapping: keeping the problem space separate from the solution space",
-      "learn": "Structure what you heard as an opportunity solution tree: one desired outcome at the root (the metric above), opportunities beneath it phrased as the customer's own unmet needs and pain points in their words, and solutions only as leaves attached to a specific opportunity. Enforce the discipline that a solution with no parent opportunity gets deleted, and that an opportunity supported by one loud stakeholder and zero operators is marked as such. Choose the target opportunity explicitly on reach (how many people, how often), impact on the root metric, your confidence given the evidence count, and effort under the customer's constraints - and write the reason down, because in month three someone will ask why you did not build the other thing.",
-      "minutes": 30,
-      "resource": {
-        "label": "Product Talk (Teresa Torres) - Opportunity Solution Trees",
-        "url": "https://www.producttalk.org/opportunity-solution-trees/"
-      }
-    },
-    {
-      "name": "Interviewing the incumbent engineering team without becoming the threat",
-      "learn": "The customer's own platform or data team is simultaneously your best source of ground truth and the group most likely to quietly stall you, because a vendor arriving with a mandate reads as a verdict on their backlog. Interview them first, not last, and lead with the questions that concede status: 'what have you already tried here', 'what did you build that we should reuse rather than replace', 'what would you have done with another two engineers'. Ask directly what they want to own after go-live and what they refuse to be paged for, then make that split explicit in the problem statement - an FDE who hands over a runbook and an on-call boundary gets change windows; one who does not, does not.",
-      "minutes": 25,
-      "resource": {
-        "label": "Atlassian Team Playbook - Roles and Responsibilities play",
-        "url": "https://www.atlassian.com/team-playbook/plays/roles-and-responsibilities"
-      }
-    },
-    {
-      "name": "Synthesis: from raw transcript to evidence with a count behind it",
-      "learn": "Within 24 hours of each session, cut the transcript into atomic observations, tag each with speaker, role, and type (fact, quote, pain, workaround, constraint, request, metric), and keep verbatim wording for anything you will later quote back. Cluster across interviews and attach a support count to every claim - 'four of five operators maintain a private spreadsheet' is an insight; 'users want better search' is a paraphrase of one person. Deliberately record disconfirming evidence and the claims that only the champion made, and mark every open question with the person who can close it, so synthesis produces a to-do list rather than a mood.",
-      "minutes": 30,
-      "resource": {
-        "label": "GOV.UK Service Manual - Analyse a research session",
-        "url": "https://www.gov.uk/service-manual/user-research/analyse-a-research-session"
-      }
-    },
-    {
-      "name": "The one-page problem statement the client will actually sign",
-      "learn": "Write one page, in their vocabulary, with six fixed sections: current state with numbers and the query behind them; who is affected and how often; what it costs today; the constraint set with named owners; the success metric with baseline, target and date; and explicit non-goals ('this does not replace the case management system', 'this does not touch PHI in phase one'), plus open questions with owners. Lead with the customer's own quoted words rather than your framing, keep every number traceable to a source, and cut every adjective that is not attached to a measurement. Then do the read-back: send it, get on a call, read it aloud, and ask 'what did I get wrong?' - written agreement without a spoken correction usually means they skimmed it.",
-      "minutes": 40,
-      "resource": {
-        "label": "Google Technical Writing One",
-        "url": "https://developers.google.com/tech-writing/one"
-      }
-    },
-    {
-      "name": "Closing for commitment: advancement versus a polite stall",
-      "learn": "End every session by asking for something that costs the other person real resource - an introduction to the operator or the gatekeeper by name, a data export, read access to a system, a named owner for an open question, or a specific 30-minute slot on a specific day. Learn to distinguish advancement (they did a thing) from a stall dressed as enthusiasm ('this is great, send me something and I'll take it to the team'), and record which you got in the write-up. Treat repeated compliments plus zero commitments as the strongest possible negative signal, and say so in the write-up rather than filing it as validation.",
-      "minutes": 20,
-      "resource": {
-        "label": "The Mom Test - teaching notes on commitment and advancement (chapter 5)",
-        "url": "https://www.momtestbook.com/teachers"
-      }
-    },
-    {
-      "name": "Build the reusable script and self-scorecard, then run the five",
-      "learn": "Produce a single artefact you will use on real engagements: a 45-minute agenda, the consent line, a 12-question core bank with follow-up probes for each, role-specific branches for buyer / operator / gatekeeper / incumbent engineer, the constraint checklist, the closing-ask menu, and a one-page write-up template. Pair it with a scorecard you fill in after every session - your talk ratio (target under 30 percent), leading questions per hour, number of specific past events obtained, number of numbers obtained, commitments obtained, and one thing you would ask differently. Run all five interviews, score each, and revise the script between sessions so the diffs to the script are themselves the evidence of learning.",
-      "minutes": 35,
-      "resource": {
-        "label": "NN/g - Writing an Effective Guide for a UX Interview",
-        "url": "https://www.nngroup.com/articles/interview-guide/"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can run a 45-minute discovery session end to end from your own script - consent, context, past-behaviour walkthrough, screen-share observation, constraints, closing ask - and finish on time with the transcript, the scorecard and the write-up committed the same day.",
-    "You can show a talk-ratio under 30 percent and a leading-question count that falls measurably from interview one to interview five, evidenced by the tagged transcripts, not by your recollection.",
-    "You can take any stated request ('we need a dashboard', 'we need an agent') and ladder it in under ten minutes to the decision it supports, the person who makes that decision, and one number in money, time or risk.",
-    "You can turn a customer's raw data export into three defensible baseline numbers with the DuckDB queries attached, and present them with an explicit statement of which one you are least sure about.",
-    "You can produce a one-page problem statement that the interviewee confirms verbally with no substantive correction, containing a measured baseline, a dated success metric, named constraint owners and explicit non-goals.",
-    "You can name, for any engagement, every stakeholder in the five-role map plus the person who has not yet been in a room with you, and state what each one would have to see to consider the project a success.",
-    "You can distinguish, in writing, an advancement from a stall for each of your five sessions, and can point to the specific commitment obtained (intro, export, access, calendar slot) or record its absence as a negative signal.",
-    "You can run the constraint checklist cold - data residency, egress, identity provider, change windows, security review, retention - and get every item to either an answer with an owner and date or an explicit 'unknown, blocking'."
-  ],
-  "failureModes": [
-    "You interview the champion and the VP, never the analyst who does the work, and ship a workflow whose second step the operations team is contractually forbidden from performing, which nobody discovers until UAT.",
-    "You demo Kaupex in the discovery call, get 'wow, that's exactly what we need', log it as validation, and only realise months later that no data export, no system access and no second meeting ever came out of that session.",
-    "The stated problem is a solution: they ask for a chatbot over their documentation, you build retrieval, and the real defect is that the documentation is three years stale - so the bot now answers confidently and wrongly at scale, which is worse than the search box it replaced.",
-    "Nobody measured the baseline, so at the quarterly review the customer's own analyst produces a number from a different definition that says the system made things slower, and you have no instrumented counter-argument.",
-    "Data residency comes up in month three: the customer's legal team will not permit egress to a hosted model API, the entire architecture assumed one, and the replan costs more than the original build.",
-    "The customer's platform team was treated as a delivery obstacle rather than interviewed, so they own the deploy, never schedule your change window, and the pilot sits in staging until the sponsor loses interest.",
-    "You say 'yes, we can do that' three times in a discovery room, the notes become the SOW, and you spend the engagement delivering scope that was never tied to the success metric or to anyone's budget."
-  ],
-  "interviewQuestions": [
-    "A customer signed for 'an AI agent that triages our security alerts'. You get one 45-minute session with the SOC analyst before design starts. Give me your actual first six questions, in order, and tell me what each one is trying to disconfirm.",
-    "Your champion tells you the team spends 'hours a day' on manual reconciliation. Walk me through how you convert that into a number you would be willing to put in a board deck, including exactly what artefact you ask for and what you do with it.",
-    "How do you tell the difference between a customer who is genuinely enthusiastic and one who is being polite? Give me the concrete signals you look for in the session and the thing you ask for at the end that settles it.",
-    "You have finished discovery and concluded that the deliverable named in the signed SOW will not move the metric the buyer cares about. Your champion picked that deliverable and told their VP it would work. What do you do, in what order, and what exactly do you say to the champion?",
-    "Design the constraint interview for a healthcare customer who wants patient-intake summarisation. What do you ask, whom do you ask, and which single answer, if it comes back wrong, invalidates your default architecture?",
-    "In discovery you find that the customer's own platform team already built half of what you were hired to build, and it mostly works. How does that change your problem statement, your architecture and your relationship with that team?",
-    "Give me a time you built the wrong thing because discovery was thin. What was the specific question you failed to ask, how would you have asked it, and what is now in your script because of it?"
-  ],
-  "proofOfWork": "A public `discovery-kit` repository that a hiring manager can evaluate in fifteen minutes and another engineer can pick up and use on a live engagement. It contains: (1) the versioned discovery script with its git history visible, so the diffs between interview one and interview five are themselves the evidence of learning, plus the consent line, the role-specific question branches, the constraint checklist and the closing-ask menu; (2) five write-ups against a fixed template, each with its filled-in scorecard (talk ratio, leading questions per hour, specific past events obtained, numbers obtained, commitment obtained or explicitly absent) and a summary chart showing those metrics trending across the five; (3) one fully annotated transcript with every question tagged open / closed / leading / loaded / hypothetical and a short written self-critique of the three worst moments; (4) a `baseline/` folder containing one real (anonymised) data export, the DuckDB queries that turn it into three baseline numbers, and a note on which number is weakest and why; (5) a one-page problem statement for the strongest of the five engagements, written in the interviewee's own quoted language, that they confirmed on a read-back call, with the confirmation email or note included; and (6) a `delta.md` comparing the hypothesis you wrote down before interview one with the final problem statement, naming precisely what you were wrong about and which question surfaced it - the last file being the one that actually demonstrates the skill."
+ "i": 66,
+ "topic": "Application security: OWASP Top 10 hands-on",
+ "track": "I. Security and Compliance",
+ "month": 7,
+ "hours": 10,
+ "why": "An FDE is the person sitting in the room when the customer's security team returns a pentest report two weeks before go-live, and the deployment either survives that meeting or slips a quarter. You will be deploying your own code inside someone else's VPC, against their SSO, holding their regulated data, which means you personally own the authorization boundary, the secrets, and the answer to 'can tenant A see tenant B'. Reading the OWASP list is worthless here - you need to have actually exploited broken object-level authorization and a forged JWT with your own hands, because that is the only way you can look at a customer's API and see the bug before their auditor does.",
+ "prerequisites": [
+  "Auth (topic 27): OAuth2 authorization-code flow, OIDC id_token vs access_token, JWT structure and claims (iss, aud, exp, sub), and how RBAC claims get into a request context - you cannot attack what you cannot draw.",
+  "Data modelling for multi-tenant AI systems (topic 30): tenant_id propagation, Postgres row-level security, PII classification and audit trails, since most real findings in an FDE deployment are authorization findings, not memory-corruption findings.",
+  "FastAPI in production (topic 26) and PostgreSQL at depth (topic 29): dependency injection for auth, parameterised queries via bound parameters, and enough SQL to know why string interpolation into a WHERE clause is the whole bug.",
+  "Networking (topic 2): TLS handshake and certificate validation, HTTP request/response structure, headers, redirects, and proxies - you will spend ten hours reading raw HTTP in an intercepting proxy.",
+  "CI/CD and supply chain (topic 18): a pipeline you can add jobs to, plus SBOM/scanning concepts, because half of A06 is a CI problem rather than a code problem.",
+  "A local runnable copy of your own stack - Dokeo (Python/FastAPI/Postgres) and DefenderMate (TypeScript/Next.js) - with seeded data for at least two tenants and three roles, because the deliverable requires finding a real issue in your own code."
+ ],
+ "subtopics": [
+  {
+   "name": "Burp workbench: proxy, CA cert, scope, Repeater loop",
+   "learn": "Install Burp Suite Community, install its CA certificate into the browser trust store, and set target scope so Proxy history is not drowned in telemetry noise. Learn the loop you will run 200 times today: intercept a request, send it to Repeater with Ctrl+R, mutate one parameter, resend, diff status code / Content-Length / response time. Know Intruder's Sniper and Cluster bomb modes and that Community throttles Intruder hard, so scripted requests with Python plus `requests` are often faster for enumeration. Configure match-and-replace rules to swap the session cookie or Authorization header automatically - that is how you test cross-tenant access without re-logging in every request.",
+   "minutes": 25,
+   "resource": {
+    "label": "PortSwigger: Burp Suite desktop documentation",
+    "url": "https://portswigger.net/burp/documentation/desktop"
+   }
+  },
+  {
+   "name": "Map your own attack surface before touching a lab",
+   "learn": "Produce the artifact everything else hangs off: an endpoint inventory for Dokeo and DefenderMate with, per route, the HTTP method, whether authentication is required, which role/permission is checked, whether the object is tenant-scoped, what user input reaches a query/filesystem/HTTP client, and what it returns. Pull it from the OpenAPI schema plus route decorators rather than memory, and mark every route where the authorization check is 'the ORM filter happens to include tenant_id'. Also map trust boundaries: browser to edge, edge to API, API to Postgres, API to model provider, and any background worker that runs with elevated credentials. Every finding you produce later will be a cell in this table.",
+   "minutes": 30,
+   "resource": {
+    "label": "OWASP WSTG: Identify Application Entry Points (WSTG-INFO-06)",
+    "url": "https://owasp.org/www-project-web-security-testing-guide/stable/4-Web_Application_Security_Testing/01-Information_Gathering/06-Identify_Application_Entry_Points"
+   }
+  },
+  {
+   "name": "A01 Broken Access Control: IDOR and horizontal privilege escalation",
+   "learn": "Work the PortSwigger access-control labs end to end: unprotected admin functionality, admin functionality found via robots.txt or a JS bundle, user role controlled by a request parameter or a cookie, user ID controlled by a request parameter with and without an unpredictable GUID, and the 'user ID leaked in a redirect / in a different response' variants. The mechanism to internalise is that authentication answers 'who are you' and authorization answers 'may you touch this object', and almost every real breach is the second check missing on one route out of 200. Learn to test by identity swap: capture request R as user A, replay it verbatim with user B's session, and treat any 200 that should be 403 as a finding. Note that 404-instead-of-403 is a defensible design choice but only when it is deliberate and uniform.",
+   "minutes": 45,
+   "resource": {
+    "label": "PortSwigger Web Security Academy: Access control vulnerabilities",
+    "url": "https://portswigger.net/web-security/access-control"
+   }
+  },
+  {
+   "name": "API authorization: BOLA, BFLA, mass assignment, excessive data exposure",
+   "learn": "Learn the API-specific shape of A01 from the OWASP API Security Top 10: Broken Object Level Authorization (`GET /documents/{id}` with no tenant predicate), Broken Function Level Authorization (`POST /admin/users` reachable because the router guard was only applied to the GET), Broken Object Property Level Authorization / mass assignment (a Pydantic model or JS object spread that lets a client set `role`, `tenant_id`, `is_admin` or `credits`), and excessive data exposure where the API returns the whole ORM row and the frontend hides fields. Fix patterns matter more than exploits here: explicit response models with an allowlist of fields, separate input schemas that physically cannot carry privileged fields, and a single `authorize(actor, action, resource)` chokepoint rather than per-route ad hoc `if`. Then re-derive the same bugs against your own OpenAPI spec.",
+   "minutes": 40,
+   "resource": {
+    "label": "OWASP Top 10 API Security Risks 2023 (BOLA, BOPLA, BFLA)",
+    "url": "https://owasp.org/API-Security/editions/2023/en/0x11-t10/"
+   }
+  },
+  {
+   "name": "A07 Authentication failures: brute force, enumeration, reset flows, MFA bypass",
+   "learn": "Run the authentication labs: username enumeration via subtly different responses and via response timing, password brute-force with IP-lockout bypasses (X-Forwarded-For, alternating valid logins), 2FA bypassed by skipping the second-step request, and password reset poisoning via a spoofed Host header used to build the reset link. The general lesson is that authentication is a state machine and attackers move between states out of order - test every step for 'what if I just call step 3 directly'. Know the correct defences concretely: constant-time comparisons, uniform error messages and timings, Argon2id or bcrypt with real cost parameters (never SHA-256 of a password), single-use time-bounded reset tokens generated by a CSPRNG and stored hashed, and rate limits keyed on account plus IP plus device rather than IP alone.",
+   "minutes": 40,
+   "resource": {
+    "label": "PortSwigger Web Security Academy: Authentication vulnerabilities",
+    "url": "https://portswigger.net/web-security/authentication"
+   }
+  },
+  {
+   "name": "JWT attacks: alg confusion, unverified signatures, jwk/jku/kid injection",
+   "learn": "Complete the JWT labs with Burp's JWT Editor: unverified signature, `alg: none`, brute-forced weak HMAC secret (hashcat mode 16500 against a short `secret`), signature bypass via an embedded `jwk` header, via `jku` pointing at an attacker-hosted JWKS, via `kid` path traversal to a known file such as `/dev/null`, and RS256-to-HS256 algorithm confusion where the public key is used as the HMAC key. In code, know the difference between `jwt.decode(token, options={'verify_signature': False})`, decoding without pinning `algorithms=['RS256']`, and decoding without checking `aud`, `iss` and `exp` - each is a separate real bug and the last one is why a staging token can work in production. Then grep your own codebase and your customer-facing SDK for every decode call and check all four properties.",
+   "minutes": 45,
+   "resource": {
+    "label": "PortSwigger Web Security Academy: JWT attacks",
+    "url": "https://portswigger.net/web-security/jwt"
+   }
+  },
+  {
+   "name": "OAuth 2.0 and OIDC implementation flaws",
+   "learn": "Work the OAuth labs: authentication bypass via a flawed `state` parameter (CSRF on the callback, linking the victim's account to the attacker's identity), stealing an access token via an over-permissive `redirect_uri` (open redirect chained to the callback, path traversal in the redirect, or a naive `startswith` check), and unprotected dynamic client registration. Understand precisely why `redirect_uri` must be matched exactly against a registered allowlist, why implicit flow leaks tokens in the URL fragment and referer, why PKCE (`code_challenge` S256) exists for public clients, and why an access token is not proof of identity - only a validated `id_token` with checked `aud`, `iss`, `nonce` and signature is. This is the highest-frequency FDE integration and the place where a customer's IdP config will hand you a real finding.",
+   "minutes": 40,
+   "resource": {
+    "label": "PortSwigger Web Security Academy: OAuth 2.0 authentication vulnerabilities",
+    "url": "https://portswigger.net/web-security/oauth"
+   }
+  },
+  {
+   "name": "Sessions, cookie attributes and CSRF",
+   "learn": "Do the CSRF labs: no token, token not tied to session, token validated only when present, token in a cookie (double-submit done wrong), and SameSite Lax bypass via a GET-based state change or a client-side redirect. Get the cookie flags exactly right rather than approximately: `HttpOnly` blocks JS theft, `Secure` blocks plaintext transmission, `SameSite=Lax` is the browser default and still allows top-level GET navigation, `SameSite=None` requires `Secure`, and the `__Host-` prefix pins a cookie to one origin with no `Domain` attribute. Know when CSRF is genuinely not exploitable (a pure `Authorization: Bearer` API with no ambient cookie) and when engineers wrongly assume it isn't, and know that a strict CORS policy is not a CSRF defence because the simple request still fires.",
+   "minutes": 35,
+   "resource": {
+    "label": "PortSwigger Web Security Academy: Cross-site request forgery (CSRF)",
+    "url": "https://portswigger.net/web-security/csrf"
+   }
+  },
+  {
+   "name": "A03 Injection: SQL injection by hand, then the correct fix",
+   "learn": "Run the SQLi track: UNION-based data extraction (determine column count with ORDER BY / NULL padding, find a text-compatible column, exfiltrate `information_schema.tables` on Postgres), blind boolean-based, blind time-based with `pg_sleep()`, and error-based via `CAST(... AS int)`. Then write the fix and prove it: bound parameters (`cursor.execute(sql, (value,))`, SQLAlchemy `text()` with `:param`), understanding that parameterisation binds values only - table names, column names and `ORDER BY` direction must be validated against an allowlist because they cannot be bound. Learn why ORMs are not automatically safe (`.filter(text(f\"...\"))`, `raw()`, string-built `IN` clauses) and why a WAF regex is a mitigation, not a fix. Finish by adding a least-privilege database role so even a successful injection cannot `DROP` or read another schema.",
+   "minutes": 45,
+   "resource": {
+    "label": "PortSwigger Web Security Academy: SQL injection",
+    "url": "https://portswigger.net/web-security/sql-injection"
+   }
+  },
+  {
+   "name": "Injection beyond SQL: OS command, template, NoSQL, and LLM-adjacent sinks",
+   "learn": "Do the OS command injection labs (blind detection with `; sleep 10`, out-of-band via DNS) and the server-side template injection labs (identify the engine with `${7*7}` / `{{7*7}}`, then escalate through Python object attributes such as `__class__.__mro__` to reach `os.system` in Jinja2). The generalisation to carry: every injection is 'attacker data crossing into an interpreter', so enumerate your interpreters - shell, template engine, SQL, MongoDB query documents, YAML/pickle loaders, XPath, and now the model prompt itself. Fixes are structural: `subprocess.run([...], shell=False)` with an argument list, never `shell=True` with an f-string; sandboxed or logic-less templates; and `yaml.safe_load` over `yaml.load`. Cross-reference guardrails and prompt injection (topic 51) so you can explain to a customer why prompt injection is untrusted-input-into-an-interpreter with no parameterised query available.",
+   "minutes": 35,
+   "resource": {
+    "label": "PortSwigger Web Security Academy: OS command injection",
+    "url": "https://portswigger.net/web-security/os-command-injection"
+   }
+  },
+  {
+   "name": "XSS: reflected, stored, DOM-based, and a CSP that actually helps",
+   "learn": "Work reflected, stored and DOM XSS labs including a `document.write`/`innerHTML` sink reached from `location.hash`, and at least one context-escape lab (inside an attribute, inside a JS string, inside a template literal) so you internalise that escaping is context-dependent, not a single `escape()` call. Know the real fixes: contextual output encoding by the framework (React's JSX escaping, and precisely why `dangerouslySetInnerHTML` and Angular's bypass functions defeat it), DOMPurify for HTML you must render, and a Content-Security-Policy without `unsafe-inline` using nonces or hashes plus `object-src 'none'` and `base-uri 'none'`. Understand what XSS actually buys an attacker in your app: it runs in the victim's origin, so `HttpOnly` protects the cookie but not the session - the attacker just issues authenticated requests from the page.",
+   "minutes": 40,
+   "resource": {
+    "label": "PortSwigger Web Security Academy: Cross-site scripting",
+    "url": "https://portswigger.net/web-security/cross-site-scripting"
+   }
+  },
+  {
+   "name": "SSRF and cloud metadata: the FDE's most dangerous feature request",
+   "learn": "Run the SSRF labs: basic SSRF to an internal admin interface, blacklist bypasses (alternate IP encodings, `127.1`, decimal integers, `localhost` variants, double URL-encoding), whitelist bypasses using the `@` userinfo trick, `#` fragments and DNS names that resolve to loopback, plus SSRF via the Referer header and via an open redirect chain. Then connect it to cloud reality: any 'give us a URL and we will import it' feature is one bad parse away from reading `http://169.254.169.254/latest/meta-data/iam/security-credentials/` and exfiltrating the instance role. The fix set is architectural - enforce IMDSv2 (token-required, hop limit 1), resolve the hostname yourself and validate the resulting IP against RFC1918/link-local/loopback ranges before connecting, re-validate after every redirect, and egress through a locked-down proxy with an allowlist rather than trusting a regex.",
+   "minutes": 35,
+   "resource": {
+    "label": "PortSwigger Web Security Academy: Server-side request forgery (SSRF)",
+    "url": "https://portswigger.net/web-security/ssrf"
+   }
+  },
+  {
+   "name": "XXE, deserialization and file upload",
+   "learn": "Complete the XXE labs (file retrieval via an external entity, blind XXE via out-of-band DNS/HTTP and via error messages, XInclude when you cannot control the whole document) and know the one-line fix: disable DTD processing and external entity resolution in the parser - in Python use `defusedxml`, never bare `xml.etree` on untrusted input. Do at least one insecure deserialization lab and be able to state why `pickle.loads`, `yaml.load` and Java native deserialization on attacker data are remote code execution by design, not by bug. Then the file upload track: web-shell upload via a bypassed content-type check, extension blacklist bypass, and path traversal in the filename. Fixes to be able to write from memory: allowlist by sniffed content type, generate your own filename (never trust `filename`), store outside the web root or in object storage, and serve with `Content-Disposition: attachment` plus `X-Content-Type-Options: nosniff`.",
+   "minutes": 35,
+   "resource": {
+    "label": "PortSwigger Web Security Academy: XML external entity (XXE) injection",
+    "url": "https://portswigger.net/web-security/xxe"
+   }
+  },
+  {
+   "name": "A05 Security misconfiguration: CORS, headers, debug surface",
+   "learn": "Do the CORS labs and be able to explain the exact failure: `Access-Control-Allow-Origin` reflected from the request `Origin` together with `Access-Control-Allow-Credentials: true` is a cross-origin data read of every authenticated endpoint, and `Access-Control-Allow-Origin: null` is trivially forged from a sandboxed iframe. This is the single most common FDE-introduced bug because it is what you type at 11pm to unblock a customer's frontend. Then sweep the rest of A05 on your own deployment: `/docs` and `/openapi.json` exposed in production, DEBUG mode returning stack traces and settings, default credentials on a bundled Grafana or Redis, directory listing, missing `Strict-Transport-Security` / `X-Content-Type-Options` / `X-Frame-Options` or `frame-ancestors`, and verbose version banners. Use the OWASP Secure Headers project as the checklist and check the response headers of your own production URL right now.",
+   "minutes": 25,
+   "resource": {
+    "label": "PortSwigger Web Security Academy: Cross-origin resource sharing (CORS)",
+    "url": "https://portswigger.net/web-security/cors"
+   }
+  },
+  {
+   "name": "Business logic flaws and abuse of legitimate functionality",
+   "learn": "Work the logic-flaw labs: excessive trust in client-side controls (a price or quantity in the request body), negative or overflowing quantities, inconsistent handling of the same value across two endpoints, flawed enforcement of workflow sequence, and authentication bypass via an email-domain check that trusts a user-supplied field. These are the findings a scanner will never produce and the ones customers care most about, because they map directly to money and to regulated actions. In an AI deployment the equivalents are concrete: an unmetered endpoint that lets one tenant burn the whole model budget, a job-submission API with no per-tenant concurrency cap, and a 'retry' button with no idempotency key that double-charges. Test by asking 'what does this endpoint assume, and can I violate that assumption while staying inside the API contract'.",
+   "minutes": 30,
+   "resource": {
+    "label": "PortSwigger Web Security Academy: Business logic vulnerabilities",
+    "url": "https://portswigger.net/web-security/logic-flaws"
+   }
+  },
+  {
+   "name": "A02 Cryptographic failures and the secrets you actually hold",
+   "learn": "Audit data in transit and at rest rather than reading crypto theory: is TLS terminated at the edge and then plaintext HTTP inside the mesh, is `verify=False` set anywhere in an HTTP client, are database and Redis connections using TLS, is `sslmode=require` (which does not verify the certificate) mistaken for `verify-full`. On storage: passwords under Argon2id/bcrypt with per-user salts, tokens and API keys stored as hashes so a database dump is not a credential dump, envelope encryption with KMS for column-level PII, and a documented key rotation path. Know the anti-patterns by name - ECB mode, a static IV, `Math.random()` or `random` instead of `secrets.token_urlsafe`, home-rolled `==` comparison of MACs instead of `hmac.compare_digest`, and JWTs used as long-lived opaque session tokens with no revocation.",
+   "minutes": 30,
+   "resource": {
+    "label": "OWASP Cheat Sheet Series: Cryptographic Storage",
+    "url": "https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html"
+   }
+  },
+  {
+   "name": "A06 Vulnerable and outdated components in your own supply chain",
+   "learn": "Run real scanners against your real repos rather than reading about SCA: `pip-audit` against the resolved lockfile, `npm audit --omit=dev` against DefenderMate, and `trivy image` against both container images to catch OS-level CVEs the language tools never see. Learn to triage instead of panic - is the vulnerable function reachable from your code path, is it a dev-only dependency, is there a fixed version and does it break your API - and to record that reasoning, because a customer's security team will ask why a HIGH is still open. Wire Dependabot or Renovate with grouped update PRs so the fix path exists before the finding arrives, and pin by digest in Dockerfiles so a nightly rebuild cannot silently pull a new base layer. Keep an SBOM (CycloneDX or SPDX) as an artifact of every build so 'are we affected by CVE-X' takes minutes, not days.",
+   "minutes": 20,
+   "resource": {
+    "label": "pip-audit (PyPA official repository)",
+    "url": "https://github.com/pypa/pip-audit"
+   }
+  },
+  {
+   "name": "Security testing in CI: SAST, DAST and a gate policy people won't disable",
+   "learn": "Add three jobs and, crucially, decide what each one blocks. SAST with Semgrep or CodeQL on every PR, using a curated ruleset plus custom rules for your own footguns (any `jwt.decode` without `algorithms=`, any ORM query on a tenant-scoped table without a tenant filter, any `subprocess` with `shell=True`). Secret scanning with push protection so a key never reaches the remote in the first place. DAST with the OWASP ZAP baseline scan against an ephemeral environment for headers, cookie flags and low-hanging misconfiguration. The gate policy is the senior part: block the merge on new HIGH findings introduced by the diff, report-only on the pre-existing backlog, allow a documented, expiring, reviewer-approved suppression, and never a global `nosec` - a scanner everyone ignores is worse than no scanner because it manufactures false assurance.",
+   "minutes": 30,
+   "resource": {
+    "label": "GitHub Docs: Code security (code scanning, secret scanning, Dependabot)",
+    "url": "https://docs.github.com/en/code-security"
+   }
+  },
+  {
+   "name": "A09 Logging and monitoring: making an attack visible",
+   "learn": "Decide what a security event is in your system and make it queryable: authentication success and failure with actor, source IP and user agent; authorization denials (a 403 spike from one principal across many object ids is IDOR probing in progress); privilege and role changes; token issuance and revocation; data export and bulk read; and admin actions. Emit structured JSON with a trace id so a security event joins the same trace as the request (build on OpenTelemetry from topic 21), keep an append-only audit trail with an integrity guarantee for regulated tenants, and set retention to survive the typical months-long dwell time. Equally important, log what you must never log: passwords, tokens, full card numbers, PII in URLs (which land in access logs and Referer headers), and raw prompts containing customer data. Then write two alerts and prove they fire against your own traffic.",
+   "minutes": 20,
+   "resource": {
+    "label": "OWASP Top 10 2021: A09 Security Logging and Monitoring Failures",
+    "url": "https://owasp.org/Top10/2021/A09_2021-Security_Logging_and_Monitoring_Failures/"
+   }
+  },
+  {
+   "name": "Find, score, fix and regression-test one real issue in your own stack",
+   "learn": "Turn the lab skills on Dokeo and DefenderMate and go until you have a genuine finding - most likely a missing tenant predicate, a mass-assignment field, a reflected CORS origin, or a JWT decode without audience validation. Write it up the way a customer's security team expects: title, affected endpoint and commit, severity with an explicit CVSS v3.1 vector string and a sentence on why environmental metrics adjust it for your deployment, minimal reproduction as a copy-pasteable `curl`, evidence, impact in business terms, remediation, and detection guidance. Then fix it, and write the test that would have caught it - a pytest case that authenticates as tenant B and asserts a 403/404 on tenant A's object - and confirm it fails on the vulnerable commit and passes on the fix. A finding without a regression test is a fix that will regress within two releases.",
+   "minutes": 35,
+   "resource": {
+    "label": "FIRST: CVSS v3.1 Specification Document",
+    "url": "https://www.first.org/cvss/v3.1/specification-document"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can complete the PortSwigger apprentice and practitioner labs across access control, authentication, JWT, OAuth, SQL injection, XSS, SSRF, CSRF, XXE and business logic, and produce a lab completion list as evidence.",
+  "You can take an unfamiliar API's OpenAPI spec and, within an hour, produce an authorization matrix of endpoint x role x tenant with the identity-swap test result in every cell, and name the highest-risk three routes.",
+  "You can exploit and then correctly fix a cross-tenant IDOR in your own code, and ship a pytest regression test that fails on the vulnerable commit and passes on the patched one.",
+  "You can forge a JWT four different ways (alg none, unverified signature, weak HMAC secret, jku/kid injection) and audit any codebase's decode calls for algorithm pinning, audience, issuer and expiry in a single grep-driven pass.",
+  "You can write a CVSS v3.1 vector for a finding, defend the base metrics you chose, and explain how the environmental score changes for a deployment inside a customer's private VPC versus a public SaaS.",
+  "You can explain to a customer's frontend engineer why reflecting the Origin header with credentials enabled is a full authenticated data read, and hand them the correct allowlist implementation in the same conversation.",
+  "You can add SAST, secret scanning and a ZAP baseline job to a pipeline with a written gate policy - blocking only diff-introduced HIGH findings, with expiring reviewed suppressions - and state the false-positive rate you measured before enabling the gate.",
+  "You can produce a security finding write-up that a customer's security team accepts without a follow-up call: reproduction, impact in business language, remediation, and detection guidance."
+ ],
+ "failureModes": [
+  "A tenant-scoped endpoint filters by primary key only because 'the ORM session already has the tenant', row-level security was never enabled on that one table, and a customer analyst enumerating sequential document ids reads another business unit's contracts for six weeks before anyone notices.",
+  "The edge proxy and the application normalise paths differently, so an authorization middleware that protects `/admin/` never sees a request to `/admin%2fusers` or `/Admin/users`, and the whole admin surface is reachable unauthenticated behind a rule that looks correct in code review.",
+  "CORS was loosened to reflect any Origin with credentials during an on-site integration to unblock a customer's dev server, the change shipped in a hotfix branch with no ticket, and it stays in production until an external pentest finds it.",
+  "A JWT is validated for signature but not for `aud` and `iss`, so a token minted by the customer's staging IdP - or by a different application sharing the same identity provider - authenticates successfully against production.",
+  "A 'import from URL' document feature is deployed onto a node group where IMDSv1 was left enabled for a legacy agent, turning a low-severity SSRF into instance-role credential theft and an incident that involves the customer's cloud security team.",
+  "A dependency is pinned by floating tag in the Dockerfile, the nightly rebuild pulls a new transitive package with a known RCE, and because the SBOM is generated only on tagged releases nobody can answer 'which running images are affected' for two days.",
+  "Login rate limiting is enforced at the ALB per source IP, but the same authentication endpoint is reachable through an internal service-mesh route that bypasses the edge entirely, so credential stuffing from inside the cluster succeeds with no lockouts and no alert."
+ ],
+ "interviewQuestions": [
+  "Two weeks before go-live, the customer's security team returns a pentest report with fourteen findings against your deployment. Walk me through how you triage it in the next twenty-four hours, which findings you push back on and how, and what you tell their CISO on the call.",
+  "Design authorization for a multi-tenant API where enterprise customers have nested org units, delegated admins and shared read-only collaborators. Where exactly is the check enforced, how do you make it impossible for a new endpoint to forget it, and how would you prove to an auditor that no IDOR exists?",
+  "Users occasionally see another tenant's data on the dashboard, but only under load and never reproducibly. Walk me through your investigation - what are the candidate mechanisms, and what would you instrument first?",
+  "Explain precisely what breaks in each of these three cases and how the exploit differs: a JWT library called with signature verification disabled, a service that accepts `alg: none`, and a service where the `kid` header is used to look up a key from disk without sanitisation.",
+  "Your product takes a customer-supplied URL and fetches the document. Enumerate every way that becomes SSRF, then tell me what a real fix looks like in an AWS deployment - not the regex, the architecture.",
+  "You find a stored XSS in a customer's production instance at 4pm on a Friday. What happens in the next hour, who do you tell, and what determines whether you hotfix or roll back?",
+  "How would you add security testing to a delivery pipeline for a team that will absolutely disable anything noisy? Be specific about what blocks a merge, what is report-only, how suppressions work, and how you would measure whether the gate is earning its keep."
+ ],
+ "proofOfWork": "Publish an internal-pentest dossier repository for Dokeo and DefenderMate that reads like a professional engagement rather than a lab notebook. It contains: a scoped test plan mapped to OWASP ASVS Level 2 controls with each control marked pass, fail or not-applicable and a one-line justification; a generated authorization matrix of every endpoint crossed with every role and both seeded tenants, produced by a committed script that authenticates as each principal, replays each request and records the status code, so the matrix is regenerable on any commit rather than hand-typed; at least one genuine finding written up with a CVSS v3.1 vector string, a copy-pasteable `curl` reproduction, evidence, business impact and remediation; the patch itself as a linked pull request; and a pytest regression test proving the fix, demonstrated by a short recording or CI log showing the test red on the vulnerable commit and green on the patched one. Add the CI wiring that keeps it true - Semgrep with at least two custom rules written for your own footguns, secret scanning with push protection, a ZAP baseline scan against an ephemeral environment, and a documented gate policy explaining exactly what blocks a merge and how suppressions expire - plus a one-page `SECURITY.md` covering the disclosure contact, supported versions and expected response times, which is the document every enterprise procurement review asks for."
 }

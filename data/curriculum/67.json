@@ -1,209 +1,211 @@
 {
  "i": 67,
- "topic": "Engagement documents: site survey, PRD-lite, SOW, ADRs, design docs, runbooks",
- "track": "J. FDE Craft and Communication",
- "month": 8,
- "hours": 8,
- "why": "An FDE is the only person in the room who sits between a sponsor who wants an outcome, a platform team that owns the environment, and an on-call engineer who will be woken up by whatever you deploy, and the artifact that keeps those three aligned is writing, not code. Every expensive delivery failure - the six-week slip on an IAM role nobody was assigned, the security veto three days before go-live, the 3am incident where the customer cannot restart your service - is traceable to a document that was never written or was written for the wrong reader. Producing a site survey, a PRD-lite, a SOW section set, ADRs, a design doc and runbooks that a customer's lead accepts without rewriting is the difference between a contractor who ships code and a forward-deployed engineer who ships a working system the customer can own.",
+ "topic": "Threat modelling and secrets lifecycle",
+ "track": "I. Security and Compliance",
+ "month": 7,
+ "hours": 6.0,
+ "why": "An FDE is the person sitting across from the customer's security architect in week two of a deployment, and the two artifacts that unblock or kill the project are a credible threat model and a credible answer to 'how do you rotate that credential without taking us down'. Nobody buys 'we take security seriously' - they buy a data-flow diagram with named trust boundaries, a STRIDE table where every threat has a mitigation and an owner, and a rotation runbook that has actually been rehearsed against a live system. Secrets are also the single most common way an on-site deployment breaks after handover: the credential expires, the rotation job flips the password at 03:00, and the service that cached it at import time goes down while you are on a plane.",
  "prerequisites": [
-  "Discovery (topic 66): stakeholder mapping, the questions that surface the real problem, and a set of discovery notes you can trace every requirement back to.",
-  "SRE fundamentals (topic 20) and incident response (topic 23): SLIs, SLOs, error budgets, severity ladders and escalation, because runbooks and go-live criteria are written in that vocabulary.",
-  "Observability (topic 21): what a dashboard, an alert rule and a trace actually look like, so a runbook can point at real signals instead of describing them.",
-  "Enough of the deployment stack to describe an architecture accurately: Kubernetes core and production ops (topics 7 and 8), Terraform (topic 12), AWS networking and IAM (topics 13 and 15).",
-  "Threat modelling and secrets lifecycle (topic 62) plus compliance basics (topic 64): data classification, trust boundaries, and what a customer security review asks for.",
-  "Git at depth (topic 4) and comfort with Markdown, PR review and CI, since the whole pack is docs-as-code in the customer's repository."
+  "Application security: OWASP Top 10 hands-on (topic 61) - you need to know what an IDOR, an SSRF and a broken-auth bug actually look like before you can predict them on a diagram.",
+  "Auth and identity (topic 27): OIDC authorization code + PKCE, JWT validation with issuer/audience/algorithms, JWKS, and what a refresh token rotation window is - half of secrets work is really identity work.",
+  "Data modelling for multi-tenant systems (topic 30): tenant_id propagation, Postgres row-level security, PII classification and audit tables, because tenant isolation is the threat every enterprise reviewer asks about first.",
+  "Linux and containers (Month 1-2): file permissions and umask, process environment via /proc/<pid>/environ, container image layers, and how a Kubernetes pod gets its filesystem and service account token.",
+  "Production Python and FastAPI (topics 25-26): dependency injection, connection pooling with SQLAlchemy (pool_recycle, pool_pre_ping), and retry with backoff - rotation correctness lives inside these mechanics.",
+  "Basic Terraform and CI (Month 3-4): remote state, plan output in pull requests, GitHub Actions job permissions - the two places secrets leak that nobody diagrams."
  ],
  "subtopics": [
   {
-   "name": "Map the pack: six documents, six readers, one index",
-   "learn": "Before writing anything, fix the stack: the site survey answers 'what actually exists and what will block us', the PRD-lite answers 'what are we building, for whom, and how will we know it worked', the SOW answers 'what are we on the hook for, by when, and who signs it off', ADRs answer 'why this and not that', the design doc answers 'how it works and how it fails', and the runbook answers 'what does the on-call engineer do at 3am'. Each has a different reader - platform lead, product sponsor, procurement, customer architect, on-call - and a different failure mode when missing. Use the Diataxis split (tutorial, how-to, reference, explanation) to stop mixing modes inside one file, because a runbook that explains architecture is a runbook nobody follows. Ship a one-page index listing every document with its owner, reviewer, status and last-verified date.",
+   "name": "Frame the system: DFD, assets, trust boundaries",
+   "learn": "Draw DefenderMate as a level-1 data flow diagram with exactly four element types - external entity, process, data store, data flow - and then draw the trust boundaries as lines that cross flows, not as boxes around components. A boundary is any place where the authority of the caller changes: browser to BFF, BFF to API, API to Postgres, API to model provider, Temporal worker to tenant object storage, operator laptop to production. Name the assets in the customer's language (tenant documents, classification decisions, audit log, model API key, signing key) and record who is allowed to see each. Finish by writing the three sentences a reviewer actually reads: what the system does, what it must never do, and what you are explicitly assuming about the environment it runs in.",
    "minutes": 25,
    "resource": {
-    "label": "Diataxis - a systematic framework for technical documentation",
-    "url": "https://diataxis.fr/"
+    "label": "OWASP Community - Threat Modeling",
+    "url": "https://owasp.org/www-community/Threat_Modeling"
    }
   },
   {
-   "name": "Site survey I: environment, access and the deploy path",
-   "learn": "Inventory the target the way an installer would, with a value, a source and evidence for every line: cloud accounts and regions, VPC CIDRs and whether they collide with yours, subnet and NAT layout, egress rules (allowlist, TLS-intercepting forward proxy, or no egress at all), Kubernetes distribution and version, CNI, ingress controller and any admission policies already enforced, container registry and whether images must be mirrored internally, identity provider and SSO/SCIM, bastion or VPN access and how many days a laptop grant takes, secrets manager, CI system, and who is allowed to merge to the deploying branch. Then draw the deploy path end to end - repo, build, scan, sign, registry, environment promotion, approval gate - and name the human who approves each gate. Anything you were told rather than verified gets marked as unverified until you have run the command yourself.",
-   "minutes": 35,
-   "resource": {
-    "label": "AWS Well-Architected Framework",
-    "url": "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html"
-   }
-  },
-  {
-   "name": "Site survey II: data, security and compliance reality",
-   "learn": "Capture the facts that decide whether the architecture is even permissible: data classification for every input and output (public, internal, PII, PHI, regulated), residency and cross-border rules, retention and deletion obligations, whether prompts and completions may leave the tenant boundary or call a third-party model API at all, encryption requirements (KMS or customer-managed keys at rest, mTLS in transit), audit log retention, and the control framework in force (SOC 2, ISO 27001, HIPAA with a BAA, FedRAMP). Get the security review process in writing: who runs it, which artifacts they expect (architecture and data flow diagrams, a questionnaire such as ASVS or SIG, pen test evidence, SBOM), and the lead time in weeks. The highest-value line in this section is 'PII in scope: yes or no, and here is the field-level list', because it changes retrieval design, logging, eval datasets and where the model can run.",
-   "minutes": 30,
-   "resource": {
-    "label": "NIST SP 800-122 - Guide to Protecting the Confidentiality of Personally Identifiable Information (PII)",
-    "url": "https://csrc.nist.gov/pubs/sp/800/122/final"
-   }
-  },
-  {
-   "name": "Site survey III: constraints, blockers and the RAID register",
-   "learn": "Convert findings into a decision-ready register rather than prose, using four buckets: risks (probability, impact, mitigation, owner), assumptions (what you are betting on and what it costs if false), issues (blocking now, with owner and needed-by date) and dependencies (what the customer must provide and when). Every row names a human, not a team, and carries a date. Learn to recognise the constraints that historically kill delivery: no outbound internet, no cluster admin, a change freeze covering your go-live quarter, one overloaded DBA, procurement lead time on a GPU quota increase, or a policy that blocks the model provider entirely. State each item's schedule impact in days, because 'we are blocked on IAM' moves nobody while 'this pushes go-live past the November freeze' moves everyone.",
+   "name": "STRIDE per element and per interaction",
+   "learn": "Apply STRIDE (Spoofing, Tampering, Repudiation, Information disclosure, Denial of service, Elevation of privilege) mechanically: external entities get S and R; processes get all six; data stores get T, I, D and R; data flows get T, I and D. Do it per interaction - 'analyst browser -> BFF /api/classify' - not per box, because the interesting threats live on the arrows. Produce a table with columns id, element, STRIDE category, threat in one sentence, existing control, gap, severity, owner, status; a threat with no control and no owner is not a finding, it is a wish. Force yourself to write at least one threat per category per boundary crossing, then delete the ones that are genuinely not applicable and say why - the deletions are what proves you did the pass.",
    "minutes": 25,
    "resource": {
-    "label": "Microsoft Azure Well-Architected Framework",
-    "url": "https://learn.microsoft.com/en-us/azure/well-architected/"
+    "label": "Microsoft Learn - Threat Modeling Tool overview",
+    "url": "https://learn.microsoft.com/en-us/azure/security/develop/threat-modeling-tool"
    }
   },
   {
-   "name": "PRD-lite: one page that fixes problem, scope and success",
-   "learn": "Write one page, not ten, with fixed sections: problem with a baseline number, the two or three user journeys expressed as the job to be done, in-scope list, an explicit non-goals list, success metrics with their measurement definition and an instrumentation owner, and an assumptions block. Force every metric to be computable: not 'faster triage' but 'median minutes from ticket creation to first correct routing decision, computed from created_at and routed_at in the ticketing system, baseline 42 minutes over the last 90 days'. Write the non-goals section first when scope is contested - it is the section that saves the engagement. Trace every claim back to a named stakeholder from your discovery notes so the sponsor can see whose words these are.",
-   "minutes": 35,
-   "resource": {
-    "label": "Google Technical Writing One",
-    "url": "https://developers.google.com/tech-writing/one"
-   }
-  },
-  {
-   "name": "Requirements language and testable acceptance criteria",
-   "learn": "Adopt RFC 2119 keywords - MUST, MUST NOT, SHOULD, MAY - and use them deliberately, because an ambiguous 'should' in a SOW is where disputes live. Rewrite every soft requirement as an observable condition: 'the system MUST return a routing decision for 95 percent of tickets within 3 seconds, measured as p95 at the API gateway over a rolling 24 hours' beats 'responses should be fast'. Attach a verification method to each requirement - an automated test id, a load-test scenario, an eval run, or a named manual check - so acceptance becomes a script rather than an argument. Ban seamless, robust, scalable, real-time and AI-powered from requirement text, and treat any requirement you cannot write a failing test for as a discovery gap to take back to the sponsor before signing.",
+   "name": "Threat modelling the AI surface",
+   "learn": "Add the threats classic STRIDE tables miss because the model is a confused deputy with a customer's credentials. Cover indirect prompt injection through retrieved documents and tool output (the attacker writes the payload into a PDF you ingest, not into the chat box), excessive agency (a tool that can DELETE when the task only needs SELECT), insecure output handling (model output rendered as HTML, or passed to a shell, a SQL string or an HTTP client, giving XSS and SSRF), system-prompt and tool-schema extraction, and cross-tenant leakage through a shared vector index or a shared prompt cache. For each, name the control layer: allow-listed tools with per-tool scopes, output treated as untrusted input, retrieval filtered by tenant_id before the model sees anything, egress allow-list on the agent's network namespace, and human confirmation gates on irreversible actions.",
    "minutes": 25,
    "resource": {
-    "label": "RFC 2119 - Key words for use in RFCs to indicate requirement levels",
-    "url": "https://www.rfc-editor.org/info/rfc2119/"
+    "label": "OWASP Top 10 Risks and Mitigations for LLM and GenAI Apps (2025 list)",
+    "url": "https://genai.owasp.org/llm-top-10/"
    }
   },
   {
-   "name": "SOW anatomy: deliverables, obligations, assumptions, exclusions, change control",
-   "learn": "Learn each section and the specific failure it defends against: deliverables (which artifacts are handed over, in what format, to which repository), milestones with dates and acceptance or payment triggers, customer obligations (access, environments, data, named SMEs, decision turnaround) each with a needed-by date, assumptions listed explicitly so that a broken one triggers a change request instead of unpaid work, exclusions and out-of-scope, acceptance criteria with a named signer per deliverable, a change control procedure (who raises, how it is priced, who approves, what happens to the timeline), and post-go-live support terms with an expiry date. Understand where risk sits in fixed-fee versus time-and-materials, and why fixed-fee plus vague assumptions is the standard way delivery teams go negative. Practise writing the exclusion list: it is short, blunt, and the most re-read part of the document.",
-   "minutes": 35,
-   "resource": {
-    "label": "FAR 37.602 - Performance work statement: required scope, results, measurable standards and constraints",
-    "url": "https://www.acquisition.gov/far/37.602"
-   }
-  },
-  {
-   "name": "ADRs: what counts as a decision and the canonical shape",
-   "learn": "An ADR records one architecturally significant decision - expensive to reverse, spanning components or teams, or one the customer will question later. Learn the shape: an ordinal title (0007-postgres-pgvector-for-retrieval), status (proposed, accepted, superseded by 0012, deprecated), date, context stating the forces and the customer-specific constraints, the decision in the active voice ('We will...'), consequences split into what improves, what gets worse and what you now have to live with, and alternatives considered with a concrete reason each was rejected. The value is concentrated in Context and Consequences; a record with no rejected alternatives is a preference, not a decision. Keep it to a page that a reviewer can read in ten minutes.",
-   "minutes": 25,
-   "resource": {
-    "label": "Architectural Decision Records - adr.github.io",
-    "url": "https://adr.github.io/"
-   }
-  },
-  {
-   "name": "Running an ADR log: template, numbering, supersession, review",
-   "learn": "Keep the log in the customer's repo at docs/adr/ as numbered Markdown, pick one template (MADR is the common default) and never edit an accepted ADR - supersede it with a new record that links back, so the history of why the design moved stays readable. Wire ADR review into the pull request that implements the decision so the two cannot diverge, and use a lightweight tool or a template file plus a PR checklist rather than a bespoke process. Learn the practical triggers for writing one: you are about to choose a datastore, a queue, an auth model, a tenancy model, a model provider or a deployment target, or you have just spent an hour of a meeting arguing. Expect five to fifteen ADRs across a typical engagement, and expect the customer to reuse them long after you leave.",
-   "minutes": 30,
-   "resource": {
-    "label": "joelparkerhenderson/architecture-decision-record - templates and examples",
-    "url": "https://github.com/architecture-decision-record/architecture-decision-record"
-   }
-  },
-  {
-   "name": "Design doc: Google-style structure and the review it exists for",
-   "learn": "The design doc exists to surface disagreement early and cheaply, not to describe finished code. Structure it as context and scope, goals and explicit non-goals, the design itself (data model, APIs, request flow, storage, tenancy, failure behaviour), alternatives considered, cross-cutting concerns (security, privacy, observability, cost, operations), then estimate and rollout. Write it before you build, circulate it with a fixed review window and named reviewers including the customer's architect and security lead, resolve comments in the document rather than in DMs, and mark it as a point-in-time artifact that stops being maintained once shipped - after that the code and the runbook are the living truth. Length is a signal: three to ten pages is right, twenty means the scope is wrong.",
-   "minutes": 35,
-   "resource": {
-    "label": "Design Docs at Google",
-    "url": "https://www.industrialempathy.com/posts/design-docs-at-google/"
-   }
-  },
-  {
-   "name": "Diagrams that survive an architecture review: C4 and diagrams-as-code",
-   "learn": "Use the C4 levels deliberately - System Context (who and which systems, the one diagram a sponsor understands), Container (deployable units, datastores, protocols and ports), Component only where a container is genuinely complex - and never ship a diagram that mixes levels. Add the two diagrams security reviewers ask for by name: a data flow diagram with trust boundaries drawn, and a network or deployment diagram showing VPCs, subnets, ingress, egress and where credentials are issued. Keep diagrams as code (Mermaid or Structurizr) beside the document so they are reviewable in a pull request and regenerable, and label every arrow with the protocol and the direction of initiation, since 'who calls whom' is what determines firewall rules and service accounts.",
-   "minutes": 25,
-   "resource": {
-    "label": "The C4 model for visualising software architecture",
-    "url": "https://c4model.com/"
-   }
-  },
-  {
-   "name": "The design doc sections FDEs skip: failure modes, capacity, rollback, cost",
-   "learn": "Add the sections that make an operations team accept the design. Failure modes: for each dependency, what happens when it is slow, down or returns garbage, plus the specific timeout, retry policy with jitter and cap, circuit breaker and degraded mode you chose. Capacity: expected and peak request rate, payload sizes, token volume and concurrency, with the arithmetic that sizes replicas, connection pools and rate limits. Rollback: not 'redeploy the previous image' but a plan that covers schema migrations (expand then contract), in-flight work, feature flags and data written by the new version. Cost: unit economics per request and per tenant including model tokens, so an invoice never surprises the sponsor. Security: the authn and authz model, secret handling, and the blast radius of each compromised component.",
-   "minutes": 30,
-   "resource": {
-    "label": "Google SRE Book - Addressing Cascading Failures (timeouts, retries, degraded modes, capacity)",
-    "url": "https://sre.google/sre-book/addressing-cascading-failures/"
-   }
-  },
-  {
-   "name": "Runbooks that work at 3am: structure and the first five minutes",
-   "learn": "Write for a stranger under stress. Every procedure carries a trigger (the exact alert name or observed symptom), a severity, prerequisites including which access is needed and how to get it, a decision tree of copy-pasteable commands that include the cluster, namespace and account context, the expected output at each step so the reader knows whether it worked, an explicit 'if this fails, escalate to X via Y' path, and a rollback. Lead with a triage block - is it up, is it degraded, is data at risk, do we need to communicate - and put the stop-the-bleeding action before diagnosis. Include the boring things that are always missing: how to authenticate, dashboard URLs, exact service and container names, how to safely restart, how to pause or drain consumers, and how to verify recovery. The only acceptable test is watching someone else execute it.",
-   "minutes": 30,
-   "resource": {
-    "label": "PagerDuty Incident Response - During an Incident (triage, roles and the first actions)",
-    "url": "https://response.pagerduty.com/during/during_an_incident/"
-   }
-  },
-  {
-   "name": "Wiring alerts to runbooks and SLO context",
-   "learn": "A runbook nobody can find during an incident does not exist, so attach it to the alert itself: Prometheus alerting rules carry annotations, and every rule should ship with summary, description and a runbook_url pointing at the exact section, with any alert lacking one failing review. Learn what makes an alert page-worthy - symptom-based, tied to an SLI a user feels, and actionable - so the runbook covers a small number of real conditions instead of every metric on a dashboard. Put SLO context inside each procedure: how much error budget this burn consumes and the threshold at which you stop rolling forward and start rolling back. Cross-reference the customer's severity ladder and communication templates rather than inventing your own, so their process is the one being followed.",
-   "minutes": 25,
-   "resource": {
-    "label": "Prometheus - alerting best practices",
-    "url": "https://prometheus.io/docs/practices/alerting/"
-   }
-  },
-  {
-   "name": "Handover pack: on-call, escalation, and proving they can run it",
-   "learn": "The engagement ends when the customer can operate the system without you. Assemble the service catalogue entry (what it is, who owns it, upstream and downstream dependencies), an escalation matrix with names, hours and channels including your post-go-live support window and its expiry date, access requirements per role, a maintenance calendar (certificate expiry, key rotation, dependency upgrades, model deprecation dates), the backup and restore procedure with the date of the last successful tested restore, and a DR or game-day record. Then prove it: run a live exercise where the customer's on-call engineer executes the top procedures from the documents alone while you stay silent, and log every hesitation as a documentation defect to fix before sign-off.",
-   "minutes": 25,
-   "resource": {
-    "label": "Google SRE Book - Being On-Call",
-    "url": "https://sre.google/sre-book/being-on-call/"
-   }
-  },
-  {
-   "name": "Docs as code: repo layout, templates, review and freshness gates",
-   "learn": "Put the pack in the customer's repository, not your laptop or a drive folder they lose access to. Standardise the layout (docs/adr/, docs/design/, docs/runbooks/, docs/engagement/ for survey, PRD and SOW summary), ship templates as files so a new document starts pre-structured, and require documentation changes in the same pull request as the behaviour change with the right reviewers attached. Add mechanical gates in CI: a Markdown linter, a prose linter with a banned-words list, a link checker, and a small script that fails the build when a runbook has no verified-on date within N days or an ADR has sat in proposed status past a threshold. Publish through MkDocs or the customer's existing docs site so the pack is searchable rather than a pile of files nobody opens.",
-   "minutes": 25,
-   "resource": {
-    "label": "Write the Docs - Docs as Code",
-    "url": "https://www.writethedocs.org/guide/docs-as-code/"
-   }
-  },
-  {
-   "name": "Go-live readiness review and written sign-off",
-   "learn": "Before traffic moves, run a readiness review as a checklist backed by evidence rather than opinion: SLOs defined and instrumented, dashboards and alerts live and proven by firing one deliberately, runbooks executed by someone other than the author, a backup restored at least once, rollback demonstrated in a lower environment, security review closed with every exception written down and accepted by a named owner, capacity headroom calculated, cost ceiling and budget alerts configured, on-call rota populated, and each SOW acceptance criterion mapped one-to-one to evidence. Produce a single readiness page marking each line green, amber or red with an owner for every amber, and obtain an explicit written sign-off. Practise saying 'we are not ready, and here is the specific reason' - holding that line in front of a sponsor is exactly what a delivery lead is assessing.",
-   "minutes": 25,
-   "resource": {
-    "label": "Google SRE Book - table of contents",
-    "url": "https://sre.google/sre-book/table-of-contents/"
-   }
-  },
-  {
-   "name": "Sanitising and publishing a pack in the open",
-   "learn": "Learn to strip a real engagement pack into something publishable without gutting it. Replace the customer with a plausible pseudonymous profile; scrub personal names, internal hostnames, CIDR ranges, account ids, ARNs, ticket links, dashboard URLs, screenshots of internal tools and any pricing; and check git history, file metadata and diagram source as well as the rendered text, since redaction failures usually live in commit history. Replace real figures with rounded or ratio-preserving numbers and state that you did so. Keep the structure and the reasoning - the parts that demonstrate judgement - and add a short preamble explaining what was changed and why. Apply one style guide across the whole pack so it reads in a single voice rather than as six documents by six authors.",
+   "name": "Multi-tenant and authorization threats",
+   "learn": "Enumerate the isolation failures that actually happen: a query path that forgets SET LOCAL app.tenant_id so RLS silently passes, a table where RLS is enabled but not FORCED so the owner role bypasses it, an object storage prefix that is per-tenant by convention only, a background worker or admin endpoint running as a superuser role, and IDs that are sequential integers so enumeration is trivial. Write the negative tests as threats: 'analyst of tenant A can read /api/conversations/<uuid of tenant B>' with expected 404, not 403, because 403 confirms existence. Distinguish authentication (who), authorization (what), and tenancy (whose) - most real bugs are the third one, and they are invisible in a diagram unless you draw the data store per tenant.",
    "minutes": 20,
    "resource": {
-    "label": "Microsoft Writing Style Guide",
-    "url": "https://learn.microsoft.com/en-us/style-guide/welcome/"
+    "label": "OWASP Cheat Sheet Series - Authorization",
+    "url": "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html"
+   }
+  },
+  {
+   "name": "Ranking risk without theatre",
+   "learn": "Score with CVSS v3.1 base metrics (AV, AC, PR, UI, S, C, I, A) when you need a number a customer's GRC team can reconcile with their vulnerability register, and understand why DREAD fell out of favour - two engineers score the same threat differently and the total is not comparable across systems. For threats with no CVE, use a two-axis likelihood x impact grid with written definitions of each level, and record the reasoning sentence, since the sentence is what survives the argument. Know that the scope metric (S:C) is what turns a container escape or an RLS bypass from High into Critical, and be able to defend a downgrade with a compensating control (network isolation, short credential TTL, monitored audit log).",
+   "minutes": 20,
+   "resource": {
+    "label": "FIRST - CVSS v3.1 specification document",
+    "url": "https://www.first.org/cvss/v3.1/specification-document"
+   }
+  },
+  {
+   "name": "From threats to controls, assumptions and accepted risk",
+   "learn": "Every row ends in one of four dispositions - mitigate, transfer, avoid, accept - and 'accept' requires a named human, a written justification and an expiry date, or it is just an open bug with better formatting. Map mitigations to real MITRE ATT&CK techniques where it helps a security team place your work in their language (T1552 credentials in files, T1078 valid accounts, T1195 supply chain). Write the assumptions section as testable claims: 'the cluster is not shared with untrusted tenants', 'egress is restricted to an allow-list', 'the customer's IdP enforces MFA for analysts'; when an assumption is later false, that is a change request, not a surprise. Keep an explicit out-of-scope list so the reviewer stops asking about the things you deliberately did not model.",
+   "minutes": 20,
+   "resource": {
+    "label": "MITRE ATT&CK - Enterprise Mitigations (controls mapped to techniques)",
+    "url": "https://attack.mitre.org/mitigations/enterprise/"
+   }
+  },
+  {
+   "name": "Keep the threat model alive in code review",
+   "learn": "A threat model written once for the security review is stale within a sprint. Store the model in the repo next to the code - a diagram source file plus the threat table as YAML or a pytm script that renders the DFD and the report from Python objects - so a pull request can change it and a reviewer can diff it. Add a CI check or a CODEOWNERS rule that fires when a new external dependency, network egress, data store or tool definition appears, and a review trigger list: new trust boundary, new PII field, new third-party API, new admin path. Track threats as issues with the same lifecycle as bugs, so 'we have a threat model' becomes a number: open threats by severity, mean age, count with no owner.",
+   "minutes": 20,
+   "resource": {
+    "label": "OWASP pytm - Pythonic threat modelling framework (official repository)",
+    "url": "https://github.com/OWASP/pytm"
+   }
+  },
+  {
+   "name": "Inventory every secret and rank it by blast radius",
+   "learn": "You cannot rotate what you have not listed. Build a table of every credential in the system with: name, type (password, API key, signing key, encryption key, certificate, OAuth client secret, service account token), where it is stored, which workloads read it, what it can do if stolen, how long it lives, how it is rotated today, and how long a rotation takes. Include the ones people forget - the model provider API key, the webhook HMAC shared with the customer, the Postgres superuser used by migrations, the container registry pull secret, the TLS private key, the backup encryption key, and the SSH key on the bastion. Sort by blast radius times exposure, not by alphabetical order, and mark each as long-lived, short-lived, or dynamic; the goal state is that almost nothing in the top rows is long-lived.",
+   "minutes": 20,
+   "resource": {
+    "label": "OWASP Cheat Sheet Series - Secrets Management",
+    "url": "https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html"
+   }
+  },
+  {
+   "name": "Detect leaked secrets in code, history and logs",
+   "learn": "Run gitleaks (detect --redact over full history, protect --staged in a pre-commit hook) and trufflehog with verification enabled so you get 'this key is live' rather than 'this looks like entropy'; tune the allow-list so developers do not learn to ignore the tool. Understand what rewriting history does and does not achieve: git filter-repo or BFG removes the blob from your branch, but forks, clones, CI caches, and the provider's unreferenced-object storage may still serve it, so the only real remediation is revocation. Turn on provider-side push protection and secret scanning so the next one is blocked at push time. Extend the same thinking to runtime: scrub Authorization headers and api_key fields from structured logs, from error-reporting payloads, and from LLM traces, and add a test that asserts a known canary string never appears in log output.",
+   "minutes": 25,
+   "resource": {
+    "label": "gitleaks (official repository)",
+    "url": "https://github.com/gitleaks/gitleaks"
+   }
+  },
+  {
+   "name": "Storage: KV v2, versioning, and encryption at rest",
+   "learn": "Use a versioned KV store rather than a flat one: Vault kv-v2 gives you check-and-set writes (-cas=N) to prevent lost updates during concurrent rotation, version history for rollback, soft delete versus destroy, max_versions, and delete_version_after. Know the difference between deleting a version and destroying it, and why a rotation runbook must destroy the old value only after the overlap window closes. Understand the storage security model beneath it - Vault's barrier and seal/unseal, auto-unseal backed by a cloud KMS, and for Kubernetes Secrets the fact that base64 is encoding not encryption, so etcd needs an EncryptionConfiguration with a kms provider before you can claim encryption at rest. Read-path least privilege matters as much as encryption: a policy that grants read on secret/data/* is the same as no vault at all.",
+   "minutes": 20,
+   "resource": {
+    "label": "HashiCorp Vault docs - KV secrets engine v2",
+    "url": "https://developer.hashicorp.com/vault/docs/secrets/kv/kv-v2"
+   }
+  },
+  {
+   "name": "Getting a secret into the process without leaking it",
+   "learn": "Compare the three delivery shapes and their leak surfaces. Environment variables are readable at /proc/<pid>/environ by any process of the same uid, are inherited by every child process, show up in docker inspect, in crash dumps and core files, and are routinely captured wholesale by error-reporting SDKs. Files (tmpfs mount, mode 0400, owned by the app uid) are better, can be re-read on change, and are what most secret injectors use. A direct API fetch at startup with in-memory caching is best but demands you handle refresh. Whichever you pick, load secrets through one accessor function - never a module-level constant evaluated at import - so a rotation can invalidate the cache, and make __repr__ of any config object redact the value so a stack trace does not print it.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs - Secrets",
+    "url": "https://kubernetes.io/docs/concepts/configuration/secret/"
+   }
+  },
+  {
+   "name": "Workload identity: deleting the bootstrap secret",
+   "learn": "The recursive problem in secrets management is the credential that fetches credentials. Solve it with platform-issued identity: Vault's Kubernetes auth method validates a projected ServiceAccount token via the TokenReview API and binds a role to bound_service_account_names and bound_service_account_namespaces; JWT/OIDC auth trusts your CI provider's issuer with bound_claims on repository and ref. On clouds, the same pattern is an OIDC identity provider plus a role trust policy with a condition on sub and aud (IRSA on EKS, workload identity federation on GCP), which is how a GitHub Actions job deploys with zero stored access keys. Set automountServiceAccountToken: false where it is not needed, scope projected tokens with an explicit audience and short expirationSeconds, and be ready to explain to a customer why this is strictly better than a sealed long-lived key.",
+   "minutes": 25,
+   "resource": {
+    "label": "HashiCorp Vault docs - Kubernetes auth method",
+    "url": "https://developer.hashicorp.com/vault/docs/auth/kubernetes"
+   }
+  },
+  {
+   "name": "Dynamic secrets and lease mechanics",
+   "learn": "Configure the database secrets engine so the application never holds a static Postgres password: Vault holds a rotated root credential (vault write -f database/rotate-root/<config>), and each workload calls vault read database/creds/<role> to get a unique username and password with a lease. Learn the lease lifecycle properly - default_lease_ttl and max_lease_ttl, vault lease renew, vault lease revoke -prefix database/creds/<role> to kill every credential a compromised service ever received, and the revocation_statements that drop the role in Postgres (including REASSIGN OWNED / DROP OWNED, which is the usual reason revocation fails). Understand the operational cost you are trading for: credential churn shows up in pg_stat_activity and in connection-pool behaviour, so pool lifetime must be shorter than lease TTL or you will hold connections authenticated by a revoked user.",
+   "minutes": 25,
+   "resource": {
+    "label": "HashiCorp Vault docs - Database secrets engine",
+    "url": "https://developer.hashicorp.com/vault/docs/secrets/databases"
+   }
+  },
+  {
+   "name": "Zero-downtime rotation mechanics",
+   "learn": "Rotation is a two-valid-credentials problem, never a swap. Internalise the AWS Secrets Manager four-step model - createSecret, setSecret, testSecret, finishSecret - and the staging labels AWSCURRENT, AWSPENDING and AWSPREVIOUS, which exist precisely so a reader mid-rotation still resolves something valid. Prefer the alternating-users strategy (two database users, rotate the idle one, then flip the label) over single-user rotation, because a single user's password change breaks new connections while existing pooled ones keep working, producing a slow-burn partial outage. On the client side you need: a refresh path (file watch, TTL cache, or SIGHUP), a retry that re-reads the secret on an auth error instead of backing off blindly, connection pool settings (pool_recycle shorter than the overlap window, pool_pre_ping) and an overlap window longer than your longest connection lifetime plus deploy time. Rehearse the whole thing under load and measure error count, not vibes.",
+   "minutes": 30,
+   "resource": {
+    "label": "AWS Secrets Manager User Guide - Rotate secrets",
+    "url": "https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotating-secrets.html"
+   }
+  },
+  {
+   "name": "Rotating verification keys: JWKS and webhook HMACs",
+   "learn": "Signing keys are the rotation case that breaks other people's systems, because verifiers cache. Publish a JWKS with a kid on every key, add the new key to the document and let it propagate for at least the Cache-Control max-age of the jwks_uri before you sign anything with it, then sign with the new kid, then keep the old public key until the longest-lived token issued under it has expired plus clock skew. Verifiers must select by kid, refresh the JWKS on an unknown kid with a rate limit, and never accept alg from the token. For shared HMAC webhook secrets the same overlap applies: accept a signature that matches either the current or previous secret during the window, compare with a constant-time function (hmac.compare_digest), and include a timestamp in the signed payload with a replay window. Announce the cutover dates to the customer in writing before you touch anything.",
+   "minutes": 20,
+   "resource": {
+    "label": "RFC 7517 - JSON Web Key (JWK)",
+    "url": "https://www.rfc-editor.org/info/rfc7517/"
+   }
+  },
+  {
+   "name": "Encryption keys, envelope encryption and re-wrapping",
+   "learn": "Distinguish rotating a key from re-encrypting data. With envelope encryption, a KMS-held key encryption key wraps per-object data keys, so rotating the KEK is cheap and instant while the ciphertext is untouched - you only re-wrap the data keys. Know what AWS KMS automatic key rotation actually does (new backing material, old material retained so old ciphertext still decrypts, key id unchanged) and why that is not the same as removing the compromised material. With Vault transit, rotate with vault write -f transit/keys/<name>/rotate, then re-encrypt existing ciphertext with transit/rewrap/<name> (which never exposes plaintext), and raise min_decryption_version only once the rewrap job has finished, or you will make old rows permanently unreadable. Estimate and schedule the rewrap cost before promising a date, and always test decrypt-after-rotate on a restored backup.",
+   "minutes": 20,
+   "resource": {
+    "label": "AWS KMS Developer Guide - concepts (envelope encryption, key rotation)",
+    "url": "https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html"
+   }
+  },
+  {
+   "name": "Secrets in CI, IaC and container builds",
+   "learn": "Three places secrets escape that never appear on a DFD. Terraform writes provider credentials, database passwords and generated keys into state in plaintext even when the variable is marked sensitive = true, so the backend must be encrypted, access-restricted and never committed - and plan output posted to a pull request comment is a public disclosure channel. CI runners need short-lived OIDC-federated identity rather than stored keys, job-level least-privilege permissions, and masked outputs, and you must assume any secret available to a workflow is available to a pull request from a fork unless the trigger says otherwise. Container builds must use build-time secret mounts (RUN --mount=type=secret) rather than ARG or ENV, since anything in a build argument or layer is visible via docker history and to anyone who pulls the image.",
+   "minutes": 15,
+   "resource": {
+    "label": "Terraform docs - sensitive data in state",
+    "url": "https://developer.hashicorp.com/terraform/language/manage-sensitive-data"
+   }
+  },
+  {
+   "name": "Leak response, audit evidence, and the runbook",
+   "learn": "Write the runbook so a stressed engineer at 02:00 can execute it: revoke first, rotate second, investigate third - in that order, because a valid stolen credential is an ongoing incident and forensic curiosity is not. For each secret in the inventory, the runbook needs the exact commands, the expected duration, the blast radius of doing it, the rollback, and the verification step (a probe that proves the new credential works and the old one no longer does). Enable and read audit devices - Vault audit logs hash secret values with an HMAC so you can search for 'was this specific credential ever read, by whom, from which IP' without the log itself becoming the leak - and pair them with cloud trail events for GetSecretValue. Close the loop with a written timeline, the scope of what the credential could reach, and one systemic fix per incident.",
+   "minutes": 25,
+   "resource": {
+    "label": "HashiCorp Vault docs - Audit devices",
+    "url": "https://developer.hashicorp.com/vault/docs/audit"
    }
   }
  ],
  "outcomes": [
-  "You can complete a site survey of an unfamiliar customer environment in under two working days and hand back a blockers table where every row has a named human, a needed-by date and a schedule impact stated in days.",
-  "You can turn a vague sponsor request into a one-page PRD-lite whose success metric names the exact fields and source system it is computed from, and whose non-goals list has at least three concrete entries.",
-  "You can draft the SOW section set - deliverables, customer obligations, assumptions, exclusions, acceptance, change control - and explain for any single line which delivery failure it exists to prevent.",
-  "You can write an ADR in under thirty minutes that a customer architect accepts, with at least two rejected alternatives carrying specific rejection reasons and a consequences section that honestly lists what got worse.",
-  "You can produce a design doc with correctly levelled C4 diagrams, per-dependency failure modes with chosen timeouts and retry policy, capacity arithmetic, and a rollback plan that survives a schema migration.",
-  "You can hand a runbook to an engineer who has never seen the system and watch them resolve a simulated incident without asking you a question, then close each stall point as a logged documentation defect.",
-  "You can attach a runbook_url annotation to every page-worthy alert and demonstrate the alert firing and the link resolving to the correct procedure section.",
-  "You can chair a go-live readiness review that ends in a signed one-page verdict, and defend a 'not ready' call to a sponsor using evidence rather than opinion."
+  "You can produce a level-1 DFD of DefenderMate with numbered trust boundaries and a STRIDE-per-interaction table in under 90 minutes, where every row carries an existing control, a gap, a severity with a written justification, an owner and a status.",
+  "You can list every secret in a running system from a repo scan plus an infrastructure scan, and state for each one its blast radius, its current TTL, who reads it, and how many minutes a rotation takes.",
+  "You can rotate a live Postgres credential used by a running service under continuous load and show a request log with zero 5xx and zero authentication errors across the cutover.",
+  "You can stand up Vault Kubernetes auth so that no static credential exists in any manifest, image or file, and demonstrate that deleting the pod's projected token immediately stops it from fetching secrets.",
+  "You can revoke every dynamic credential ever issued to one compromised workload with a single command and then prove from the audit log which credentials existed, when they were read, and by which client IP.",
+  "You can rotate a JWT signing key without invalidating a single live session, and explain the ordering (publish, propagate, sign, retire) with the specific cache TTLs that make it safe.",
+  "You can defend a risk acceptance to a customer's security reviewer with a CVSS v3.1 vector, a compensating control, a named owner and an expiry date, rather than asking them to trust you.",
+  "You can find a secret committed to git history, and correctly explain why history rewriting is not remediation and revocation is."
  ],
  "failureModes": [
-  "An unwritten assumption - the customer will provision the IAM role and VPN access in week one - slips six weeks, and because it never appeared in the SOW's assumptions or dependencies the team burns budget idle with no change order to point at.",
-  "The site survey misses a TLS-intercepting egress proxy and an internal-only mirror registry, so the first deploy dies on certificate validation and image pulls and week one goes to networking instead of the product.",
-  "The design doc is written after the code, so the customer's security architect vetoes the outbound model API call at the pre-go-live review and the entire retrieval path is redesigned in the final sprint.",
-  "No ADRs exist, so four months later a new CTO asks why Temporal rather than Celery, nobody can reconstruct the constraints that drove it, and the decision is relitigated in meetings that cost more than the record would have.",
-  "The runbook is a wiki page of screenshots from a UI that has since changed, with commands missing cluster and namespace context, so the on-call engineer restarts the wrong deployment at 3am and extends the incident by hours.",
-  "Success metrics were agreed on a slide but never instrumented, so at renewal there is no baseline and no measured delta and the engagement is judged on sentiment rather than evidence.",
-  "Scope creep is accepted verbally in a standup and never raised as a change request, so a fixed-fee engagement silently goes negative while the team is congratulated for being accommodating."
+  "The application reads the database password once into a module-level constant at import time, so the 03:00 rotation job succeeds, the secrets manager shows the new value, and every pod keeps using the old credential until the next deploy - at which point everything fails at once, hours after the change that caused it.",
+  "Single-user rotation runs behind a connection pool: existing connections keep working while every new connection fails, so error rate creeps from 0 to a few percent over an hour and gets blamed on the network instead of the rotation.",
+  "The rotation function lives in a private subnet with no VPC endpoint or NAT for the secrets service, so setSecret updates the database but finishSecret times out, leaving AWSPENDING valid and AWSCURRENT stale - the secret is now rotated in the database and not in the store.",
+  "A signing key is rotated and the old public key removed the same minute, so every token issued in the previous hour fails verification and every user in the customer's org is logged out simultaneously during their business day.",
+  "Secret scanning is enabled on new commits only, while the real leaked cloud key has been in git history since 2021 and in four forks - the scanner reports clean and the key is still live.",
+  "The workload authenticates to Vault with a long-lived token stored as a Kubernetes Secret, so the entire secrets programme has replaced many medium-value credentials with one master credential and nobody rotates it.",
+  "The threat model is a PDF produced for the security review and never touched again; three sprints later the system has a shared vector index, an agent with a write-capable tool and a new third-party API, none of which appear on the diagram the customer is auditing against.",
+  "Terraform plan output containing a generated password is posted as a pull request comment by CI, or the state file lands in a bucket readable by the whole engineering org, disclosing credentials that were never in any code file."
  ],
  "interviewQuestions": [
-  "You land on a new customer deployment on Monday morning. What do you write in week one, in what order, who reviews each document, and who has to sign which one?",
-  "Walk me through the site survey you would run before deploying an LLM application inside a regulated customer's VPC. Give me the ten questions whose answers would change your architecture, and say how each one changes it.",
-  "Mid-engagement the sponsor asks for a feature that adds about two weeks. It is a fixed-fee SOW. What do you do in the next hour, and which documents change?",
-  "Write me the ADR for choosing between pgvector in the customer's existing Postgres and a dedicated vector database. What goes in Context, what goes in Consequences, and what would make you supersede it later?",
-  "Your design doc's rollback plan says 'redeploy the previous image', but the release ran a destructive migration. How should that section have been written, and what else in the doc does that change?",
-  "How do you write a runbook that a customer's on-call engineer who has never met you can execute at 3am, and what do you deliberately leave out of it?",
-  "Six months after handover, how would you know whether the documentation you left behind is actually being used and is still true?"
+  "Walk me through threat modelling a multi-tenant RAG application deployed inside our VPC. Where are the trust boundaries, and which STRIDE category worries you most given the model can call tools?",
+  "Design zero-downtime rotation for a Postgres credential used by 40 pods sitting behind pgbouncer. What are the two-credential mechanics, what is your overlap window based on, and what specifically breaks if you get it wrong?",
+  "We cannot use your secrets manager - we run our own Vault and our own PKI. How do you integrate without shipping us a bootstrap secret, and what do you need from our platform team?",
+  "A live AWS access key for a customer environment was committed to a public repository eight months ago. Talk me through your first thirty minutes, and tell me why rewriting git history is not the fix.",
+  "How would you rotate a JWT signing key when three third parties verify our tokens offline against a cached JWKS document, one of whom refreshes daily? What is the sequence and what is the minimum retention for the old key?",
+  "Our security team says no secrets may be passed as environment variables. Is that a meaningful control or cargo cult? Argue both sides and tell me what you would actually implement.",
+  "After we enabled automatic rotation, one service's error rate went from zero to three percent and stayed there. You have logs, metrics and shell access. How do you diagnose it?",
+  "You have one week on site and the customer wants a threat model. What do you produce, who do you interview, and how do you stop it becoming a document nobody updates?"
  ],
- "proofOfWork": "Run and publish a cold-start audit of your own engagement pack. Recruit an engineer who has never seen the system, give them nothing but the repository containing the design doc, ADRs and runbooks, and ask them to do three timed tasks on a live sandbox deployment while you stay silent and screen-record: perform a fresh deploy from scratch, resolve two simulated incidents triggered by real alerts (one dependency failure, one bad release requiring rollback with a migration in play), and answer three architecture questions the design doc should already cover. Log every stall as a numbered documentation defect with a timestamp, the exact sentence or missing step that caused it, and the severity, then ship a v2 of the pack that closes every defect and publish the before-and-after diff alongside the defect log and the timings. Add a small CI job in the same repository that enforces the freshness rules you learned - Markdown and prose linting, a link checker, a failure when a runbook lacks a verified-on date inside the window, and a failure when an alert rule has no runbook_url annotation - so the artifact proves not only that you can write the pack but that you can keep it true after you leave."
+ "proofOfWork": "Build a rotation game-day harness as a small repository: docker-compose brings up Vault (dev mode with the database and transit secrets engines enabled), Postgres, a FastAPI service that reads its database credential through a refreshable accessor, and a load generator holding steady traffic through a connection pool. A single make rotate-drill target then executes three rotations back to back - the database password using the alternating-users pattern, the JWT signing key with a kid overlap and a JWKS cache TTL, and a transit encryption key with a rewrap pass over existing rows - while recording request count, error count by class, p99 latency and the exact second of each cutover. The harness emits a one-page markdown report with the before/after graphs, the Vault audit log lines proving the old credentials were revoked and never read afterwards, and a verification probe showing the retired credential now fails. Ship a second, deliberately broken branch that reproduces the module-level-global caching failure so the report can show the same drill producing a visible outage, which is the artifact that makes a customer's platform team believe the runbook."
 }

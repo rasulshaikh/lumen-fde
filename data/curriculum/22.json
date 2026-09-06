@@ -1,218 +1,228 @@
 {
  "i": 22,
- "topic": "Load testing and chaos",
+ "topic": "Observability: OpenTelemetry, Prometheus, Grafana, logs, traces, metrics",
  "track": "D. Reliability and Observability",
  "month": 3,
- "hours": 6.0,
- "why": "When a customer asks 'will this hold on Monday when the whole ops floor logs in' or 'what happens when your worker pod gets patched', the FDE is the only person in the room who can answer with evidence rather than opinion, and that answer decides whether the go-live happens. Load tests find the first bottleneck before the customer does and turn a vague 'it feels slow' into a number, a saturated resource and a proven fix; chaos experiments turn 'Temporal is durable' from a vendor claim into a recovery time you measured on their cluster. Both are also how you write the capacity and resilience sections of the runbook the customer will hold you to after you leave.",
+ "hours": 8.0,
+ "why": "When DefenderMate misclassifies a lead or a HubSpot write silently fails at a customer, the first question on the call is 'what happened to webhook 8813 at 14:02', and the FDE who can open one Grafana tab and walk from the latency spike to the exact trace to the log line holding the HubSpot 429 body owns that conversation; the one who says 'let me add some prints and redeploy' has already lost the week. FDEs inherit the customer's stack rather than choosing it, so you must speak Prometheus, OpenTelemetry and Grafana natively because that is what their platform team runs and what their security review will ask you to integrate with instead of replace. The SLOs you wrote in topic 20 are fiction until the metrics behind them exist, are labelled without cardinality bombs, and alert on burn rate, and that instrumentation is yours to ship, not the customer's.",
  "prerequisites": [
-  "The USE method and single-box tooling from 'Performance and troubleshooting on a single box' (topic 3): top, vmstat, iostat, py-spy, reading a flame graph. Load testing is USE applied while something else drives the traffic.",
-  "Kubernetes ops from topic 8: readiness and liveness probes, requests and limits, `kubectl describe` / `logs` / `get events`, EndpointSlices, and the k3s cluster on the Hetzner box with Kaupex (FastAPI API, Temporal worker, Postgres) deployed and reachable through Traefik.",
-  "Prometheus and Grafana from 'Observability' (topic 21): RED metrics for Kaupex, `histogram_quantile()` over `rate()` of buckets, and a dashboard you can place k6 series next to.",
-  "SLOs from 'SRE fundamentals' (topic 20): the latency and availability targets that become k6 thresholds and chaos steady-state definitions.",
-  "Enough JavaScript to write ES modules with imports, arrow functions and JSON handling (k6 scripts are JS, not Python), and enough Temporal to start a Kaupex workflow and run a worker; 'Temporal at depth' (topic 34) comes later and builds on the failure semantics you observe here.",
-  "Postgres basics: `psql`, `EXPLAIN`, `pg_stat_activity`, and the SQLAlchemy async engine configuration in Kaupex, so pool and lock diagnostics are readable."
+  "SRE fundamentals from 'SRE fundamentals: SLIs, SLOs, error budgets, toil, on-call' (topic 20): DefenderMate's SLIs and SLOs already written down, because every metric, bucket boundary and alert in this topic exists to measure one of them",
+  "Enough of 'FastAPI in production' (topic 26) to run DefenderMate locally as an API process plus a separate worker process consuming a queue, since the whole point is instrumenting a real webhook -> queue -> classifier -> HubSpot path, not a hello-world",
+  "Networking from topic 2: HTTP headers and how proxies treat unknown ones, HTTP/1.1 vs gRPC (HTTP/2) framing, ports; propagation is literally two headers and OTLP is gRPC on 4317 or HTTP on 4318",
+  "Docker from topic 5 and Kubernetes core from topic 7: docker compose for the local Collector/Tempo/Prometheus/Loki/Grafana stack, and a kind cluster for the DaemonSet, ServiceMonitor and Operator half",
+  "Python at depth: contextvars and how asyncio.create_task copies context, the logging module's LogRecord/Formatter/Handler chain, context managers and decorators, how gunicorn/uvicorn fork workers",
+  "Single-box troubleshooting from topic 3: what RSS, CFS throttling, file descriptors and run-queue length are, so the saturation panel is not decoration"
  ],
  "subtopics": [
   {
-   "name": "Test taxonomy: which question each test type answers",
-   "learn": "Know the six shapes and the question each answers: smoke (1-5 VUs for a minute: does the script and the system work at all), average-load (ramp to expected daily peak and hold 30-60 min: does p95 meet the SLO at normal traffic), stress (150-200% of peak: where is the knee), soak (normal load for 2-8 h: leaks, connection churn, disk and log growth), spike (0 to 5-10x in seconds: does it shed or fall over, and does it recover), breakpoint (ramping-arrival-rate with no ceiling until a threshold aborts: the number for the capacity plan). Pick by the question you owe the customer, never 'a load test'. For Kaupex the order is smoke, average, stress, breakpoint, with a soak only once you have a fix to verify.",
-   "minutes": 10,
-   "resource": {
-    "label": "Grafana k6 docs: Load test types",
-    "url": "https://grafana.com/docs/k6/latest/testing-guides/test-types/"
-   }
-  },
-  {
-   "name": "Open vs closed workload models and coordinated omission",
-   "learn": "A closed model (constant-vus, ramping-vus) has each VU wait for its response before iterating, so when the server slows the offered load drops with it and the measured latency flatters the system; this is coordinated omission and it is why a 10-VU test 'passes' while real users queue. An open model (constant-arrival-rate, ramping-arrival-rate) starts iterations on a clock regardless of response time, which is how webhook and API traffic actually arrives. In the open model the executor still needs VUs to run iterations: size `preAllocatedVUs` at roughly rate x p99 seconds with a `maxVUs` ceiling, and read `dropped_iterations` as 'the generator could not keep up', which is either a test bug or the first symptom of saturation. Be able to say why arrival rate is the right shape for Kaupex's API and webhook ingress while a closed model is right only for a fixed pool of worker threads.",
+   "name": "Three signals, one question each, and where cardinality is allowed to live",
+   "learn": "Metrics are pre-aggregated numbers with a bounded label set and answer 'is something wrong and how much'; traces are the per-request causal tree and answer 'where in this request did the time or the error go'; logs are arbitrary events with unbounded context and answer 'what exactly happened here'. Internalise the cardinality rule: a Prometheus time series costs memory per unique label set and the OTel SDK keeps one aggregator per attribute set, so hubspot_contact_id or tenant email can never be a metric label but is fine as a span attribute or log field. Map the four golden signals (latency, traffic, errors, saturation) and RED (rate, errors, duration) onto DefenderMate: webhook receipt, classifier call and HubSpot write each get a span; classification outcome and HubSpot status class become counters; classifier latency becomes a histogram; the webhook payload id and HubSpot response body go to logs only. Write this allocation down before touching code; it is the design artifact a customer's SRE will review.",
    "minutes": 20,
    "resource": {
-    "label": "Grafana k6 docs: Open and closed models",
-    "url": "https://grafana.com/docs/k6/latest/using-k6/scenarios/concepts/open-vs-closed/"
+    "label": "Google SRE Book: Monitoring Distributed Systems (four golden signals)",
+    "url": "https://sre.google/sre-book/monitoring-distributed-systems/"
    }
   },
   {
-   "name": "k6 script anatomy: lifecycle, VUs, checks, tags, test data",
-   "learn": "Structure: the init context runs once per VU (imports, `export const options`, `new SharedArray('tasks', () => JSON.parse(open('./tasks.json')))` so test data loads once instead of per VU), `export function setup()` runs once and returns data (log in, fetch a JWT), `export default function (data)` is the VU loop, `export function teardown(data)` cleans up. Use `check(res, { 'status 201': r => r.status === 201 })` to record pass rates without failing the run, `group()` to bucket a user flow, and always tag dynamic URLs with `{ tags: { name: 'GET /tasks/:id' } }` so http_req_duration is not split across ten thousand unique URLs. Correlate requests: extract the id via `res.json('id')` and use it in the next call, parametrise with `__ENV.BASE_URL` and `k6 run -e BASE_URL=https://kaupex.local script.js`, use `http.batch()` for parallel fetches, and add `sleep()` only when modelling closed-model users. Define a custom `Trend('task_completed_ms')` from `k6/metrics` to time an end-to-end business operation (submit, then poll until status is done) rather than a single HTTP call, because that is the number the customer cares about.",
+   "name": "The span data model: the fields you will actually set",
+   "learn": "A span carries a name, a SpanContext (16-byte trace_id, 8-byte span_id, trace_flags whose 01 bit means sampled, trace_state), a parent span id, a SpanKind, start and end timestamps, typed attributes (default cap 128 via OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT, values must be str/bool/int/float or homogeneous lists; dicts are dropped with a warning), timestamped events (record_exception writes an 'exception' event with exception.type, exception.message, exception.stacktrace), links to spans in other traces, and a Status of UNSET, OK or ERROR. Know the SpanKind contract cold: SERVER/CLIENT pairs are how backends build service graphs and compute network time; PRODUCER/CONSUMER is what the webhook -> queue -> worker hop must use; INTERNAL is for the classifier logic. Resource attributes (service.name, service.version, deployment.environment) describe the emitting process and are set once at provider creation. Span names must be low-cardinality templates ('POST /webhooks/{source}', 'classify_lead', 'hubspot.contacts.update'), never contain ids, because every backend groups and searches on them.",
+   "minutes": 25,
+   "resource": {
+    "label": "OpenTelemetry docs: Traces (spans, context, kinds, status)",
+    "url": "https://opentelemetry.io/docs/concepts/signals/traces/"
+   }
+  },
+  {
+   "name": "W3C traceparent, tracestate and baggage: the headers that make it one trace",
+   "learn": "traceparent is 'version-traceid-parentid-flags', e.g. '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'; the last byte's 01 bit is the sampled flag that lets downstream services honour the root's sampling decision. tracestate carries vendor key=value pairs and is opaque to you. baggage is a separate header carrying arbitrary key/values (tenant_id, webhook_source) across hops, and it is not copied onto spans automatically: if you want it queryable you write a SpanProcessor whose on_start copies chosen baggage entries into span attributes. Know what happens at the edge: a HubSpot webhook arrives with no traceparent so your SERVER span becomes the root, which is correct; a request arriving with a foreign traceparent makes you a child of someone else's trace, which is sometimes what you want (customer's API gateway) and sometimes a bug (a test harness reusing a fixed id). Default OTEL_PROPAGATORS=tracecontext,baggage; add b3multi only for Zipkin-era neighbours. A load balancer or WAF that strips unknown headers breaks propagation silently, so check the header actually arrives with a request dump before blaming the SDK.",
+   "minutes": 25,
+   "resource": {
+    "label": "W3C Recommendation: Trace Context",
+    "url": "https://www.w3.org/TR/trace-context/"
+   }
+  },
+  {
+   "name": "Python SDK bootstrap: providers, processors, exporters, env vars, shutdown",
+   "learn": "Install opentelemetry-sdk and opentelemetry-exporter-otlp-proto-grpc (or -proto-http). Wire Resource.create({'service.name': ..., 'service.version': ..., 'deployment.environment': ...}) into TracerProvider(resource=..., sampler=...), attach BatchSpanProcessor(OTLPSpanExporter(endpoint='http://otel-collector:4317', insecure=True)) and trace.set_tracer_provider(provider). Never use SimpleSpanProcessor outside tests: it exports synchronously inside the request path. Know BatchSpanProcessor's knobs and defaults: max_queue_size 2048, schedule_delay_millis 5000, max_export_batch_size 512, export_timeout_millis 30000; when the queue is full spans are dropped with a single warning you will not see. Prefer environment over code so the same image runs everywhere: OTEL_SERVICE_NAME, OTEL_RESOURCE_ATTRIBUTES, OTEL_EXPORTER_OTLP_ENDPOINT (gRPC 4317; for HTTP 4318 the SDK appends /v1/traces), OTEL_EXPORTER_OTLP_PROTOCOL, OTEL_TRACES_SAMPLER, OTEL_LOG_LEVEL=debug when nothing arrives. Call provider.shutdown() (or provider.force_flush()) on process exit, in a FastAPI lifespan teardown and in the worker's SIGTERM handler, otherwise the final batch is lost and the last spans before a crash never appear. Metrics mirror this: MeterProvider with PeriodicExportingMetricReader(OTLPMetricExporter) and OTEL_METRIC_EXPORT_INTERVAL (60000 ms default).",
    "minutes": 30,
    "resource": {
-    "label": "Grafana k6 docs: Test lifecycle",
-    "url": "https://grafana.com/docs/k6/latest/using-k6/test-lifecycle/"
+    "label": "OpenTelemetry docs: Python",
+    "url": "https://opentelemetry.io/docs/languages/python/"
    }
   },
   {
-   "name": "Scenarios and executors: arrival rate, stages, dropped iterations",
-   "learn": "Write `options.scenarios` as named scenarios, each with `executor`, `exec` (the function to run), `startTime`, `gracefulStop` (default 30s: how long in-flight iterations get to finish before VUs are interrupted) and per-scenario `tags`. Know all executors: shared-iterations, per-vu-iterations, constant-vus, ramping-vus (with `stages` and `gracefulRampDown`), constant-arrival-rate, ramping-arrival-rate, externally-controlled. For the breakpoint test use ramping-arrival-rate with stages climbing from 10 to 500 per `timeUnit: '1s'` over 20 minutes, `preAllocatedVUs: 100, maxVUs: 2000`, and a threshold with `abortOnFail` so the run stops at the knee instead of hammering a dead system. Run two scenarios concurrently to model mixed traffic (read-heavy at `startTime: '0s'`, writes at `startTime: '2m'`) and understand why per-scenario tags plus tagged thresholds are the only way to read them apart in the summary.",
-   "minutes": 20,
-   "resource": {
-    "label": "Grafana k6 docs: Executors",
-    "url": "https://grafana.com/docs/k6/latest/using-k6/scenarios/executors/"
-   }
-  },
-  {
-   "name": "Thresholds as pass/fail gates and CI exit codes",
-   "learn": "Thresholds turn a run into a verdict: `thresholds: { http_req_failed: ['rate<0.01'], http_req_duration: ['p(95)<400', 'p(99)<1200'], 'http_req_duration{name:POST /tasks}': ['p(95)<800'], checks: ['rate>0.99'], dropped_iterations: ['count<10'] }`. Use the object form `{ threshold: 'p(99)<2000', abortOnFail: true, delayAbortEval: '60s' }` to stop the breakpoint test once the system is clearly past the knee without a false abort during warm-up. k6 exits non-zero (code 99) when any threshold fails, which is what makes `k6 run` usable as a CI gate; set `summaryTrendStats: ['avg','med','p(95)','p(99)','max']` so the console shows the tails, and implement `handleSummary(data)` to emit JSON plus a markdown table for the load report. Derive every threshold number from the SLOs in topic 20, not from whatever the system happens to do today.",
-   "minutes": 15,
-   "resource": {
-    "label": "Grafana k6 docs: Thresholds",
-    "url": "https://grafana.com/docs/k6/latest/using-k6/thresholds/"
-   }
-  },
-  {
-   "name": "Reading k6 output and streaming it into Prometheus and Grafana",
-   "learn": "Decompose http_req_duration = http_req_sending + http_req_waiting (time to first byte, the server's share) + http_req_receiving; connection cost lives in http_req_blocked, http_req_connecting and http_req_tls_handshaking and should be near zero after warm-up because k6 reuses connections per VU (set `noConnectionReuse: true` only when modelling clients that do not). Read the `http_reqs` rate as achieved throughput, `iteration_duration` as the full flow, `http_req_failed` as the error rate (2xx and 3xx count as success by default; change it with `http.setResponseCallback`), and never report averages, which hide the bimodal tail customers feel. Stream results with `k6 run -o experimental-prometheus-rw script.js` and `K6_PROMETHEUS_RW_SERVER_URL=http://prometheus:9090/api/v1/write` (add `K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM=true` when Prometheus has native histograms enabled) so k6 series sit beside the Kaupex RED metrics from topic 21 on one Grafana dashboard and the before/after screenshots share a time axis; keep `--out json=run.json` for offline analysis.",
-   "minutes": 25,
-   "resource": {
-    "label": "Grafana k6 docs: Built-in metrics reference",
-    "url": "https://grafana.com/docs/k6/latest/using-k6/metrics/reference/"
-   }
-  },
-  {
-   "name": "The load generator is a system too: OS limits and placement",
-   "learn": "One k6 process can drive tens of thousands of VUs at roughly 1-5 MB of RAM each, but the OS gives out first: raise `ulimit -n` to 250000, widen `net.ipv4.ip_local_port_range` to '1024 65535', set `net.ipv4.tcp_tw_reuse=1` to survive TIME_WAIT churn, and expect ephemeral-port exhaustion the moment you enable `noConnectionReuse`. Set `discardResponseBodies: true` globally and opt in per request when you need the body. Never run the generator on the same box as the target (the Hetzner node hosting k3s): CPU contention makes both numbers lies. Run k6 from a second VPS or a dedicated pod on other hardware, or the k6-operator TestRun CRD when you need parallelism; watch the generator's own CPU with top and stop trusting results past about 80 percent, and treat `dropped_iterations` or high `http_req_blocked` as generator problems to rule out before blaming the target.",
-   "minutes": 15,
-   "resource": {
-    "label": "Grafana k6 docs: Fine-tuning OS",
-    "url": "https://grafana.com/docs/k6/latest/set-up/fine-tune-os/"
-   }
-  },
-  {
-   "name": "Finding the app-tier bottleneck: event loop, GIL, worker count",
-   "learn": "Under a constant-arrival-rate run, apply USE (topic 3) to each Kaupex API pod: `kubectl top pod` and `container_cpu_cfs_throttled_seconds_total` for saturation and throttling, `py-spy dump --pid 1` inside the container for what the event loop is doing right now, `py-spy record -o flame.svg` for the picture. Know the three classic Python API knees: a single uvicorn process pinning one core (fix: `--workers N`, or gunicorn with `-k uvicorn.workers.UvicornWorker`, roughly one per core because the GIL serialises CPU work); a blocking call inside `async def` (sync `requests`, sync psycopg, `time.sleep`, CPU-heavy JSON or pydantic on large bodies) that freezes every request on that loop so p99 explodes while CPU looks idle; and sync `def` endpoints saturating Starlette's anyio threadpool (40 tokens by default) so requests queue invisibly. The dump must name the frame; the fix is `await` on an async client, `run_in_threadpool` for the truly blocking, or moving the work into a Temporal activity. Also check uvicorn `--limit-concurrency` and `--backlog`, and confirm readiness probes are not failing under load and yanking pods from the Service, which shows up in k6 as intermittent connection refused.",
+   "name": "Zero-code instrumentation: FastAPI, httpx, psycopg, redis under opentelemetry-instrument",
+   "learn": "Run 'opentelemetry-bootstrap -a install' to detect installed libraries and install the matching opentelemetry-instrumentation-* packages, then launch with 'opentelemetry-instrument uvicorn app:app'. Know what each instrumentor gives you: FastAPI/ASGI creates a SERVER span per request named by route template with http.request.method, http.route, http.response.status_code, url.scheme and server.address; httpx and requests create CLIENT spans and inject traceparent on every outgoing call, which is what makes the HubSpot API call a child of your worker span; psycopg adds db.system and a sanitised db.statement; redis adds db.operation and db.statement. Know the forking gotchas: gunicorn --preload or uvicorn --workers creates the exporter before fork and the export thread dies in the children, so instrument in gunicorn's post_fork hook or per-worker startup; uvicorn --reload spawns an uninstrumented child. Set OTEL_PYTHON_EXCLUDED_URLS='health,ready,metrics' (and the FastAPI-specific OTEL_PYTHON_FASTAPI_EXCLUDED_URLS) so probes and scrapes do not become 70 percent of your spans. When zero-code fights your process model, call FastAPIInstrumentor().instrument_app(app), HTTPXClientInstrumentor().instrument() and friends explicitly at startup instead.",
    "minutes": 30,
    "resource": {
-    "label": "FastAPI docs: Concurrency and async / await",
-    "url": "https://fastapi.tiangolo.com/async/"
+    "label": "OpenTelemetry docs: Python zero-code instrumentation",
+    "url": "https://opentelemetry.io/docs/zero-code/python/"
    }
   },
   {
-   "name": "Finding the data-tier bottleneck: pools, max_connections, waits",
-   "learn": "The second knee is almost always the pool. SQLAlchemy defaults to `pool_size=5, max_overflow=10, pool_timeout=30`, so four uvicorn workers can hold 60 Postgres backends and the sixteenth concurrent request per worker waits 30 s then raises 'QueuePool limit of size 5 overflow 10 reached'; Postgres `max_connections` (default 100) then caps the whole system and new connections fail with 'FATAL: sorry, too many clients already'. While k6 runs, query `SELECT state, wait_event_type, wait_event, count(*) FROM pg_stat_activity GROUP BY 1,2,3`: many `idle in transaction` means a leaked transaction, `Lock` waits mean row or advisory contention (find the blocker with `pg_blocking_pids(pid)` and `pg_locks`), `IO` / `DataFileRead` means the working set fell out of shared_buffers, `Client` / `ClientRead` on active sessions means the app is slow to consume results. Enable `pg_stat_statements` and sort by `total_exec_time` to find the query that only becomes visible at concurrency (a sequential scan that was fine at 1 rps). Fixes you must be able to prove: an index (verify with `EXPLAIN (ANALYZE, BUFFERS)` before and after), pgbouncer in `pool_mode = transaction`, `statement_timeout` and `idle_in_transaction_session_timeout` so a bad client cannot hold the pool, and pool sizing where workers x (pool_size + max_overflow) stays under max_connections minus superuser_reserved_connections.",
-   "minutes": 25,
+   "name": "Manual spans and gen_ai semantic conventions around the classifier",
+   "learn": "Get a named tracer once per module: tracer = trace.get_tracer('defendermate.classifier', version). Wrap the LLM call with 'with tracer.start_as_current_span(\"classify_lead\", kind=SpanKind.INTERNAL) as span:' and set the gen_ai semantic-convention attributes so any backend understands it: gen_ai.system ('anthropic'), gen_ai.request.model, gen_ai.request.max_tokens, gen_ai.request.temperature, gen_ai.response.model, gen_ai.response.finish_reasons, gen_ai.usage.input_tokens, gen_ai.usage.output_tokens. Keep prompt and completion text off the span by default: it is PII and size; gate capture behind an explicit env flag and document it. Add your own namespaced attributes for what the business asks about: defendermate.classification (bounded enum), defendermate.confidence, defendermate.webhook.source. On failure call span.record_exception(exc), span.set_status(Status(StatusCode.ERROR, str(exc))) and re-raise; never swallow, and never set OK manually unless you have checked the result. Emit span.add_event('retry', {'attempt': n, 'backoff_ms': ms}) inside retry loops so the trace shows why 3 s became 20 s. Use span links when one classifier batch serves many webhooks. Verify in Tempo that the classifier span's duration matches the provider-side latency you see in the API response headers.",
+   "minutes": 30,
    "resource": {
-    "label": "PostgreSQL docs: The Cumulative Statistics System (pg_stat_activity)",
-    "url": "https://www.postgresql.org/docs/current/monitoring-stats.html"
+    "label": "OpenTelemetry semantic conventions: Generative AI",
+    "url": "https://opentelemetry.io/docs/specs/semconv/gen-ai/"
    }
   },
   {
-   "name": "Before/after methodology: proving the fix",
-   "learn": "A load report is an experiment, so control the variables: same script, same executor and rate, same duration, same dataset, same cluster state (warm or cold identically, with a 2-minute warm-up scenario excluded from thresholds), and change exactly one thing between runs. Record the environment in the report header (image digest, replica count, requests and limits, Postgres settings, node CPU model), because a 'fix' that shipped alongside a replica bump proves nothing. Report throughput at the fixed arrival rate, p50/p95/p99 and max, error rate, dropped_iterations, and the resource that saturated, with Grafana panels over identical time ranges. Run each configuration at least twice and quote the worse run; if run-to-run variance exceeds the improvement you have not proven anything and must say so. Codify the winning thresholds into the script and wire `k6 run` into CI on a nightly schedule against staging so the next regression is a red job, not a customer call.",
-   "minutes": 20,
+   "name": "Context across async boundaries: webhook -> queue -> worker without breaking the trace",
+   "learn": "The webhook handler must return 200 in milliseconds, so the classifier runs later in a worker and the trace breaks at the queue unless you carry context by hand. Producer side: carrier = {}; propagate.inject(carrier); store carrier next to the job (Redis Stream field, Kafka record header, Temporal header, a JSONB column). Consumer side: ctx = propagate.extract(carrier); with tracer.start_as_current_span('process_webhook', context=ctx, kind=SpanKind.CONSUMER). Decide parent versus link deliberately: a job processed once is a child span; a job retried many times or drained in batches gets a new trace per attempt with a Link back to the PRODUCER span, so one poison message cannot create a 10,000-span trace that no UI renders. Know Python's context rules: asyncio.create_task copies contextvars at creation so spans flow into tasks, but ThreadPoolExecutor and run_in_executor do not, so wrap with contextvars.copy_context().run or install opentelemetry-instrumentation-threading. A span must end in the same execution that started it; a span started in the request and ended in the worker is a bug that shows as spans with absurd durations. Prove the whole thing with a single trace id visible in the API log, the queue payload, the worker log and the HubSpot CLIENT span.",
+   "minutes": 30,
    "resource": {
-    "label": "Grafana k6 docs: Automated performance testing",
-    "url": "https://grafana.com/docs/k6/latest/testing-guides/automated-performance-testing/"
+    "label": "OpenTelemetry docs: Python manual instrumentation (context, propagation)",
+    "url": "https://opentelemetry.io/docs/languages/python/instrumentation/"
    }
   },
   {
-   "name": "Overload, Little's law and load shedding",
-   "learn": "Little's law (concurrency = throughput x latency) explains the cliff: once a server's concurrency limit is full, every extra request queues, latency rises linearly with queue depth, and throughput flattens or falls as context switching and GC eat CPU. The SRE response is to fail fast and cheaply: bound the queue, return 503 or 429 with `Retry-After` immediately instead of letting requests time out slowly, reject low-criticality traffic (batch ingestion) before interactive traffic, and never let health checks fail under load, which turns overload into an outage. Implement one concrete limiter in Kaupex (uvicorn `--limit-concurrency`, or an ASGI middleware holding an `asyncio.Semaphore` per route class) and show with k6 that at 2x the breakpoint the p99 of accepted requests stays flat while rejections rise, rather than every request degrading. Understand the chapter's client-side adaptive throttling (reject locally when requests far exceed accepts) as what you recommend when the server is not yours to change.",
-   "minutes": 20,
-   "resource": {
-    "label": "Google SRE Book: Handling Overload",
-    "url": "https://sre.google/sre-book/handling-overload/"
-   }
-  },
-  {
-   "name": "Retry storms and cascading failures",
-   "learn": "Retries are load multipliers: a client retrying three times turns a 10 percent slowdown into a 4x surge exactly when the server can least take it, and a worker pool retrying a slow dependency exhausts its own threads and takes out a healthy service upstream. Learn the chapter's triggers (process death, deploys, organic growth, planned changes) and mitigations: exponential backoff with full jitter, a retry budget (retries capped near 10 percent of requests per client), retry only idempotent calls and only on specific errors (never on 4xx, never on a timeout without a deadline), deadline propagation so a downstream call cannot outlive its caller's timeout, and circuit breakers that stop calling a dependency that keeps failing. Reproduce a storm on your cluster: run k6 against Kaupex while NetworkChaos delays Postgres, watch the LLM and HubSpot retry code in Kaupex amplify the queue, then add a budget and jitter and re-run to show the difference.",
-   "minutes": 15,
-   "resource": {
-    "label": "Google SRE Book: Addressing Cascading Failures",
-    "url": "https://sre.google/sre-book/addressing-cascading-failures/"
-   }
-  },
-  {
-   "name": "Principles of chaos: hypothesis, blast radius, abort criteria",
-   "learn": "Chaos is an experiment, not a stunt: define steady state as measurable outputs (the SLIs from topic 20: Kaupex task completion rate, API p95, Temporal workflow success rate), write a hypothesis ('killing one worker pod causes zero failed workflows and under 60 s of added completion latency'), inject a real-world event (process death, network delay, dependency outage, disk full, clock skew), and compare steady state during and after. Minimise blast radius (one namespace, one pod, staging first, 30 s duration, a named owner watching, an abort condition tied to a dashboard panel), automate the experiment once understood, and only then run it in production with the customer's written sign-off. Write every experiment as a one-page card before running it: hypothesis, scope, method, abort criteria, expected and actual observations, timeline, recovery time, follow-up tickets. Those cards are the 'chaos notes' deliverable and exactly what a customer's risk or change board will ask to see.",
-   "minutes": 20,
-   "resource": {
-    "label": "Principles of Chaos Engineering",
-    "url": "https://principlesofchaos.org/"
-   }
-  },
-  {
-   "name": "Chaos Mesh on k3s: install, scope, safety",
-   "learn": "Install with `helm repo add chaos-mesh https://charts.chaos-mesh.org`, `kubectl create ns chaos-mesh`, then `helm install chaos-mesh chaos-mesh/chaos-mesh -n chaos-mesh --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/k3s/containerd/containerd.sock`; the socket path is the k3s-specific gotcha (k3s bundles its own containerd) and getting it wrong leaves experiments that never reach the Injected phase. Understand what you installed: chaos-controller-manager reconciles the CRDs, chaos-daemon is a privileged hostPID DaemonSet that uses nsenter, tc and iptables inside target pods (exactly the component a customer security team will flag, see topic 10), and the dashboard on port 2333 (`kubectl -n chaos-mesh port-forward svc/chaos-dashboard 2333:2333`) requires a ServiceAccount token unless you disable security mode for a lab. Every experiment scopes via `spec.selector` (namespaces, labelSelectors, pods by name) and `spec.mode` (one, all, fixed, fixed-percent, random-max-percent) plus `spec.duration`; inspect with `kubectl describe podchaos <name>` (Records with Injected and Recovered phases), pause with the annotation `experiment.chaos-mesh.org/pause: \"true\"`, and `kubectl delete` to recover. Never install it in a customer cluster without restricting the controller to target namespaces and agreeing a change window.",
-   "minutes": 20,
-   "resource": {
-    "label": "Chaos Mesh docs: Install Chaos Mesh using Helm",
-    "url": "https://chaos-mesh.org/docs/production-installation-using-helm/"
-   }
-  },
-  {
-   "name": "PodChaos under load: pod-kill, pod-failure, container-kill",
-   "learn": "With a constant-arrival-rate k6 run against Kaupex, apply `kind: PodChaos` with `action: pod-kill` (deletes the pod; `gracePeriod: 0` means SIGKILL with no drain, which is what a node crash looks like), `action: pod-failure` with `duration: '60s'` (swaps the container image for a pause image so the pod exists but serves nothing, which is what a wedged process looks like), and `action: container-kill` with `containerNames` to kill only the app container and exercise restartPolicy without rescheduling. Observe three clocks: time until readiness removes the pod from the Service (`kubectl get endpointslices -w`), time until the replacement is Ready (`kubectl get events --sort-by=.lastTimestamp -w`), and what k6 recorded in `http_req_failed` and the error strings in that window. Expect to find that a single-replica Deployment gives a hard outage of image-pull plus startup time, that two replicas without a PodDisruptionBudget still both die during a node drain, and that a readiness probe with `periodSeconds: 10` leaves up to 10 s of traffic going to a dead pod. Fix each and re-run until the hypothesis holds; that loop is the chaos notes.",
-   "minutes": 25,
-   "resource": {
-    "label": "Chaos Mesh docs: Simulate Pod Faults",
-    "url": "https://chaos-mesh.org/docs/simulate-pod-chaos-on-kubernetes/"
-   }
-  },
-  {
-   "name": "NetworkChaos: latency, loss and partition to Postgres and Temporal",
-   "learn": "Apply `kind: NetworkChaos` to the Kaupex API pods with `direction: to` and a `target` selector on the Postgres pods (or `externalTargets: ['<managed-db-ip>']` for a database outside the cluster) to inject `action: delay` (`latency: '200ms', jitter: '50ms', correlation: '25'`), `action: loss` (`loss: '10'`), `action: partition`, and `action: bandwidth`. Underneath it is tc netem and iptables inside the target pod's network namespace, so only that pod is affected. Watch which timeouts fire and in what order: libpq `connect_timeout`, Postgres `statement_timeout`, SQLAlchemy `pool_timeout`, uvicorn keep-alive, Traefik's ingress timeouts, and k6's request timeout (default 60 s); if nothing fires inside your SLO the customer sees a hang, not an error, and that is the finding. Repeat against the Temporal frontend service: delay makes worker polls slow but workflows keep progressing; a partition stops workers completing tasks, heartbeats lapse, and activities time out and retry when the partition heals. Write down the observed timeout chain and set the missing timeouts so the system fails inside the latency budget instead of hanging.",
-   "minutes": 25,
-   "resource": {
-    "label": "Chaos Mesh docs: Simulate Network Faults",
-    "url": "https://chaos-mesh.org/docs/simulate-network-chaos-on-kubernetes/"
-   }
-  },
-  {
-   "name": "Kubernetes termination semantics and resource pressure (StressChaos)",
-   "learn": "Know the termination sequence precisely: an API delete marks the pod Terminating and, in parallel, the endpoint controller removes it from EndpointSlices; the kubelet runs the preStop hook, sends SIGTERM to PID 1 of each container, waits `terminationGracePeriodSeconds` (default 30), then SIGKILLs. Because endpoint removal and SIGTERM race, a server that exits instantly on SIGTERM still drops in-flight requests; add `preStop: exec: command: ['sleep', '5']` and make uvicorn and the Temporal worker drain rather than exit. If the container starts with `sh -c 'python ...'` without `exec`, sh is PID 1, ignores SIGTERM, and every shutdown takes the full 30 s then a SIGKILL. Chaos Mesh pod-kill with gracePeriod 0 and `kubectl delete pod --grace-period=0 --force` skip all of this. PodDisruptionBudgets (`minAvailable`) are honoured only by the Eviction API (`kubectl drain`, autoscalers), not by deletes or chaos. Use `kind: StressChaos` with `stressors: { cpu: { workers: 2, load: 100 }, memory: { workers: 1, size: '256MB' } }` inside the Kaupex worker's cgroup to produce CPU throttling (`container_cpu_cfs_throttled_periods_total` climbing) and an OOMKilled restart (exit code 137; `kubectl describe pod` shows Last State Terminated, Reason OOMKilled), then size requests and limits from that evidence instead of guesses.",
-   "minutes": 20,
-   "resource": {
-    "label": "Kubernetes docs: Pod Lifecycle (termination of Pods)",
-    "url": "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"
-   }
-  },
-  {
-   "name": "Temporal worker killed mid-workflow: timeouts, retries, replay",
-   "learn": "Kill the Kaupex Temporal worker pod (pod-kill, gracePeriod 0) while a workflow is inside an activity and trace exactly what the server does. Nothing happens immediately: the server has no liveness signal from a dead worker, so the activity stays started until its Start-To-Close timeout or its Heartbeat timeout expires; then the server records ActivityTaskTimedOut and, if the retry policy allows (default: initial interval 1 s, backoff coefficient 2.0, maximum interval 100x initial, unlimited attempts), schedules the next attempt, which any live worker polling the task queue picks up. Consequences you must be able to state cold: with a 1-hour Start-To-Close and no Heartbeat timeout the workflow stalls for an hour; a 30 s Heartbeat timeout plus `activity.heartbeat(progress)` bounds detection to 30 s and lets the retry resume from `activity.info().heartbeat_details`; Schedule-To-Start timeouts are non-retryable by design (they mean no worker is polling) so leave them unset. Workflow tasks on the dead worker time out after the Workflow Task timeout (default 10 s), the sticky cache is gone, and a fresh worker replays the full event history to rebuild state, which is why workflow code must be deterministic. Verify with `temporal workflow describe -w <id>` (Pending Activities: attempt, lastFailure, lastWorkerIdentity), `temporal workflow show -w <id>` for the event list, and `temporal task-queue describe -t kaupex` to see which worker identities are polling. Time the gap from kill to workflow completion and record it in the chaos notes.",
+   "name": "The Collector: receivers, processors, exporters, connectors, pipelines",
+   "learn": "The Collector config has receivers, processors, exporters, connectors, extensions and service.pipelines.{traces,metrics,logs} that wire them together; a component that is defined but not referenced in a pipeline does nothing, which is the first thing to check when nothing arrives. Production processor order: memory_limiter first (check_interval 1s, limit_mib, spike_limit_mib; it refuses data instead of letting the process OOM), then resourcedetection or k8sattributes, then attributes/transform for redaction (action: delete on http.request.header.authorization, hash on user.email), then batch last (send_batch_size, timeout). Exporters you will use: otlp to Tempo or Jaeger on 4317, prometheusremotewrite or prometheus (exposes a /metrics endpoint for scraping), loki or otlphttp for logs, and debug with verbosity: detailed while developing. Connectors join pipelines: spanmetrics turns spans into RED metrics, servicegraph builds the service map. Run 'otelcol validate --config=config.yaml' before every deploy. Know that tail_sampling, k8sattributes, transform and loki live in the contrib distribution, not core. Enable the health_check extension on 13133 for liveness and zpages on 55679 to inspect live pipelines.",
    "minutes": 35,
    "resource": {
-    "label": "Temporal docs: Detecting Activity failures (timeouts, heartbeats, retries)",
-    "url": "https://docs.temporal.io/encyclopedia/detecting-activity-failures"
+    "label": "OpenTelemetry docs: Collector configuration",
+    "url": "https://opentelemetry.io/docs/collector/configuration/"
    }
   },
   {
-   "name": "Temporal graceful shutdown, idempotency and worker tuning under load",
-   "learn": "Because an activity may have performed its side effect (HubSpot write, LLM call, Postgres insert) before the worker died, retries mean at-least-once execution: every activity that touches the outside world needs an idempotency key derived from `activity.info().workflow_id` plus `activity_id`, `INSERT ... ON CONFLICT DO NOTHING`, or a lookup-before-write, and LLM calls should be cached by prompt hash so a retry does not double the bill. Make shutdown graceful in the Python SDK: `Worker(..., graceful_shutdown_timeout=timedelta(seconds=25))` (below terminationGracePeriodSeconds) stops polling, lets running activities finish or observe `activity.wait_for_worker_shutdown()` and heartbeat their progress, and cancels whatever remains; wire SIGTERM to `await worker.shutdown()` so a routine rollout is not an unplanned chaos experiment. Then load-test the worker path: run k6 at a rate that starts workflows, watch `temporal_worker_task_slots_available` (label `worker_type`) hit zero and `temporal_activity_schedule_to_start_latency` climb, and tune `max_concurrent_activities`, `max_concurrent_workflow_tasks`, `max_concurrent_activity_task_polls` (default 5), `max_cached_workflows`, or add replicas; if the pod's CPU is pinned, more slots will not help. Expose SDK metrics with `Runtime(telemetry=TelemetryConfig(metrics=PrometheusConfig(bind_address='0.0.0.0:9000')))` so they sit on the same Grafana dashboard as the k6 series.",
+   "name": "Sampling: head, parent-based, tail, and the scaling constraint",
+   "learn": "Head sampling decides at the root: OTEL_TRACES_SAMPLER=parentbased_traceidratio with OTEL_TRACES_SAMPLER_ARG=0.1 keeps 10 percent of roots and every child honours the parent's flag, so traces stay complete; always_on for dev. Head sampling cannot 'keep all the errors' because the decision precedes the error. Tail sampling in the Collector's tail_sampling processor buffers each trace for decision_wait (10-30 s) then applies policies: status_code ERROR keep, latency threshold_ms above your SLO keep, string_attribute on tenant for a VIP customer keep, probabilistic 5 percent for the rest; compose them with and/composite policies. The cost: every span of a trace must reach the same Collector instance, so with more than one replica you put the loadbalancing exporter (routing_key: traceID) in a first tier in front of the samplers. Metrics derived from traces are wrong after sampling, so run the spanmetrics connector before tail_sampling or compute RED from the SDK instead. Be able to answer 'why is there no trace for my successful fast request' and 'why is the error trace missing' in one sentence each.",
+   "minutes": 25,
+   "resource": {
+    "label": "OpenTelemetry docs: Sampling",
+    "url": "https://opentelemetry.io/docs/concepts/sampling/"
+   }
+  },
+  {
+   "name": "Prometheus data model, metric types, naming and finding cardinality offenders",
+   "learn": "A time series is a metric name plus a label set; a sample is (timestamp, float64). Counter is monotonic and only ever read through rate() or increase(); Gauge is a point-in-time value read with avg_over_time or max_over_time; Histogram exposes cumulative _bucket series with an le label plus _sum and _count and aggregates correctly across instances; Summary computes quantiles client-side and cannot be aggregated, so avoid it. Naming: defendermate_classifier_requests_total, defendermate_hubspot_write_duration_seconds; base units (seconds, bytes), _total suffix for counters, no label value baked into the name. Label values must be bounded enumerations: outcome in {qualified, disqualified, error}, status_class in {2xx, 4xx, 5xx}; tenant is acceptable only while tenants number in the tens. Python client: Counter(...).labels(outcome='qualified').inc(), Histogram(..., buckets=[...]).observe(seconds); under gunicorn set PROMETHEUS_MULTIPROC_DIR because each worker holds its own registry and the parent must aggregate. Find offenders on a customer's server with topk(10, count by (__name__)({__name__=~'.+'})) and the /api/v1/status/tsdb endpoint's seriesCountByMetricName. Pick one path per service: prometheus_client scraped directly, or OTel Meter.create_counter/create_histogram exported through the Collector; never both for the same numbers.",
    "minutes": 30,
    "resource": {
-    "label": "Temporal docs: Worker performance tuning",
-    "url": "https://docs.temporal.io/develop/worker-performance"
+    "label": "Prometheus docs: Metric types",
+    "url": "https://prometheus.io/docs/concepts/metric_types/"
+   }
+  },
+  {
+   "name": "Scrape configuration, service discovery, relabeling and the /metrics contract",
+   "learn": "prometheus.yml scrape_configs: job_name, scrape_interval (15 s default; every rate() window and alert 'for' depends on it), scrape_timeout below the interval, static_configs for compose, kubernetes_sd_configs (role: pod or endpoints) for clusters, relabel_configs to keep only pods annotated prometheus.io/scrape=true and to rewrite the instance and job labels into something a human recognises. The exposition format is plain text with '# HELP' and '# TYPE' lines then samples; a /metrics endpoint that computes on demand and takes seconds will stall scrapes, so precompute in a background task. The synthetic 'up' metric is 1 when the scrape succeeded, and 'up == 0' is your first alert. With Prometheus Operator, ServiceMonitor and PodMonitor CRDs are selected by label; a missing 'release' label matching the Prometheus CR's serviceMonitorSelector is the single most common reason a customer's Prometheus ignores your service. Verify at /targets and /service-discovery, reload with SIGHUP or POST /-/reload (requires --web.enable-lifecycle).",
+   "minutes": 20,
+   "resource": {
+    "label": "Prometheus docs: Configuration (scrape_configs, relabel_configs)",
+    "url": "https://prometheus.io/docs/prometheus/latest/configuration/configuration/"
+   }
+  },
+  {
+   "name": "PromQL for RED: the six queries you paste into every dashboard",
+   "learn": "rate(x_total[5m]) is the per-second average over the window and the window must be at least four times scrape_interval or you get gaps; increase() gives the count in the window; irate() is for spike hunting only, never alerts. Aggregate with sum by (route, status_class) (rate(http_server_request_duration_seconds_count[5m])). Error ratio: sum(rate(x_total{status_class='5xx'}[5m])) / sum(rate(x_total[5m])). Latency: histogram_quantile(0.99, sum by (le) (rate(x_duration_seconds_bucket[5m]))) and the le label must survive the aggregation or the result is garbage. Saturation: queue depth gauges, process_resident_memory_bytes, container_cpu_cfs_throttled_periods_total, process_open_fds. Know why histogram_quantile returns NaN (no samples), why it can report a value above your largest finite bucket (+Inf interpolation) and why coarse buckets make p99 a lie. Recording rules with the level:metric:operations convention (job:http_requests:rate5m) for anything a dashboard or alert evaluates more than once a minute. Learn absent(), offset, topk(), label_replace() and the 'on'/'ignoring' vector-matching keywords because each one will save you an afternoon at a customer once.",
+   "minutes": 30,
+   "resource": {
+    "label": "Prometheus docs: Querying basics (PromQL)",
+    "url": "https://prometheus.io/docs/prometheus/latest/querying/basics/"
+   }
+  },
+  {
+   "name": "Histograms done right: bucket edges at SLO thresholds, exemplars, native histograms",
+   "learn": "The Python client's default buckets (.005 to 10 s) are wrong for an LLM call that takes 2-30 s; choose buckets that bracket your SLO thresholds, for example 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60 for classifier latency, because histogram_quantile interpolates linearly inside a bucket and the only exact measurement is 'fraction under a bucket edge' via x_bucket{le='5'} / x_count. Every extra bucket is one more series per label set: 12 buckets x 10 routes x 3 status classes is 360 series for one metric. Exemplars attach a trace_id to an observation (observe(value, {'trace_id': hex}) in the client, exposed only in the OpenMetrics format, stored by Prometheus with --enable-feature=exemplar-storage) so a Grafana latency panel shows dots that click through to the exact slow trace; this is the concrete link between metrics and traces. Know native histograms and OTel exponential histograms as the fix for bucket choice (bucket boundaries chosen automatically, aggregatable across differently configured services) and their current feature-flag status so you can tell a customer when to adopt them.",
+   "minutes": 25,
+   "resource": {
+    "label": "Prometheus docs: Histograms and summaries (best practices)",
+    "url": "https://prometheus.io/docs/practices/histograms/"
+   }
+  },
+  {
+   "name": "Structured logs that carry trace_id and span_id",
+   "learn": "The target is that every log line emitted while a request is in flight carries trace_id and span_id so a click on a span lands on exactly its lines. Two ways in Python: OTEL_PYTHON_LOG_CORRELATION=true with the logging instrumentation injects otelTraceID, otelSpanID and otelServiceName into every LogRecord; or in your own JSON formatter read trace.get_current_span().get_span_context() and format trace_id as a 32-character lowercase hex (format(ctx.trace_id, '032x')) because Tempo and Loki expect hex, not the integer. Emit exactly one JSON object per line on stdout; never multi-line tracebacks in production since each line becomes a separate log entry, put the traceback in an 'exc_info' field. Ship via OTLP logs (LoggerProvider + BatchLogRecordProcessor + LoggingHandler) or via stdout -> Collector filelog receiver -> Loki exporter; pick one and document it. Define the level contract: INFO for state transitions with ids (webhook received, classified, hubspot written), WARN for retried failures, ERROR only when a human should look, and never DEBUG in production by default. Redact secrets and PII in the formatter, not downstream, because the Collector already saw the raw line.",
+   "minutes": 25,
+   "resource": {
+    "label": "OpenTelemetry docs: Logs (data model and correlation)",
+    "url": "https://opentelemetry.io/docs/concepts/signals/logs/"
+   }
+  },
+  {
+   "name": "Loki: labels versus fields, and the LogQL you actually need",
+   "learn": "Loki indexes only labels (the stream selector) so keep them to service, namespace, pod and level; every unique label combination is a stream and a trace_id, request_id or tenant label creates millions of streams and stops ingestion, the cardinality failure in log form. Everything else stays in the line and is parsed at query time: {service='defendermate-worker'} | json | trace_id='4bf92f3577b34da6a3ce929d0e0e4736', line filters |= 'hubspot' and != 'health', label filters | level='error' | duration > 2s after parsing. Metric queries from logs: sum by (level) (rate({service='defendermate-api'} | json [5m])) and count_over_time for 'how many 429 bodies in the last hour'. Configure derived fields on the Loki datasource in Grafana (a regex or JSON field for trace_id, internal link with the Tempo datasourceUid) so a trace id in any log line becomes a clickable link. Know the operator knobs a customer's platform team will ask about: retention_period, chunk_target_size, per-tenant ingestion rate limits, and that 'too many outstanding requests' means your query fanned out over too many streams.",
+   "minutes": 20,
+   "resource": {
+    "label": "Grafana Loki documentation",
+    "url": "https://grafana.com/docs/loki/latest/"
+   }
+  },
+  {
+   "name": "Grafana: Tempo datasource, trace-to-logs, trace-to-metrics, TraceQL, one-tool navigation",
+   "learn": "Configure the Tempo datasource with tracesToLogsV2 (datasourceUid of Loki, tags mapping service.name -> service, spanStartTimeShift '-1m' and spanEndTimeShift '1m' so clock skew does not hide lines, filterByTraceID true), tracesToMetrics (queries using $__tags to jump to the RED panels for the selected span's service) and serviceMap (needs spanmetrics and servicegraph connectors in the Collector writing to Prometheus). Learn TraceQL because attribute search is how you find things without an id: { resource.service.name = 'defendermate-worker' && span.gen_ai.request.model =~ 'claude.*' && duration > 5s }, { status = error }, and structural queries like { span.http.route = '/webhooks/hubspot' } >> { span.db.system = 'postgresql' }. Practise the Explore split view until it is muscle memory: latency panel with exemplars on the left, click a dot, the trace opens on the right, click the HubSpot CLIENT span, its logs appear below; that is the demo you owe the customer and the screenshot the plan asks for. Know Tempo's limits: traces are retrievable by id immediately but searchable by attribute only after they are flushed to blocks, and max_duration and lookback settings bound what search returns.",
+   "minutes": 30,
+   "resource": {
+    "label": "Grafana docs: Tempo data source (trace to logs, trace to metrics, TraceQL)",
+    "url": "https://grafana.com/docs/grafana/latest/datasources/tempo/"
+   }
+  },
+  {
+   "name": "Dashboards and datasources as code: the RED dashboard you ship to every customer",
+   "learn": "Provision datasources with YAML in /etc/grafana/provisioning/datasources (apiVersion: 1; datasources: name, type, url, uid, isDefault, jsonData) and dashboards through a provider pointing at a folder of dashboard JSON with allowUiUpdates: false so the customer cannot drift them silently; give every dashboard a stable uid so links survive re-import. Build one RED dashboard from scratch: template variables $env and $service from label_values(up, job); rows for Rate, Errors (ratio panel with a red threshold at the SLO), Duration (p50/p95/p99 from histogram_quantile plus a heatmap panel over the _bucket series with exemplars enabled) and Saturation (queue depth, worker count, memory, CFS throttling); an annotations query from deployment events so every step change has a cause line. Use the HTTP API (POST /api/dashboards/db with overwrite: true, service-account token) from CI so the version-controlled JSON is the source of truth. Know the panel types that matter: time series, stat with thresholds, heatmap for histograms, state timeline for up/down, and the difference between instant and range queries in a table panel.",
+   "minutes": 25,
+   "resource": {
+    "label": "Grafana docs: Provisioning (datasources, dashboards, alerting)",
+    "url": "https://grafana.com/docs/grafana/latest/administration/provisioning/"
+   }
+  },
+  {
+   "name": "Alerting rules: symptom-based, multi-window burn rate, Alertmanager routing",
+   "learn": "A Prometheus alerting rule has alert, expr, for (pending -> firing; set to at least two scrape intervals), labels (severity: page or ticket, team) and annotations (summary, runbook_url) templated with {{ $labels.service }} and {{ $value }}. Alert on symptoms users feel (error ratio, latency SLO burn, up == 0, absent(heartbeat_metric)) rather than causes (CPU above 80 percent, restarts above 3), because the HubSpot 429 storm that loses leads has green CPU. Implement the SRE Workbook multi-window multi-burn-rate pair for the SLO from topic 20: a fast alert (1 h window at 14.4x burn with a 5 m confirmation window, for 2m) and a slow alert (6 h at 6x with 30 m confirmation), each requiring both windows to exceed the threshold. Alertmanager: a route tree by severity and team, group_by ['alertname', 'service'], group_wait 30s, group_interval 5m, repeat_interval 4h, inhibit_rules so a ClusterDown alert silences fifty pod-level alerts, receivers for Slack, PagerDuty and a generic webhook. Ship nothing to a customer until 'promtool check rules' and 'promtool test rules' with a unit-test file pass in CI, and until you have watched the alert fire and resolve against injected errors.",
+   "minutes": 25,
+   "resource": {
+    "label": "Prometheus docs: Alerting rules",
+    "url": "https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/"
+   }
+  },
+  {
+   "name": "Operating the pipeline: Collector self-telemetry, dropped data, backpressure, bisecting 'no traces'",
+   "learn": "The Collector exposes its own Prometheus metrics on :8888 (service.telemetry.metrics): otelcol_receiver_accepted_spans and otelcol_receiver_refused_spans, otelcol_processor_dropped_spans (memory_limiter and tail_sampling), otelcol_exporter_sent_spans and otelcol_exporter_send_failed_spans, otelcol_exporter_queue_size against otelcol_exporter_queue_capacity, plus the same families for metric points and log records. Alert when refused or send_failed is non-zero for five minutes: silent data loss is the failure mode of observability itself and it always happens during the incident you most need. Exporter knobs: sending_queue (enabled, num_consumers, queue_size), retry_on_failure (initial_interval, max_interval, max_elapsed_time after which data is dropped for good), timeout. Backend rate limiting (Tempo 429 on per-tenant ingestion limits, Grafana Cloud quotas) appears as send_failed; the fix is sampling or a limit increase, not a bigger queue. Bisect a 'no traces' ticket in a fixed order: OTEL_LOG_LEVEL=debug on the SDK, debug exporter in the Collector, receiver accepted versus refused, exporter sent versus failed, backend ingester logs, then the datasource's time range and tenant in Grafana.",
+   "minutes": 20,
+   "resource": {
+    "label": "OpenTelemetry docs: Collector internal telemetry",
+    "url": "https://opentelemetry.io/docs/collector/internal-telemetry/"
+   }
+  },
+  {
+   "name": "Deploying on Kubernetes: agent versus gateway, k8sattributes, Operator injection, kube-prometheus-stack",
+   "learn": "Two Collector topologies: agent (DaemonSet; pods send to the node-local Collector via OTEL_EXPORTER_OTLP_ENDPOINT built from status.hostIP through the downward API; the k8sattributes processor maps pod IP to k8s.pod.name, k8s.namespace.name, k8s.deployment.name and needs RBAC to list pods and replicasets) and gateway (a Deployment behind a Service; the one place for tail sampling, export credentials and egress control). Most customers run both: agents forward to the gateway. The OpenTelemetry Operator's Instrumentation CRD plus the annotation instrumentation.opentelemetry.io/inject-python: 'true' injects zero-code instrumentation into an existing Deployment via an init container and env vars, which is the no-code-change path you offer for a customer's legacy services. Install with the official Helm charts (opentelemetry-collector with mode: daemonset or deployment, opentelemetry-operator) and kube-prometheus-stack for Prometheus Operator, Alertmanager and Grafana; scrape the Collector's :8888 with a ServiceMonitor. Give the Collector real requests and limits and set memory_limiter limit_mib at roughly 80 percent of the container limit, because at a customer the Collector is often the first pod OOMKilled when traffic spikes, which erases the telemetry of the spike.",
+   "minutes": 20,
+   "resource": {
+    "label": "OpenTelemetry docs: Collector deployment patterns (agent, gateway)",
+    "url": "https://opentelemetry.io/docs/collector/deploy/"
    }
   }
  ],
  "outcomes": [
-  "You can write a k6 script with a ramping-arrival-rate breakpoint scenario, tagged requests, a custom Trend for end-to-end task completion and thresholds derived from the Kaupex SLOs, run it from a separate host, and have results streaming into Prometheus so k6 and application RED metrics share one Grafana time axis.",
-  "You can name the first saturated resource in Kaupex under load within 15 minutes using `kubectl top`, `py-spy dump`, `pg_stat_activity` and the k6 timing breakdown, and state whether it is CPU, event-loop blocking, threadpool, connection pool or Postgres, with the evidence line for each.",
-  "You can produce a before/after load report in which exactly one variable changed, both configurations were run twice, the environment is recorded down to the image digest, and the p95/p99 improvement at fixed arrival rate exceeds run-to-run variance.",
-  "You can explain, with numbers from your own runs, how much a closed-model test under-reported latency versus the open model at the same nominal load, and what a non-zero `dropped_iterations` meant.",
-  "You can install Chaos Mesh on k3s with the correct containerd socket, scope an experiment to one namespace and one pod, run PodChaos, NetworkChaos and StressChaos against Kaupex while k6 is live, and read the outcome from EndpointSlice changes, events and `http_req_failed`.",
-  "You can kill a Temporal worker mid-activity and predict, before looking, how long until the activity retries and on which worker, confirm it with `temporal workflow describe` and `temporal task-queue describe`, and name the change (heartbeat timeout, idempotency key, graceful shutdown) that cuts recovery time.",
-  "You can implement a load-shedding limiter and demonstrate with k6 that at 2x the breakpoint the accepted requests' p99 stays flat while 503s rise, and explain to a customer's ops lead why that beats uniform degradation.",
-  "You can write a one-page chaos experiment card (hypothesis, blast radius, abort criteria, observations, recovery time, follow-ups) that a customer's change advisory board would accept."
+  "You can instrument a FastAPI webhook receiver, a queued worker that calls an LLM, and an outbound HubSpot client so that one trace_id links the SERVER span, the CONSUMER span, the classifier INTERNAL span with gen_ai.* attributes and the HTTP CLIENT span, and show the full tree in Grafana Tempo with span durations that reconcile to the provider's reported latency.",
+  "You can write an OpenTelemetry Collector config from memory with memory_limiter, k8sattributes or resourcedetection, attributes-based redaction, batch, tail_sampling and OTLP, Prometheus and Loki exporters, pass 'otelcol validate', and prove data flow using only the Collector's receiver and exporter counters on :8888.",
+  "You can produce the six PromQL queries of a RED dashboard (rate, error ratio, p50/p95/p99, saturation) for any service given only its metric names, and explain why each rate() window is at least four scrape intervals and why le must survive the aggregation in histogram_quantile.",
+  "You can choose histogram buckets for a 2-30 s LLM call so that the SLO threshold is a bucket edge, compute the fraction under threshold exactly with _bucket over _count, and attach exemplars so a latency dot clicks through to the exact slow trace.",
+  "You can configure parentbased_traceidratio head sampling plus a tail_sampling policy set that keeps all errors and slow traces and a fixed percentage of the rest, explain the loadbalancing-exporter requirement for more than one Collector replica, and tell a customer in one sentence why a fast successful request has no trace.",
+  "You can make every log line emitted during a request carry the 32-hex trace_id, ship logs to Loki with only service, namespace, pod and level as labels, and configure trace-to-logs and derived fields so a span click lands on exactly the lines for that span.",
+  "You can write the fast and slow multi-window burn-rate alert rules for a written SLO, route them through Alertmanager with grouping and an inhibition rule, pass 'promtool test rules' in CI, and demonstrate the alert firing and resolving against injected 429s.",
+  "You can bisect a 'no traces are arriving' report in under fifteen minutes by checking, in order, SDK debug log, Collector debug exporter, receiver accepted versus refused, exporter sent versus failed, backend ingester limits, and the Grafana datasource time range and tenant."
  ],
  "failureModes": [
-  "The load generator ran on the same VPS as the k3s node; CPU contention manufactured a bottleneck at 300 rps that did not exist, and a sprint went into tuning uvicorn for a phantom.",
-  "A closed-model test with 20 VUs reported a 180 ms p95 and 'passed'; on go-live morning real users arrived at an open rate, requests piled into the uvicorn backlog, and p95 hit 9 s while the test dashboards were being shown to the customer.",
-  "Every request was tagged by its full URL including UUIDs, so k6 and then Prometheus remote-write produced tens of thousands of series, the summary was unreadable, the write endpoint hit cardinality limits, and the one slow endpoint stayed invisible.",
-  "The Temporal activity writing to HubSpot had a 2-hour Start-To-Close and no Heartbeat timeout; a node reboot during patching killed the worker and 340 workflows sat 'Running' for two hours, the customer's ops team re-submitted them by hand, and because the activity had no idempotency key HubSpot ended up with duplicate records.",
-  "Chaos Mesh went onto a customer cluster without a target-namespace restriction, a fixed-percent PodChaos with a typo in its labelSelector matched every pod including ingress, and the experiment card had no abort condition and no one watching the dashboard.",
-  "Client retries with no jitter and no budget turned a 30 s Postgres failover into a 15-minute outage: API pods exhausted their pools retrying, readiness probes that hit the database failed, Kubernetes pulled every pod out of the Service, and the LLM gateway retried on top of it all.",
-  "A before/after report showed a 40 percent p95 improvement that was actually a warm cache and a replica count that changed between runs; the fix was reverted in production two weeks later when the regression reappeared, and the report's credibility with the customer went with it."
+  "Someone puts hubspot_contact_id or the raw request path with ids on a Prometheus label; a week later the customer's shared Prometheus holds two million series, head memory triples, the pod OOMs while replaying the WAL on every restart, and the customer's entire monitoring goes dark, not just yours.",
+  "The BatchSpanProcessor is created before gunicorn forks, or the worker exits without provider.shutdown(): spans sit in a dead export thread or an unflushed queue, the trace ends at the webhook's 200, and you spend a day debugging propagation headers when the problem is process lifecycle.",
+  "The webhook handler enqueues the job without injecting traceparent into the Redis Stream fields or Kafka headers, so every worker span is a new root; 'one trace from webhook to HubSpot write' is actually three unlinked traces and nobody notices until a customer asks why a write took forty minutes and there is no single trace to show them.",
+  "Tail sampling runs on two Collector replicas behind a round-robin Service without the loadbalancing exporter; halves of the same trace land on different instances, the ERROR policy fires on one half only, and Tempo shows truncated traces with missing parents that look exactly like an instrumentation bug.",
+  "/health, /ready and /metrics are not in OTEL_PYTHON_EXCLUDED_URLS; with 10 s probes per pod and 15 s scrapes, seventy percent of all spans are probes, the sampling budget is spent on noise, and the customer's Grafana Cloud bill doubles in the first month of the pilot.",
+  "A prompt or the raw webhook payload containing names and emails is set as a span attribute 'for debugging' and shipped to a SaaS tracing backend; the customer's DPO finds it during SOC 2 evidence collection and the integration is paused pending legal review.",
+  "Alerts are written on causes (CPU above 80 percent, restarts above 3) instead of symptoms; the HubSpot write path returns 429 for six hours with green CPU and zero restarts, 1,400 leads are never written, and the customer learns about it from their sales team on Monday.",
+  "The Collector is deployed without memory_limiter and with default resources; the first real traffic burst makes it the first pod OOMKilled, every SDK queue fills and drops, and the incident that caused the burst has no telemetry for exactly the minutes you need to explain it."
  ],
  "interviewQuestions": [
-  "A customer says 'we need to know if the system can handle 5,000 concurrent users on Monday.' Turn that into a k6 test plan: which executor, what rate and duration, which thresholds, where the generator runs, and what you will and will not be able to claim from the result.",
-  "Your load test shows p99 climbing steeply at 400 rps while CPU on the API pods sits at 35 percent. Walk me through the next ten minutes: what you look at, in what order, and what each of the three most likely causes looks like in the evidence.",
-  "Explain coordinated omission to a customer engineer who insists their 50-thread JMeter run proved the system is fine. What would you change in the test, and what do you expect the new numbers to show?",
-  "Design the timeout and retry policy for a Temporal activity that writes to a third-party CRM with a p99 of 4 s and occasional 60 s stalls. Cover Start-To-Close, Heartbeat, the retry policy, idempotency, and exactly what happens when the worker pod is killed halfway through.",
-  "Kubernetes deletes a pod during a rolling deploy and users see connection resets for about three seconds even though the app handles SIGTERM. Explain the race that causes it and the two changes that eliminate it.",
-  "You have one afternoon in a customer's staging cluster to run chaos experiments before a go-live. Which three experiments do you run, what is the steady-state hypothesis for each, how do you control blast radius, and how do you write up the results so their change advisory board accepts them?",
-  "Under a spike, would you rather the API degrade uniformly (every request slower) or shed load (some 503s, the rest fast)? Defend your answer for an interactive LLM workflow product and describe how you would implement and prove it."
+  "A customer says the trace for a failed request is missing in Tempo while successful ones are present. Walk through every place the decision to drop it could have been made, from SDK sampler to Collector to backend ingestion limits, and how you would confirm or rule out each in under ten minutes.",
+  "Design the telemetry for a webhook -> queue -> LLM classifier -> CRM write pipeline running across two services and a Redis queue. Which spans, which SpanKind on each, where exactly do you inject and extract context, which fields go on spans versus metric labels versus logs, and what do you refuse to record and why?",
+  "Here is a p99 latency panel showing 45 s while the largest finite bucket is 30 s and the customer insists no request took that long. Explain what histogram_quantile did, how you would fix the bucket layout for a 2-30 s LLM call, and how you would prove the real p99 today without waiting for new data.",
+  "A platform team reports Prometheus memory grew four-fold after your service shipped. Name the queries and endpoints you use to find the offending metric and label, then describe the code change and the Collector processor that make it impossible to recur.",
+  "Explain head versus tail sampling to a customer's CTO in two minutes, then to their SRE in detail: policies, decision_wait, the horizontal-scaling constraint, and how the spanmetrics connector must be positioned relative to the sampler.",
+  "Your SLO says 99.5 percent of HubSpot writes succeed within 5 s over 30 days. Write the SLI expression, the fast and slow burn-rate alert expressions with thresholds and 'for' durations, and argue why the pair beats a single error-ratio threshold on a pager.",
+  "The customer runs Datadog, not Grafana, and will not change. Which parts of your OpenTelemetry instrumentation carry over unchanged, what has to change, and how do you argue for OTel-native instrumentation without sounding like you are selling a migration?"
  ],
- "proofOfWork": "A public repository `kaupex-loadchaos` containing: the k6 scripts (smoke, average-load, ramping-arrival-rate breakpoint, and a mixed two-scenario run) with thresholds derived from the Kaupex SLOs and a `handleSummary` that emits a markdown table; Chaos Mesh manifests for PodChaos, NetworkChaos to Postgres, NetworkChaos to the Temporal frontend, and StressChaos, plus a Makefile that installs Chaos Mesh on k3s with the correct containerd socket, runs each experiment while k6 is live, and tears everything down; and a `REPORT.md` with the breakpoint number before and after the single fix, Grafana panels over identical time ranges, the observed timeout chain to Postgres, and a Temporal recovery timeline measured with `temporal workflow describe` for a worker killed mid-activity, showing detection time falling from the original Start-To-Close timeout to under 30 s after adding a heartbeat timeout and an idempotency key. A reviewer should be able to clone it, point it at any FastAPI plus Temporal deployment through `BASE_URL` and a namespace, and reproduce all three findings in under an hour."
+ "proofOfWork": "A public repository named defendermate-observability containing a docker-compose stack (otel-collector-contrib, Tempo, Prometheus with exemplar storage enabled, Loki, Alertmanager, Grafana with provisioned datasources and a RED dashboard) and a 'make demo' target that replays 200 synthetic HubSpot webhooks with 5 percent injected classifier exceptions and 5 percent HubSpot 429 responses, then prints the trace_id of one failed request. The README walks a reviewer in six clicks from the latency panel's exemplar dot to the trace to the log line holding the 429 body, with a screen recording of the same path. A 'make verify' target asserts, via the Collector's :8888 metrics and Tempo's API, that refused and send_failed counters are zero, that every worker CONSUMER span has a parent in the API service, that no span attribute matches an email or phone regex, and that 'promtool test rules' passes for the two burn-rate alerts. A one-page DECISIONS.md records why each span attribute and each metric label was chosen, with the series-count arithmetic for every label, so a customer's SRE can review the cardinality budget before the pilot goes live."
 }

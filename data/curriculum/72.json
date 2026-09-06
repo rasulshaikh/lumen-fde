@@ -1,191 +1,200 @@
 {
  "i": 72,
- "topic": "Narrative: why FDE, why this company, travel, comp",
- "track": "K. Interview Loop and Mocks",
+ "topic": "Discovery: finding the real problem",
+ "track": "J. FDE Craft and Communication",
  "month": 8,
- "hours": 3,
- "why": "An FDE loop is the only engineering loop that screens for staffing risk as hard as it screens for skill, because the hire gets put in front of a paying customer within weeks and every hour is either billable or burning a deployment budget. 'Why FDE', 'how much can you travel' and 'what number are you looking for' are not warm-up questions - they are the hiring manager deciding whether you will still be willing to fly to a customer site in month seven and whether your comp expectation fits the band they already have signed off. The same muscle is the job itself: compressing a complex situation into sixty seconds for a specific audience, and stating a constraint as a number you can actually hold, is what you do in every kickoff, every steering meeting and every scope conversation with a customer.",
+ "hours": 8,
+ "why": "An FDE is handed a signed contract and a stated requirement that is almost always a solution somebody already picked - 'we need a dashboard', 'we need RAG over our SharePoint', 'we need an agent that does triage' - and building exactly that is the most common way an engagement ships on time and still fails. You are the only person on the vendor side who will sit with the analyst who does the work at 09:00 and the VP who signed the cheque at 16:00, so the single problem statement both of them will agree with does not exist until you go and manufacture it. Bad discovery does not fail loudly: you deliver in week six, adoption is zero by week ten, and the renewal conversation becomes about your product instead of their process.",
  "prerequisites": [
-  "Executive communication and trade-off defence from 'Demos, executive communication, defending trade-offs' (topic 68) - specifically the discipline of leading with the outcome and holding a hard time box.",
-  "The negotiation mechanics from 'Negotiation and offers' (topic 70): BATNA, reservation value, anchoring, and the difference between a range and a number. This topic supplies the number; that topic supplies the conversation.",
-  "At least three shipped pieces of customer-facing work you can describe with a metric - the Lumen FDE deployment, one integration or migration you owned, and one production incident you debugged - written up per 'Technical writing and public write-ups' (topic 69).",
-  "A resume you have stopped restructuring, since every claim in the narrative has to survive 'Resume defence: every line' (topic 73) two weeks later.",
-  "A working shortlist of 8-12 target companies with real job postings saved as text (the precursor to the 40-company list in topic 82), including at least one enterprise-deployment shop, one frontier-lab, and one Series A/B startup - the three answers differ.",
-  "Your own financial floor computed before you start: current total comp, monthly burn, months of runway, and the number below which you would say no. Do this in a spreadsheet, not in your head."
+  "SLIs, SLOs and error budgets from 'SRE fundamentals' (topic 20). A discovery success metric is an SLI with a baseline, a target and a measurement method, not an adjective.",
+  "The compliance vocabulary from 'Compliance: SOC 2, GDPR, HIPAA, PCI' (topic 64): BAA, DPA, sub-processor, data residency, right to erasure. You cannot ask constraint questions in a language you do not speak.",
+  "Enough Postgres and warehouse fluency (topics 29 and 36) to ask for a schema dump or a CSV export in the interview and have three defensible numbers out of it before the follow-up call.",
+  "A running demo you can put on screen in 90 seconds - Kaupex or DefenderMate - because FDE discovery is bidirectional: you probe, they react to something concrete, and you learn from the reaction, not from the compliment.",
+  "Five real humans who will give you 45 minutes each: ex-clients, friends running small businesses, an ops manager at a company you once contracted for. Booked before you start reading, not after.",
+  "Recording and transcription set up and tested end to end, plus a git repo for the write-ups. Discovering that your recorder was muted after interview three costs you the interview."
  ],
  "subtopics": [
   {
-   "name": "Decode what 'FDE' means at each target company",
-   "learn": "The title is not one job. Read three saved job descriptions side by side and classify each on four axes: how much time is on customer premises versus remote, whether you own production for the customer or hand off to their team, whether you write product code that ships back into core or only deployment-specific code, and whether the role is quota-adjacent (pre-sales POCs) or delivery-only (post-signature). Palantir-lineage FDE means embedded, on-site, owns the customer's outcome; a frontier-lab 'applied AI engineer' usually means prototypes and integration patterns that feed back into product; a startup FDE means you are also support, solutions architect and sometimes AE. Write the classification down per company - your 'why FDE' answer must match the axis they actually staff for, or it reads as a canned answer.",
-   "minutes": 12,
+   "name": "Three different things called 'discovery' and which one you are doing",
+   "learn": "Separate sales discovery (does a deal exist, run pre-signature by an AE), product discovery (what should the product become, run continuously by PM/design), and delivery discovery - the FDE job - which starts after money changed hands and asks: what does this specific customer actually do all day, what will they let us deploy, and what has to be true in ninety days for them to renew. Know why the third is the hardest: the contract has already named a deliverable, your champion has already told their boss what it does, and your job is to find the real problem without making anyone look wrong for having mis-stated it. Write down, for your own engagement, the one sentence you would have to change in the SOW if discovery went badly - that is your risk surface.",
+   "minutes": 25,
    "resource": {
-    "label": "Palantir Blog - A Day in the Life of a Palantir Forward Deployed Software Engineer",
-    "url": "https://blog.palantir.com/a-day-in-the-life-of-a-palantir-forward-deployed-software-engineer-45ef2de257b1"
+    "label": "GOV.UK Service Manual - How the discovery phase works",
+    "url": "https://www.gov.uk/service-manual/agile-delivery/how-the-discovery-phase-works"
    }
   },
   {
-   "name": "The positioning spine: one paragraph you can say in your sleep",
-   "learn": "Write a single 70-90 word paragraph with four slots: what you are now (role plus the domain you actually operate in), the two or three capability proofs that are unusual together (e.g. production Kubernetes plus LLM eval infrastructure plus direct customer delivery), the arc that explains why those combined (not a chronology - a reason), and the one sentence about what you want next. Constraint: no adjectives about yourself ('passionate', 'driven', 'strong communicator') - only nouns and verbs that a listener could verify. Test it by reading it aloud with a stopwatch: 70-90 words lands at 30-38 seconds at interview pace, which is half of a 'tell me about yourself' answer and the entire spine of everything else in this topic.",
-   "minutes": 15,
+   "name": "The Mom Test: three rules and the three signals you are being lied to",
+   "learn": "Internalise the three rules until you can apply them mid-sentence: talk about their life instead of your idea; ask about specifics in the past instead of generics or opinions about the future; talk less and listen more. Learn the three failure signals that mean the conversation produced nothing - compliments ('that's really cool', 'I love it'), fluff (generics, hypotheticals, 'I always/usually/never'), and ideas (their feature requests, which are data about a problem, never a spec). Practise the conversions out loud: 'would you use a tool that does X?' becomes 'walk me through the last time you did X'; 'how much would you pay?' becomes 'what do you spend on this today, and who signs that invoice?'; 'do you think this is a problem?' becomes 'what did you do about it last month?'",
+   "minutes": 40,
    "resource": {
-    "label": "Exponent - Forward Deployed Engineer interview guide",
-    "url": "https://www.tryexponent.com/blog/forward-deployed-engineer-interview-the-definitive-2026-guide-fde"
+    "label": "The Mom Test (Rob Fitzpatrick) - book site",
+    "url": "https://www.momtestbook.com/"
    }
   },
   {
-   "name": "Build the 60-second 'why FDE' answer",
-   "learn": "Structure: (1) the moment you discovered the thing FDE work does that pure product work does not - a specific incident, named and dated, not a preference; (2) the evidence that you already do this and like it (a customer meeting you ran, a scope you renegotiated, a deployment you did inside someone else's VPC); (3) the explicit acknowledgement of the cost - travel, ambiguity, being the only engineer in the room, other people's legacy systems - because an answer that does not name the cost signals you have not done the job; (4) the forward statement tying it to their axis from subtopic 1. Hard limits: 150-170 spoken words, no more than two proper nouns the interviewer will not recognise, and no sentence longer than 25 words. Write it, cut 20%, then never read it aloud from the page again.",
-   "minutes": 15,
+   "name": "Question taxonomy and a leading-question audit you can run on your own transcript",
+   "learn": "Classify every question you ask into open ('walk me through', 'what happened next', 'who else was involved'), closed (yes/no - fine for pinning facts, useless for exploring), leading (contains the answer: 'so that's slow, right?'), loaded (assumes a fact not in evidence: 'when the sync breaks, what do you do?'), and hypothetical (worthless: 'would you', 'could you see yourself', 'if we built'). Build a grep-able red-flag list - 'would you', 'do you think', 'wouldn't it be', 'how much would you pay', 'does that make sense', 'right?' - and after each interview run it over the transcript and count hits per hour. Set a target that trends downward across the five interviews and record the number in every write-up; an unmeasured habit does not change.",
+   "minutes": 30,
    "resource": {
-    "label": "MIT CAPD - Using the STAR method to structure a behavioral interview answer (worksheet included)",
-    "url": "https://capd.mit.edu/resources/the-star-method-for-behavioral-interviews/"
+    "label": "NN/g - Open-Ended vs. Closed Questions in User Research",
+    "url": "https://www.nngroup.com/articles/open-ended-questions/"
    }
   },
   {
-   "name": "Evidence pack: three receipts that make the answer non-hypothetical",
-   "learn": "For each of the three claims in your 'why FDE' answer, attach one receipt you can produce in five seconds if asked: a link, a number, or a named artifact. Example receipts - 'the runbook their on-call still uses' (link), 'cut p95 from 4.1s to 900ms by moving reranking off the request path' (number plus method), 'ran the Thursday steering call for eleven weeks' (cadence plus duration). Rehearse the follow-up form of each: interviewers do not challenge the story, they challenge the number, so know the baseline, the measurement window and the confounder for every metric you cite. Any claim with no receipt gets deleted from the answer - it is a liability in the resume-defence round.",
-   "minutes": 10,
+   "name": "Stakeholder map: buyer, champion, operator, gatekeeper, saboteur",
+   "learn": "Build a five-row map before interview one: economic buyer (owns budget, cares about the number in the board deck), champion (staked their reputation on you, will tell you what they want to hear), operator (does the work you are about to change, is the only source of ground truth about the workflow), gatekeeper (security, legal, procurement, platform - can veto and never gets invited), and the person who loses if this works (headcount, a tool they built, a fiefdom). Assign a different question set to each: the buyer gets 'what does this have to move for you to fund phase two', the operator gets 'show me the last five cases you handled', the gatekeeper gets 'what has to be true before you would sign off on a deployment in your VPC'. Explicitly answer 'who has not been in a room with us yet, and why' - the missing name is usually the one who kills the project in month three.",
+   "minutes": 30,
    "resource": {
-    "label": "Yale Office of Career Strategy - Writing impactful, quantified accomplishment bullets",
-    "url": "https://ocs.yale.edu/resources/writing-impactful-resume-bullets/"
+    "label": "Microsoft Cloud Adoption Framework - Strategy (motivations, outcomes, stakeholders)",
+    "url": "https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/strategy/"
    }
   },
   {
-   "name": "The 30-minute company dossier",
-   "learn": "Standardise a one-page dossier you can fill for any target in half an hour: who pays them and for what (segment, ACV shape, self-serve versus enterprise), the delivery motion (do they have an FDE/solutions org, is it pre- or post-sales, who does the customer's integration today), the current strategic bet stated in their own words from the last 90 days, one named competitor and the honest reason a buyer picks them instead, and the constraint you would hit in week one of a deployment there (data residency, air-gapped environments, on-prem, FedRAMP, a customer base of hospitals). For public companies, pull the risk factors and segment revenue from the latest 10-K rather than trusting the marketing site.",
-   "minutes": 15,
+   "name": "Booking, consent, recording and the 45-minute session shape",
+   "learn": "Get on the operator's calendar directly rather than through the champion, using a framing that costs them nothing: 'I want to understand how the work actually gets done so we don't build the wrong thing - 45 minutes, no prep, no slides.' Open every session with the same 60-second block: who you are, why you are there, that there are no wrong answers, that you will record for accuracy and share the write-up back, and an explicit yes/no on recording that you capture in the transcript. Then run a fixed shape - 5 minutes context, 25 minutes past-behaviour and screen-share walkthrough, 10 minutes constraints and metrics, 5 minutes commitments - and hold to it, because a session that runs long is a session the operator will not grant you twice.",
+   "minutes": 25,
    "resource": {
-    "label": "SEC EDGAR full-text search",
-    "url": "https://www.sec.gov/edgar/search/"
+    "label": "GOV.UK Service Manual - Getting informed consent for user research",
+    "url": "https://www.gov.uk/service-manual/user-research/getting-users-consent-for-research"
    }
   },
   {
-   "name": "'Why this company' as a deployment-shaped hypothesis",
-   "learn": "The answer that works is not admiration, it is a hypothesis about their delivery problem plus your fit to it, in three beats: 'here is the specific hard part of shipping your product into a customer's environment as I understand it', 'here is why I believe that (evidence from the dossier, not the homepage)', 'here is the thing I have done that maps to it'. Say one falsifiable thing - a claim they can correct - because being corrected turns a monologue into a conversation and proves you did work. Explicitly ban three phrasings: mission worship with no mechanism, 'I love your product' with no usage evidence, and any sentence that would be equally true of two competitors. Produce one version per target company; the spine is shared, beat one is bespoke.",
-   "minutes": 15,
+   "name": "Laddering: from raw request to decision to business metric",
+   "learn": "Treat every stated request as the top of a ladder and climb down it in the room: 'we need a dashboard' -> what decision does the dashboard support -> who makes that decision, how often, on what data today -> what happens when they get it wrong -> what does that cost per occurrence. Use one-word probes to keep them talking ('and then?', 'because?', 'walk me through that'), and stop laddering at the first number tied to money, time or risk, because that is the level at which the buyer will fund it. Learn Shape Up's distinction between the raw idea and the shaped problem, and the appetite question - 'is this a two-week thing or a two-month thing for you?' - asked of the customer rather than of yourself, so scope gets bounded by their patience, not by your ambition.",
+   "minutes": 30,
    "resource": {
-    "label": "Palantir Apollo docs - Introduction: delivering software into customer-owned, on-prem and air-gapped environments",
-    "url": "https://www.palantir.com/docs/apollo/core/introduction"
+    "label": "Shape Up (Basecamp) - Chapter 3: Set Boundaries (appetite, narrowing the problem)",
+    "url": "https://basecamp.com/shapeup/1.2-chapter-03"
    }
   },
   {
-   "name": "Second-sourcing the company from primary material",
-   "learn": "Build the dossier from sources the marketing site does not control: the company's own engineering and research posts from the last two quarters, their public docs and changelog (what shipped, how fast, what is still beta), their open GitHub repos and issue tracker (response latency, who answers, what customers are actually blocked on), their status page history, their pricing page and enterprise tier gates, and their job postings across the whole org (what they are hiring for tells you the roadmap better than the roadmap does). Note one thing you learned that a casual candidate would not know, and place it in beat two of the 'why this company' answer. Never cite a number from a source you cannot name in the room.",
-   "minutes": 12,
+   "name": "Workflow archaeology: watch the work, do not ask about the work",
+   "learn": "Get a screen share and make them process a real case in front of you while you stay silent - 'do it exactly as you would if I weren't here, including the bits you'd normally skip'. Count and record the artefacts nobody mentions in a requirements doc: the shadow spreadsheet, the copy-paste between two systems (the swivel chair), the Slack DM that is actually an approval step, the saved email search that is actually a queue, the person they ping when it is ambiguous. Time the case end to end with a stopwatch, note every hand-off and every point where work waits, and ask 'how often is this the easy version?' - the exception path is usually 30 to 60 percent of volume and is where automation dies.",
+   "minutes": 35,
    "resource": {
-    "label": "GitHub Docs - Searching issues and pull requests (mining a company's public tracker)",
-    "url": "https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests"
+    "label": "NN/g - Contextual Inquiry: observing and interviewing users in their context",
+    "url": "https://www.nngroup.com/articles/contextual-inquiry/"
    }
   },
   {
-   "name": "Travel: convert vibes into a number and a schedule shape",
-   "learn": "Answer with a unit and a shape, not an adjective: '25-40% travel, comfortable with Monday-to-Thursday on-site during a deployment ramp, up to two consecutive weeks abroad, one international trip a quarter' beats 'I'm flexible' every time, because the second answer is heard as either 'unlimited' or 'unknown', and both are staffing risk. Compute the number from real constraints - dependants, visa processing times, a partner's schedule, health, cost of living in the customer's city - and write the arithmetic down so you can defend it. State one thing you will not do (e.g. permanent relocation, or four-week continuous rotations) rather than discovering it in month two, and learn the standard distributed-delivery vocabulary - core hours, timezone overlap, async-by-default, on-site cadence - so you can describe how you cover a customer you are not physically with.",
-   "minutes": 12,
+   "name": "Quantify the pain from their own data, not from their adjectives",
+   "learn": "Convert anecdote to arithmetic before the follow-up call: volume (cases per week), unit cost (minutes per case x loaded hourly rate), error rate, rework rate, and cost of delay (what one day of latency costs). Ask for the smallest real artefact that gets you there - a CSV export of the last 90 days of tickets, a table dump, a query result - and be specific about columns and timeframe so it can be approved as low-risk. Load it in DuckDB (`read_csv_auto`, then `SELECT date_trunc('week', created_at), count(*), median(closed_at - created_at)`), and come back with three numbers, the query that produced them, and one number you are unsure about - inviting the correction is what makes the other two credible.",
+   "minutes": 35,
    "resource": {
-    "label": "GitLab Handbook - All-Remote",
-    "url": "https://handbook.gitlab.com/handbook/company/culture/all-remote/"
+    "label": "DuckDB docs - CSV Import (read_csv and the CSV sniffer)",
+    "url": "https://duckdb.org/docs/current/data/csv/overview"
    }
   },
   {
-   "name": "Work authorisation, borders, and the logistics that kill offers",
-   "learn": "Know your own status cold and be able to state it in one sentence without hedging - what you hold, what it permits, what would need sponsoring, and the realistic lead time. Learn the categories that matter for a travelling FDE: business-visitor entry for meetings and training versus authorisation to perform productive work, employer-sponsored work status, the difference between the petition and the visa stamp, and the practical timelines including any lottery or consular appointment queue. Know the second-order items interviewers and recruiters will ask about: passport validity window, prior refusals, whether a customer's site requires citizenship or a clearance you cannot obtain, and whether the role is billable to a government customer. Raise sponsorship early with the recruiter, not after the offer - it is a budget and timeline question, and late disclosure reads as concealment.",
-   "minutes": 12,
+   "name": "Read the system, not just the people: schemas, APIs and the integration inventory",
+   "learn": "In parallel with the human interviews, ask for the machine-readable truth: an OpenAPI document, a `\\d+` schema dump or ERD, five real (redacted) payloads, and a list of every system the process touches. For each system record whether it is the system of record or a system of reference, who owns it internally, whether it has an API or only a CSV export, its auth model, and its rate limits. Then ask the single highest-yield engineering question in discovery - 'what breaks today, and how do you find out?' - because the existing failure modes tell you more about the real architecture than any diagram they will draw for you.",
+   "minutes": 30,
    "resource": {
-    "label": "USCIS - H-1B Specialty Occupations: LCA, I-129 petition, cap and validity periods",
-    "url": "https://www.uscis.gov/working-in-the-united-states/h-1b-specialty-occupations"
+    "label": "OpenAPI Specification (latest)",
+    "url": "https://spec.openapis.org/oas/latest.html"
    }
   },
   {
-   "name": "Customer-site reality: access, security and the trips you cannot take",
-   "learn": "Rehearse the operational answers a delivery lead actually needs: can you work in a facility with no personal devices and no internet egress, can you clear a background check, can you badge into a bank or hospital, are you comfortable in a country your government advises against, do you have any travel restriction by nationality. Learn what an air-gapped or SCIF-style engagement does to your workflow - no cloud IDE, no pasting logs into a chat window, code moved by review and transfer, debugging from screenshots - and say plainly whether you have done it or not. Honest 'I have not, here is the closest thing I have done' beats bravado; the failure mode is an FDE who says yes and then cannot be staffed on the only account that needed them.",
-   "minutes": 8,
+   "name": "Constraint discovery: the questions that kill projects if asked late",
+   "learn": "Run a fixed constraint checklist in every engagement before you design anything: where may data physically live and may it leave their VPC or their country; is there egress to third-party model APIs or is this air-gapped; who owns the deploy and what is the change-freeze calendar; what identity provider and what does 'SSO' mean here concretely (Entra, Okta, Keycloak, SAML vs OIDC); what security review, pen test or vendor questionnaire stands between you and production and how long has that taken for the last vendor; what is the data-retention and deletion obligation. Capture each answer with a named owner and a date, and treat 'I think it's fine' as unanswered. Every one of these is cheap in week one and an architecture rewrite in week ten.",
+   "minutes": 30,
    "resource": {
-    "label": "DCSA - Background investigations and the security clearance process for applicants",
-    "url": "https://www.dcsa.mil/Personnel-Vetting/Background-Investigations-for-Applicants/Investigations-Clearance-Process/"
+    "label": "AWS Well-Architected Framework",
+    "url": "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html"
    }
   },
   {
-   "name": "Comp: derive the band before anyone asks",
-   "learn": "Produce one spreadsheet with a row per target company and columns for base, bonus target, equity value per year with the assumed price, sign-on, and a total-comp figure with the assumptions written next to it. Pull level-and-location bands from aggregated data, and calibrate the level first - senior FDE at a frontier lab, a public data company and a Series B are three different bands and often three different level ladders. Compute three numbers you will carry into every call: your walk-away (below this you decline), your target (defensible from data, top of band for the level), and your ask (target plus the negotiation margin). Never state a number you cannot source in one sentence.",
-   "minutes": 15,
+   "name": "Define the success metric and run the pre-mortem before writing code",
+   "learn": "Write the success metric in SLI form - indicator, measurement method, current baseline, target, date, and who reads it - for example 'median analyst time-to-triage on inbound alerts, measured from webhook receipt to analyst disposition in the DefenderMate audit log, currently 22 minutes, target under 5 minutes for 80 percent of alerts by 31 March, reviewed monthly by the SOC lead'. Insist that the baseline is measured, not remembered, and that the instrumentation to measure it is part of phase one rather than an afterthought. Then run a 15-minute pre-mortem with the champion: 'it is six months from now and this was quietly switched off - write down the three most likely reasons' - and turn each reason into either a discovery question you have not asked or a risk with an owner.",
+   "minutes": 30,
    "resource": {
-    "label": "Levels.fyi - Software Engineer compensation data",
-    "url": "https://www.levels.fyi/t/software-engineer"
+    "label": "Google SRE Workbook - Implementing SLOs",
+    "url": "https://sre.google/workbook/implementing-slos/"
    }
   },
   {
-   "name": "Cross-check the band with independent sources",
-   "learn": "Aggregated self-reported data skews high and is thin at senior levels for niche titles, so triangulate with at least two more sources before you commit to a number: statutory salary disclosures filed for work-visa petitions (real base salaries, by employer, job title and year, though base only - no equity), pay-transparency ranges published in the job posting itself where jurisdictions require them, and published company compensation frameworks where a company documents its own formula. Reconcile the spread rather than averaging it: understand why the filed base is lower than the aggregate total (equity and bonus), and never quote a total-comp figure back to a recruiter as if it were base.",
-   "minutes": 10,
+   "name": "Opportunity mapping: keeping the problem space separate from the solution space",
+   "learn": "Structure what you heard as an opportunity solution tree: one desired outcome at the root (the metric above), opportunities beneath it phrased as the customer's own unmet needs and pain points in their words, and solutions only as leaves attached to a specific opportunity. Enforce the discipline that a solution with no parent opportunity gets deleted, and that an opportunity supported by one loud stakeholder and zero operators is marked as such. Choose the target opportunity explicitly on reach (how many people, how often), impact on the root metric, your confidence given the evidence count, and effort under the customer's constraints - and write the reason down, because in month three someone will ask why you did not build the other thing.",
+   "minutes": 30,
    "resource": {
-    "label": "US DOL Office of Foreign Labor Certification - Performance and public disclosure data (filed LCA wages by employer)",
-    "url": "https://www.dol.gov/agencies/eta/foreign-labor/performance"
+    "label": "Product Talk (Teresa Torres) - Opportunity Solution Trees",
+    "url": "https://www.producttalk.org/opportunity-solution-trees/"
    }
   },
   {
-   "name": "Equity literacy: what the number is actually made of",
-   "learn": "Be able to hold your own on the mechanics without a calculator: RSUs versus ISOs versus NSOs and who owes tax when, the standard four-year vest with a one-year cliff versus front-loaded or backloaded schedules, single- versus double-trigger acceleration, refresh grants and the cliff-year total-comp dip, strike price versus 409A versus preferred price, the post-termination exercise window and why 90 days is a trap, and dilution and liquidation preference in a private company. Then apply it: recompute each offer's annual equity value under a flat-price assumption and again at zero, and note which offers survive both. Ask for the grant document terms, share count and current preferred price - a total-comp number quoted without them is marketing.",
-   "minutes": 12,
+   "name": "Interviewing the incumbent engineering team without becoming the threat",
+   "learn": "The customer's own platform or data team is simultaneously your best source of ground truth and the group most likely to quietly stall you, because a vendor arriving with a mandate reads as a verdict on their backlog. Interview them first, not last, and lead with the questions that concede status: 'what have you already tried here', 'what did you build that we should reuse rather than replace', 'what would you have done with another two engineers'. Ask directly what they want to own after go-live and what they refuse to be paged for, then make that split explicit in the problem statement - an FDE who hands over a runbook and an on-call boundary gets change windows; one who does not, does not.",
+   "minutes": 25,
    "resource": {
-    "label": "The Holloway Guide to Equity Compensation",
-    "url": "https://www.holloway.com/g/equity-compensation/preview"
+    "label": "Atlassian Team Playbook - Roles and Responsibilities play",
+    "url": "https://www.atlassian.com/team-playbook/plays/roles-and-responsibilities"
    }
   },
   {
-   "name": "The comp script: deflect early, anchor once, hold the number",
-   "learn": "Rehearse three scripts verbatim. Early screen: deflect without stonewalling - 'I want to understand the level and scope first; what band is this role approved at?' - and never volunteer current salary. If pressed to a number, give one figure with a one-line justification plus 'and I'm flexible on the mix between base and equity' - a single number anchors better than a range whose bottom becomes the offer. After an offer: acknowledge, thank, ask for it in writing with the full breakdown, take 24 hours, and come back with one prioritised ask supported by a competing data point, not three vague ones. Practise saying the number out loud until your voice does not rise at the end of it - the recording is where you find out that it does.",
-   "minutes": 12,
+   "name": "Synthesis: from raw transcript to evidence with a count behind it",
+   "learn": "Within 24 hours of each session, cut the transcript into atomic observations, tag each with speaker, role, and type (fact, quote, pain, workaround, constraint, request, metric), and keep verbatim wording for anything you will later quote back. Cluster across interviews and attach a support count to every claim - 'four of five operators maintain a private spreadsheet' is an insight; 'users want better search' is a paraphrase of one person. Deliberately record disconfirming evidence and the claims that only the champion made, and mark every open question with the person who can close it, so synthesis produces a to-do list rather than a mood.",
+   "minutes": 30,
    "resource": {
-    "label": "Haseeb Qureshi - How Not to Bomb Your Offer Negotiation (the deflect, anchor and counter scripts)",
-    "url": "https://haseebq.com/how-not-to-bomb-your-offer-negotiation/"
+    "label": "GOV.UK Service Manual - Analyse a research session",
+    "url": "https://www.gov.uk/service-manual/user-research/analyse-a-research-session"
    }
   },
   {
-   "name": "Recording rig and the 60-second discipline",
-   "learn": "Set up a repeatable capture: webcam scene plus a visible countdown timer source, external mic set so peaks sit around -12 to -6 dB with no clipping, camera at eye level, key light in front rather than a window behind you, and a fixed file-naming convention (topic_company_takeN_date). Record every take unedited including the bad ones. Discipline rules while recording: start on the answer, not on 'so, um, basically'; hit the point by second ten; stop talking when the answer is done even if the timer has time left. If a take runs over sixty seconds, do not fix it by talking faster - cut a clause and re-take.",
-   "minutes": 12,
+   "name": "The one-page problem statement the client will actually sign",
+   "learn": "Write one page, in their vocabulary, with six fixed sections: current state with numbers and the query behind them; who is affected and how often; what it costs today; the constraint set with named owners; the success metric with baseline, target and date; and explicit non-goals ('this does not replace the case management system', 'this does not touch PHI in phase one'), plus open questions with owners. Lead with the customer's own quoted words rather than your framing, keep every number traceable to a source, and cut every adjective that is not attached to a measurement. Then do the read-back: send it, get on a call, read it aloud, and ask 'what did I get wrong?' - written agreement without a spoken correction usually means they skimmed it.",
+   "minutes": 40,
    "resource": {
-    "label": "OBS Studio - Quick Start Guide",
-    "url": "https://obsproject.com/kb/quick-start-guide"
+    "label": "Google Technical Writing One",
+    "url": "https://developers.google.com/tech-writing/one"
    }
   },
   {
-   "name": "Transcript-based self-review and the rehearsal loop",
-   "learn": "Do not review by feel. Transcribe each take with a local speech-to-text model and score the transcript on five countable things: filler count per minute (target under three), time to first substantive claim (target under ten seconds), hedges ('kind of', 'I guess', 'sort of' - target zero), longest sentence in words (target under 25), and total word count against the time box. Diff take N against take N-1 and keep only the changes that moved a metric. Run the loop until three consecutive takes land in range, then run two adversarial drills: the cold open (hit record and answer with no warm-up) and the interrupt (have someone cut you off at second twenty with 'sorry - can you make that concrete?' and recover without restarting).",
-   "minutes": 12,
+   "name": "Closing for commitment: advancement versus a polite stall",
+   "learn": "End every session by asking for something that costs the other person real resource - an introduction to the operator or the gatekeeper by name, a data export, read access to a system, a named owner for an open question, or a specific 30-minute slot on a specific day. Learn to distinguish advancement (they did a thing) from a stall dressed as enthusiasm ('this is great, send me something and I'll take it to the team'), and record which you got in the write-up. Treat repeated compliments plus zero commitments as the strongest possible negative signal, and say so in the write-up rather than filing it as validation.",
+   "minutes": 20,
    "resource": {
-    "label": "openai/whisper - speech recognition model and CLI",
-    "url": "https://github.com/openai/whisper"
+    "label": "The Mom Test - teaching notes on commitment and advancement (chapter 5)",
+    "url": "https://www.momtestbook.com/teachers"
+   }
+  },
+  {
+   "name": "Build the reusable script and self-scorecard, then run the five",
+   "learn": "Produce a single artefact you will use on real engagements: a 45-minute agenda, the consent line, a 12-question core bank with follow-up probes for each, role-specific branches for buyer / operator / gatekeeper / incumbent engineer, the constraint checklist, the closing-ask menu, and a one-page write-up template. Pair it with a scorecard you fill in after every session - your talk ratio (target under 30 percent), leading questions per hour, number of specific past events obtained, number of numbers obtained, commitments obtained, and one thing you would ask differently. Run all five interviews, score each, and revise the script between sessions so the diffs to the script are themselves the evidence of learning.",
+   "minutes": 35,
+   "resource": {
+    "label": "NN/g - Writing an Effective Guide for a UX Interview",
+    "url": "https://www.nngroup.com/articles/interview-guide/"
    }
   }
  ],
  "outcomes": [
-  "You can deliver a 'why FDE' answer in 55-65 seconds, on the first take, that contains a dated specific moment, one verifiable metric, and an explicit acknowledgement of the cost of the role.",
-  "You can deliver a company-specific 'why this company' answer that states one falsifiable claim about their delivery problem, sourced from a primary document you can name, and that would be false if said about their nearest competitor.",
-  "You can state your travel availability as a percentage, a trip shape and a hard limit, and defend the arithmetic behind it when asked 'what if we needed more?'.",
-  "You can state your work-authorisation status, what would need sponsoring, and the realistic lead time in one sentence with no hedging.",
-  "You can name your target total-comp number, cite the two independent sources it came from, and split it into base, bonus, equity and sign-on without a calculator.",
-  "You can explain double-trigger acceleration, the 90-day post-termination exercise window, and why a private-company equity figure is an assumption, in plain language, to a non-technical recruiter.",
-  "You have transcript metrics showing three consecutive takes under three fillers per minute, under ten seconds to first substantive claim, and zero hedge phrases.",
-  "You can survive the interrupt drill: cut off at second twenty with 'make that concrete', you produce a specific example within five seconds and still finish inside the time box."
+  "You can run a 45-minute discovery session end to end from your own script - consent, context, past-behaviour walkthrough, screen-share observation, constraints, closing ask - and finish on time with the transcript, the scorecard and the write-up committed the same day.",
+  "You can show a talk-ratio under 30 percent and a leading-question count that falls measurably from interview one to interview five, evidenced by the tagged transcripts, not by your recollection.",
+  "You can take any stated request ('we need a dashboard', 'we need an agent') and ladder it in under ten minutes to the decision it supports, the person who makes that decision, and one number in money, time or risk.",
+  "You can turn a customer's raw data export into three defensible baseline numbers with the DuckDB queries attached, and present them with an explicit statement of which one you are least sure about.",
+  "You can produce a one-page problem statement that the interviewee confirms verbally with no substantive correction, containing a measured baseline, a dated success metric, named constraint owners and explicit non-goals.",
+  "You can name, for any engagement, every stakeholder in the five-role map plus the person who has not yet been in a room with you, and state what each one would have to see to consider the project a success.",
+  "You can distinguish, in writing, an advancement from a stall for each of your five sessions, and can point to the specific commitment obtained (intro, export, access, calendar slot) or record its absence as a negative signal.",
+  "You can run the constraint checklist cold - data residency, egress, identity provider, change windows, security review, retention - and get every item to either an answer with an owner and date or an explicit 'unknown, blocking'."
  ],
  "failureModes": [
-  "You say 'I'm totally flexible on travel' in the loop, get staffed on a rotation you cannot sustain, and the account team loses a quarter re-staffing the engagement - the reputational damage lands on you, not on the recruiter who wrote it down.",
-  "You give the first number in the screening call without having calibrated the level, anchor 25% under band, and the offer comes in exactly where you anchored, permanently resetting every future refresh and promotion off that base.",
-  "The 'why this company' answer is assembled from the homepage and the About page, the interviewer is the person who wrote neither, and the answer reads as interchangeable across their three closest competitors.",
-  "You quote a metric in the narrative round that you cannot reconstruct in the resume-defence round two weeks later, and the loop's feedback becomes 'inflates impact' - the single hardest tag to recover from in a debrief.",
-  "Sponsorship or a border constraint surfaces after the offer rather than in the recruiter screen, the role turns out to be budgeted without it, and the offer is withdrawn for a reason that had nothing to do with your engineering.",
-  "You accept a private-company offer on a headline total-comp figure without the share count, preferred price or exercise window, and discover at exit that the equity was worth a fraction of the number you traded base salary for.",
-  "You claim comfort with air-gapped or clearance-gated customer sites you have never worked in, get assigned to exactly that account because it is the one that needed the answer, and cannot do the work."
+  "You interview the champion and the VP, never the analyst who does the work, and ship a workflow whose second step the operations team is contractually forbidden from performing, which nobody discovers until UAT.",
+  "You demo Kaupex in the discovery call, get 'wow, that's exactly what we need', log it as validation, and only realise months later that no data export, no system access and no second meeting ever came out of that session.",
+  "The stated problem is a solution: they ask for a chatbot over their documentation, you build retrieval, and the real defect is that the documentation is three years stale - so the bot now answers confidently and wrongly at scale, which is worse than the search box it replaced.",
+  "Nobody measured the baseline, so at the quarterly review the customer's own analyst produces a number from a different definition that says the system made things slower, and you have no instrumented counter-argument.",
+  "Data residency comes up in month three: the customer's legal team will not permit egress to a hosted model API, the entire architecture assumed one, and the replan costs more than the original build.",
+  "The customer's platform team was treated as a delivery obstacle rather than interviewed, so they own the deploy, never schedule your change window, and the pilot sits in staging until the sponsor loses interest.",
+  "You say 'yes, we can do that' three times in a discovery room, the notes become the SOW, and you spend the engagement delivering scope that was never tied to the success metric or to anyone's budget."
  ],
  "interviewQuestions": [
-  "Why forward-deployed rather than a product engineering role at the same company? Be specific about what you get from it and what you give up.",
-  "This role is roughly 40% travel, mostly to customer sites in other timezones, sometimes at short notice. Walk me through what that actually looks like in your life, and tell me where your limit is.",
-  "What do you think is the hardest part of getting our product into a customer's production environment? You have not worked here - I want your hypothesis and what it is based on.",
-  "You are three weeks into a deployment and it is clear the thing in the SOW will not solve the customer's actual problem. Your champion has already told their VP it will. What do you do, and in what order do you talk to whom?",
-  "What are you looking for in compensation, and how did you arrive at that number?",
-  "You have another offer. Tell me honestly how you are comparing them - what would make you pick us, and what is the thing about us that worries you?",
-  "Six months in, what would make you conclude this was the wrong job? Give me the concrete signal you would be watching for."
+  "A customer signed for 'an AI agent that triages our security alerts'. You get one 45-minute session with the SOC analyst before design starts. Give me your actual first six questions, in order, and tell me what each one is trying to disconfirm.",
+  "Your champion tells you the team spends 'hours a day' on manual reconciliation. Walk me through how you convert that into a number you would be willing to put in a board deck, including exactly what artefact you ask for and what you do with it.",
+  "How do you tell the difference between a customer who is genuinely enthusiastic and one who is being polite? Give me the concrete signals you look for in the session and the thing you ask for at the end that settles it.",
+  "You have finished discovery and concluded that the deliverable named in the signed SOW will not move the metric the buyer cares about. Your champion picked that deliverable and told their VP it would work. What do you do, in what order, and what exactly do you say to the champion?",
+  "Design the constraint interview for a healthcare customer who wants patient-intake summarisation. What do you ask, whom do you ask, and which single answer, if it comes back wrong, invalidates your default architecture?",
+  "In discovery you find that the customer's own platform team already built half of what you were hired to build, and it mostly works. How does that change your problem statement, your architecture and your relationship with that team?",
+  "Give me a time you built the wrong thing because discovery was thin. What was the specific question you failed to ask, how would you have asked it, and what is now in your script because of it?"
  ],
- "proofOfWork": "Beyond the three recordings, build a private 'narrative kit' repo that turns the answers into a system you can run against any company in thirty minutes. It contains: a filled one-page dossier for each of your top ten targets, each with the delivery motion, the strategic bet in their own words with the primary source cited, the named competitor and the honest reason a buyer picks them, and the week-one deployment constraint you would hit; a comp model spreadsheet with a row per target showing level assumption, base, bonus, equity with the price assumption made explicit, an equity-at-zero column, and your walk-away, target and ask, with every cell traceable to at least two independent sources; a one-page travel and authorisation constraint sheet with the arithmetic behind the percentage, the hard limits, and your work-authorisation status in one sentence; and a rehearsal log recording every take with its transcript, filler count per minute, time to first substantive claim, longest sentence, and total word count, plus a short note on the single edit that moved a metric between takes. Prove the loop closed rather than that the folder exists: include the take-1 and take-final transcripts side by side with the metric deltas, the recording of the interrupt drill where you were cut off and recovered without restarting, and a dated log of every real recruiter or interview conversation where you used a number from the kit, what you said, and what came back - including the ones where the band came in lower than your model, and what you changed in the model afterwards."
+ "proofOfWork": "A public `discovery-kit` repository that a hiring manager can evaluate in fifteen minutes and another engineer can pick up and use on a live engagement. It contains: (1) the versioned discovery script with its git history visible, so the diffs between interview one and interview five are themselves the evidence of learning, plus the consent line, the role-specific question branches, the constraint checklist and the closing-ask menu; (2) five write-ups against a fixed template, each with its filled-in scorecard (talk ratio, leading questions per hour, specific past events obtained, numbers obtained, commitment obtained or explicitly absent) and a summary chart showing those metrics trending across the five; (3) one fully annotated transcript with every question tagged open / closed / leading / loaded / hypothetical and a short written self-critique of the three worst moments; (4) a `baseline/` folder containing one real (anonymised) data export, the DuckDB queries that turn it into three baseline numbers, and a note on which number is weakest and why; (5) a one-page problem statement for the strongest of the five engagements, written in the interviewee's own quoted language, that they confirmed on a read-back call, with the confirmation email or note included; and (6) a `delta.md` comparing the hypothesis you wrote down before interview one with the final problem statement, naming precisely what you were wrong about and which question surfaced it - the last file being the one that actually demonstrates the skill."
 }

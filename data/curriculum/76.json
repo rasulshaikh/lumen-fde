@@ -1,227 +1,200 @@
 {
  "i": 76,
- "topic": "LLM system design mocks (four)",
- "track": "K. Interview Loop and Mocks",
- "month": 9,
- "hours": 8,
- "why": "The LLM design round is the one place in an FDE loop where the interviewer is explicitly checking whether you can be trusted to put a non-deterministic system in front of a paying customer: not whether you know what RAG is, but whether you can put a number on p99 latency, cost per request, and what happens when the model is wrong. In the field this exact conversation happens in the customer's architecture review, where their security lead asks where the tokens go, their finance lead asks what it costs at 10x volume, and their staff engineer asks how you know it is working - and you get one whiteboard and 45 minutes to answer all three. Topics 43 and 45-60 gave you the material; this topic trains delivering it under a clock, with four recordings so you can see the gap between what you know and what you can actually say in the room.",
+ "topic": "Negotiation and offers",
+ "track": "J. FDE Craft and Communication",
+ "month": 8,
+ "hours": 5,
+ "why": "An FDE negotiates for a living - what is in the pilot and what is not, whether the go-live slips, whether that 'small ask' becomes a change order - so the offer negotiation is the first time the people who will staff you on accounts watch you hold a position under pressure with a real relationship on the line. Folding in ten minutes because a recruiter said 'this is the band' is the same behaviour that later turns a fixed-scope deployment into six months of unpaid feature work. FDE compensation is also structurally messier than a straight software engineering offer - hybrid or field ladders with different equity bands, travel load, on-call for someone else's production, sometimes a variable component tied to deployment milestones - so the highest-leverage moves here are structural (which ladder, which level, what is written down) rather than an extra few percent on base.",
  "prerequisites": [
-  "The classic design motion from 'System design mocks' (topic 44): the 45-minute phase budget, back-of-envelope estimation, C4 container diagrams with numbered flows, and deep-dive-with-two-options is assumed muscle memory here - this topic only adds the LLM layer on top.",
-  "LLM-era serving constraints from topic 43 and 'Serving at scale' (topic 56): prefill versus decode, KV cache sizing, continuous batching, and why p99 is in seconds and depends on output length.",
-  "RAG at depth (topic 49): chunking strategies, hybrid BM25-plus-dense retrieval, reciprocal rank fusion, cross-encoder reranking, contextual retrieval, and metadata pre-filtering for tenant isolation.",
-  "Evals as infrastructure (topic 53) and LLM observability (topic 54): golden sets, LLM-as-judge with agreement measured against human labels, online scoring, and OpenTelemetry gen_ai.* spans - you must be able to draw these as boxes, not mention them as intentions.",
-  "Gateway, routing, fallbacks and canaries (topic 55), cost and latency engineering (topic 59), and guardrails and prompt injection (topic 51): prompt caching economics, batch APIs, model tiering, token-bucket admission control on RPM and TPM, and the OWASP LLM Top 10 - so 'a malicious document in the corpus' is a constraint you draw rather than a question that stalls you.",
-  "A working rig: OBS or QuickTime capturing screen plus mic, Excalidraw with a saved LLM-architecture stencil, a visible countdown timer, and a private repo to hold four 45-minute recordings, four diagrams and four scorecards."
+  "A live pipeline from topics 82 and 83 - a target list of ~40 companies and loops running in waves - because leverage in this topic is almost entirely a function of having real alternatives at the same time, not of technique.",
+  "Your narrative from topic 72 (why FDE, why this company, travel, comp): the compensation-expectations question lands in the first ten minutes of the first recruiter call, before any of this material gets a chance to matter.",
+  "Public proof from topics 69 and 80 - published case studies, working repos, recorded demos - which is the evidence you point at when you ask for a level review rather than just asserting seniority.",
+  "Executive communication from topic 68: a counter is a ninety-second, bottom-line-up-front ask delivered on a call, not a four-paragraph email.",
+  "Basic financial modelling in a spreadsheet: annualising a four-year grant, discounting by probability, and comparing two offers on year-one cash versus four-year total versus risk-adjusted expected value.",
+  "Honest, written knowledge of your own constraints before anyone asks: monthly burn, months of runway, notice period, dependents, relocation or visa limits, and what you are contractually leaving behind (unvested equity, an unpaid bonus, a clawback)."
  ],
  "subtopics": [
   {
-   "name": "What the LLM round scores that the classic round does not",
-   "learn": "Tabulate the five extra dimensions an LLM design round grades and that a pure distributed-systems answer misses: (1) quality is a design output, not a given - you must name the metric and how it is measured; (2) latency is dominated by generation, so TTFT and output-token count are design variables, not implementation details; (3) unit cost is a first-class NFR with a dollar figure; (4) the failure mode is a confident wrong answer, not a 500, so monitoring and rollback look different; (5) data movement is a compliance question because the tokens leave the customer's perimeter. Write these five on a card and force yourself to hit each one in every mock. The single most common senior-level miss is a beautiful architecture with no answer to 'how do you know it is good enough to ship?'",
+   "name": "The full surface area of an FDE offer",
+   "learn": "Enumerate every component before valuing any of them: base, target bonus (percentage of base, discretionary or contractual, pro-rated in year one), equity (RSU or option, dollar-denominated or share-denominated, and its vesting shape), sign-on cash (often split across two years, always attached to a clawback), relocation, and the FDE-specific lines - travel load, per-diem and booking policy, on-call stipend for customer production, region and account assignment, and in field orgs a variable or MBO component tied to deployment milestones. Learn who can move what: a recruiter can usually move sign-on and start date alone, the hiring manager owns level and scope, and base above band or an out-of-band grant needs a compensation committee exception that takes days. Learn that a dollar-denominated grant converts to shares at a price fixed on a specific date - grant date, or a trailing 15/20/30-day average - so 'X dollars of equity' can shrink materially between handshake and grant notice unless the conversion date is stated in writing.",
    "minutes": 20,
    "resource": {
-    "label": "Hello Interview - System Design in a Hurry: Introduction (how you are evaluated)",
-    "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/introduction"
+    "label": "GitLab Handbook - Compensation: pay bands, levels, variable pay and the parts of an offer",
+    "url": "https://handbook.gitlab.com/handbook/total-rewards/compensation/"
    }
   },
   {
-   "name": "The 45-minute phase budget for an LLM problem",
-   "learn": "Adapt the classic budget so the AI-specific content is not stranded at the end: 0-6 requirements including a quality bar and a cost ceiling; 6-11 estimation (QPS, tokens in and out per request, cost per request, GPU or TPM capacity); 11-16 API surface plus the data and index model; 16-24 high-level diagram with the sync path and the async path drawn separately; 24-38 two deep dives, one of which must be retrieval-or-agent-loop and the other evals-or-serving; 38-45 failure modes, rollout and the operability close. Enforce a hard rule that the evaluation story is on the board before minute 40 - if you leave it to the close it always gets cut and the interviewer reads that as you not having shipped one. Practise saying the transition sentences out loud ('that is the happy path - let me now show how we detect it degrading').",
+   "name": "Calibrating a market band before anyone asks you for a number",
+   "learn": "Build a band from at least three independent sources per target company and write it down before the first call: levels.fyi percentiles filtered by company, level and metro; the posted range (several US states and cities require the range in the posting or on request, so 'what is the band for this level?' is a legitimate, answerable question); and two humans who actually hold the role. Record P25/P50/P75 separately for base, annualised equity and total comp rather than one blended figure, because the shape differs enormously - AI labs load equity, consultancies and services orgs load base plus variable. Know the data hazards: self-reported data skews high and skews toward the roles people brag about, private-company numbers go stale the moment the 409A moves, and FDE-style titles are thin in every dataset, so map the role onto the nearest engineering level and search that instead of the literal title. The output is three numbers per company - floor, target, stretch - that you read off a page later instead of inventing under pressure.",
+   "minutes": 20,
+   "resource": {
+    "label": "The Pragmatic Engineer - The Trimodal Nature of Software Engineering Salaries",
+    "url": "https://blog.pragmaticengineer.com/software-engineering-salaries-in-the-netherlands-and-europe/"
+   }
+  },
+  {
+   "name": "Level and ladder: the FDE slotting problem",
+   "learn": "The highest-value negotiation in an FDE offer is usually structural, not numeric. Ask directly and early: is this role on the software engineering job family or on a separate field/solutions/services ladder, what is the internal level code, what are the bands for the level above and below, and what is the written promotion rubric. Field ladders frequently carry lower equity bands, slower or absent refresh cycles, and a ceiling one or two rungs below the engineering ladder, and moving ladders after you join is far harder than being slotted correctly on day one. Read live FDE and deployment-strategist postings side by side (Anthropic, Palantir, Databricks, OpenAI, Scale) and learn to spot the tells - 'solutions', 'delivery', 'resident' versus a posting that sits in the engineering job family with a stated level. Then learn the counter that actually works: not 'pay me more' but 'given the scope you described - owning a deployment end to end with no engineering backstop - this looks like your L5; here is the evidence, can you take it to the leveling committee?'",
+   "minutes": 20,
+   "resource": {
+    "label": "Engineering Ladders - the Developer track, level by level (jorgef/engineeringladders)",
+    "url": "https://github.com/jorgef/engineeringladders/blob/master/Developer.md"
+   }
+  },
+  {
+   "name": "Walk-away, BATNA and ZOPA: four numbers set in writing first",
+   "learn": "Pre-commit four numbers before any conversation, because you cannot compute them honestly while a recruiter is on the phone: the walk-away (below which you decline and mean it), the target (a good outcome), the stretch (your opening ask), and the indifference point between your top two live options. Get the vocabulary right - your BATNA is your best alternative if this negotiation fails (stay put, take the other offer, keep interviewing with N live loops) and its quality, not your desire for the job, is what creates leverage; your reservation price is the worst deal you will still accept. Derive the walk-away from real inputs - twelve-month burn, notice-period gap, dependents, relocation and visa costs, unvested equity you forfeit, opportunity cost of loops you abandon - never from current salary plus a percentage. Learn ZOPA, the overlap between their maximum and your minimum, and accept that when there is no overlap the right move is a fast, warm no rather than a slow grind that burns a relationship you will want in three years.",
+   "minutes": 20,
+   "resource": {
+    "label": "Harvard PON - What is BATNA? How to Find Your Best Alternative to a Negotiated Agreement",
+    "url": "https://www.pon.harvard.edu/daily/batna/translate-your-batna-to-the-current-deal/"
+   }
+  },
+  {
+   "name": "Never the first number: deflection that survives three asks",
+   "learn": "Drill the deflection until it is boring, because whoever names a number first defines the range and the recruiter will ask inside the first ten minutes. Sequence: (1) 'I would rather get fit and level right first - what range is budgeted for this role?'; (2) 'I am sure you will be competitive; what does the band look like at that level?'; (3) if pressed a third time, give a researched total-comp range with an explicit dependency - 'somewhere in the X to Y range depending on level and how the equity is structured' - never a single point. Know the legal backdrop: many US states and cities prohibit asking for salary history at all, and several require disclosure of the posted range on request, so declining to share history is normal rather than adversarial. Never misstate your current or competing compensation - it is sometimes verifiable, it destroys the offer when caught, and the FDE community at these companies is small enough that it follows you. Talk about the market rate for the work, not about your history.",
+   "minutes": 20,
+   "resource": {
+    "label": "Patrick McKenzie - Salary Negotiation: Make More Money, Be More Valued",
+    "url": "https://www.kalzumeus.com/2012/01/23/salary-negotiation/"
+   }
+  },
+  {
+   "name": "Sequencing the pipeline so two offers land in the same fortnight",
+   "learn": "Leverage is mostly a scheduling problem, and it is solved weeks before the offer call. Start the slowest processes first, put your top-choice company second rather than first so you arrive practised and with a live alternative, and slow the fast ones deliberately ('I have two processes finishing in a fortnight - can we align final rounds?'). Learn the honest accelerants: telling a company truthfully that you are in final stages elsewhere, asking a recruiter to compress a loop into one week, asking for a decision date rather than a number. Learn the recovery when timing fails and you have one offer with the rest at round two: convert the offer into a disclosed deadline for the others, accept that some processes will not move, and decide in advance whether you would take the bird in hand. Keep one table with company, stage, recruiter name, next date and expected decision date, because every move in this topic depends on knowing at any moment what your real alternatives are.",
+   "minutes": 20,
+   "resource": {
+    "label": "Haseeb Qureshi - How to Break Into the Tech Industry: Job Hunting and Interviews",
+    "url": "https://haseebq.com/how-to-break-into-tech-job-hunting-and-interviews/"
+   }
+  },
+  {
+   "name": "Exploding offers and buying time",
+   "learn": "A 24- or 72-hour fuse is a pressure tactic far more often than a real constraint, and asking for time almost never costs you an offer - a company that has spent six weeks and several engineers' days on your loop does not rescind over a one-week extension. Learn the specific asks: a written extension with a concrete reason ('I have a final round on the 14th and I will not commit to something I cannot honour'), time with two more people on the team, and the equity plan documents plus grant notice, which legitimately take days to read. Learn to name the tactic politely if it persists, and to treat a flat refusal as data - a company that manufactures urgency with a candidate will do it to you with a customer deadline. Learn the mirror-image obligation: once you have decided, move within a day, because slow-rolling a company you intend to decline costs you a relationship in a small market.",
    "minutes": 15,
    "resource": {
-    "label": "Hello Interview - System Design in a Hurry: Delivery Framework",
-    "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery"
+    "label": "NACE - Advisory Opinion: Setting Reasonable Deadlines for Job Offers",
+    "url": "https://www.naceweb.org/career-development/organizational-structure/advisory-opinion-setting-reasonable-deadlines-for-job-offers"
    }
   },
   {
-   "name": "Writing the rubric: what 4/5 means on each LLM dimension",
-   "learn": "Write your own 1-5 rubric as observable behaviours across six dimensions: requirements and quality bar, estimation with token and dollar math, architecture and data flow, LLM-specific depth (retrieval or agent loop or serving), evaluation and observability, and communication under pushback. A 4 on 'quality bar' means you defined success as a measurable criterion with a target and a measurement method before drawing any box - for example 'answer is grounded in a retrieved chunk, judged by an LLM judge with kappa above 0.6 against 150 human labels, target 95 percent on the golden set, gate at 92'. A 3 is 'we would evaluate it'. Score two of your own topic-44 recordings on this rubric first so you know your own baseline before mock 1.",
+   "name": "The counter: a prioritised package, delivered live",
+   "learn": "Structure the counter as a package with an explicit priority order, deliver it on a call, and confirm in writing afterwards - long email threads strip the tone and leave only the number. The shape that works: genuine enthusiasm and a specific reason you want this role, the constraint or alternative that justifies the ask, two or three requests with the most important named first, and a clear close ('if you can do X, I will sign today' - and only say that if it is true). Mechanics that matter: ask for the level review before anything else because it lifts every other number; counter on total compensation when the base band is rigid; use sign-on to bridge a gap the band cannot close, including bridging unvested equity you are forfeiting, and bring the vest schedule as evidence; never state a number you would not accept, because your ask is a commitment. When they say no, ask the two follow-ups that keep the conversation alive: 'what would have to be true for that to be possible?' and 'if the cash is fixed, can we move start date, sign-on, or the equity refresh at the first review?'",
    "minutes": 20,
    "resource": {
-    "label": "Claude Docs - Define your success criteria (test and evaluate)",
-    "url": "https://platform.claude.com/docs/en/test-and-evaluate/develop-tests"
+    "label": "Haseeb Qureshi - How Not to Bomb Your Offer Negotiation",
+    "url": "https://haseebq.com/how-not-to-bomb-your-offer-negotiation/"
    }
   },
   {
-   "name": "Four archetypes, interviewer cards and the recording rig",
-   "learn": "Pick four problems that cover disjoint ground rather than four flavours of RAG: (1) grounded question answering over a customer corpus, (2) an agent that takes write actions in the customer's systems, (3) an eval and observability platform for a fleet of LLM features, (4) high-volume batch extraction under a fixed cost ceiling in an air-gapped environment. For each, write an interviewer card with the deliberately vague opening prompt, three clarifying answers you will only give if asked, two curveballs to fire at minute 30, and one hard pushback on your primary choice. Configure the rig once: 1080p capture, mic tested, Excalidraw stencil containing gateway, queue, worker, vector index, object store, judge, trace store and a legend for sync versus async, plus a visible timer.",
+   "name": "Tactical empathy and calibrated questions on a recruiter call",
+   "learn": "Take the three moves from Never Split the Difference that survive contact with a professional recruiter and drill only those: labels ('it sounds like the band is a real constraint on your side'), mirrors (repeating their last three words so they keep talking and reveal what is flexible), and calibrated how/what questions ('how am I supposed to make this work against an offer that pays materially more?') that hand them the problem without an ultimatum. Use the accusation audit for the awkward opening - 'you are probably going to think I am being difficult here' - and use silence after you make the ask, because the pause is where a recruiter fills in a concession. Learn explicitly what not to import: hostage-negotiation aggression, invented deadlines and manufactured scarcity read as amateurish, and they are unnecessary when your alternative is real.",
    "minutes": 15,
    "resource": {
-    "label": "Exponent - Forward Deployed Engineer interview guide",
-    "url": "https://www.tryexponent.com/blog/forward-deployed-engineer-interview-the-definitive-2026-guide-fde"
+    "label": "FBI Law Enforcement Bulletin - active listening skills: an evaluation tool for crisis negotiators",
+    "url": "https://leb.fbi.gov/articles/focus/focus-on-training-an-evaluation-tool-for-crisis-negotiators"
    }
   },
   {
-   "name": "Token and throughput math in three minutes",
-   "learn": "Rehearse until it is automatic: state tokens-in and tokens-out per request (chunks retrieved x chunk size + system prompt + history for input; a sentence is roughly 20 tokens, a page roughly 500), multiply by QPS to get input and output tokens per minute, and compare against the provider's ITPM and OTPM limits rather than only RPM. For self-hosted, size the KV cache as 2 (K and V) x layers x kv_heads x head_dim x bytes_per_element x sequence_length per sequence, subtract weights from device memory, and show how many concurrent sequences fit - that number, not the GPU count, is your concurrency. Every figure you write must be followed by the decision it changes: 'that is 4M output tokens per minute, which is over the tier limit, so we shard across two keys or move the bulk path to the batch API'.",
+   "name": "Equity mechanics: strike, 409A, vesting shapes, cliffs, refresh, dilution",
+   "learn": "Learn the vocabulary well enough to interrogate a grant rather than admire it: RSU versus ISO versus NSO; strike price versus 409A fair market value versus last preferred price; grant date versus vesting commencement date; the standard four-year vest with a one-year cliff and monthly or quarterly vesting after, and the variants (back-loaded shapes such as 5/15/40/40 propped up by year-one and year-two cash bonuses, front-loaded grants, and one-year grants that are really an annual re-negotiation). Then learn the details that decide whether the paper is money: the post-termination exercise window (commonly 90 days, sometimes extended to seven or ten years), double-trigger RSUs at private companies that need both time vesting and a liquidity event before a seven-year expiry, the refresh grant policy and whether field roles are on the same refresh cadence as engineering, and dilution from future rounds. Learn the preference stack - a 1x non-participating preferred over a large raised total means a mediocre exit pays common holders nothing - and always ask for fully diluted shares outstanding so a percentage means something.",
    "minutes": 20,
    "resource": {
-    "label": "Claude Docs - Token counting API",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+    "label": "The Open Guide to Equity Compensation (jlevy/og-equity-compensation)",
+    "url": "https://github.com/jlevy/og-equity-compensation"
    }
   },
   {
-   "name": "Latency budget: TTFT, TPOT, and every hop around the model",
-   "learn": "Draw the budget as a stacked bar before you optimise anything: auth and gateway, embedding of the query, vector search, cross-encoder rerank, prompt assembly, TTFT, then output_tokens x TPOT, then post-processing and guardrail checks. Know the shape of the two model phases - prefill is compute-bound and scales with input length, decode is memory-bandwidth-bound and scales with output length - so 'shorten the prompt' fixes TTFT while 'cap max_tokens' or 'stream' fixes perceived total. Name the three levers you will actually use: stream tokens via SSE so perceived latency equals TTFT, run reranking and guardrails concurrently rather than serially, and cache the static prefix. State a target as a pair, e.g. p50 TTFT under 800 ms and p95 full answer under 6 s, and say which component you would cut first to hold it.",
+   "name": "Valuing the equity: turning a headline into a defensible range",
+   "learn": "Build the spreadsheet that converts each grant into annual expected value plus a range, never a point estimate. Public RSUs: shares times current price, split across the actual vest schedule, with year one written as zero until the cliff and an explicit share-price assumption you can defend. Private options: (exit price per common share minus strike) times shares, times probability of exit, minus the cash required to exercise and the tax required to hold - then run three scenarios (down-round or acqui-hire where common gets nothing, 2x, 10x) and show all three. Refuse the two standard sleights of hand: valuing common at the last preferred price, and quoting a four-year grant total as though it were an annual number. Compare offers on three normalised axes - year-one cash, four-year total, and risk-adjusted expected value - and keep the assumptions visible next to each cell so you can defend the comparison out loud when a recruiter challenges your maths.",
    "minutes": 20,
    "resource": {
-    "label": "vLLM docs - Optimization and tuning (TTFT, ITL, chunked prefill, batching)",
-    "url": "https://docs.vllm.ai/en/latest/configuration/optimization/"
+    "label": "Cooley GO - Liquidation preference: why common stock can be paid last",
+    "url": "https://www.cooleygo.com/glossary/liquidation-preference/"
    }
   },
   {
-   "name": "Cost model on the whiteboard and the three levers",
-   "learn": "Compute cost per request live: (input_tokens/1M x input_price) + (output_tokens/1M x output_price), multiply by monthly volume, and compare it to whatever the customer pays for the process today - that ratio is the only cost argument that lands. Then show the three levers with their real multipliers: prompt caching (cache writes cost more than base input, cache reads a small fraction, so it only pays when the shared prefix is large and reused within the cache TTL), the batch API (roughly half price with a 24-hour completion window, therefore only for the async path), and model tiering (a small model handles the 80 percent of requests a router classifies as easy, with escalation on low confidence). Say explicitly what each lever costs you in quality or freshness; a lever with no downside signals you have not run it.",
+   "name": "Tax and net: what you actually keep",
+   "learn": "Comparing gross numbers across offer structures is how people take the worse deal. For US-structured offers: RSUs are ordinary income at vest, and supplemental withholding at the flat statutory rate (22% federal up to the $1M threshold, 37% above) routinely under-withholds high earners into an April bill; sell-to-cover versus net-settle changes your cash position. ISOs create no ordinary income at exercise but the spread is an alternative minimum tax preference item that can generate a large cash tax on shares you cannot sell; NSOs are taxed as ordinary income on the spread at exercise. An 83(b) election on restricted stock or an early exercise must be filed within 30 days of transfer and the deadline is not recoverable. Know that the 90-day post-termination exercise window plus that tax bill is what silently converts a large option grant into zero. Do the arithmetic per offer, and route anything consequential through an actual tax professional - your job is to know which questions to ask, not to self-file.",
    "minutes": 20,
    "resource": {
-    "label": "Claude Docs - Pricing (input, output, cache read/write, batch)",
-    "url": "https://platform.claude.com/docs/en/about-claude/pricing"
+    "label": "IRS Topic no. 427, Stock options",
+    "url": "https://www.irs.gov/taxtopics/tc427"
    }
   },
   {
-   "name": "Retrieval architecture that survives questioning",
-   "learn": "Be able to defend, in 90 seconds each: chunking (fixed 300-600 tokens with overlap versus structure-aware splitting, and why chunk boundaries destroy tables), hybrid retrieval (BM25 for identifiers and rare tokens, dense for paraphrase, fused with RRF), reranking (retrieve top 50-100, cross-encode down to top 10-20, and its latency cost), and contextual retrieval (prepend a short generated summary of the parent document to each chunk before embedding). Draw the index refresh path as a real pipeline with a document version, a delete tombstone and a reindex job, because deletion and staleness are where customers get burned. For multi-tenant, insist on pre-filtering by tenant_id in the vector query rather than filtering after top-k, and explain the recall collapse that post-filtering causes on small tenants.",
-   "minutes": 20,
-   "resource": {
-    "label": "Anthropic Engineering - Introducing Contextual Retrieval",
-    "url": "https://www.anthropic.com/engineering/contextual-retrieval"
-   }
-  },
-  {
-   "name": "The agent loop: step budget, durability, human-in-the-loop",
-   "learn": "When the problem involves actions, draw the loop explicitly: planner or model call, tool selection, tool execution, observation, termination check. Then draw the four controls a customer will demand: a hard step and token budget with a defined behaviour at exhaustion (escalate to human, never silently truncate), idempotency keys on every write tool so a retry cannot double-charge, an approval gate on the subset of tools with irreversible effects, and durable execution so a worker crash resumes rather than replays side effects. State the workflow-versus-agent decision out loud: if the steps are known, a deterministic workflow with LLM steps inside is cheaper, more testable and easier to sell than a free-running agent, and saying so is a seniority signal.",
-   "minutes": 20,
-   "resource": {
-    "label": "Anthropic Engineering - Building effective agents",
-    "url": "https://www.anthropic.com/engineering/building-effective-agents"
-   }
-  },
-  {
-   "name": "Evals drawn as infrastructure, not promised as a slide",
-   "learn": "Put four concrete boxes on the diagram: an offline golden set (100-300 labelled cases, versioned in git, built from real customer traffic plus adversarial cases) run in CI as a required check with a regression threshold; an online scorer sampling a percentage of production traces and writing scores back to the trace; a human review queue fed by low-confidence and low-score traces, whose labels flow back into the golden set; and a dataset builder that promotes interesting production traces into fixtures. Name the judge design - pointwise with a rubric versus pairwise against a reference, why you randomise position to fight position bias, and that you report agreement with human labels before trusting the judge as a gate. Give the metric a target and a gate value, and say what you do when the gate fails on a release you must ship.",
-   "minutes": 20,
-   "resource": {
-    "label": "Langfuse Docs - Evaluation overview (datasets, experiments, scores)",
-    "url": "https://langfuse.com/docs/evaluation/overview"
-   }
-  },
-  {
-   "name": "Guardrails, injection and tenant isolation as design elements",
-   "learn": "Treat every retrieved chunk and every tool output as untrusted input in the design, not as an afterthought: the classic break is a document in the customer's own corpus containing instructions that the model follows. Draw the mitigations as boxes - structural separation of instructions from data, a tool allowlist scoped to the caller's permissions rather than the agent's, output handling that never renders model output as HTML or executes it, and an egress check on anything the model emits toward an external system. Add the tenancy layer: per-tenant index namespace or mandatory metadata filter, per-tenant keys and rate limits, PII redaction before the payload leaves the perimeter, and prompt-and-completion logging with masking so the trace store does not become the biggest PII repository the customer owns.",
+   "name": "Non-US and remote offer structures",
+   "learn": "If any target is an Indian entity, an international remote role or a contractor arrangement, learn the structure before you compare numbers. Indian offers are quoted as CTC, which bundles employer PF, gratuity accrual and a 'performance-linked' variable that is not guaranteed cash - strip it back to fixed monthly in-hand before you compare with a US total-comp figure. ESOPs from an Indian entity are typically taxed as a perquisite at exercise on the spread between fair market value and exercise price, then capital gains at sale, with a deferral regime for eligible startups; confirm the specifics with a chartered accountant rather than a blog. Notice period (30/60/90 days) is a negotiable start-date constraint and buyouts are a real ask. For remote or contractor roles, know the difference between employee and independent contractor treatment - who withholds, who pays employer-side taxes, what benefits and equity you do and do not get - because an eye-catching contractor day rate frequently nets less than a salaried offer.",
    "minutes": 15,
    "resource": {
-    "label": "OWASP GenAI - LLM01: Prompt Injection",
-    "url": "https://genai.owasp.org/llmrisk/llm01-prompt-injection/"
+    "label": "Income Tax Department, India - official portal",
+    "url": "https://www.incometax.gov.in/iec/foportal/"
    }
   },
   {
-   "name": "Serving choice: hosted API versus self-hosted vLLM",
-   "learn": "Be ready to justify either direction with numbers rather than preference. Hosted wins on time to value, model quality, elasticity and no GPU ops; self-hosted wins when data cannot leave, when volume is high and steady enough to beat per-token pricing, or when the customer needs a fine-tuned or open-weight model. If self-hosted, name the knobs: tensor parallel size, gpu_memory_utilization, max_model_len, max_num_seqs and max_num_batched_tokens, prefix caching for the shared system prompt, and quantisation to fit a larger model on the same card. Say what continuous batching does to the latency-versus-throughput trade-off, and give a rough utilisation break-even so the customer's finance team sees the reasoning rather than an assertion.",
-   "minutes": 15,
+   "name": "Non-cash terms an FDE should negotiate harder than base",
+   "learn": "For a forward-deployed role, several non-cash terms are worth more over four years than the base delta you are arguing about. Negotiate and get in writing: expected travel percentage and cadence (three days a week on site is a different life from one week a month), who books and who approves, per-diem, whether loyalty points are yours, and the weekend-travel policy; region and account assignment, and what happens when your account is re-staffed; on-call expectations for customer production and whether there is a stipend or comp time; start date (a later start is often the cheapest concession they can give you); the date and criteria of your first performance and equity review, ideally at six months rather than the default annual cycle; and the internal mobility path to product engineering if the FDE org is a stepping stone for you. If a variable or MBO component exists, ask for the historical attainment distribution across the team and a guarantee or draw for the first two quarters while you ramp.",
+   "minutes": 20,
    "resource": {
-    "label": "vLLM documentation (serving, engine args, deployment)",
-    "url": "https://docs.vllm.ai/en/latest/"
+    "label": "Haseeb Qureshi - Ten Rules for Negotiating a Job Offer",
+    "url": "https://haseebq.com/my-ten-rules-for-negotiating-a-job-offer/"
    }
   },
   {
-   "name": "Gateway layer: routing, fallback ladders, rate limits, canary",
-   "learn": "Draw one gateway in front of every model call and load it with the things a customer actually needs: per-tenant token buckets on both requests and tokens, a queue with admission control that sheds with a clear 429 and Retry-After rather than queueing forever, retries with exponential backoff and jitter that respect 429 and 529 differently from 500, a per-request timeout larger than p99 TTFT plus expected generation, and a fallback ladder (primary model, then a smaller or alternate-provider model, then a cached or templated response, then an honest failure). Say the dangerous part out loud: a fallback that silently degrades quality without emitting a metric is worse than an error, so every fallback fires a counter and is visible on the eval dashboard. Add canaries by tenant percentage gated on eval scores, not just error rate and latency.",
-   "minutes": 15,
+   "name": "Reading the paperwork: clawbacks, IP assignment, notice and dispute clauses",
+   "learn": "Read the offer letter, the equity plan document and the grant notice as three separate contracts, because the offer letter is the least binding of them and the plan document is where the exercise window, the transfer restrictions, the company repurchase right and the change-of-control treatment actually live. Look specifically for: sign-on clawback terms (usually full or pro-rated repayment if you leave inside twelve months) and relocation repayment; the invention-assignment and outside-activities clauses, which matter a great deal to you because you have public repos and side projects - ask for a prior-inventions schedule listing them and a carve-out for work done on your own time and equipment; non-solicit and any non-compete (enforceability varies by jurisdiction and has been actively litigated); mandatory arbitration and class-action waivers; and the at-will language that makes every verbal promise revocable. The rule that saves you: anything a hiring manager promises - level, travel, region, a six-month review, a promotion timeline - is not real until it is in the letter, because managers change roles within a year.",
+   "minutes": 20,
    "resource": {
-    "label": "Claude Docs - Rate limits (RPM, ITPM, OTPM, 429 and 529 handling)",
-    "url": "https://platform.claude.com/docs/en/api/rate-limits"
+    "label": "US FTC - Noncompete Rule and related materials",
+    "url": "https://www.ftc.gov/legal-library/browse/rules/noncompete-rule"
    }
   },
   {
-   "name": "Failure modes, curveballs and the operability close",
-   "learn": "Rehearse a fixed close: the four golden signals plus four LLM-specific ones (grounding or judge score, refusal and fallback rate, tokens and dollars per request, p95 TTFT), the three alerts you would actually page on, and the rollback unit - which for an LLM system is usually a prompt version or a model pin, not a deployment. Pre-drill eight curveballs and answer each by pointing at the diagram, quantifying and choosing within three minutes: provider outage, 10x volume, one tenant is 70 percent of traffic, the customer forbids data egress, quality drops after a model version change, a document must be deleted for GDPR within 24 hours, the customer wants citations for every sentence, and the cost ceiling is halved. Understand cascading failure specifically for LLM stacks: retries on a saturated model endpoint amplify load exactly when TTFT is already degraded.",
-   "minutes": 15,
+   "name": "The written negotiation plan and the decision matrix",
+   "learn": "Produce the deliverable: one document per top company with the researched band and its sources, your floor/target/stretch, the level you are asking for and the evidence for it, the exact opening sentence of your counter, your top three asks in priority order with a fallback for each, the concessions you will accept in return, and your walk-away with the arithmetic that produced it. Add a normalisation sheet that puts every live offer on the same axes - year-one cash, four-year total, risk-adjusted equity value, plus the non-cash terms - and a weighted decision matrix whose weights you set before any numbers arrive, so the choice is not made by whoever called last. Include the scripts for the four moments you will otherwise fumble: the expectations question, the 'what will it take to sign today' question, the extension request, and the decline. Pre-writing the plan is the entire point: everything in this topic is easy on paper and hard in a live twelve-minute call.",
+   "minutes": 25,
    "resource": {
-    "label": "Google SRE Book - Addressing Cascading Failures",
-    "url": "https://sre.google/sre-book/addressing-cascading-failures/"
+    "label": "Harvard PON - A Negotiation Preparation Worksheet: A Tool for Continuous Improvement",
+    "url": "https://www.pon.harvard.edu/daily/negotiation-training-daily/negotiating-for-continuos-improvement-use-a-negotiation-preparation-worksheet/"
    }
   },
   {
-   "name": "The FDE twist: designing inside the customer's constraints",
-   "learn": "Practise the swap table until the redesign takes 60 seconds on the board: hosted model to self-hosted open-weight in the customer's VPC; managed vector database to pgvector in their existing Postgres; SaaS trace store to self-hosted; provider batch API to your own queue and worker pool. Know the data-control vocabulary customers use - zero data retention, no training on inputs, regional processing, BYO key encryption, audit log of every prompt and completion - and where each is a provider setting versus your own responsibility. In the mock, ask the constraint question in the requirements phase rather than discovering it at minute 35: 'can prompts containing customer content leave your network, and does the answer differ for the pilot and for production?'",
-   "minutes": 15,
+   "name": "Rehearsal and the close",
+   "learn": "Run at least six recorded role-plays with a friend playing a recruiter who has a written role card and instructions to push: the expectations question in the first five minutes, 'this is the top of the band', a 48-hour exploding deadline, 'we cannot move base but we can add equity', 'do you have a competing offer, and what are the numbers?', and 'what will it take for you to sign today?'. Score yourself on the recording for the things you cannot feel in the moment - did you name a number first, did you fill your own silence, did you apologise for asking, did you concede a dimension you had not planned to, how long between their objection and your capitulation. Then drill the close: accept verbally, ask for the full document set, re-read the grant notice for the share count and conversion date, sign, and only then decline the others personally and warmly, with a short reason and no auction-style gloating - those recruiters are the people who will source your next role.",
+   "minutes": 25,
    "resource": {
-    "label": "OpenAI Platform - Your data (retention, training, controls)",
-    "url": "https://developers.openai.com/api/docs/guides/your-data"
-   }
-  },
-  {
-   "name": "Mock 1 - grounded QA over a customer's document corpus",
-   "learn": "Prompt: 'Design an assistant that answers questions over 2 million internal documents for 40 enterprise tenants, with citations.' Solo, timed, recorded. Non-negotiables for a pass: a stated grounding metric with target and gate; ingestion drawn as a versioned pipeline with deletes and reindex; hybrid retrieval plus rerank with the latency cost accounted; tenant isolation by pre-filter; a latency budget with streaming; cost per question and the caching lever; and the answer to 'what happens when the corpus does not contain the answer' being an explicit abstain path, not a hope. Immediately after the timer, write three bullets of raw impression before watching anything.",
-   "minutes": 50,
-   "resource": {
-    "label": "Anthropic Cookbook (RAG, citations, evaluation notebooks)",
-    "url": "https://github.com/anthropics/claude-cookbooks"
-   }
-  },
-  {
-   "name": "Mock 2 - agent platform with write access to customer systems",
-   "learn": "Prompt: 'Design a system where an agent resolves support tickets by reading a knowledge base and taking actions in Zendesk and the customer's billing system.' Non-negotiables: workflow-versus-agent decision stated with a reason; tool schemas and an authorisation model tied to the requesting user, not a service account with god rights; idempotency on every write; step and token budget with a defined exhaustion behaviour; durable execution for crash recovery; an approval gate on irreversible tools; a full audit trail linking trace id to the action taken; and a prompt-injection story for the knowledge base. Expect the curveball 'a malicious ticket instructs the agent to refund itself' and answer it on the diagram.",
-   "minutes": 50,
-   "resource": {
-    "label": "Anthropic Engineering - How we built our multi-agent research system",
-    "url": "https://www.anthropic.com/engineering/multi-agent-research-system"
-   }
-  },
-  {
-   "name": "Mock 3 - eval and observability platform for a fleet of LLM features",
-   "learn": "Prompt: 'A customer has 12 teams shipping LLM features and no idea which ones are getting worse. Design the platform that tells them.' This is the archetype most candidates fumble because it has no model in the hot path. Non-negotiables: a trace data model (trace, span, generation, score, session, user) with cost and token attributes; ingestion sized for high-cardinality writes with sampling and an async collector; prompt versioning linked to traces so a regression is attributable to a change; datasets built from production traces; scheduled and CI-triggered experiments; judge calibration against human labels; masking and retention for PII; and per-team dashboards with an alert on score drift rather than only error rate.",
-   "minutes": 50,
-   "resource": {
-    "label": "Langfuse Docs (tracing data model, prompt management, experiments)",
-    "url": "https://langfuse.com/docs"
-   }
-  },
-  {
-   "name": "Mock 4 - high-volume extraction under a hard cost ceiling, air-gapped",
-   "learn": "Prompt: 'Extract 30 structured fields from 40 million scanned documents per year. It must run inside the customer's data centre and the unit cost must be under a stated ceiling.' Non-negotiables: throughput and GPU maths done live (tokens per document, batch size, tokens per second per GPU, GPUs needed for the SLA window); a self-hosted serving design with the vLLM knobs named; a cheap-model-first cascade with escalation on schema-validation failure or low confidence; structured output enforcement and what you do with a malformed response; a dead-letter path with human review; checkpointing and resumability for a multi-day job; and a sampling-based quality measurement because you cannot label 40 million documents. Then defend the ceiling with arithmetic when the interviewer halves it.",
-   "minutes": 50,
-   "resource": {
-    "label": "Exponent - free peer mock interview practice",
-    "url": "https://www.tryexponent.com/practice"
-   }
-  },
-  {
-   "name": "Self-review protocol, score table and the pattern ledger",
-   "learn": "For each recording, watch at 1.5x with the rubric open and log phase-transition timestamps against the planned budget, every filler stall longer than five seconds, every question you answered with an adjective instead of a number, and every moment you drew a box you could not defend. Maintain three columns per mock: 'said', 'should have said', 'did not know' - the third column is the only one that generates study, and if it is empty you chose problems that were too easy. Keep a running pattern ledger of reusable answers (latency budget template, cost formula, judge calibration script, fallback ladder, tenancy filter) so mock 4 costs less preparation than mock 1. Ship only when three consecutive mocks score 4 or better on all six dimensions, including LLM-specific depth and evaluation.",
-   "minutes": 40,
-   "resource": {
-    "label": "Hello Interview - System Design in a Hurry: Core Concepts",
-    "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/core-concepts"
+    "label": "MIT OCW 15.665 Power and Negotiation - negotiation simulations and reflection assignments",
+    "url": "https://ocw.mit.edu/courses/15-665-power-and-negotiation-spring-2014/pages/assignments/"
    }
   }
  ],
  "outcomes": [
-  "You can take an underspecified LLM prompt to a written set of requirements in six minutes that includes a measurable quality bar with a target and a measurement method, a latency target expressed as TTFT and total, a cost ceiling per request, and an explicit statement of where customer data is allowed to go.",
-  "You can compute, in under four minutes and out loud, tokens in and out per request, tokens per minute against provider ITPM and OTPM limits, cost per request and per month, and - for self-hosted - concurrent sequences from KV cache maths, naming for each number the design decision it changes.",
-  "You can draw an evaluation and observability subsystem as boxes on the diagram before minute 40 in every mock, including golden set in CI with a gate value, online sampling and scoring, a human review queue feeding labels back, and judge agreement against human labels.",
-  "You can deep dive retrieval or the agent loop for at least seven minutes with two named options, a quantified reason for your choice, its dominant failure mode, and the metric you would watch to catch it.",
-  "You can answer any of eight rehearsed curveballs (provider outage, 10x volume, hot tenant, no data egress, model version regression, GDPR delete, per-sentence citations, halved cost ceiling) in three minutes by locating it on the diagram, quantifying it and committing to a choice.",
-  "You can perform the constraint swap - hosted model to in-VPC open weights, managed vector store to pgvector, SaaS tracing to self-hosted, batch API to your own queue - in under 90 seconds and state precisely what is lost in each swap.",
-  "You can score your own recording against your six-dimension rubric with timestamped evidence and land within half a point of a peer's independent score on at least four dimensions.",
-  "You can show three consecutive mocks at 4/5 or better on every dimension, evidenced by the recordings, the exported diagrams and the score table with the 'did not know' column emptying over time."
+  "You can state, for each of your top ten target companies, a sourced band (P25/P50/P75 split into base, annualised equity and total), a target, a stretch and a walk-away number, with the arithmetic behind the walk-away written down.",
+  "You can deflect the compensation-expectations question three consecutive times on a recorded call without naming a number, without lying about current pay, and without sounding evasive - and then give a defended range if pressed a fourth time.",
+  "You can convert any option grant into a three-scenario expected-value range given strike, 409A FMV, last preferred price, fully diluted share count, preference stack and vesting shape, and name the inputs you would have to request to do it.",
+  "You can run a live counter that moves at least two dimensions beyond base - level review, sign-on, equity, start date, review timing - and closes with a commitment you are prepared to honour.",
+  "You can name the level and ladder a given FDE offer sits on, the bands for the adjacent levels, and the promotion rubric, and can make an evidence-backed case for a level review to a hiring manager.",
+  "You can explain the after-tax difference between an RSU offer and an ISO grant of nominally equal headline value, including flat supplemental withholding shortfall, AMT on the exercise spread, and the 30-day 83(b) window.",
+  "You can find, in an offer letter and equity plan document, the six clauses that materially change the deal - sign-on clawback, exercise window, invention assignment, non-solicit, arbitration, change-of-control treatment - and articulate what you would ask to change in each.",
+  "You can choose between two competing offers using a matrix whose weights you set before the numbers arrived, and decline the loser in a three-sentence call that keeps the recruiter relationship intact."
  ],
  "failureModes": [
-  "The design assumes a hosted provider throughout; the customer's security review then forbids prompts leaving their network, and the whole retrieval, serving and tracing stack has to be re-chosen on site because the in-VPC swap was never rehearsed.",
-  "Multi-tenant retrieval filters by tenant_id after the top-k vector search, so small tenants get near-empty result sets and their users are told the answer is not in the corpus while the documents sit in the index.",
-  "A document deleted for a GDPR request is removed from the source of truth but never tombstoned in the vector index, so the assistant keeps citing it for weeks and the customer discovers it before your monitoring does.",
-  "The fallback ladder silently drops to a smaller model during a provider incident with no counter and no eval score attached, so quality degrades for two days and the customer's first signal is an angry end user rather than a dashboard.",
-  "The agent's write tools run under a service account with broad permissions and no idempotency key, so a retried step double-refunds a customer and the audit log cannot prove which invocation did it.",
-  "Cost was estimated on average prompt length; production prompts carry conversation history and ten retrieved chunks, input tokens triple, prompt caching never hits because the prefix changes per request, and the bill lands at four times the number given to the customer's finance team.",
-  "The LLM-as-judge gate was never calibrated against human labels, so it passes a release that humans consider clearly worse, the team stops trusting the gate within a month, and it is disabled in CI without being replaced."
+  "You give a number in the first recruiter screen, the whole process gets calibrated to it, and you never learn that the band topped out 35% higher because nobody had a reason to tell you.",
+  "You hint at a competing offer you do not have, the recruiter asks a specific follow-up about the level and structure, and the resulting stumble costs you both the credibility and the offer in a field small enough that people compare notes.",
+  "You win a 6% base bump and accept the level as offered, so you sit two years under a lower ceiling with smaller refreshes, and the promotion you were verbally promised needs a committee packet nobody prepared.",
+  "You compare a Series B option grant against public RSUs by multiplying shares by the last preferred price, ignoring strike, the liquidation preference and future dilution, and discover at an acqui-hire three years later that common holders received nothing.",
+  "The hiring manager promises a specific region, a travel ceiling and a six-month equity review on a call, none of it enters the offer letter, and eleven months in you are on a different account, travelling four days a week, reporting to someone who never heard the promise.",
+  "You take a sign-on bonus with a full twelve-month clawback, the deployment turns out to be staff-augmentation work with no engineering ownership, and leaving in month eight now costs you cash you have already spent.",
+  "You negotiate entirely over email, your carefully framed package arrives at the compensation committee as a single bald number with no justification, and the answer comes back as a flat no you have no conversational room to reopen."
  ],
  "interviewQuestions": [
-  "Design a grounded question-answering system over two million documents for forty enterprise tenants, one of which will not allow any data to leave their network. Give me the shared architecture, then tell me exactly which components change for that tenant and what capability they lose.",
-  "You are told the assistant is 'not accurate enough'. Before touching the prompt, how do you determine whether the problem is retrieval, the generation step, the chunking, or the question distribution - and what measurement distinguishes each?",
-  "Walk me through your latency budget for a streamed answer with a p95 target of six seconds. Where does the time actually go, which component would you cut first, and how does the answer change if the customer requires reranking and a guardrail check on the output?",
-  "Your agent takes write actions in the customer's billing system. Design the boundary: authorisation model, idempotency, approval gates, step budget, audit trail, and the test that proves a malicious document in the knowledge base cannot trigger a refund.",
-  "The customer wants unit cost cut by half without a quality drop they can notice. Give me the levers in order, quantify each one, and tell me which of them you would refuse to pull and why.",
-  "I want to push back: you chose a self-hosted open-weight model on four GPUs instead of a hosted API. Defend it with arithmetic, tell me the volume at which the decision flips, and describe the migration for a live customer if it flips.",
-  "How would you gate a deployment on an LLM-as-judge score when you have 150 human labels and no baseline? Tell me the agreement number below which you would refuse to ship the gate, and what you would do instead in the meantime."
+  "Recruiter screen, minute six: 'So that we do not waste each other's time - what are your compensation expectations for this role?' Answer it out loud, and then I am going to ask you the same thing twice more.",
+  "You have our offer and one from a competitor. Tell me what it would take for you to sign with us today - and be specific, because I have to take it to a committee and defend it.",
+  "Walk me through how you would compare two offers where one is a public company paying RSUs and the other is a Series C paying options. What do you need to know about the Series C before you can even put the two on the same page, and how would you present that comparison to your partner at home?",
+  "We cannot move base - it is the top of the band for this level. But I can add equity. Talk me through what you would want to know before you decide whether that is a good trade for you.",
+  "A customer's VP tells you two weeks before go-live that the deployment is unacceptable without a feature that is not in the SOW, and threatens to escalate to your VP. You cannot deliver it and hold the date. How do you run that conversation, and what do you actually say first?",
+  "You accepted our offer three weeks ago. During onboarding you discover you were slotted one level below what the hiring manager described in the loop, and the equity in the grant notice is 20% below what the letter implied because of the conversion date. What do you do, in what order, and with whom?",
+  "Tell me about a negotiation you lost - with an employer, a vendor or a customer. What did you concede too early, what would you set as your walk-away if you ran it again, and how would you know in the moment that you were about to fold?"
  ],
- "proofOfWork": "A public `llm-design-mocks` repository (or a section of the FDE dashboard) that a hiring manager can skim in ten minutes and a peer can reuse in one, built around a reusable LLM Design Kit rather than four one-off recordings. It contains `rubric.md` with the six dimensions defined as observable behaviours at each of 1-5, plus a score table for all four mocks showing self-score, peer score and the per-dimension gap, with the three consecutive 4/5 sessions highlighted; four exported Excalidraw diagrams, each with the requirements, token maths and cost-per-request written on the canvas as they were during the session, alongside a `scorecard-NN.md` listing phase-transition timestamps against the planned budget and the 'said / should have said / did not know' table; and the kit itself - a one-page latency budget template with the TTFT and TPOT decomposition, a cost-per-request spreadsheet with cache-hit, batch and model-tier levers wired as formulas, a curveball card deck with the eight scenarios and your three-minute answers, and a constraint swap table mapping each hosted component to its in-VPC equivalent with the capability lost. The differentiator is a short `calibration.md` showing one small runnable artifact: a judge prompt scored against 50 hand-labelled examples with the agreement number reported, which turns the eval section of every mock from an assertion into something you have actually measured."
+ "proofOfWork": "Build a negotiation dossier for your live pipeline and keep it as a private, versioned artifact you can walk an interviewer through. It has four parts. First, a comparison model - a spreadsheet with one row per live or target company and columns for sourced band and its three sources, level and ladder, year-one cash, four-year total, risk-adjusted equity expected value under three exit scenarios with the assumptions visible, and the non-cash terms priced explicitly (travel days per year, on-call weeks, notice-period gap, forfeited unvested equity); every private-company row must compute from strike, 409A FMV, fully diluted shares and the preference stack rather than a headline number. Second, a one-page plan per top-five company containing your floor, target and stretch, the level you will ask for with the two pieces of public evidence you will cite, the literal first three sentences of your counter, your three asks in priority order with a fallback for each, and the walk-away with its arithmetic. Third, six recorded role-play sessions - each under fifteen minutes, each with a written role card for the counterparty covering a different pressure move (expectations question, top-of-band refusal, exploding deadline, equity-for-base swap, competing-offer probe, sign-today close) - plus a self-scored rubric per recording tracking whether you named a number first, seconds of silence you filled, dimensions conceded that were not in the plan, and time from objection to capitulation, with a visible trend across the six. Fourth, a clause-by-clause annotation of one real offer letter and one real equity plan document (redact the employer) marking the sign-on clawback, exercise window, vesting shape and conversion date, invention-assignment and outside-activities language, non-solicit, arbitration and change-of-control treatment, with the specific redline you would request on each. Once the negotiation actually happens, add a two-page delta memo: what you asked for, what you got, what you left on the table, which sentence changed the outcome, and what you will do differently next time - that memo is the part that turns a lucky outcome into a repeatable skill."
 }

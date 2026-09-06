@@ -1,200 +1,218 @@
 {
  "i": 23,
- "topic": "Incident response and postmortems",
+ "topic": "Load testing and chaos",
  "track": "D. Reliability and Observability",
  "month": 3,
- "hours": 6,
- "why": "When the system you deployed at a customer breaks at 02:00, the FDE is the person the customer's VP calls, the person who has to run the bridge with the customer's own platform team on it, and the person who has to send the written account the customer's CTO forwards to their board. Nobody on the vendor side has more context than you, so you are the de facto incident commander whether or not anyone gave you the title, and a sloppy incident (three people typing into production, no timeline, a status update that speculated about root cause and was wrong) costs more trust than the outage itself. The postmortem is the artifact that turns an outage into a renewal: a blameless, numbers-first document with dated action items is how a customer decides you are safe to keep in production.",
+ "hours": 6.0,
+ "why": "When a customer asks 'will this hold on Monday when the whole ops floor logs in' or 'what happens when your worker pod gets patched', the FDE is the only person in the room who can answer with evidence rather than opinion, and that answer decides whether the go-live happens. Load tests find the first bottleneck before the customer does and turn a vague 'it feels slow' into a number, a saturated resource and a proven fix; chaos experiments turn 'Temporal is durable' from a vendor claim into a recovery time you measured on their cluster. Both are also how you write the capacity and resilience sections of the runbook the customer will hold you to after you leave.",
  "prerequisites": [
-  "SLIs, SLOs and error-budget burn alerts from 'SRE fundamentals' (topic 20): severity levels and paging rules only make sense against a defined SLO for DefenderMate.",
-  "The ability to read a trace, a log stream and a Prometheus dashboard under pressure from 'Observability' (topic 21); during an incident you are consuming what you built there, not building it.",
-  "The chaos notes on Kaupex and Temporal from 'Load testing and chaos' (topic 22): those experiments are the scenario bank for your Wheel of Misfortune sessions.",
-  "Kubernetes production ops from topic 8: `kubectl rollout undo`, `kubectl get events`, probes, HPA, and how ArgoCD self-heal (topic 9) will fight a manual `kubectl` change.",
-  "Postgres operations basics: `pg_stat_activity`, `statement_timeout`, `lock_timeout`, what an idle-in-transaction session does to `VACUUM` and to lock queues (previewed here, deepened in topic 29).",
-  "A Slack or Discord workspace you control, a Grafana Cloud stack with at least one alert rule firing into a contact point, and one friend willing to spend 45 minutes playing game master."
+  "The USE method and single-box tooling from 'Performance and troubleshooting on a single box' (topic 3): top, vmstat, iostat, py-spy, reading a flame graph. Load testing is USE applied while something else drives the traffic.",
+  "Kubernetes ops from topic 8: readiness and liveness probes, requests and limits, `kubectl describe` / `logs` / `get events`, EndpointSlices, and the k3s cluster on the Hetzner box with Kaupex (FastAPI API, Temporal worker, Postgres) deployed and reachable through Traefik.",
+  "Prometheus and Grafana from 'Observability' (topic 21): RED metrics for Kaupex, `histogram_quantile()` over `rate()` of buckets, and a dashboard you can place k6 series next to.",
+  "SLOs from 'SRE fundamentals' (topic 20): the latency and availability targets that become k6 thresholds and chaos steady-state definitions.",
+  "Enough JavaScript to write ES modules with imports, arrow functions and JSON handling (k6 scripts are JS, not Python), and enough Temporal to start a Kaupex workflow and run a worker; 'Temporal at depth' (topic 34) comes later and builds on the failure semantics you observe here.",
+  "Postgres basics: `psql`, `EXPLAIN`, `pg_stat_activity`, and the SQLAlchemy async engine configuration in Kaupex, so pool and lock diagnostics are readable."
  ],
  "subtopics": [
   {
-   "name": "Severity ladder and the declaration threshold",
-   "learn": "Write a SEV1 to SEV5 ladder for DefenderMate where each level is defined by customer-observable impact and a required response, not by which component broke: SEV1 = customer-facing outage or data loss, IC assigned, status page within 15 minutes, exec update every 30; SEV2 = degraded for a subset, IC assigned, no status page unless it lasts 60 minutes; SEV3 and below are business-hours tickets. Internalise PagerDuty's rule that if you are unsure whether it is a SEV1 or SEV2 you treat it as the higher one, and that declaring an incident is cheap while a late declaration is not. Know the difference between severity (impact) and priority (order of work) and why a SEV1 for one tenant may be a P2 for the platform.",
+   "name": "Test taxonomy: which question each test type answers",
+   "learn": "Know the six shapes and the question each answers: smoke (1-5 VUs for a minute: does the script and the system work at all), average-load (ramp to expected daily peak and hold 30-60 min: does p95 meet the SLO at normal traffic), stress (150-200% of peak: where is the knee), soak (normal load for 2-8 h: leaks, connection churn, disk and log growth), spike (0 to 5-10x in seconds: does it shed or fall over, and does it recover), breakpoint (ramping-arrival-rate with no ceiling until a threshold aborts: the number for the capacity plan). Pick by the question you owe the customer, never 'a load test'. For Kaupex the order is smoke, average, stress, breakpoint, with a soak only once you have a fix to verify.",
+   "minutes": 10,
+   "resource": {
+    "label": "Grafana k6 docs: Load test types",
+    "url": "https://grafana.com/docs/k6/latest/testing-guides/test-types/"
+   }
+  },
+  {
+   "name": "Open vs closed workload models and coordinated omission",
+   "learn": "A closed model (constant-vus, ramping-vus) has each VU wait for its response before iterating, so when the server slows the offered load drops with it and the measured latency flatters the system; this is coordinated omission and it is why a 10-VU test 'passes' while real users queue. An open model (constant-arrival-rate, ramping-arrival-rate) starts iterations on a clock regardless of response time, which is how webhook and API traffic actually arrives. In the open model the executor still needs VUs to run iterations: size `preAllocatedVUs` at roughly rate x p99 seconds with a `maxVUs` ceiling, and read `dropped_iterations` as 'the generator could not keep up', which is either a test bug or the first symptom of saturation. Be able to say why arrival rate is the right shape for Kaupex's API and webhook ingress while a closed model is right only for a fixed pool of worker threads.",
    "minutes": 20,
    "resource": {
-    "label": "PagerDuty Incident Response - Severity Levels",
-    "url": "https://response.pagerduty.com/before/severity_levels/"
+    "label": "Grafana k6 docs: Open and closed models",
+    "url": "https://grafana.com/docs/k6/latest/using-k6/scenarios/concepts/open-vs-closed/"
    }
   },
   {
-   "name": "Roles: Incident Commander, deputy, scribe, comms lead, subject-matter experts",
-   "learn": "Know each role's single job and its anti-pattern: the IC owns decisions and the timeline but never touches a keyboard to debug; the deputy watches the IC (time, fatigue, missed hand-raises) and takes over on a clean hand-off ('you have command', 'I have command'); the scribe records observations, decisions and actions with timestamps; the comms lead owns every message that leaves the room; SMEs run diagnosis and execute tasks the IC assigns. Practise the hand-off protocol and the 'IC role is not seniority' rule: on a customer bridge the customer's principal engineer may be the best SME precisely because they should not be IC. Decide up front how the FDE splits the IC and comms roles when only two people are awake.",
-   "minutes": 25,
-   "resource": {
-    "label": "PagerDuty Incident Response - Different Roles",
-    "url": "https://response.pagerduty.com/before/different_roles/"
-   }
-  },
-  {
-   "name": "Running the bridge: the IC decision loop",
-   "learn": "Run the loop out loud: state current impact and what is known, propose one action, poll for strong objections ('any strong objections?' then a five-second silence, not a discussion), assign it to a named person with a timebox ('Priya, roll back the classifier to the previous revision, report in 5 minutes'), then re-assess when the timebox expires. Enforce one channel and one voice bridge, ban side-threads and 'let me just try something', and never let a task go unassigned or un-timeboxed. Know PagerDuty's explicit rules: the IC may remove anyone who is disruptive, the IC decides rather than seeks consensus, and 'I need someone to' is banned in favour of names. Pin a state summary (impact, current hypothesis, actions in flight, next update time) every 30 minutes.",
+   "name": "k6 script anatomy: lifecycle, VUs, checks, tags, test data",
+   "learn": "Structure: the init context runs once per VU (imports, `export const options`, `new SharedArray('tasks', () => JSON.parse(open('./tasks.json')))` so test data loads once instead of per VU), `export function setup()` runs once and returns data (log in, fetch a JWT), `export default function (data)` is the VU loop, `export function teardown(data)` cleans up. Use `check(res, { 'status 201': r => r.status === 201 })` to record pass rates without failing the run, `group()` to bucket a user flow, and always tag dynamic URLs with `{ tags: { name: 'GET /tasks/:id' } }` so http_req_duration is not split across ten thousand unique URLs. Correlate requests: extract the id via `res.json('id')` and use it in the next call, parametrise with `__ENV.BASE_URL` and `k6 run -e BASE_URL=https://kaupex.local script.js`, use `http.batch()` for parallel fetches, and add `sleep()` only when modelling closed-model users. Define a custom `Trend('task_completed_ms')` from `k6/metrics` to time an end-to-end business operation (submit, then poll until status is done) rather than a single HTTP call, because that is the number the customer cares about.",
    "minutes": 30,
    "resource": {
-    "label": "PagerDuty Incident Response - During an Incident",
-    "url": "https://response.pagerduty.com/during/during_an_incident/"
+    "label": "Grafana k6 docs: Test lifecycle",
+    "url": "https://grafana.com/docs/k6/latest/using-k6/test-lifecycle/"
    }
   },
   {
-   "name": "Scribing the timeline and annotating dashboards",
-   "learn": "Keep a single incident channel where every entry is `HH:MM UTC` plus one of OBSERVED / DECIDED / ACTION / RESULT, and paste raw evidence (the exact error line, the `kubectl rollout history` output, the alert payload) rather than paraphrase. Push the same timestamps into Grafana as annotations (`POST /api/annotations` with `time`, `tags: [\"incident\",\"INC-2026-014\"]`, `text`) on the DefenderMate SLO dashboard so the postmortem graphs show detection, mitigation and recovery as vertical lines against the burn rate. Configure the dashboard's annotation query to pull by tag so the lines survive dashboard edits. Export the channel history at the end; the timeline is the raw material for the postmortem and it degrades every hour it is not written down.",
+   "name": "Scenarios and executors: arrival rate, stages, dropped iterations",
+   "learn": "Write `options.scenarios` as named scenarios, each with `executor`, `exec` (the function to run), `startTime`, `gracefulStop` (default 30s: how long in-flight iterations get to finish before VUs are interrupted) and per-scenario `tags`. Know all executors: shared-iterations, per-vu-iterations, constant-vus, ramping-vus (with `stages` and `gracefulRampDown`), constant-arrival-rate, ramping-arrival-rate, externally-controlled. For the breakpoint test use ramping-arrival-rate with stages climbing from 10 to 500 per `timeUnit: '1s'` over 20 minutes, `preAllocatedVUs: 100, maxVUs: 2000`, and a threshold with `abortOnFail` so the run stops at the knee instead of hammering a dead system. Run two scenarios concurrently to model mixed traffic (read-heavy at `startTime: '0s'`, writes at `startTime: '2m'`) and understand why per-scenario tags plus tagged thresholds are the only way to read them apart in the summary.",
    "minutes": 20,
    "resource": {
-    "label": "Grafana docs - Annotate visualizations (incl. annotations HTTP API)",
-    "url": "https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/annotate-visualizations/"
+    "label": "Grafana k6 docs: Executors",
+    "url": "https://grafana.com/docs/k6/latest/using-k6/scenarios/executors/"
    }
   },
   {
-   "name": "Mitigate first: the five-minute triage decision",
-   "learn": "Adopt the SRE rule that during an incident you stop the bleeding before you find the cause. Within five minutes of declaring, answer three questions: what changed (deploy, config, feature flag, dependency, traffic, certificate expiry, quota), can it be reverted, and can traffic be shed. Know the generic mitigation menu and its order of preference: roll back the last change, disable via flag, scale up, fail over, degrade gracefully (serve cached, drop non-critical path), rate limit, drain. Understand why 'roll forward with a fix' is usually the wrong first move under pressure and when it is the only move (a migration that already ran, a data corruption). Rehearse saying 'we are mitigating; root cause comes after' to a customer exec who wants to know why.",
+   "name": "Thresholds as pass/fail gates and CI exit codes",
+   "learn": "Thresholds turn a run into a verdict: `thresholds: { http_req_failed: ['rate<0.01'], http_req_duration: ['p(95)<400', 'p(99)<1200'], 'http_req_duration{name:POST /tasks}': ['p(95)<800'], checks: ['rate>0.99'], dropped_iterations: ['count<10'] }`. Use the object form `{ threshold: 'p(99)<2000', abortOnFail: true, delayAbortEval: '60s' }` to stop the breakpoint test once the system is clearly past the knee without a false abort during warm-up. k6 exits non-zero (code 99) when any threshold fails, which is what makes `k6 run` usable as a CI gate; set `summaryTrendStats: ['avg','med','p(95)','p(99)','max']` so the console shows the tails, and implement `handleSummary(data)` to emit JSON plus a markdown table for the load report. Derive every threshold number from the SLOs in topic 20, not from whatever the system happens to do today.",
+   "minutes": 15,
+   "resource": {
+    "label": "Grafana k6 docs: Thresholds",
+    "url": "https://grafana.com/docs/k6/latest/using-k6/thresholds/"
+   }
+  },
+  {
+   "name": "Reading k6 output and streaming it into Prometheus and Grafana",
+   "learn": "Decompose http_req_duration = http_req_sending + http_req_waiting (time to first byte, the server's share) + http_req_receiving; connection cost lives in http_req_blocked, http_req_connecting and http_req_tls_handshaking and should be near zero after warm-up because k6 reuses connections per VU (set `noConnectionReuse: true` only when modelling clients that do not). Read the `http_reqs` rate as achieved throughput, `iteration_duration` as the full flow, `http_req_failed` as the error rate (2xx and 3xx count as success by default; change it with `http.setResponseCallback`), and never report averages, which hide the bimodal tail customers feel. Stream results with `k6 run -o experimental-prometheus-rw script.js` and `K6_PROMETHEUS_RW_SERVER_URL=http://prometheus:9090/api/v1/write` (add `K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM=true` when Prometheus has native histograms enabled) so k6 series sit beside the Kaupex RED metrics from topic 21 on one Grafana dashboard and the before/after screenshots share a time axis; keep `--out json=run.json` for offline analysis.",
    "minutes": 25,
    "resource": {
-    "label": "Google SRE Book - Emergency Response",
-    "url": "https://sre.google/sre-book/emergency-response/"
+    "label": "Grafana k6 docs: Built-in metrics reference",
+    "url": "https://grafana.com/docs/k6/latest/using-k6/metrics/reference/"
    }
   },
   {
-   "name": "Troubleshooting under pressure without fooling yourself",
-   "learn": "Apply the SRE troubleshooting loop deliberately: triage, examine (what the telemetry says, not what you expect), hypothesise, test the cheapest discriminating experiment, repeat. Name the pitfalls you must actively defend against: confirmation bias toward the last thing you touched, correlation with an unrelated deploy, fixing symptoms of a healthy component, and 'it is always DNS' style pattern-matching that skips the evidence. Build the 'is it us or the cloud' reflex: check the provider health dashboard and your dependency status pages before spending 20 minutes on your own code. Keep a written list of hypotheses with the evidence for and against each so a fresh responder can pick up without re-deriving.",
+   "name": "The load generator is a system too: OS limits and placement",
+   "learn": "One k6 process can drive tens of thousands of VUs at roughly 1-5 MB of RAM each, but the OS gives out first: raise `ulimit -n` to 250000, widen `net.ipv4.ip_local_port_range` to '1024 65535', set `net.ipv4.tcp_tw_reuse=1` to survive TIME_WAIT churn, and expect ephemeral-port exhaustion the moment you enable `noConnectionReuse`. Set `discardResponseBodies: true` globally and opt in per request when you need the body. Never run the generator on the same box as the target (the Hetzner node hosting k3s): CPU contention makes both numbers lies. Run k6 from a second VPS or a dedicated pod on other hardware, or the k6-operator TestRun CRD when you need parallelism; watch the generator's own CPU with top and stop trusting results past about 80 percent, and treat `dropped_iterations` or high `http_req_blocked` as generator problems to rule out before blaming the target.",
+   "minutes": 15,
+   "resource": {
+    "label": "Grafana k6 docs: Fine-tuning OS",
+    "url": "https://grafana.com/docs/k6/latest/set-up/fine-tune-os/"
+   }
+  },
+  {
+   "name": "Finding the app-tier bottleneck: event loop, GIL, worker count",
+   "learn": "Under a constant-arrival-rate run, apply USE (topic 3) to each Kaupex API pod: `kubectl top pod` and `container_cpu_cfs_throttled_seconds_total` for saturation and throttling, `py-spy dump --pid 1` inside the container for what the event loop is doing right now, `py-spy record -o flame.svg` for the picture. Know the three classic Python API knees: a single uvicorn process pinning one core (fix: `--workers N`, or gunicorn with `-k uvicorn.workers.UvicornWorker`, roughly one per core because the GIL serialises CPU work); a blocking call inside `async def` (sync `requests`, sync psycopg, `time.sleep`, CPU-heavy JSON or pydantic on large bodies) that freezes every request on that loop so p99 explodes while CPU looks idle; and sync `def` endpoints saturating Starlette's anyio threadpool (40 tokens by default) so requests queue invisibly. The dump must name the frame; the fix is `await` on an async client, `run_in_threadpool` for the truly blocking, or moving the work into a Temporal activity. Also check uvicorn `--limit-concurrency` and `--backlog`, and confirm readiness probes are not failing under load and yanking pods from the Service, which shows up in k6 as intermittent connection refused.",
+   "minutes": 30,
+   "resource": {
+    "label": "FastAPI docs: Concurrency and async / await",
+    "url": "https://fastapi.tiangolo.com/async/"
+   }
+  },
+  {
+   "name": "Finding the data-tier bottleneck: pools, max_connections, waits",
+   "learn": "The second knee is almost always the pool. SQLAlchemy defaults to `pool_size=5, max_overflow=10, pool_timeout=30`, so four uvicorn workers can hold 60 Postgres backends and the sixteenth concurrent request per worker waits 30 s then raises 'QueuePool limit of size 5 overflow 10 reached'; Postgres `max_connections` (default 100) then caps the whole system and new connections fail with 'FATAL: sorry, too many clients already'. While k6 runs, query `SELECT state, wait_event_type, wait_event, count(*) FROM pg_stat_activity GROUP BY 1,2,3`: many `idle in transaction` means a leaked transaction, `Lock` waits mean row or advisory contention (find the blocker with `pg_blocking_pids(pid)` and `pg_locks`), `IO` / `DataFileRead` means the working set fell out of shared_buffers, `Client` / `ClientRead` on active sessions means the app is slow to consume results. Enable `pg_stat_statements` and sort by `total_exec_time` to find the query that only becomes visible at concurrency (a sequential scan that was fine at 1 rps). Fixes you must be able to prove: an index (verify with `EXPLAIN (ANALYZE, BUFFERS)` before and after), pgbouncer in `pool_mode = transaction`, `statement_timeout` and `idle_in_transaction_session_timeout` so a bad client cannot hold the pool, and pool sizing where workers x (pool_size + max_overflow) stays under max_connections minus superuser_reserved_connections.",
    "minutes": 25,
    "resource": {
-    "label": "Google SRE Book - Effective Troubleshooting",
-    "url": "https://sre.google/sre-book/effective-troubleshooting/"
-   }
-  },
-  {
-   "name": "Kubernetes mitigation moves for Dokeo and DefenderMate",
-   "learn": "Be able to execute each of these blind and know what it does and does not fix: `kubectl rollout history deploy/dokeo` then `kubectl rollout undo deploy/dokeo --to-revision=N`; `kubectl rollout pause` to freeze a bad progressive rollout; `kubectl scale --replicas=` and temporarily raising HPA `minReplicas`; `kubectl cordon` and `drain --ignore-daemonsets --delete-emptydir-data` for a bad node; `kubectl delete pod` on a single CrashLoopBackOff pod (useless if the image is broken, useful if it is a stuck init); `kubectl get events -A --sort-by=.lastTimestamp` as the first command every time. Know that ArgoCD with `selfHeal: true` will revert your manual `undo` within minutes, so the durable mitigation is `git revert` on the app-of-apps repo or `argocd app set --sync-policy none` first, and that `kubectl rollout undo` changes the pod-template-hash so your dashboards' version labels change too.",
-   "minutes": 25,
-   "resource": {
-    "label": "Kubernetes docs - Deployments: Rolling Back a Deployment",
-    "url": "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-back-a-deployment"
-   }
-  },
-  {
-   "name": "Data-layer mitigation on Kaupex Postgres",
-   "learn": "Read `pg_stat_activity` for the incident view: `state`, `wait_event_type`, `wait_event`, `xact_start`, `query_start`, and `pg_blocking_pids(pid)` to find the head of a lock queue. Know the difference between `pg_cancel_backend(pid)` (cancels the statement, keeps the session) and `pg_terminate_backend(pid)` (kills the session and rolls back), and that killing an `idle in transaction` session that holds an `ACCESS EXCLUSIVE` lock unblocks everything behind it. Know the emergency settings you can `ALTER SYSTEM SET` and `pg_reload_conf()` without a restart: `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`. Know what not to do: terminating the walsender to a replica, or a long-running `VACUUM` on a table near wraparound, converts a slow incident into an outage.",
-   "minutes": 20,
-   "resource": {
-    "label": "PostgreSQL docs - The Cumulative Statistics System (pg_stat_activity)",
+    "label": "PostgreSQL docs: The Cumulative Statistics System (pg_stat_activity)",
     "url": "https://www.postgresql.org/docs/current/monitoring-stats.html"
    }
   },
   {
-   "name": "Workflow-engine incidents: stuck and poisoned Temporal workflows",
-   "learn": "Diagnose a Kaupex incident where hundreds of workflows are stuck: `temporal workflow list --query 'ExecutionStatus=\"Running\" AND WorkflowType=\"Onboarding\"'`, `temporal workflow describe -w <id>` to see pending activities and their retry state, `temporal task-queue describe` to confirm workers are polling. Know the mitigation ladder: restart workers (safe, execution is durable), `temporal workflow signal` to nudge a waiting workflow, `temporal workflow reset -w <id> --event-id N --reason` to replay from before a bad activity, `temporal workflow cancel` (cooperative) versus `terminate` (immediate, no cleanup), and batch versions of each. Understand the poison-pill pattern where one activity fails forever with an unbounded retry policy and starves the task queue, and why the postmortem action item is a `maximumAttempts` and a non-retryable error type, not a bigger worker pool.",
+   "name": "Before/after methodology: proving the fix",
+   "learn": "A load report is an experiment, so control the variables: same script, same executor and rate, same duration, same dataset, same cluster state (warm or cold identically, with a 2-minute warm-up scenario excluded from thresholds), and change exactly one thing between runs. Record the environment in the report header (image digest, replica count, requests and limits, Postgres settings, node CPU model), because a 'fix' that shipped alongside a replica bump proves nothing. Report throughput at the fixed arrival rate, p50/p95/p99 and max, error rate, dropped_iterations, and the resource that saturated, with Grafana panels over identical time ranges. Run each configuration at least twice and quote the worse run; if run-to-run variance exceeds the improvement you have not proven anything and must say so. Codify the winning thresholds into the script and wire `k6 run` into CI on a nightly schedule against staging so the next regression is a red job, not a customer call.",
    "minutes": 20,
    "resource": {
-    "label": "Temporal CLI docs - temporal workflow commands (describe, signal, reset, cancel, terminate)",
-    "url": "https://docs.temporal.io/cli/command-reference/workflow"
+    "label": "Grafana k6 docs: Automated performance testing",
+    "url": "https://grafana.com/docs/k6/latest/testing-guides/automated-performance-testing/"
    }
   },
   {
-   "name": "Alert hygiene: symptoms not causes, grouping, inhibition, silences",
-   "learn": "Audit every DefenderMate alert against the rule that a page must be urgent, actionable, and about a user-visible symptom (SLO burn rate, error ratio, latency), with cause-based alerts (pod restarts, CPU) demoted to tickets or dashboards. In Alertmanager, configure `route.group_by` so one incident is one notification rather than 40, `group_wait` and `group_interval` to batch, `repeat_interval` long enough not to re-page during the incident, and `inhibit_rules` so a cluster-down alert suppresses every downstream service alert. Know `amtool silence add alertname=... --duration=2h --comment='INC-014'` and that silences during an incident are logged in the timeline, and put a `runbook_url` annotation on every paging rule so the responder lands on the mitigation steps, not a search box.",
+   "name": "Overload, Little's law and load shedding",
+   "learn": "Little's law (concurrency = throughput x latency) explains the cliff: once a server's concurrency limit is full, every extra request queues, latency rises linearly with queue depth, and throughput flattens or falls as context switching and GC eat CPU. The SRE response is to fail fast and cheaply: bound the queue, return 503 or 429 with `Retry-After` immediately instead of letting requests time out slowly, reject low-criticality traffic (batch ingestion) before interactive traffic, and never let health checks fail under load, which turns overload into an outage. Implement one concrete limiter in Kaupex (uvicorn `--limit-concurrency`, or an ASGI middleware holding an `asyncio.Semaphore` per route class) and show with k6 that at 2x the breakpoint the p99 of accepted requests stays flat while rejections rise, rather than every request degrading. Understand the chapter's client-side adaptive throttling (reject locally when requests far exceed accepts) as what you recommend when the server is not yours to change.",
    "minutes": 20,
    "resource": {
-    "label": "Prometheus docs - Alertmanager (grouping, inhibition, silences)",
-    "url": "https://prometheus.io/docs/alerting/latest/alertmanager/"
+    "label": "Google SRE Book: Handling Overload",
+    "url": "https://sre.google/sre-book/handling-overload/"
    }
   },
   {
-   "name": "On-call design and escalation policies",
-   "learn": "Set up a real schedule and escalation chain in Grafana IRM (or PagerDuty free tier): primary, secondary after a 5-minute unacknowledged timeout, then the engineering lead, with an override mechanism for hand-offs and a weekly rotation. Know the SRE numbers: no more than two incidents per 12-hour shift so responders can actually do postmortems, and page volume is a reliability metric, not a badge. Decide what the FDE embedded in a customer's rotation looks like: who pages you, through which system, with what SLA in the SOW, and what you do when the customer's own on-call does not acknowledge. Write the hand-off note format: open incidents, known-flaky alerts, changes scheduled in the next 24 hours.",
+   "name": "Retry storms and cascading failures",
+   "learn": "Retries are load multipliers: a client retrying three times turns a 10 percent slowdown into a 4x surge exactly when the server can least take it, and a worker pool retrying a slow dependency exhausts its own threads and takes out a healthy service upstream. Learn the chapter's triggers (process death, deploys, organic growth, planned changes) and mitigations: exponential backoff with full jitter, a retry budget (retries capped near 10 percent of requests per client), retry only idempotent calls and only on specific errors (never on 4xx, never on a timeout without a deadline), deadline propagation so a downstream call cannot outlive its caller's timeout, and circuit breakers that stop calling a dependency that keeps failing. Reproduce a storm on your cluster: run k6 against Kaupex while NetworkChaos delays Postgres, watch the LLM and HubSpot retry code in Kaupex amplify the queue, then add a budget and jitter and re-run to show the difference.",
    "minutes": 15,
    "resource": {
-    "label": "Grafana Cloud docs - Alerting and IRM (schedules, escalation chains)",
-    "url": "https://grafana.com/docs/grafana-cloud/observe-and-act/alert-and-measure-reliability/"
+    "label": "Google SRE Book: Addressing Cascading Failures",
+    "url": "https://sre.google/sre-book/addressing-cascading-failures/"
    }
   },
   {
-   "name": "Customer and executive communication during the incident",
-   "learn": "Write and rehearse the three message types: the initial status post within 15 minutes of a SEV1 ('We are investigating elevated errors affecting X; next update by HH:MM'), the periodic update every 30 minutes even when the content is 'no change, still investigating', and the resolution post with impact window and a promise of a postmortem date. Use the impact / what we know / what we are doing / next update structure and never state a cause you have not confirmed; 'a database issue' becomes the headline the customer repeats to their board and you will spend the postmortem walking it back. Separate the war-room channel from the stakeholder channel and let only the comms lead post in the latter. As the FDE, decide in advance which incidents the customer hears about from you proactively versus from their own monitoring, and write that into the engagement runbook.",
-   "minutes": 30,
-   "resource": {
-    "label": "Atlassian Incident Management Handbook - Incident communication",
-    "url": "https://www.atlassian.com/incident-management/incident-communication"
-   }
-  },
-  {
-   "name": "Writing the blameless postmortem",
-   "learn": "Use the Google template sections and know why each exists: summary with impact in numbers (requests failed, tenants affected, minutes of SLO budget burned, revenue if known), trigger versus root cause versus contributing factors, detection (how long from first bad request to first human knowing, and whether a human or an alert found it), the timeline with UTC timestamps, lessons learned split into what went well / what went wrong / where we got lucky, and action items each with owner, type (prevent, detect, mitigate, process), priority and ticket link. Enforce blamelessness mechanically: no names in the causal chain (roles instead), no counterfactuals ('should have'), and every human action described in terms of what made it reasonable at the time. Write it within 48 hours, circulate for comment before the review meeting, and publish it where the customer can read it.",
-   "minutes": 35,
-   "resource": {
-    "label": "Google SRE Book - Postmortem Culture: Learning from Failure",
-    "url": "https://sre.google/sre-book/postmortem-culture/"
-   }
-  },
-  {
-   "name": "Facilitating the debrief when the customer's team pulled the trigger",
-   "learn": "Run the postmortem meeting as a facilitated debrief rather than a status review: open with the purpose (learning, not accountability), walk the timeline asking 'what did you see at that moment' and 'what made that the obvious next step' instead of 'why did you do that', and pull out the tacit knowledge (who knew the runbook was stale, who had seen this error before) that never appears in tickets. Know how to handle the hardest case for an FDE: the customer's engineer ran the migration that caused the outage, their manager is in the room, and your postmortem has to be honest about the trigger without making the vendor look like it is assigning blame. Practise redirecting 'who' questions to 'what conditions' and recording disagreements about causation rather than forcing consensus.",
+   "name": "Principles of chaos: hypothesis, blast radius, abort criteria",
+   "learn": "Chaos is an experiment, not a stunt: define steady state as measurable outputs (the SLIs from topic 20: Kaupex task completion rate, API p95, Temporal workflow success rate), write a hypothesis ('killing one worker pod causes zero failed workflows and under 60 s of added completion latency'), inject a real-world event (process death, network delay, dependency outage, disk full, clock skew), and compare steady state during and after. Minimise blast radius (one namespace, one pod, staging first, 30 s duration, a named owner watching, an abort condition tied to a dashboard panel), automate the experiment once understood, and only then run it in production with the customer's written sign-off. Write every experiment as a one-page card before running it: hypothesis, scope, method, abort criteria, expected and actual observations, timeline, recovery time, follow-up tickets. Those cards are the 'chaos notes' deliverable and exactly what a customer's risk or change board will ask to see.",
    "minutes": 20,
    "resource": {
-    "label": "Etsy Debriefing Facilitation Guide (GitHub)",
-    "url": "https://github.com/etsy/DebriefingFacilitationGuide"
+    "label": "Principles of Chaos Engineering",
+    "url": "https://principlesofchaos.org/"
    }
   },
   {
-   "name": "Action items that actually close",
-   "learn": "Turn each lesson into an action item that passes the test in the SRE Workbook chapter: specific, has one owner, has a due date, is tracked as a ticket with a priority that competes honestly with feature work, and is classified so the mix is visible (if every item is 'add an alert' and none is 'prevent', say so). Distinguish the immediate fix from the systemic fix and record both. Set up the review loop: a monthly check of open postmortem action items with the customer, and a rule that a repeat incident with an unclosed action item is escalated as a process failure, not another SEV. Include near-misses in the process; the cheapest postmortem is the one for an incident that did not quite happen.",
-   "minutes": 15,
-   "resource": {
-    "label": "Google SRE Workbook - Postmortem Culture: Learning from Failure",
-    "url": "https://sre.google/workbook/postmortem-culture/"
-   }
-  },
-  {
-   "name": "Incident metrics and the monthly reliability report",
-   "learn": "Compute and report time-to-detect, time-to-acknowledge, time-to-mitigate and time-to-resolve per incident from the timeline, incident count by severity per month, and SLO budget consumed per incident, and know why an averaged MTTR across heterogeneous incidents is a vanity number that hides one four-hour outage behind fifty two-minute blips. Map your SEV definitions onto the customer's contractual SLA (monthly availability percentage, exclusions for scheduled maintenance and customer-caused issues, the service-credit process) so the reliability report answers the question their finance team will ask. Build the one-page monthly format: budget remaining, incidents with links to postmortems, open action items with ages, and one recommendation.",
+   "name": "Chaos Mesh on k3s: install, scope, safety",
+   "learn": "Install with `helm repo add chaos-mesh https://charts.chaos-mesh.org`, `kubectl create ns chaos-mesh`, then `helm install chaos-mesh chaos-mesh/chaos-mesh -n chaos-mesh --set chaosDaemon.runtime=containerd --set chaosDaemon.socketPath=/run/k3s/containerd/containerd.sock`; the socket path is the k3s-specific gotcha (k3s bundles its own containerd) and getting it wrong leaves experiments that never reach the Injected phase. Understand what you installed: chaos-controller-manager reconciles the CRDs, chaos-daemon is a privileged hostPID DaemonSet that uses nsenter, tc and iptables inside target pods (exactly the component a customer security team will flag, see topic 10), and the dashboard on port 2333 (`kubectl -n chaos-mesh port-forward svc/chaos-dashboard 2333:2333`) requires a ServiceAccount token unless you disable security mode for a lab. Every experiment scopes via `spec.selector` (namespaces, labelSelectors, pods by name) and `spec.mode` (one, all, fixed, fixed-percent, random-max-percent) plus `spec.duration`; inspect with `kubectl describe podchaos <name>` (Records with Injected and Recovered phases), pause with the annotation `experiment.chaos-mesh.org/pause: \"true\"`, and `kubectl delete` to recover. Never install it in a customer cluster without restricting the controller to target namespaces and agreeing a change window.",
    "minutes": 20,
    "resource": {
-    "label": "Atlassian Incident Management Handbook - Common incident management metrics",
-    "url": "https://www.atlassian.com/incident-management/kpis/common-metrics"
+    "label": "Chaos Mesh docs: Install Chaos Mesh using Helm",
+    "url": "https://chaos-mesh.org/docs/production-installation-using-helm/"
    }
   },
   {
-   "name": "Wheel of Misfortune and disaster role-playing",
-   "learn": "Design and run a tabletop from the SRE book's format: a game master holds a real past incident (or one of your topic 22 chaos scenarios) as a script, reveals information only when the responder asks the right question or runs the right command, injects a twist at the ten-minute mark (a second alert, a customer exec joining the bridge), and stops at 30 minutes for a debrief. Score the responder on declaration time, mitigation-first behaviour, communication cadence and timeline quality, not on finding the root cause. Rotate roles so you play IC, scribe and game master at least once each. Keep the scenario bank versioned in the Dokeo repo and add one scenario after every real incident.",
+   "name": "PodChaos under load: pod-kill, pod-failure, container-kill",
+   "learn": "With a constant-arrival-rate k6 run against Kaupex, apply `kind: PodChaos` with `action: pod-kill` (deletes the pod; `gracePeriod: 0` means SIGKILL with no drain, which is what a node crash looks like), `action: pod-failure` with `duration: '60s'` (swaps the container image for a pause image so the pod exists but serves nothing, which is what a wedged process looks like), and `action: container-kill` with `containerNames` to kill only the app container and exercise restartPolicy without rescheduling. Observe three clocks: time until readiness removes the pod from the Service (`kubectl get endpointslices -w`), time until the replacement is Ready (`kubectl get events --sort-by=.lastTimestamp -w`), and what k6 recorded in `http_req_failed` and the error strings in that window. Expect to find that a single-replica Deployment gives a hard outage of image-pull plus startup time, that two replicas without a PodDisruptionBudget still both die during a node drain, and that a readiness probe with `periodSeconds: 10` leaves up to 10 s of traffic going to a dead pod. Fix each and re-run until the hypothesis holds; that loop is the chaos notes.",
    "minutes": 25,
    "resource": {
-    "label": "Google SRE Book - Accelerating SREs to On-Call and Beyond (Disaster Role Playing, Wheel of Misfortune)",
-    "url": "https://sre.google/sre-book/accelerating-sre-on-call/"
+    "label": "Chaos Mesh docs: Simulate Pod Faults",
+    "url": "https://chaos-mesh.org/docs/simulate-pod-chaos-on-kubernetes/"
+   }
+  },
+  {
+   "name": "NetworkChaos: latency, loss and partition to Postgres and Temporal",
+   "learn": "Apply `kind: NetworkChaos` to the Kaupex API pods with `direction: to` and a `target` selector on the Postgres pods (or `externalTargets: ['<managed-db-ip>']` for a database outside the cluster) to inject `action: delay` (`latency: '200ms', jitter: '50ms', correlation: '25'`), `action: loss` (`loss: '10'`), `action: partition`, and `action: bandwidth`. Underneath it is tc netem and iptables inside the target pod's network namespace, so only that pod is affected. Watch which timeouts fire and in what order: libpq `connect_timeout`, Postgres `statement_timeout`, SQLAlchemy `pool_timeout`, uvicorn keep-alive, Traefik's ingress timeouts, and k6's request timeout (default 60 s); if nothing fires inside your SLO the customer sees a hang, not an error, and that is the finding. Repeat against the Temporal frontend service: delay makes worker polls slow but workflows keep progressing; a partition stops workers completing tasks, heartbeats lapse, and activities time out and retry when the partition heals. Write down the observed timeout chain and set the missing timeouts so the system fails inside the latency budget instead of hanging.",
+   "minutes": 25,
+   "resource": {
+    "label": "Chaos Mesh docs: Simulate Network Faults",
+    "url": "https://chaos-mesh.org/docs/simulate-network-chaos-on-kubernetes/"
+   }
+  },
+  {
+   "name": "Kubernetes termination semantics and resource pressure (StressChaos)",
+   "learn": "Know the termination sequence precisely: an API delete marks the pod Terminating and, in parallel, the endpoint controller removes it from EndpointSlices; the kubelet runs the preStop hook, sends SIGTERM to PID 1 of each container, waits `terminationGracePeriodSeconds` (default 30), then SIGKILLs. Because endpoint removal and SIGTERM race, a server that exits instantly on SIGTERM still drops in-flight requests; add `preStop: exec: command: ['sleep', '5']` and make uvicorn and the Temporal worker drain rather than exit. If the container starts with `sh -c 'python ...'` without `exec`, sh is PID 1, ignores SIGTERM, and every shutdown takes the full 30 s then a SIGKILL. Chaos Mesh pod-kill with gracePeriod 0 and `kubectl delete pod --grace-period=0 --force` skip all of this. PodDisruptionBudgets (`minAvailable`) are honoured only by the Eviction API (`kubectl drain`, autoscalers), not by deletes or chaos. Use `kind: StressChaos` with `stressors: { cpu: { workers: 2, load: 100 }, memory: { workers: 1, size: '256MB' } }` inside the Kaupex worker's cgroup to produce CPU throttling (`container_cpu_cfs_throttled_periods_total` climbing) and an OOMKilled restart (exit code 137; `kubectl describe pod` shows Last State Terminated, Reason OOMKilled), then size requests and limits from that evidence instead of guesses.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kubernetes docs: Pod Lifecycle (termination of Pods)",
+    "url": "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/"
+   }
+  },
+  {
+   "name": "Temporal worker killed mid-workflow: timeouts, retries, replay",
+   "learn": "Kill the Kaupex Temporal worker pod (pod-kill, gracePeriod 0) while a workflow is inside an activity and trace exactly what the server does. Nothing happens immediately: the server has no liveness signal from a dead worker, so the activity stays started until its Start-To-Close timeout or its Heartbeat timeout expires; then the server records ActivityTaskTimedOut and, if the retry policy allows (default: initial interval 1 s, backoff coefficient 2.0, maximum interval 100x initial, unlimited attempts), schedules the next attempt, which any live worker polling the task queue picks up. Consequences you must be able to state cold: with a 1-hour Start-To-Close and no Heartbeat timeout the workflow stalls for an hour; a 30 s Heartbeat timeout plus `activity.heartbeat(progress)` bounds detection to 30 s and lets the retry resume from `activity.info().heartbeat_details`; Schedule-To-Start timeouts are non-retryable by design (they mean no worker is polling) so leave them unset. Workflow tasks on the dead worker time out after the Workflow Task timeout (default 10 s), the sticky cache is gone, and a fresh worker replays the full event history to rebuild state, which is why workflow code must be deterministic. Verify with `temporal workflow describe -w <id>` (Pending Activities: attempt, lastFailure, lastWorkerIdentity), `temporal workflow show -w <id>` for the event list, and `temporal task-queue describe -t kaupex` to see which worker identities are polling. Time the gap from kill to workflow completion and record it in the chaos notes.",
+   "minutes": 35,
+   "resource": {
+    "label": "Temporal docs: Detecting Activity failures (timeouts, heartbeats, retries)",
+    "url": "https://docs.temporal.io/encyclopedia/detecting-activity-failures"
+   }
+  },
+  {
+   "name": "Temporal graceful shutdown, idempotency and worker tuning under load",
+   "learn": "Because an activity may have performed its side effect (HubSpot write, LLM call, Postgres insert) before the worker died, retries mean at-least-once execution: every activity that touches the outside world needs an idempotency key derived from `activity.info().workflow_id` plus `activity_id`, `INSERT ... ON CONFLICT DO NOTHING`, or a lookup-before-write, and LLM calls should be cached by prompt hash so a retry does not double the bill. Make shutdown graceful in the Python SDK: `Worker(..., graceful_shutdown_timeout=timedelta(seconds=25))` (below terminationGracePeriodSeconds) stops polling, lets running activities finish or observe `activity.wait_for_worker_shutdown()` and heartbeat their progress, and cancels whatever remains; wire SIGTERM to `await worker.shutdown()` so a routine rollout is not an unplanned chaos experiment. Then load-test the worker path: run k6 at a rate that starts workflows, watch `temporal_worker_task_slots_available` (label `worker_type`) hit zero and `temporal_activity_schedule_to_start_latency` climb, and tune `max_concurrent_activities`, `max_concurrent_workflow_tasks`, `max_concurrent_activity_task_polls` (default 5), `max_cached_workflows`, or add replicas; if the pod's CPU is pinned, more slots will not help. Expose SDK metrics with `Runtime(telemetry=TelemetryConfig(metrics=PrometheusConfig(bind_address='0.0.0.0:9000')))` so they sit on the same Grafana dashboard as the k6 series.",
+   "minutes": 30,
+   "resource": {
+    "label": "Temporal docs: Worker performance tuning",
+    "url": "https://docs.temporal.io/develop/worker-performance"
    }
   }
  ],
  "outcomes": [
-  "You can take a paging alert on DefenderMate and, within five minutes, have declared a severity, named yourself IC, opened the incident channel with a pinned state summary, and issued one timeboxed mitigation task to a named person, all recorded with UTC timestamps.",
-  "You can run a 30-minute Wheel of Misfortune as IC with a friend as game master and be scored by them on the rubric (declaration time, mitigation before diagnosis, update cadence, no unassigned tasks) at or above the threshold you set in the playbook.",
-  "You can execute the Kubernetes and Postgres mitigation menu from memory on your k3s cluster: `kubectl rollout undo` to a named revision with ArgoCD self-heal disabled first, HPA minReplicas raised, a blocking Postgres session found via `pg_blocking_pids` and terminated, each with the observed effect written to the timeline.",
-  "You can diagnose a Kaupex incident where workflows are stuck on a poisoned activity using `temporal workflow describe` and `task-queue describe`, mitigate with a reset or terminate, and state the retry-policy change that prevents recurrence.",
-  "You can write a customer-facing status update in under three minutes that states impact, what is known, what is being done and the next update time, with no unconfirmed cause, and a resolution message that commits to a postmortem date.",
-  "You can produce a blameless postmortem within 48 hours of an incident that a reviewer confirms has no names in the causal chain, no counterfactual language, impact quantified in requests and SLO budget, a UTC timeline matching the Grafana annotations, and action items each with owner, type, priority and ticket link.",
-  "You can audit your Grafana or Alertmanager rules and show that every paging alert is symptom-based with a `runbook_url`, that related alerts group into one notification, and that a cluster-level alert inhibits its downstream children.",
-  "You can present a one-page monthly reliability report to a non-engineer that includes SLO budget remaining, incidents by severity with postmortem links, time-to-detect and time-to-mitigate per incident, and the age of every open action item."
+  "You can write a k6 script with a ramping-arrival-rate breakpoint scenario, tagged requests, a custom Trend for end-to-end task completion and thresholds derived from the Kaupex SLOs, run it from a separate host, and have results streaming into Prometheus so k6 and application RED metrics share one Grafana time axis.",
+  "You can name the first saturated resource in Kaupex under load within 15 minutes using `kubectl top`, `py-spy dump`, `pg_stat_activity` and the k6 timing breakdown, and state whether it is CPU, event-loop blocking, threadpool, connection pool or Postgres, with the evidence line for each.",
+  "You can produce a before/after load report in which exactly one variable changed, both configurations were run twice, the environment is recorded down to the image digest, and the p95/p99 improvement at fixed arrival rate exceeds run-to-run variance.",
+  "You can explain, with numbers from your own runs, how much a closed-model test under-reported latency versus the open model at the same nominal load, and what a non-zero `dropped_iterations` meant.",
+  "You can install Chaos Mesh on k3s with the correct containerd socket, scope an experiment to one namespace and one pod, run PodChaos, NetworkChaos and StressChaos against Kaupex while k6 is live, and read the outcome from EndpointSlice changes, events and `http_req_failed`.",
+  "You can kill a Temporal worker mid-activity and predict, before looking, how long until the activity retries and on which worker, confirm it with `temporal workflow describe` and `temporal task-queue describe`, and name the change (heartbeat timeout, idempotency key, graceful shutdown) that cuts recovery time.",
+  "You can implement a load-shedding limiter and demonstrate with k6 that at 2x the breakpoint the accepted requests' p99 stays flat while 503s rise, and explain to a customer's ops lead why that beats uniform degradation.",
+  "You can write a one-page chaos experiment card (hypothesis, blast radius, abort criteria, observations, recovery time, follow-ups) that a customer's change advisory board would accept."
  ],
  "failureModes": [
-  "Three engineers on the bridge each 'just try something' in production at the same time; one rolls back the deployment while another applies a hotfix, ArgoCD self-heal reverts both, and the postmortem timeline cannot say which change fixed it or when the customer was actually impacted.",
-  "The first status-page update says 'a database issue' because someone saw connection errors; the real cause is a certificate that expired on the ingress, the customer's CTO has already forwarded 'database issue' to their board, and the postmortem review spends twenty minutes on the retraction instead of the fix.",
-  "The IC is also the strongest debugger, disappears into a terminal for fifteen minutes, nobody posts the 30-minute update, and the customer's engineering manager escalates to the vendor's CEO because the channel went silent.",
-  "A responder terminates every 'idle in transaction' backend in `pg_stat_activity` to clear a lock queue, including the logical-replication slot consumer, and the analytics replica falls two hours behind, producing a second incident during the first one.",
-  "The postmortem names the customer's junior engineer as having 'run the migration without approval', their manager refuses to sign off, the document is never published, and the same migration pattern causes a repeat outage three months later because no action item was ever created.",
-  "Twelve action items are written, none has a due date or ticket, all are 'add alert for X', and at the monthly review nine are still open; the customer concludes the vendor treats postmortems as paperwork.",
-  "A Kaupex activity with an unbounded retry policy fails forever against a decommissioned downstream API, the retries consume the entire task queue's worker capacity, and the team scales the worker pool from 4 to 40 pods before anyone runs `temporal workflow describe` and sees the single failing activity."
+  "The load generator ran on the same VPS as the k3s node; CPU contention manufactured a bottleneck at 300 rps that did not exist, and a sprint went into tuning uvicorn for a phantom.",
+  "A closed-model test with 20 VUs reported a 180 ms p95 and 'passed'; on go-live morning real users arrived at an open rate, requests piled into the uvicorn backlog, and p95 hit 9 s while the test dashboards were being shown to the customer.",
+  "Every request was tagged by its full URL including UUIDs, so k6 and then Prometheus remote-write produced tens of thousands of series, the summary was unreadable, the write endpoint hit cardinality limits, and the one slow endpoint stayed invisible.",
+  "The Temporal activity writing to HubSpot had a 2-hour Start-To-Close and no Heartbeat timeout; a node reboot during patching killed the worker and 340 workflows sat 'Running' for two hours, the customer's ops team re-submitted them by hand, and because the activity had no idempotency key HubSpot ended up with duplicate records.",
+  "Chaos Mesh went onto a customer cluster without a target-namespace restriction, a fixed-percent PodChaos with a typo in its labelSelector matched every pod including ingress, and the experiment card had no abort condition and no one watching the dashboard.",
+  "Client retries with no jitter and no budget turned a 30 s Postgres failover into a 15-minute outage: API pods exhausted their pools retrying, readiness probes that hit the database failed, Kubernetes pulled every pod out of the Service, and the LLM gateway retried on top of it all.",
+  "A before/after report showed a 40 percent p95 improvement that was actually a warm cache and a replica count that changed between runs; the fix was reverted in production two weeks later when the regression reappeared, and the report's credibility with the customer went with it."
  ],
  "interviewQuestions": [
-  "You are on-site with a customer and their production deployment of your platform starts returning 500s to a third of tenants. Their platform team is on the bridge, their VP joins ten minutes later, and your own engineering team is asleep in another timezone. Walk me through the first fifteen minutes: who is IC, what you say, what commands you run, what you post and where, and what you refuse to do.",
-  "Design the severity ladder and paging policy for a multi-tenant LLM classification service with an SLO of 99.9 percent successful webhook deliveries. Which alerts page, which create tickets, how do you avoid 40 notifications for one incident, and what does a single tenant's outage map to?",
-  "An incident was caused by a customer engineer running a schema migration in production without a review. Write the root-cause section of the postmortem out loud so that it is honest, blameless, and something their manager will sign. Then tell me the action items and who owns each.",
-  "During an incident someone proposes rolling forward with a hotfix rather than rolling back. Under what conditions do you accept that, under what conditions do you overrule it as IC, and how do you handle the fact that the person proposing it is the customer's principal engineer?",
-  "Your postmortem shows detection took 45 minutes because the customer noticed before any alert fired. Debug the alerting: what did the existing alerts measure, what should they have measured, how would you structure the new rules in Alertmanager or Grafana, and how would you prove the new alert would have fired for this incident?",
-  "The customer's finance team asks for your MTTR for the quarter. Explain why you would push back on a single averaged number, what you would report instead, how it ties to their contractual SLA and exclusions, and how you would present it in one page.",
-  "Describe a Temporal or queue-based system in which one bad message or workflow starves everything else. How do you detect it during the incident with the CLI, what is the immediate mitigation, and what retry-policy or error-classification change goes into the postmortem so it does not recur?"
+  "A customer says 'we need to know if the system can handle 5,000 concurrent users on Monday.' Turn that into a k6 test plan: which executor, what rate and duration, which thresholds, where the generator runs, and what you will and will not be able to claim from the result.",
+  "Your load test shows p99 climbing steeply at 400 rps while CPU on the API pods sits at 35 percent. Walk me through the next ten minutes: what you look at, in what order, and what each of the three most likely causes looks like in the evidence.",
+  "Explain coordinated omission to a customer engineer who insists their 50-thread JMeter run proved the system is fine. What would you change in the test, and what do you expect the new numbers to show?",
+  "Design the timeout and retry policy for a Temporal activity that writes to a third-party CRM with a p99 of 4 s and occasional 60 s stalls. Cover Start-To-Close, Heartbeat, the retry policy, idempotency, and exactly what happens when the worker pod is killed halfway through.",
+  "Kubernetes deletes a pod during a rolling deploy and users see connection resets for about three seconds even though the app handles SIGTERM. Explain the race that causes it and the two changes that eliminate it.",
+  "You have one afternoon in a customer's staging cluster to run chaos experiments before a go-live. Which three experiments do you run, what is the steady-state hypothesis for each, how do you control blast radius, and how do you write up the results so their change advisory board accepts them?",
+  "Under a spike, would you rather the API degrade uniformly (every request slower) or shed load (some 503s, the rest fast)? Defend your answer for an interactive LLM workflow product and describe how you would implement and prove it."
  ],
- "proofOfWork": "A public `incident-kit` directory in the Dokeo repository that a hiring manager can read in ten minutes and a friend can use to run a drill in thirty. It contains: (1) a one-page incident playbook with the SEV ladder, role cards, the IC decision-loop script, the status-update templates and the Kubernetes / Postgres / Temporal mitigation menu with exact commands; (2) three Wheel of Misfortune scenario scripts derived from the topic 22 chaos experiments, each with the game master's hidden timeline, the information-release triggers and the scoring rubric; (3) a recorded 30-minute drill (screen and audio) in which you are IC and a friend is game master, with the exported incident channel timeline and the Grafana dashboard screenshot showing detection, mitigation and recovery annotations; (4) the resulting postmortem written to the Google template, redlined by a second reader for blame language and counterfactuals, with every action item linked to an issue in the repo and a `postmortem-review.md` recording what the reviewer challenged; and (5) the Alertmanager or Grafana alerting config diff that came out of the postmortem, showing the symptom-based rule, the `runbook_url` annotation, and the inhibition rule, plus a `promtool test rules` or equivalent unit test proving the new alert would have fired on the recorded incident data."
+ "proofOfWork": "A public repository `kaupex-loadchaos` containing: the k6 scripts (smoke, average-load, ramping-arrival-rate breakpoint, and a mixed two-scenario run) with thresholds derived from the Kaupex SLOs and a `handleSummary` that emits a markdown table; Chaos Mesh manifests for PodChaos, NetworkChaos to Postgres, NetworkChaos to the Temporal frontend, and StressChaos, plus a Makefile that installs Chaos Mesh on k3s with the correct containerd socket, runs each experiment while k6 is live, and tears everything down; and a `REPORT.md` with the breakpoint number before and after the single fix, Grafana panels over identical time ranges, the observed timeout chain to Postgres, and a Temporal recovery timeline measured with `temporal workflow describe` for a worker killed mid-activity, showing detection time falling from the original Start-To-Close timeout to under 30 s after adding a heartbeat timeout and an idempotency key. A reviewer should be able to clone it, point it at any FastAPI plus Temporal deployment through `BASE_URL` and a namespace, and reproduce all three findings in under an hour."
 }

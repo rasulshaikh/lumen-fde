@@ -1,199 +1,200 @@
 {
-  "i": 24,
-  "topic": "High availability and disaster recovery",
-  "track": "D. Reliability and Observability",
-  "month": 3,
-  "hours": 6.0,
-  "why": "Every enterprise deal an FDE touches has a security questionnaire line that reads 'state your RTO and RPO' and a CTO who asks 'what happens if the region goes down' in the second architecture review, and the answer determines whether the pilot is allowed near production data. The FDE also inherits the customer's existing Postgres, their single-AZ Kubernetes cluster and their untested nightly dump, and is the person on the bridge when a migration drops a table or an AZ degrades. An FDE who has personally restored a database to a timestamp and measured the clock can make commitments and price them; one who has only read about it will either overpromise or stall the deal.",
-  "prerequisites": [
-    "Topic 13 (AWS networking and compute): what an Availability Zone and a Region are, subnets per AZ, cross-zone load balancing, and why an ALB in one AZ is not redundant.",
-    "Topic 14 (AWS data): you have already run an RDS point-in-time restore and a forced Multi-AZ failover; this topic does the self-managed Postgres equivalent and then zooms out to the whole system.",
-    "Topic 8 (Kubernetes production ops): Deployments, StatefulSets, PersistentVolumes, node drains and readiness probes, so PodDisruptionBudgets and topology spread constraints have something to attach to.",
-    "Topic 20 (SRE fundamentals): SLIs, SLOs and error budgets; RTO and RPO are the same discipline applied to the recovery half of an outage.",
-    "Working Postgres: psql, what WAL and checkpoints are, that replicas replay WAL, and how to run pg_dump; Topic 29 goes deeper but the vocabulary is assumed now.",
-    "A target to drill on: the Kaupex Postgres on the Hetzner VPS (or a clone of it in Docker) plus an S3-compatible bucket you control (Hetzner Object Storage, Backblaze B2 or AWS S3) for the WAL archive; budget a few USD and about 20 GB."
-  ],
-  "subtopics": [
-    {
-      "name": "Availability arithmetic: nines, serial and parallel composition",
-      "learn": "Convert nines into budget you can feel: 99.9% is roughly 43 minutes of downtime per month, 99.95% about 22, 99.99% about 4.4. Hard dependencies in series multiply, so an app at 99.95% on a database at 99.95% behind DNS at 99.99% caps at about 99.89% before you write a line of code; redundant components in parallel give 1-(1-a)^n only when their failures are independent, and a shared deploy pipeline, shared AZ or shared control plane makes them correlated. Availability equals MTBF/(MTBF+MTTR), which is why a measured RTO is a direct lever on the SLO. Practice: take the Kaupex stack (VPS, Postgres, object storage, LLM provider, DNS) and compute its honest ceiling, marking each dependency hard or soft.",
-      "minutes": 20,
-      "resource": {
-        "label": "AWS Well-Architected Reliability Pillar - Availability",
-        "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/availability.html"
-      }
-    },
-    {
-      "name": "RTO and RPO as negotiated business numbers, per tier",
-      "learn": "RTO is the elapsed time from declaring a disaster to the service serving users again, and it includes detection and decision time, not just the restore; RPO is the maximum window of committed data you may lose, expressed in time. Both are set from business impact (revenue per hour, regulatory retention, contractual penalties), never from what the current infrastructure happens to offer, and cost rises steeply as either approaches zero. Build a tier table for a customer workload: Tier 0 for auth and payments (RTO 15 min, RPO near zero), Tier 1 for core product (RTO 1 h, RPO 5 min), Tier 2 for analytics and logs (RTO 24 h, RPO 24 h). Always record objective next to measured; the gap column is the DR plan.",
-      "minutes": 20,
-      "resource": {
-        "label": "Reliability Pillar - REL13-BP01 Define recovery objectives for downtime and data loss",
-        "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_planning_for_recovery_objective_defined_recovery.html"
-      }
-    },
-    {
-      "name": "Failure domains, correlated failure and blast radius",
-      "learn": "Enumerate the failure domains of a stack explicitly: host, AZ, Region, cloud account, control plane, deploy pipeline, DNS zone, identity provider, TLS certificate, a single KMS key, a single Terraform state file. Redundancy only protects against domains you have actually separated; two replicas in one AZ behind one single-AZ load balancer is one failure domain wearing three costumes. Learn the correlated failures that defeat N+1: the same bad deploy rolled to all AZs, one certificate expiring everywhere, one account-level quota, one shared secret rotated. Understand cell-based architecture and shuffle sharding as ways to cap the fraction of customers any single failure can reach, and draw the dependency graph for Kaupex with each edge labelled hard or soft.",
-      "minutes": 20,
-      "resource": {
-        "label": "Reliability Pillar - Use fault isolation to protect your workload",
-        "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/use-fault-isolation-to-protect-your-workload.html"
-      }
-    },
-    {
-      "name": "Static stability: surviving an AZ loss without the control plane",
-      "learn": "During an AZ impairment the control plane (RunInstances, Auto Scaling launches, volume creation, IAM changes, Kubernetes node provisioning) is the first thing to degrade or throttle, so a design that needs new capacity to recover is not resilient. Statically stable design pre-provisions N+1 across AZs so that losing one AZ requires no launches: three AZs each running at 50% utilisation tolerate one AZ loss with headroom. Prefer data-plane dependencies (Route 53 answers, already-issued credentials, pre-pulled images, warm caches) over control-plane calls in the recovery path, and avoid fallback code paths that only execute during a disaster because they are by definition untested. Map this onto Kubernetes: cluster-autoscaler launching nodes is a control-plane dependency; the fix is spare capacity, not a faster autoscaler.",
-      "minutes": 20,
-      "resource": {
-        "label": "Amazon Builders' Library - Static stability using Availability Zones",
-        "url": "https://aws.amazon.com/builders-library/static-stability-using-availability-zones/"
-      }
-    },
-    {
-      "name": "The four DR strategies and why the data tier decides",
-      "learn": "Know the ladder cold: backup and restore (RTO hours, RPO hours, cheapest), pilot light (data replicated live, compute off, RTO tens of minutes), warm standby (scaled-down full stack, RTO minutes), multi-site active/active (RTO and RPO near zero but requires write partitioning or conflict resolution). Compute is trivially recreatable from IaC and images; data is the constraint, and whatever your replication or archive lag is becomes your real RPO regardless of the slide. Choose per tier rather than per company: most customers should run pilot light for the primary database and backup and restore for everything else. List what the DR region must already contain before the disaster: images, secrets, KMS key grants, IAM roles, service quotas, DNS records, IdP configuration.",
-      "minutes": 20,
-      "resource": {
-        "label": "AWS whitepaper - Disaster recovery options in the cloud",
-        "url": "https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html"
-      }
-    },
-    {
-      "name": "Postgres backup methods: pg_dump, pg_basebackup, WAL archiving",
-      "learn": "pg_dump is logical: it takes a consistent snapshot inside a REPEATABLE READ transaction, writes portable SQL or a custom archive (-Fc, or -Fd with -j N for parallel dump and pg_restore -j for parallel restore), survives major-version upgrades, but cannot recover to a point in time and gets slow past a few hundred GB. pg_basebackup is physical: it copies the whole cluster over the replication protocol (--checkpoint=fast to avoid waiting for the next checkpoint, -X stream to include the WAL generated during the copy, --manifest-checksums=SHA256), is bound to the same major version and architecture, and is the base for PITR. Continuous archiving sets archive_mode=on and archive_command (or archive_library in PG15+) to ship every 16 MB WAL segment off-box, with archive_timeout bounding RPO on idle systems. Match method to failure: logical corruption needs PITR, migration needs pg_dump, RPO in minutes needs WAL archiving.",
-      "minutes": 25,
-      "resource": {
-        "label": "PostgreSQL docs - Chapter 25 Backup and Restore",
-        "url": "https://www.postgresql.org/docs/current/backup.html"
-      }
-    },
-    {
-      "name": "Point-in-time recovery by hand: recovery.signal, restore_command, recovery targets and timelines",
-      "learn": "Restore the base backup into an empty PGDATA, create recovery.signal, set restore_command='cp /archive/%f %p' (or the pgbackrest archive-get equivalent) and choose a target: recovery_target_time='2026-09-05 14:06:30+00', recovery_target_lsn, recovery_target_xid, or recovery_target_name pointing at a pg_create_restore_point() you made before a risky migration. Understand recovery_target_inclusive and recovery_target_action=pause (default) versus promote or shutdown, and that after pause you inspect the data and call pg_wal_replay_resume() to promote. Learn timelines: promotion writes a new .history file and starts a new timeline, so a second attempt after a wrong target needs recovery_target_timeline='latest' or the specific ID to replay the right branch. Watch the log for 'consistent recovery state reached' before trusting anything. Run this on a Kaupex clone and write down the wall-clock time of every phase.",
-      "minutes": 30,
-      "resource": {
-        "label": "PostgreSQL docs - 25.3 Continuous Archiving and Point-in-Time Recovery",
-        "url": "https://www.postgresql.org/docs/current/continuous-archiving.html"
-      }
-    },
-    {
-      "name": "Verifying backups: manifests, checksums and restore-as-test",
-      "learn": "pg_verifybackup validates a base backup against its backup_manifest (file list, sizes, per-file checksums) and confirms the WAL range needed to reach consistency is present (-w to point at the WAL directory, -n to skip WAL parsing, -i to ignore paths). Enable data checksums (initdb --data-checksums, or pg_checksums --enable on a stopped cluster) so torn or bit-rotted pages fail at read time on the primary rather than at restore time in a disaster. Treat a backup as verified only when it has been restored and queried: schedule an automated restore to a scratch instance, run SELECT count(*) on the largest table and the application's smoke query, and alert if the newest recoverable point is older than the RPO. Monitor pg_stat_archiver (failed_count, last_failed_wal, last_archived_time) because a silently failing archive_command is the most common way a PITR chain gets a gap.",
-      "minutes": 20,
-      "resource": {
-        "label": "PostgreSQL docs - pg_verifybackup",
-        "url": "https://www.postgresql.org/docs/current/app-pgverifybackup.html"
-      }
-    },
-    {
-      "name": "pgBackRest in production: stanza, S3 repo, retention and restore --type=time",
-      "learn": "Configure pgbackrest.conf with [global] repo1-type=s3, repo1-s3-bucket, repo1-s3-endpoint, repo1-s3-region, repo1-path, repo1-retention-full=2, repo1-retention-diff, repo1-cipher-type=aes-256-cbc with repo1-cipher-pass, process-max, start-fast=y, and a [kaupex] stanza with pg1-path; point Postgres at it with archive_command='pgbackrest --stanza=kaupex archive-push %p'. Run stanza-create, check (proves archiving works end to end), backup --type=full|diff|incr, info, and expire; understand why every incremental depends on a restorable full and how block incremental (repo-block) shrinks diffs. Restore with restore --type=time --target='...' --target-action=promote, and use --delta to reuse unchanged files in place for a faster RTO. Barman and WAL-G implement the same concepts; the vocabulary transfers.",
-      "minutes": 25,
-      "resource": {
-        "label": "pgBackRest User Guide",
-        "url": "https://pgbackrest.org/user-guide.html"
-      }
-    },
-    {
-      "name": "Streaming replication, synchronous_commit and what RPO zero costs",
-      "learn": "Build a hot standby: standby.signal, primary_conninfo, a physical replication slot on the primary with max_slot_wal_keep_size set so a dead standby cannot fill the primary's disk, hot_standby=on for reads. Learn the synchronous_commit ladder: off, local, remote_write, on (flushed on the standby), remote_apply (visible on the standby), and synchronous_standby_names='ANY 1 (s1, s2)' versus FIRST; with a single synchronous standby, losing it blocks every commit, which is the availability price of RPO zero. Read pg_stat_replication (sent_lsn, write_lsn, flush_lsn, replay_lsn, replay_lag) and derive RPO directly from replay lag; check pg_replication_slots.wal_status for 'lost'. Promote with pg_ctl promote or SELECT pg_promote(), then fence or pg_rewind the old primary so it can never accept writes again; this is why Patroni with a DCS exists.",
-      "minutes": 25,
-      "resource": {
-        "label": "PostgreSQL docs - 26.2 Log-Shipping Standby Servers (streaming, slots, synchronous replication)",
-        "url": "https://www.postgresql.org/docs/current/warm-standby.html"
-      }
-    },
-    {
-      "name": "Managed cross-region replication: RDS replicas, Aurora Global, S3 CRR",
-      "learn": "An RDS cross-region read replica is asynchronous streaming; its ReplicaLag metric is your RPO, promote-read-replica breaks replication and takes minutes, and the promoted instance needs Multi-AZ and automated backups turned on afterwards or you have just created a single point of failure with no backup. Aurora Global Database replicates at the storage layer with typical sub-second lag: managed switchover is planned and lossless, unplanned failover detaches and promotes with RPO equal to lag. S3 Cross-Region Replication copies only new objects unless you run Batch Replication, does not replicate delete markers unless DeleteMarkerReplication is enabled, needs KMS key configuration for encrypted objects, and Replication Time Control adds a 15-minute SLA. DynamoDB global tables are last-writer-wins. In every case the RPO is a lag metric, so alarm on it.",
-      "minutes": 20,
-      "resource": {
-        "label": "Amazon RDS User Guide - Creating a read replica in a different AWS Region",
-        "url": "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.XRgn.html"
-      }
-    },
-    {
-      "name": "Immutable, cross-account backups against ransomware and fat fingers",
-      "learn": "The failure most DR plans forget: any credential that can delete production can usually delete the backups too. Copy backups to a separate backup account with AWS Backup cross-account copy, and lock the destination vault with Vault Lock in compliance mode, which after its cooling-off period cannot be shortened even by the account root; use S3 Object Lock compliance mode for object-store backups. Check the key path: a snapshot encrypted with a customer-managed key is unreadable if that key is scheduled for deletion or the DR account lacks kms:Decrypt and kms:CreateGrant, so use multi-Region keys or re-encrypt on copy and test decrypting from the DR account. For self-hosted Postgres, put the pgBackRest repo bucket in a different account with an IAM policy that allows PutObject and GetObject but not DeleteObject, turn on versioning, and expire old versions with lifecycle rules rather than credentials. This is the 3-2-1 rule made concrete: three copies, two media, one outside the blast radius of the production account.",
-      "minutes": 20,
-      "resource": {
-        "label": "AWS Backup Developer Guide - AWS Backup Vault Lock",
-        "url": "https://docs.aws.amazon.com/aws-backup/latest/devguide/vault-lock.html"
-      }
-    },
-    {
-      "name": "Kubernetes across AZs: topology spread, PodDisruptionBudgets and zonal volumes",
-      "learn": "Spread replicas with topologySpreadConstraints using topologyKey: topology.kubernetes.io/zone, maxSkew: 1, whenUnsatisfiable: DoNotSchedule (ScheduleAnyway when you would rather run unbalanced than not at all), and add a hostname-level podAntiAffinity so two replicas do not share a node. Write PodDisruptionBudgets with percentages: a PDB of minAvailable: 1 on a one-replica Deployment blocks every kubectl drain and every managed node-group upgrade indefinitely, and PDBs never protect against involuntary disruption such as node loss. EBS PersistentVolumes are zonal: set volumeBindingMode: WaitForFirstConsumer in the StorageClass so the volume is created where the pod lands, and understand that after an AZ loss a StatefulSet pod whose volume lives in the dead zone stays Pending until that zone returns, so database redundancy must come from Postgres replication, not from storage. Use one node group per AZ so the autoscaler can rebalance.",
-      "minutes": 25,
-      "resource": {
-        "label": "Kubernetes docs - Pod Topology Spread Constraints",
-        "url": "https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/"
-      }
-    },
-    {
-      "name": "Traffic failover: Route 53 health checks, failover records and the manual switch",
-      "learn": "Route 53 health checks come as endpoint, calculated and CloudWatch-alarm types; with the standard 30-second interval (10 seconds for fast) and FailureThreshold 3, detection alone is around 90 seconds before the record TTL and client caches add more. Failover routing uses PRIMARY and SECONDARY records, and alias records need EvaluateTargetHealth set to true or the health of the target is ignored. Point the health check at a deep endpoint that exercises the database, but keep it separate from the load balancer's shallow liveness path so a slow query under load does not fail the whole region. Fully automatic DNS failover of a database-backed application is dangerous because a transient primary blip can leave writes on both sides; Route 53 Application Recovery Controller routing controls give a highly available manual switch with readiness checks and safety rules. Explain to the customer that 'DNS failover' is minutes, not seconds, because of resolver and JVM caching.",
-      "minutes": 20,
-      "resource": {
-        "label": "Amazon Route 53 Developer Guide - Configuring DNS failover",
-        "url": "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/dns-failover.html"
-      }
-    },
-    {
-      "name": "Testing DR: game days, FIS AZ scenarios and a drill log that measures RTO",
-      "learn": "A DR test passes only when the application served real requests from recovered infrastructure and every phase has a timestamp; 'the snapshot exists' is not a test. Climb the ladder: tabletop walkthrough, single-component restore drill, AZ impairment using the AWS FIS 'AZ Availability: Power Interruption' scenario (stops instances in the AZ, pauses Auto Scaling, fails over Multi-AZ RDS, blackholes subnet traffic), then a full Region failover. Define the drill log columns before you start: T-declare, T-decision, T-restore-start, T-db-consistent, T-app-healthy, T-traffic-cut, T-verified, and record every surprise (missing secret, expired token, quota, wrong parameter group) as a ticket. Re-run until measured RTO is at or below objective, then schedule quarterly, because every deploy that adds a dependency silently rots the plan.",
-      "minutes": 25,
-      "resource": {
-        "label": "AWS Fault Injection Service User Guide - What is AWS FIS",
-        "url": "https://docs.aws.amazon.com/fis/latest/userguide/what-is.html"
-      }
-    },
-    {
-      "name": "Data integrity: soft deletes, logical corruption and defence in depth",
-      "learn": "Most real data loss is logical (a bad migration, a buggy batch job, an admin with the wrong WHERE clause) and replicates perfectly to every standby, which is why replication is availability and not backup. Layer the defences: soft deletion with a delayed purge and an application-level undelete, PITR for the recent window, cold backups for the long horizon, and continuous validation that compares counts and checksums across layers. Take from the SRE book the reframing that users want their data back, not backups, so the metric to own is time-to-restore-user-data, and that failures combine cause, scope and rate into many cases a single backup schedule cannot cover. Ask of every plan: what happens when the corruption started nine days ago and the PITR window is seven?",
-      "minutes": 20,
-      "resource": {
-        "label": "Google SRE Book - Chapter 26 Data Integrity: What You Read Is What You Wrote",
-        "url": "https://sre.google/sre-book/data-integrity/"
-      }
-    },
-    {
-      "name": "Writing and presenting the DR plan and runbook",
-      "learn": "Structure the document: scope and tiers; RTO/RPO objective versus measured for every data store; failure scenarios covered and, explicitly, those not covered; declaration criteria and who may declare; roles; a runbook with literal commands and expected output including prechecks (is pg_stat_archiver current, does the DR account decrypt a test snapshot); the DR-region prerequisites checklist (images, secrets, KMS grants, quotas, DNS, IdP); the communications template; the failback procedure, which is harder than failover because you must reverse replication and reconcile writes made during the outage; and the test history. Keep it in git beside the IaC, and make any change that adds a dependency also update the plan. Present it to a customer as a menu of tiers with cost against RTO and RPO, anchored to their own revenue-per-hour figure, not as a single recommendation.",
-      "minutes": 25,
-      "resource": {
-        "label": "Reliability Pillar - Plan for Disaster Recovery (DR)",
-        "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/plan-for-disaster-recovery-dr.html"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can take a customer's architecture diagram and within ten minutes list its failure domains, its hard dependencies with their availability ceilings, and state the highest availability it can honestly promise, with the multiplication shown.",
-    "You can perform a point-in-time restore of a self-hosted Postgres from a pgBackRest S3 repository to a named timestamp with --target-action=pause, verify a marker row, promote, and report RTO and RPO with wall-clock timestamps, in under 30 minutes for a roughly 10 GB database.",
-    "You can produce a tier table for a workload with objective and measured RTO and RPO for each data store, plus a monthly cost for backup-and-restore, pilot light and warm standby, and defend the recommended tier with the customer's own downtime cost.",
-    "You can configure a streaming standby with synchronous_commit=remote_apply, kill the primary mid-write-loop, promote, and show zero lost commits, then repeat with asynchronous replication and quantify both the lost commits and the commit-latency you saved.",
-    "You can write topologySpreadConstraints and PodDisruptionBudget manifests for a stateful service, cordon and drain every node in one zone, and show which pods kept serving, which went Pending, and why the Pending ones are tied to zonal volumes.",
-    "You can design a backup scheme that survives full compromise of the production account's credentials and prove it with a denied DeleteObject against the repo bucket and a rejected attempt to shorten a locked vault's retention.",
-    "You can run a timed DR drill, hand the customer a log with every phase timestamped, and present the gap between objective and measured along with the three changes that close it."
-  ],
-  "failureModes": [
-    "The team says 'we have HA' because there is a Multi-AZ standby and two read replicas, then a migration runs DROP TABLE orders and every replica applies it within a second; with no WAL archive, the only recovery point is last night's pg_dump and the RPO is 20 hours.",
-    "archive_command has been failing for five weeks since the object-storage credentials rotated, pg_stat_archiver.failed_count is in the thousands and nobody alerted on it, pg_wal fills the disk and crashes the primary, and the 'backups' turn out to be unrestorable because the WAL chain has a gap.",
-    "The DR runbook restores an encrypted snapshot into the recovery account, which has no grant on the production KMS key; the restore fails with a KMS access error, the key admin is on holiday, and a 30-minute RTO becomes a day of support tickets.",
-    "A PodDisruptionBudget with minAvailable: 1 sits on a single-replica StatefulSet; the managed node-group upgrade stalls for hours, the on-call force-deletes the pod to unblock it, and the only instance of the service goes down during the change window.",
-    "Automatic DNS failover flips traffic to the DR region during a 40-second primary blip; both regions accept writes for six minutes before anyone notices, and failback needs a manual reconciliation of orders that the customer's finance team has to sign off on.",
-    "A 'multi-AZ' Kubernetes cluster runs Postgres as a StatefulSet with an EBS volume in one zone; when that zone is impaired the pod stays Pending forever because the volume cannot move, and the customer discovers their database was single-AZ all along.",
-    "The DR plan is a Confluence page last edited eighteen months ago; it references a deprecated CLI flag, a Terraform workspace that no longer exists and an engineer who left, so the real RTO is the time it takes to rediscover the system under pressure."
-  ],
-  "interviewQuestions": [
-    "A customer wants 99.99% availability for an application that hard-depends on their SSO provider at 99.9% and on our LLM API at 99.9%. What do you tell them, what would you change in the design to get closer, and what number do you actually write into the SOW?",
-    "Design DR for a self-hosted Postgres plus a Kubernetes API tier with a 30-minute RTO and a 5-minute RPO across two regions, on a budget that rules out a hot standby. What replicates continuously, what stays cold, what must already exist in the DR region, and how do you prove the numbers to the customer?",
-    "Your restore drill came in at three hours against a one-hour objective. Walk me through how you break down where the time went, which phases are fixable with configuration versus architecture, and what you would ship this week.",
-    "A primary's pg_wal directory has grown to 400 GB and the disk is at 98%. Give me the candidate causes, how you confirm each in under a minute with pg_stat_archiver and pg_replication_slots, and the sequence of actions that recovers the disk without losing the ability to restore.",
-    "Should failover of a database-backed service between regions be automatic? Argue both positions, then tell me what you would actually build for a payments customer and how the switch would be implemented and protected.",
-    "A security questionnaire asks whether a compromised production admin credential could destroy your backups. Design the answer you want to give, name the controls behind each clause, and describe the test that proves it.",
-    "Compare a Multi-AZ standby, a cross-region read replica, continuous WAL archiving and a nightly snapshot: which failures does each recover from, what are their RTO and RPO, and in what scenario is the nightly snapshot the only thing that saves you?"
-  ],
-  "proofOfWork": "A public repository named kaupex-dr that turns the plan's DR document into reproducible evidence. It holds a pgbackrest.conf targeting an S3-compatible bucket in a separate account whose IAM policy allows PutObject and GetObject but denies DeleteObject, with versioning and a lifecycle rule, and a policy_test.sh showing the denied delete. A drill.sh seeds a Kaupex clone with pgbench, inserts a timestamped marker row, runs a destructive migration, then restores to a scratch cluster with pgbackrest restore --type=time --target-action=pause, checks the marker, promotes, and appends every phase timestamp to DRILL_LOG.md, which contains at least three runs with RTO and RPO and a sentence on what dominated each. A standby/ directory has a docker-compose with a primary and a synchronous standby plus kill_primary.py, which runs a write loop, kills the primary, promotes, and reports lost commits under remote_apply and under asynchronous replication. A k8s/ directory has a StatefulSet with topologySpreadConstraints and a percentage PDB, and zone_loss.sh cordons and drains one zone on a kind or EKS cluster and records how many pods kept serving versus went Pending. DR_PLAN.md contains the tier table with objective versus measured, declaration criteria, the literal runbook, the DR-region prerequisites checklist, failback steps and an explicit list of untested scenarios; a ten-minute recorded walkthrough presents it to an imagined customer CTO as a cost-versus-RTO menu."
+ "i": 24,
+ "topic": "Incident response and postmortems",
+ "track": "D. Reliability and Observability",
+ "month": 3,
+ "hours": 6,
+ "why": "When the system you deployed at a customer breaks at 02:00, the FDE is the person the customer's VP calls, the person who has to run the bridge with the customer's own platform team on it, and the person who has to send the written account the customer's CTO forwards to their board. Nobody on the vendor side has more context than you, so you are the de facto incident commander whether or not anyone gave you the title, and a sloppy incident (three people typing into production, no timeline, a status update that speculated about root cause and was wrong) costs more trust than the outage itself. The postmortem is the artifact that turns an outage into a renewal: a blameless, numbers-first document with dated action items is how a customer decides you are safe to keep in production.",
+ "prerequisites": [
+  "SLIs, SLOs and error-budget burn alerts from 'SRE fundamentals' (topic 20): severity levels and paging rules only make sense against a defined SLO for DefenderMate.",
+  "The ability to read a trace, a log stream and a Prometheus dashboard under pressure from 'Observability' (topic 21); during an incident you are consuming what you built there, not building it.",
+  "The chaos notes on Kaupex and Temporal from 'Load testing and chaos' (topic 22): those experiments are the scenario bank for your Wheel of Misfortune sessions.",
+  "Kubernetes production ops from topic 8: `kubectl rollout undo`, `kubectl get events`, probes, HPA, and how ArgoCD self-heal (topic 9) will fight a manual `kubectl` change.",
+  "Postgres operations basics: `pg_stat_activity`, `statement_timeout`, `lock_timeout`, what an idle-in-transaction session does to `VACUUM` and to lock queues (previewed here, deepened in topic 29).",
+  "A Slack or Discord workspace you control, a Grafana Cloud stack with at least one alert rule firing into a contact point, and one friend willing to spend 45 minutes playing game master."
+ ],
+ "subtopics": [
+  {
+   "name": "Severity ladder and the declaration threshold",
+   "learn": "Write a SEV1 to SEV5 ladder for DefenderMate where each level is defined by customer-observable impact and a required response, not by which component broke: SEV1 = customer-facing outage or data loss, IC assigned, status page within 15 minutes, exec update every 30; SEV2 = degraded for a subset, IC assigned, no status page unless it lasts 60 minutes; SEV3 and below are business-hours tickets. Internalise PagerDuty's rule that if you are unsure whether it is a SEV1 or SEV2 you treat it as the higher one, and that declaring an incident is cheap while a late declaration is not. Know the difference between severity (impact) and priority (order of work) and why a SEV1 for one tenant may be a P2 for the platform.",
+   "minutes": 20,
+   "resource": {
+    "label": "PagerDuty Incident Response - Severity Levels",
+    "url": "https://response.pagerduty.com/before/severity_levels/"
+   }
+  },
+  {
+   "name": "Roles: Incident Commander, deputy, scribe, comms lead, subject-matter experts",
+   "learn": "Know each role's single job and its anti-pattern: the IC owns decisions and the timeline but never touches a keyboard to debug; the deputy watches the IC (time, fatigue, missed hand-raises) and takes over on a clean hand-off ('you have command', 'I have command'); the scribe records observations, decisions and actions with timestamps; the comms lead owns every message that leaves the room; SMEs run diagnosis and execute tasks the IC assigns. Practise the hand-off protocol and the 'IC role is not seniority' rule: on a customer bridge the customer's principal engineer may be the best SME precisely because they should not be IC. Decide up front how the FDE splits the IC and comms roles when only two people are awake.",
+   "minutes": 25,
+   "resource": {
+    "label": "PagerDuty Incident Response - Different Roles",
+    "url": "https://response.pagerduty.com/before/different_roles/"
+   }
+  },
+  {
+   "name": "Running the bridge: the IC decision loop",
+   "learn": "Run the loop out loud: state current impact and what is known, propose one action, poll for strong objections ('any strong objections?' then a five-second silence, not a discussion), assign it to a named person with a timebox ('Priya, roll back the classifier to the previous revision, report in 5 minutes'), then re-assess when the timebox expires. Enforce one channel and one voice bridge, ban side-threads and 'let me just try something', and never let a task go unassigned or un-timeboxed. Know PagerDuty's explicit rules: the IC may remove anyone who is disruptive, the IC decides rather than seeks consensus, and 'I need someone to' is banned in favour of names. Pin a state summary (impact, current hypothesis, actions in flight, next update time) every 30 minutes.",
+   "minutes": 30,
+   "resource": {
+    "label": "PagerDuty Incident Response - During an Incident",
+    "url": "https://response.pagerduty.com/during/during_an_incident/"
+   }
+  },
+  {
+   "name": "Scribing the timeline and annotating dashboards",
+   "learn": "Keep a single incident channel where every entry is `HH:MM UTC` plus one of OBSERVED / DECIDED / ACTION / RESULT, and paste raw evidence (the exact error line, the `kubectl rollout history` output, the alert payload) rather than paraphrase. Push the same timestamps into Grafana as annotations (`POST /api/annotations` with `time`, `tags: [\"incident\",\"INC-2026-014\"]`, `text`) on the DefenderMate SLO dashboard so the postmortem graphs show detection, mitigation and recovery as vertical lines against the burn rate. Configure the dashboard's annotation query to pull by tag so the lines survive dashboard edits. Export the channel history at the end; the timeline is the raw material for the postmortem and it degrades every hour it is not written down.",
+   "minutes": 20,
+   "resource": {
+    "label": "Grafana docs - Annotate visualizations (incl. annotations HTTP API)",
+    "url": "https://grafana.com/docs/grafana/latest/visualizations/dashboards/build-dashboards/annotate-visualizations/"
+   }
+  },
+  {
+   "name": "Mitigate first: the five-minute triage decision",
+   "learn": "Adopt the SRE rule that during an incident you stop the bleeding before you find the cause. Within five minutes of declaring, answer three questions: what changed (deploy, config, feature flag, dependency, traffic, certificate expiry, quota), can it be reverted, and can traffic be shed. Know the generic mitigation menu and its order of preference: roll back the last change, disable via flag, scale up, fail over, degrade gracefully (serve cached, drop non-critical path), rate limit, drain. Understand why 'roll forward with a fix' is usually the wrong first move under pressure and when it is the only move (a migration that already ran, a data corruption). Rehearse saying 'we are mitigating; root cause comes after' to a customer exec who wants to know why.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google SRE Book - Emergency Response",
+    "url": "https://sre.google/sre-book/emergency-response/"
+   }
+  },
+  {
+   "name": "Troubleshooting under pressure without fooling yourself",
+   "learn": "Apply the SRE troubleshooting loop deliberately: triage, examine (what the telemetry says, not what you expect), hypothesise, test the cheapest discriminating experiment, repeat. Name the pitfalls you must actively defend against: confirmation bias toward the last thing you touched, correlation with an unrelated deploy, fixing symptoms of a healthy component, and 'it is always DNS' style pattern-matching that skips the evidence. Build the 'is it us or the cloud' reflex: check the provider health dashboard and your dependency status pages before spending 20 minutes on your own code. Keep a written list of hypotheses with the evidence for and against each so a fresh responder can pick up without re-deriving.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google SRE Book - Effective Troubleshooting",
+    "url": "https://sre.google/sre-book/effective-troubleshooting/"
+   }
+  },
+  {
+   "name": "Kubernetes mitigation moves for Dokeo and DefenderMate",
+   "learn": "Be able to execute each of these blind and know what it does and does not fix: `kubectl rollout history deploy/dokeo` then `kubectl rollout undo deploy/dokeo --to-revision=N`; `kubectl rollout pause` to freeze a bad progressive rollout; `kubectl scale --replicas=` and temporarily raising HPA `minReplicas`; `kubectl cordon` and `drain --ignore-daemonsets --delete-emptydir-data` for a bad node; `kubectl delete pod` on a single CrashLoopBackOff pod (useless if the image is broken, useful if it is a stuck init); `kubectl get events -A --sort-by=.lastTimestamp` as the first command every time. Know that ArgoCD with `selfHeal: true` will revert your manual `undo` within minutes, so the durable mitigation is `git revert` on the app-of-apps repo or `argocd app set --sync-policy none` first, and that `kubectl rollout undo` changes the pod-template-hash so your dashboards' version labels change too.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs - Deployments: Rolling Back a Deployment",
+    "url": "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-back-a-deployment"
+   }
+  },
+  {
+   "name": "Data-layer mitigation on Kaupex Postgres",
+   "learn": "Read `pg_stat_activity` for the incident view: `state`, `wait_event_type`, `wait_event`, `xact_start`, `query_start`, and `pg_blocking_pids(pid)` to find the head of a lock queue. Know the difference between `pg_cancel_backend(pid)` (cancels the statement, keeps the session) and `pg_terminate_backend(pid)` (kills the session and rolls back), and that killing an `idle in transaction` session that holds an `ACCESS EXCLUSIVE` lock unblocks everything behind it. Know the emergency settings you can `ALTER SYSTEM SET` and `pg_reload_conf()` without a restart: `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`. Know what not to do: terminating the walsender to a replica, or a long-running `VACUUM` on a table near wraparound, converts a slow incident into an outage.",
+   "minutes": 20,
+   "resource": {
+    "label": "PostgreSQL docs - The Cumulative Statistics System (pg_stat_activity)",
+    "url": "https://www.postgresql.org/docs/current/monitoring-stats.html"
+   }
+  },
+  {
+   "name": "Workflow-engine incidents: stuck and poisoned Temporal workflows",
+   "learn": "Diagnose a Kaupex incident where hundreds of workflows are stuck: `temporal workflow list --query 'ExecutionStatus=\"Running\" AND WorkflowType=\"Onboarding\"'`, `temporal workflow describe -w <id>` to see pending activities and their retry state, `temporal task-queue describe` to confirm workers are polling. Know the mitigation ladder: restart workers (safe, execution is durable), `temporal workflow signal` to nudge a waiting workflow, `temporal workflow reset -w <id> --event-id N --reason` to replay from before a bad activity, `temporal workflow cancel` (cooperative) versus `terminate` (immediate, no cleanup), and batch versions of each. Understand the poison-pill pattern where one activity fails forever with an unbounded retry policy and starves the task queue, and why the postmortem action item is a `maximumAttempts` and a non-retryable error type, not a bigger worker pool.",
+   "minutes": 20,
+   "resource": {
+    "label": "Temporal CLI docs - temporal workflow commands (describe, signal, reset, cancel, terminate)",
+    "url": "https://docs.temporal.io/cli/command-reference/workflow"
+   }
+  },
+  {
+   "name": "Alert hygiene: symptoms not causes, grouping, inhibition, silences",
+   "learn": "Audit every DefenderMate alert against the rule that a page must be urgent, actionable, and about a user-visible symptom (SLO burn rate, error ratio, latency), with cause-based alerts (pod restarts, CPU) demoted to tickets or dashboards. In Alertmanager, configure `route.group_by` so one incident is one notification rather than 40, `group_wait` and `group_interval` to batch, `repeat_interval` long enough not to re-page during the incident, and `inhibit_rules` so a cluster-down alert suppresses every downstream service alert. Know `amtool silence add alertname=... --duration=2h --comment='INC-014'` and that silences during an incident are logged in the timeline, and put a `runbook_url` annotation on every paging rule so the responder lands on the mitigation steps, not a search box.",
+   "minutes": 20,
+   "resource": {
+    "label": "Prometheus docs - Alertmanager (grouping, inhibition, silences)",
+    "url": "https://prometheus.io/docs/alerting/latest/alertmanager/"
+   }
+  },
+  {
+   "name": "On-call design and escalation policies",
+   "learn": "Set up a real schedule and escalation chain in Grafana IRM (or PagerDuty free tier): primary, secondary after a 5-minute unacknowledged timeout, then the engineering lead, with an override mechanism for hand-offs and a weekly rotation. Know the SRE numbers: no more than two incidents per 12-hour shift so responders can actually do postmortems, and page volume is a reliability metric, not a badge. Decide what the FDE embedded in a customer's rotation looks like: who pages you, through which system, with what SLA in the SOW, and what you do when the customer's own on-call does not acknowledge. Write the hand-off note format: open incidents, known-flaky alerts, changes scheduled in the next 24 hours.",
+   "minutes": 15,
+   "resource": {
+    "label": "Grafana Cloud docs - Alerting and IRM (schedules, escalation chains)",
+    "url": "https://grafana.com/docs/grafana-cloud/observe-and-act/alert-and-measure-reliability/"
+   }
+  },
+  {
+   "name": "Customer and executive communication during the incident",
+   "learn": "Write and rehearse the three message types: the initial status post within 15 minutes of a SEV1 ('We are investigating elevated errors affecting X; next update by HH:MM'), the periodic update every 30 minutes even when the content is 'no change, still investigating', and the resolution post with impact window and a promise of a postmortem date. Use the impact / what we know / what we are doing / next update structure and never state a cause you have not confirmed; 'a database issue' becomes the headline the customer repeats to their board and you will spend the postmortem walking it back. Separate the war-room channel from the stakeholder channel and let only the comms lead post in the latter. As the FDE, decide in advance which incidents the customer hears about from you proactively versus from their own monitoring, and write that into the engagement runbook.",
+   "minutes": 30,
+   "resource": {
+    "label": "Atlassian Incident Management Handbook - Incident communication",
+    "url": "https://www.atlassian.com/incident-management/incident-communication"
+   }
+  },
+  {
+   "name": "Writing the blameless postmortem",
+   "learn": "Use the Google template sections and know why each exists: summary with impact in numbers (requests failed, tenants affected, minutes of SLO budget burned, revenue if known), trigger versus root cause versus contributing factors, detection (how long from first bad request to first human knowing, and whether a human or an alert found it), the timeline with UTC timestamps, lessons learned split into what went well / what went wrong / where we got lucky, and action items each with owner, type (prevent, detect, mitigate, process), priority and ticket link. Enforce blamelessness mechanically: no names in the causal chain (roles instead), no counterfactuals ('should have'), and every human action described in terms of what made it reasonable at the time. Write it within 48 hours, circulate for comment before the review meeting, and publish it where the customer can read it.",
+   "minutes": 35,
+   "resource": {
+    "label": "Google SRE Book - Postmortem Culture: Learning from Failure",
+    "url": "https://sre.google/sre-book/postmortem-culture/"
+   }
+  },
+  {
+   "name": "Facilitating the debrief when the customer's team pulled the trigger",
+   "learn": "Run the postmortem meeting as a facilitated debrief rather than a status review: open with the purpose (learning, not accountability), walk the timeline asking 'what did you see at that moment' and 'what made that the obvious next step' instead of 'why did you do that', and pull out the tacit knowledge (who knew the runbook was stale, who had seen this error before) that never appears in tickets. Know how to handle the hardest case for an FDE: the customer's engineer ran the migration that caused the outage, their manager is in the room, and your postmortem has to be honest about the trigger without making the vendor look like it is assigning blame. Practise redirecting 'who' questions to 'what conditions' and recording disagreements about causation rather than forcing consensus.",
+   "minutes": 20,
+   "resource": {
+    "label": "Etsy Debriefing Facilitation Guide (GitHub)",
+    "url": "https://github.com/etsy/DebriefingFacilitationGuide"
+   }
+  },
+  {
+   "name": "Action items that actually close",
+   "learn": "Turn each lesson into an action item that passes the test in the SRE Workbook chapter: specific, has one owner, has a due date, is tracked as a ticket with a priority that competes honestly with feature work, and is classified so the mix is visible (if every item is 'add an alert' and none is 'prevent', say so). Distinguish the immediate fix from the systemic fix and record both. Set up the review loop: a monthly check of open postmortem action items with the customer, and a rule that a repeat incident with an unclosed action item is escalated as a process failure, not another SEV. Include near-misses in the process; the cheapest postmortem is the one for an incident that did not quite happen.",
+   "minutes": 15,
+   "resource": {
+    "label": "Google SRE Workbook - Postmortem Culture: Learning from Failure",
+    "url": "https://sre.google/workbook/postmortem-culture/"
+   }
+  },
+  {
+   "name": "Incident metrics and the monthly reliability report",
+   "learn": "Compute and report time-to-detect, time-to-acknowledge, time-to-mitigate and time-to-resolve per incident from the timeline, incident count by severity per month, and SLO budget consumed per incident, and know why an averaged MTTR across heterogeneous incidents is a vanity number that hides one four-hour outage behind fifty two-minute blips. Map your SEV definitions onto the customer's contractual SLA (monthly availability percentage, exclusions for scheduled maintenance and customer-caused issues, the service-credit process) so the reliability report answers the question their finance team will ask. Build the one-page monthly format: budget remaining, incidents with links to postmortems, open action items with ages, and one recommendation.",
+   "minutes": 20,
+   "resource": {
+    "label": "Atlassian Incident Management Handbook - Common incident management metrics",
+    "url": "https://www.atlassian.com/incident-management/kpis/common-metrics"
+   }
+  },
+  {
+   "name": "Wheel of Misfortune and disaster role-playing",
+   "learn": "Design and run a tabletop from the SRE book's format: a game master holds a real past incident (or one of your topic 22 chaos scenarios) as a script, reveals information only when the responder asks the right question or runs the right command, injects a twist at the ten-minute mark (a second alert, a customer exec joining the bridge), and stops at 30 minutes for a debrief. Score the responder on declaration time, mitigation-first behaviour, communication cadence and timeline quality, not on finding the root cause. Rotate roles so you play IC, scribe and game master at least once each. Keep the scenario bank versioned in the Dokeo repo and add one scenario after every real incident.",
+   "minutes": 25,
+   "resource": {
+    "label": "Google SRE Book - Accelerating SREs to On-Call and Beyond (Disaster Role Playing, Wheel of Misfortune)",
+    "url": "https://sre.google/sre-book/accelerating-sre-on-call/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take a paging alert on DefenderMate and, within five minutes, have declared a severity, named yourself IC, opened the incident channel with a pinned state summary, and issued one timeboxed mitigation task to a named person, all recorded with UTC timestamps.",
+  "You can run a 30-minute Wheel of Misfortune as IC with a friend as game master and be scored by them on the rubric (declaration time, mitigation before diagnosis, update cadence, no unassigned tasks) at or above the threshold you set in the playbook.",
+  "You can execute the Kubernetes and Postgres mitigation menu from memory on your k3s cluster: `kubectl rollout undo` to a named revision with ArgoCD self-heal disabled first, HPA minReplicas raised, a blocking Postgres session found via `pg_blocking_pids` and terminated, each with the observed effect written to the timeline.",
+  "You can diagnose a Kaupex incident where workflows are stuck on a poisoned activity using `temporal workflow describe` and `task-queue describe`, mitigate with a reset or terminate, and state the retry-policy change that prevents recurrence.",
+  "You can write a customer-facing status update in under three minutes that states impact, what is known, what is being done and the next update time, with no unconfirmed cause, and a resolution message that commits to a postmortem date.",
+  "You can produce a blameless postmortem within 48 hours of an incident that a reviewer confirms has no names in the causal chain, no counterfactual language, impact quantified in requests and SLO budget, a UTC timeline matching the Grafana annotations, and action items each with owner, type, priority and ticket link.",
+  "You can audit your Grafana or Alertmanager rules and show that every paging alert is symptom-based with a `runbook_url`, that related alerts group into one notification, and that a cluster-level alert inhibits its downstream children.",
+  "You can present a one-page monthly reliability report to a non-engineer that includes SLO budget remaining, incidents by severity with postmortem links, time-to-detect and time-to-mitigate per incident, and the age of every open action item."
+ ],
+ "failureModes": [
+  "Three engineers on the bridge each 'just try something' in production at the same time; one rolls back the deployment while another applies a hotfix, ArgoCD self-heal reverts both, and the postmortem timeline cannot say which change fixed it or when the customer was actually impacted.",
+  "The first status-page update says 'a database issue' because someone saw connection errors; the real cause is a certificate that expired on the ingress, the customer's CTO has already forwarded 'database issue' to their board, and the postmortem review spends twenty minutes on the retraction instead of the fix.",
+  "The IC is also the strongest debugger, disappears into a terminal for fifteen minutes, nobody posts the 30-minute update, and the customer's engineering manager escalates to the vendor's CEO because the channel went silent.",
+  "A responder terminates every 'idle in transaction' backend in `pg_stat_activity` to clear a lock queue, including the logical-replication slot consumer, and the analytics replica falls two hours behind, producing a second incident during the first one.",
+  "The postmortem names the customer's junior engineer as having 'run the migration without approval', their manager refuses to sign off, the document is never published, and the same migration pattern causes a repeat outage three months later because no action item was ever created.",
+  "Twelve action items are written, none has a due date or ticket, all are 'add alert for X', and at the monthly review nine are still open; the customer concludes the vendor treats postmortems as paperwork.",
+  "A Kaupex activity with an unbounded retry policy fails forever against a decommissioned downstream API, the retries consume the entire task queue's worker capacity, and the team scales the worker pool from 4 to 40 pods before anyone runs `temporal workflow describe` and sees the single failing activity."
+ ],
+ "interviewQuestions": [
+  "You are on-site with a customer and their production deployment of your platform starts returning 500s to a third of tenants. Their platform team is on the bridge, their VP joins ten minutes later, and your own engineering team is asleep in another timezone. Walk me through the first fifteen minutes: who is IC, what you say, what commands you run, what you post and where, and what you refuse to do.",
+  "Design the severity ladder and paging policy for a multi-tenant LLM classification service with an SLO of 99.9 percent successful webhook deliveries. Which alerts page, which create tickets, how do you avoid 40 notifications for one incident, and what does a single tenant's outage map to?",
+  "An incident was caused by a customer engineer running a schema migration in production without a review. Write the root-cause section of the postmortem out loud so that it is honest, blameless, and something their manager will sign. Then tell me the action items and who owns each.",
+  "During an incident someone proposes rolling forward with a hotfix rather than rolling back. Under what conditions do you accept that, under what conditions do you overrule it as IC, and how do you handle the fact that the person proposing it is the customer's principal engineer?",
+  "Your postmortem shows detection took 45 minutes because the customer noticed before any alert fired. Debug the alerting: what did the existing alerts measure, what should they have measured, how would you structure the new rules in Alertmanager or Grafana, and how would you prove the new alert would have fired for this incident?",
+  "The customer's finance team asks for your MTTR for the quarter. Explain why you would push back on a single averaged number, what you would report instead, how it ties to their contractual SLA and exclusions, and how you would present it in one page.",
+  "Describe a Temporal or queue-based system in which one bad message or workflow starves everything else. How do you detect it during the incident with the CLI, what is the immediate mitigation, and what retry-policy or error-classification change goes into the postmortem so it does not recur?"
+ ],
+ "proofOfWork": "A public `incident-kit` directory in the Dokeo repository that a hiring manager can read in ten minutes and a friend can use to run a drill in thirty. It contains: (1) a one-page incident playbook with the SEV ladder, role cards, the IC decision-loop script, the status-update templates and the Kubernetes / Postgres / Temporal mitigation menu with exact commands; (2) three Wheel of Misfortune scenario scripts derived from the topic 22 chaos experiments, each with the game master's hidden timeline, the information-release triggers and the scoring rubric; (3) a recorded 30-minute drill (screen and audio) in which you are IC and a friend is game master, with the exported incident channel timeline and the Grafana dashboard screenshot showing detection, mitigation and recovery annotations; (4) the resulting postmortem written to the Google template, redlined by a second reader for blame language and counterfactuals, with every action item linked to an issue in the repo and a `postmortem-review.md` recording what the reviewer challenged; and (5) the Alertmanager or Grafana alerting config diff that came out of the postmortem, showing the symptom-based rule, the `runbook_url` annotation, and the inhibition rule, plus a `promtool test rules` or equivalent unit test proving the new alert would have fired on the recorded incident data."
 }

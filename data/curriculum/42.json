@@ -1,228 +1,200 @@
 {
  "i": 42,
- "topic": "System design playbook: load balancing, caching, sharding, queues, rate limits, IDs, search",
- "track": "F. Distributed Systems and System Design",
+ "topic": "PySpark (optional: Databricks- or Palantir-style roles only)",
+ "track": "E. Backend and Data",
  "month": 5,
- "hours": 10,
- "why": "An FDE is the person in the room when the customer's architect asks 'and what happens when we roll this to all 500 clients?' and you have to answer on a whiteboard with numbers, inside their constraints (their VPC, their Postgres, their Kafka, their security team) rather than in the abstract. Every deployment you scope is assembled from the same seven building blocks: something in front spreading traffic, something remembering answers, something splitting data, something absorbing bursts, something saying no, something naming things, and something finding them. The system design round is also where senior FDE loops at Palantir, Anthropic and Databricks separate 'can build a feature' from 'can own a customer's production system', and the interviewer is grading the same thing the customer is: can you run the conversation end to end, attach numbers, name trade-offs, and tell a credible story about what breaks first.",
+ "hours": 6.0,
+ "why": "At Databricks and Palantir the FDE works inside the customer's lakehouse: their logs, transactions and eval sets already sit in Delta tables or Foundry datasets at hundreds of gigabytes to terabytes, and the fastest path to a demo on real data is a PySpark transform that runs where their pipelines run, under their cluster's memory limits and their security team's eyes. The differentiator in those loops is not API trivia but being able to look at a stage that has run for forty minutes and say 'one tenant is 40 percent of the rows, that task is the skew, here is the salt' instead of 'Spark is slow', which requires the driver/executor model and the physical plan to be in your head. This topic is optional: if your target list is API-company FDE roles only, topic 36 (DuckDB and dbt) covers the analytics you need and this six hours is better spent on topic 43.",
  "prerequisites": [
-  "Networking from topic 2 (TCP/IP, DNS, TLS, HTTP/2, load balancers): handshake and TLS-termination cost, HTTP/1.1 keep-alive vs HTTP/2 multiplexing, DNS TTL behaviour, and exactly what an L4 proxy can and cannot see compared with an L7 proxy",
-  "PostgreSQL from topic 29: B-tree vs GIN indexes, `EXPLAIN (ANALYZE, BUFFERS)`, row locks and MVCC bloat, `max_connections` and pooling, and why random keys hurt insert locality; plus the RLS multi-tenant schema from topic 30",
-  "Redis from topic 31: TTL and expiry, `maxmemory` and eviction, `SET NX PX` locks, Lua/`MULTI` atomicity, and the token-bucket limiter and idempotency store you already built for DefenderMate",
-  "Kafka from topic 33: partitions as the ordering unit, consumer groups and rebalances, offset commits, `acks`, the idempotent producer, and the DefenderMate ingestion consumers with their duplicate/reorder drill results",
-  "DDIA vocabulary from topic 39 and Raft/linearizability from topic 40: single-leader replication and lag, read-your-writes, hash vs range partitioning and rebalancing, quorum, CAP/PACELC, and what 'exactly once' can and cannot mean",
-  "SLIs/SLOs and error budgets from topic 20, HA/DR (multi-AZ vs multi-region, RTO/RPO) from topic 24, and load testing with k6 from topic 22 so failure stories can be reproduced rather than imagined",
-  "A running DefenderMate stack (FastAPI, Postgres with RLS, Redis, Kafka/Redpanda, Next.js, SSE relay of Claude) and at least one week of real numbers: requests per endpoint, p50/p99, tokens per call, documents per tenant per day"
+  "SQL at the level of topic 29 (PostgreSQL): GROUP BY semantics, window functions with frames, join types, null behaviour in aggregates and joins; you will rewrite an existing SQL aggregation and validate the PySpark output against it row for row",
+  "Topic 36 (dbt, DuckDB, dimensional modelling): what Parquet is, why data is partitioned by date, and how to export DefenderMate's `llm_calls`, `messages` and `tenants` tables from Postgres to partitioned Parquet with DuckDB `COPY ... TO ... (FORMAT PARQUET, PARTITION_BY (dt))`",
+  "Python packaging from topic 25 (`pyproject.toml`, wheels, virtualenvs), because getting your code onto every executor is a packaging problem, not a Spark problem",
+  "A laptop with Java 17 installed and `JAVA_HOME` set (`java -version` prints 17 or 21), 8 GB or more of free RAM, and Docker from topic 5 in case you want an isolated `spark` image; `pip install pyspark` does not install a JVM",
+  "Enough JVM vocabulary to read an executor log: heap, off-heap, garbage collection pause, `OutOfMemoryError`, what exit code 137 means in a container (topic 5, topic 8)",
+  "S3 semantics from topic 14: object listing cost, eventual visibility of partial writes, and the absence of atomic directory rename, which drives the output-commit section of this topic"
  ],
  "subtopics": [
   {
-   "name": "The 45-minute delivery frame: requirements, non-functionals as numbers, and the API you commit to",
-   "learn": "Run the clock deliberately: minutes 0-5 functional requirements (three core flows, an explicit out-of-scope list), 5-10 non-functionals written as numbers not adjectives (p99 per endpoint, availability target, consistency per operation, retention, tenancy isolation, cost ceiling), 10-15 core entities and the API (verbs, cursor pagination, `Idempotency-Key` on every write), 15-30 a high-level design that satisfies every functional requirement before any optimisation, 30-45 two or three deep dives chosen by the non-functionals, closing with the failure story. Write assumptions in a corner of the board and say them aloud so the interviewer or customer architect can correct them early; a wrong assumption stated is recoverable, a wrong assumption hidden is fatal. Adopt one trade-off vocabulary for the whole session (consistency vs availability per operation, latency vs cost, simplicity vs scale) and use it every time you pick between two options.",
-   "minutes": 30,
-   "resource": {
-    "label": "Hello Interview - System Design Delivery Framework",
-    "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery"
-   }
-  },
-  {
-   "name": "Back-of-envelope estimation: DefenderMate at 500 clients",
-   "learn": "Derive every number from a stated chain of assumptions and round aggressively: 500 tenants x 200 seats = 100k users; 10% daily active = 10k; 20 messages each = 200k messages/day = ~2.3/s average, x10 diurnal peak = ~25/s; each message is one Claude call at ~3k input and ~500 output tokens = 600M input tokens/day, so at roughly $3 per million input the bill is thousands of dollars a day and the largest lever is prompt caching (topic 59), not servers; 100 documents per tenant per day = 50k docs, 20 chunks each = 1M chunks/day, 1536 float32 dims = 6 KB each = ~6 GB of vectors per day = ~2 TB/year, which is what forces per-tenant partitioning and a real vector store rather than a single pgvector table; messages at 2 KB = 400 MB/day = 150 GB/year, so Postgres holds the transactional data for years without sharding. Memorise the latency table (L1 ~1 ns, RAM ~100 ns, SSD random read ~100 us, same-region RTT ~0.5 ms, cross-continent ~70-150 ms) and the powers of two (2^20 ~ 1M, 2^30 ~ 1G). Convert QPS to capacity: a FastAPI worker doing 50 ms of DB-bound work handles ~20 rps, a 4-worker pod ~80 rps, so 25 msg/s needs one pod plus headroom and the bottleneck is the queue and the upstream model, not the API tier. Always end the estimate with 'the thing that saturates first is X'.",
-   "minutes": 35,
-   "resource": {
-    "label": "System Design Primer - Back-of-the-envelope calculations",
-    "url": "https://github.com/donnemartin/system-design-primer#back-of-the-envelope-calculations"
-   }
-  },
-  {
-   "name": "Traffic entry: DNS, anycast, CDN and where TLS terminates",
-   "learn": "Know the Route 53 routing policies (simple, weighted, latency, failover with health checks, geolocation, geoproximity, multivalue answer) and what each is actually for: weighted for canaries and migrations, latency for multi-region reads, failover for DR with a health-checked primary. Understand what a 60 s TTL buys and what it does not: recursive resolvers, JVM default caching, and mobile OS caches routinely ignore it, so DNS failover is minutes not seconds, which is why anycast or an ALB in front of both regions is the answer when RTO is tight. Draw the TLS termination point and defend it: terminate at the edge or ALB for cheap certificate management, re-encrypt to origin or run mTLS to pods when the customer's security team requires it, and price the handshake (1-RTT TLS 1.3, 2-RTT TLS 1.2, resumption avoids both). Put the customer's WAF on the diagram and state what it can inspect at each termination choice.",
-   "minutes": 30,
-   "resource": {
-    "label": "Amazon Route 53 - Choosing a routing policy",
-    "url": "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy.html"
-   }
-  },
-  {
-   "name": "L4 vs L7 load balancing, algorithms and connection reuse",
-   "learn": "L4 (NLB, IPVS) balances TCP flows, preserves source IP and cannot see paths or headers; L7 (ALB, Nginx, Envoy) terminates HTTP and can route on path/host/header/cookie, retry idempotent requests, add `X-Forwarded-For` and `X-Request-ID`, and terminate TLS. Know the Nginx upstream algorithms and when each wins: default weighted round-robin for uniform short requests, `least_conn` for long-lived SSE and LLM streams whose durations vary by 100x, `hash $key consistent` (ketama ring, minimal remapping when a server leaves) for cache locality per tenant, `ip_hash` only when you have no better affinity key. Configure connection reuse or pay a handshake per request: `keepalive 32;` in the upstream block plus `proxy_http_version 1.1;` and `proxy_set_header Connection \"\";` in the location. Use `max_fails` and `fail_timeout` for passive health detection and understand their default (1 failure, 10 s). Know two ways balancing silently goes wrong: HTTP/2 multiplexes many requests onto one client connection so an L4 balancer in front sees one flow and cannot spread them, and least-connections cannot tell a 30-second SSE stream from a 30 ms JSON call until the connection count already skewed.",
-   "minutes": 40,
-   "resource": {
-    "label": "nginx - ngx_http_upstream_module (least_conn, hash consistent, keepalive, max_fails)",
-    "url": "https://nginx.org/en/docs/http/ngx_http_upstream_module.html"
-   }
-  },
-  {
-   "name": "Health checks, draining and zero-downtime rollouts behind the balancer",
-   "learn": "Separate liveness (the process is alive, restart me if not) from readiness (I can serve: pool warm, config loaded, not shutting down) and never make the balancer's check hit the database on every probe. Know the ALB target-group knobs and defaults: `HealthCheckIntervalSeconds` 30, `HealthyThresholdCount` 5, `UnhealthyThresholdCount` 2, `HealthCheckTimeoutSeconds` 5, and success matcher defaulting to `200` (a range such as `200-299` is opt-in), and that a target takes interval x threshold seconds to become healthy after a deploy, which sets your minimum rollout time. Reason about draining: the deregistration delay (default 300 s) must be longer than your longest in-flight request (an SSE stream can be 60 s) and shorter than or equal to the pod's `terminationGracePeriodSeconds`, and the app must flip `/readyz` to 503 on SIGTERM and keep serving in-flight requests until the balancer stops sending new ones. Name the cascading risk of deep health checks: when a shared dependency blips, every target fails its check at once and the balancer takes the whole fleet out of rotation.",
-   "minutes": 30,
-   "resource": {
-    "label": "AWS ALB - Health checks for target groups",
-    "url": "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/target-group-health-checks.html"
-   }
-  },
-  {
-   "name": "Cache placement and invalidation: cache-aside, write-through, TTLs, eviction and stampedes",
-   "learn": "Choose where the cache lives (in-process LRU, Redis, CDN) by hit ratio times cost-of-miss, and choose the write pattern: cache-aside (miss, load, `SET key val EX ttl`) is the default; write-through keeps the cache authoritative at the cost of write latency; write-behind buys write throughput at the cost of losing data on a crash. Design the key schema to include tenant and schema version (`t:{tenant}:conv:{id}:v3`) so a deploy can move to `v4` instead of flushing. Know the `maxmemory-policy` options (`allkeys-lru`, `allkeys-lfu`, `volatile-lru`, `volatile-ttl`, `noeviction`) and that `noeviction` at `maxmemory` makes writes fail with an OOM error rather than evicting, which turns a full cache into an outage. Prevent stampedes three ways and know when each applies: a single-flight lock (`SET lock:{key} 1 NX PX 5000`, others wait or serve stale), probabilistic early expiration (recompute before expiry with probability rising as TTL approaches zero), and jittered TTLs so a million keys written at deploy time do not expire in the same second. Cache 'not found' with a short TTL to stop lookups of nonexistent ids hammering the database. Compute what the database absorbs if the cache disappears: at 90% hit ratio, losing the cache is a 10x read spike.",
-   "minutes": 40,
-   "resource": {
-    "label": "Redis docs - Key eviction (maxmemory-policy)",
-    "url": "https://redis.io/docs/latest/develop/reference/eviction/"
-   }
-  },
-  {
-   "name": "HTTP and CDN caching semantics: Cache-Control, ETag, Vary and purge",
-   "learn": "Use the directives precisely: `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=30, stale-if-error=600` for shared caches, `private` for per-user responses, `no-store` for anything with secrets; hashed static assets get `max-age=31536000, immutable`. Implement conditional requests: `ETag` plus `If-None-Match` returns 304 and saves bandwidth but not compute unless the ETag is cheap to derive. Understand `Vary`: omit `Vary: Accept-Encoding` and you serve gzip to a client that cannot decode it; omit `Vary: Authorization` (or fail to key on tenant) on a CDN-cached API response and one tenant sees another's data. Know the purge models: URL purge is exact and slow at scale, surrogate-key or tag purge invalidates every object tagged `tenant:42` in one call. Apply to DefenderMate: Next.js `_next/static` is immutable, the tenant branding/config endpoint gets a short `s-maxage` with an ETag, and nothing under `/api/conversations` is ever shared-cacheable.",
-   "minutes": 30,
-   "resource": {
-    "label": "MDN - HTTP caching",
-    "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching"
-   }
-  },
-  {
-   "name": "Read replicas, replication lag and read-your-writes",
-   "learn": "Streaming replication is the first scale-out step for reads and the first place users see 'my data disappeared'. Know the `synchronous_commit` levels (`off`, `local`, `remote_write`, `on`, `remote_apply`) and `synchronous_standby_names`: only `remote_apply` guarantees a replica read sees the committed write, and it charges every commit a network round trip. Measure lag with `pg_stat_replication` (`write_lag`, `flush_lag`, `replay_lag`) and on the standby `pg_last_wal_replay_lsn()`; decide about `hot_standby_feedback` (prevents query cancellation on the replica, causes bloat on the primary). Route reads by consistency requirement: writes and anything read-after-write go to the primary; pin a session to the primary for N seconds after it writes, or record the commit LSN in the response and have the replica route compare it with `pg_last_wal_replay_lsn()` before serving; send list views, dashboards and analytics to replicas. Rehearse the failure: a user posts a message, the next GET hits a replica 300 ms behind, the message is missing, the UI retries the POST and creates a duplicate.",
-   "minutes": 35,
-   "resource": {
-    "label": "PostgreSQL docs - High Availability, Load Balancing, and Replication",
-    "url": "https://www.postgresql.org/docs/current/high-availability.html"
-   }
-  },
-  {
-   "name": "Partitioning and sharding: key choice, hash vs range, rebalancing and scatter-gather",
-   "learn": "Partition inside one Postgres before sharding across many: `PARTITION BY RANGE (created_at)` for append-heavy time series such as `llm_calls` and `audit_log` (retention becomes `DETACH PARTITION` + `DROP` instead of a week-long DELETE), `PARTITION BY HASH (tenant_id)` to spread a hot table; partition pruning only happens when the partition key appears in the WHERE clause, so every query path must carry it. Shard across databases only when the single primary's write throughput, working set or blast radius forces it, and pick the key by three rules: high cardinality, present in every hot query, spreads writes. Hash keys spread evenly but kill range scans; range keys keep locality but make the newest range the hottest (a `created_at` shard key puts every write on one shard). Use consistent hashing with virtual nodes so rebalancing moves a fraction of keys, and study Redis Cluster's 16384 fixed hash slots and `{tenant}` hash tags as the concrete model for slot-based resharding without a stop-the-world. Anything not keyed by the shard key becomes scatter-gather: the slowest shard defines p99, and secondary indexes are either local (query every shard) or global (async, eventually consistent).",
-   "minutes": 45,
-   "resource": {
-    "label": "PostgreSQL docs - Table Partitioning",
-    "url": "https://www.postgresql.org/docs/current/ddl-partitioning.html"
-   }
-  },
-  {
-   "name": "Hot keys, skew and the noisy-neighbour tenant",
-   "learn": "Detect skew before customers do: per-partition-key consumption in DynamoDB via CloudWatch Contributor Insights, per-partition end offsets in Kafka via `rpk topic describe -p`, hot Redis keys via `redis-cli --hotkeys` (requires an LFU policy) or `MONITOR` samples, per-tenant row counts and QPS in Postgres. Know the canonical hard ceiling, DynamoDB's 3,000 RCU and 1,000 WCU per physical partition, so 'one hot tenant' has a number attached. Mitigate in order of cost: cache the hot object; per-tenant rate limits so one bulk import cannot starve 499 tenants; write sharding (append `#0..N` to the key and fan in on read); move the whale tenant to its own shard or cell via a tenant-to-shard directory; split the partition key. State the price of each mitigation (write sharding makes reads N times more expensive; a directory becomes a critical dependency).",
+   "name": "When Spark is the right tool, and the driver, executor and cluster-manager model",
+   "learn": "Spark is a driver process (your Python script plus a JVM it controls through Py4J) that turns DataFrame code into a DAG, and a set of executor JVMs that each run `spark.executor.cores` tasks at a time, one task per partition, with a cluster manager (standalone, YARN, Kubernetes, or the one Databricks and Foundry hide from you) handing out the containers. In `local[*]` the driver and a single executor share one JVM with one thread per core, which is why a job that works on your laptop fails the first time data must cross a network or exceed one container's memory. Deploy mode `client` runs the driver where you typed `spark-submit` (a notebook kernel, a laptop, a CI runner that gets killed at the 60 minute mark); `cluster` runs it on the cluster, and standalone mode does not support cluster mode for Python applications at all. Before any of this, apply the test from topic 36: if the customer's dataset fits in RAM plus local SSD on one large box (tens to a few hundred gigabytes), DuckDB or Polars will finish before a Spark cluster has started; Spark is justified when data is larger than one node or when the customer already lives in Databricks, EMR or Foundry and your job must run where theirs do.",
    "minutes": 25,
    "resource": {
-    "label": "DynamoDB - Best practices for designing and using partition keys",
-    "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html"
+    "label": "Spark docs: Cluster Mode Overview",
+    "url": "https://spark.apache.org/docs/latest/cluster-overview.html"
    }
   },
   {
-   "name": "Multi-tenant data layouts: pooled, siloed, bridge and cells",
-   "learn": "Compare the four layouts with numbers for 500 tenants: pooled (shared tables + `tenant_id` + RLS, one migration, largest blast radius, noisy neighbours), schema-per-tenant (500 schemas means 500x migration fan-out and catalog bloat), database-per-tenant (isolation and per-tenant restore, but 500 connection pools and 500 backups), and cell-based (a full stack per group of tenants, tenant-to-cell directory, a bad deploy or hot tenant hurts one cell). Recommend tiers: pooled for standard tenants, siloed for regulated or whale tenants, and make the tenant directory (`tenant_id -> cell, shard, region, tier, limits, keys`) an explicitly cached, versioned service because every request depends on it. Study Citus's distribute-by-tenant model as the middle path: tables co-located on the `tenant_id` distribution column so joins stay local, small reference tables replicated to every node. Know the tenant-move procedure (dual-write or CDC into the destination, backfill, verify counts, cut over behind the directory, keep the source read-only for rollback) because a customer will ask for it.",
-   "minutes": 35,
+   "name": "Local install, SparkSession.builder and the spark-submit flags that matter",
+   "learn": "`pip install pyspark` ships the Spark jars but not a JVM; Spark 4.x needs Java 17 or 21 (3.5 accepts 8, 11 or 17), and a missing `JAVA_HOME` surfaces as a Py4J gateway error rather than a clear message. Build one session: `SparkSession.builder.master(\"local[4]\").appName(\"usage\").config(\"spark.sql.shuffle.partitions\", \"8\").config(\"spark.driver.memory\", \"4g\").getOrCreate()`, knowing `spark.driver.memory` cannot change after the JVM is up, so in a notebook it is silently ignored unless the kernel was started with it. Learn the submit line you will type on a customer's edge node: `spark-submit --master yarn --deploy-mode cluster --conf spark.sql.shuffle.partitions=400 --py-files src.zip --packages io.delta:delta-spark_2.13:4.0.0 --archives venv.tar.gz#env job.py --input s3://... --output s3://... --run-date 2026-09-01`. `--packages` resolves Maven coordinates on the driver and ships the jars (the Delta coordinate must match the Spark and Scala versions exactly), `--py-files` adds `.py`, `.zip` and `.egg` to every executor's `sys.path`, `--files` distributes side files, and `PYSPARK_PYTHON` / `spark.pyspark.python` pins the executor interpreter so you never see `Python in worker has different version than that in driver`. The Web UI is on port 4040 (4041 if taken) for the life of the driver only.",
+   "minutes": 20,
    "resource": {
-    "label": "Citus docs - Multi-tenant Applications",
-    "url": "https://docs.citusdata.com/en/stable/use_cases/multi_tenant.html"
+    "label": "Spark docs: Submitting Applications (spark-submit)",
+    "url": "https://spark.apache.org/docs/latest/submitting-applications.html"
    }
   },
   {
-   "name": "Queues and async work: delivery semantics, visibility timeouts, ordering, DLQs",
-   "learn": "Put every LLM call and document ingest behind a queue for three reasons you can state: decouple request latency from processing, absorb bursts up to the queue's depth, retry without the user. Define the semantics precisely: at-most-once (ack before work), at-least-once (ack after work, duplicates on crash), and 'exactly once' meaning at-least-once plus an idempotent consumer with a dedup key, or Kafka transactions for Kafka-to-Kafka only. SQS mechanics: `VisibilityTimeout` must exceed worst-case processing or be extended with `ChangeMessageVisibility` on a heartbeat, `maxReceiveCount` in the redrive policy moves poison messages to the dead-letter queue, FIFO queues with `MessageGroupId` give per-tenant ordering at a 300 requests/s per-queue ceiling (3,000 batched) unless high-throughput mode is enabled. Kafka mechanics: the partition is the ordering unit, a rebalance pauses the group, commit the offset after the side effect, and `max.poll.interval.ms` (default 300 s) kicks slow consumers out. Design the DLQ path: who is paged, how a message is inspected and replayed, and how a poison message in a FIFO group is quarantined so it stops blocking the tenant behind it.",
-   "minutes": 40,
-   "resource": {
-    "label": "Amazon SQS - Visibility timeout",
-    "url": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html"
-   }
-  },
-  {
-   "name": "Backpressure, load shedding and queue sizing",
-   "learn": "Size with Little's Law (L = lambda x W): at 25 jobs/s and 8 s per Claude call you need ~200 concurrent workers or the queue grows without bound; an unbounded queue converts an overload into a latency disaster hours later when it finally drains and re-runs thousands of jobs nobody wants. Shed early and cheaply: bound concurrency at the balancer or gateway and return 503 with `Retry-After` when exceeded, keep separate queues and worker pools for interactive vs batch so a bulk import never queues in front of a chat message, and enforce per-tenant quotas so fairness is a property of the system rather than luck. Propagate deadlines (`X-Request-Deadline` or gRPC deadlines) and drop work whose caller has already timed out. Recognise the cascading pattern from the SRE book: one server dies, survivors take its load and slow down, clients retry, the retries kill the survivors.",
-   "minutes": 35,
-   "resource": {
-    "label": "Google SRE Book - Handling Overload",
-    "url": "https://sre.google/sre-book/handling-overload/"
-   }
-  },
-  {
-   "name": "Transactional outbox and CDC: publishing events without dual-write bugs",
-   "learn": "Dual-write (commit to Postgres, then publish to Kafka) loses events when the process dies between the two and publishes phantom events when the commit rolls back. Fix with an outbox table written in the same transaction as the business row and drained by a relay: either a poller (`SELECT ... FROM outbox ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED`) or Debezium's outbox event router reading the WAL (`wal_level=logical`, columns `id`, `aggregatetype`, `aggregateid`, `type`, `payload`, routing to `outbox.event.<aggregatetype>` keyed by `aggregateid` so a tenant's or document's events stay ordered). The relay is at-least-once, so consumers still need idempotency (topic 33's dedup drill). Know the operational hazards: a stalled replication slot retains WAL until the primary's disk fills, and a poller with no index on the unsent flag becomes the slowest query in the database. Map it to DefenderMate: `document.uploaded` fans out to ingestion, `message.created` to the classifier and analytics.",
-   "minutes": 30,
-   "resource": {
-    "label": "Debezium docs - Outbox Event Router",
-    "url": "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html"
-   }
-  },
-  {
-   "name": "Rate limiting: algorithms, placement and the 429 contract",
-   "learn": "Know the algorithms and their exact failure: fixed window (a 2x burst straddling the boundary), sliding window log (exact, O(n) memory per key), sliding window counter (O(1), approximate), token bucket (rate plus burst, the default for APIs), leaky bucket and GCRA (a single timestamp per key, no burst above rate). Place limits at three layers with different keys: edge via Nginx `limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;` and `limit_req zone=api burst=20 nodelay;` (set `limit_req_status 429;` because the default is 503), gateway per API key, and application per tenant in Redis with an atomic Lua script or `MULTI`/`EXEC` on `rl:{tenant}:{window}`. Apportion inherited upstream limits: the Claude tokens-per-minute budget is shared by 500 tenants, so the per-tenant limiter must sum to less than the upstream ceiling and reserve headroom for retries. Honour the response contract: 429 with `Retry-After` and the IETF `RateLimit-Policy` / `RateLimit` headers (older drafts used `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`) so client SDKs back off correctly, and distinguish 429 (you asked too often) from 503 (we are overloaded).",
-   "minutes": 40,
-   "resource": {
-    "label": "nginx - ngx_http_limit_req_module (limit_req_zone, burst, nodelay, limit_req_status)",
-    "url": "https://nginx.org/en/docs/http/ngx_http_limit_req_module.html"
-   }
-  },
-  {
-   "name": "Timeouts, retries, backoff with jitter and circuit breakers",
-   "learn": "Every hop gets a timeout shorter than its caller's, so a 60 s user budget becomes 55 s at the API, 50 s at the worker and 45 s at the model call, and nothing waits on a caller that has already gone. Retry only idempotent operations, only on retryable errors (connection reset, 429, 503, 529), and only within a retry budget (retries never exceed ~10% of first attempts) so a partial outage cannot triple load. Use full jitter (`sleep = random(0, min(cap, base * 2^attempt))`) rather than plain exponential so retries do not arrive in synchronised waves. Add a circuit breaker per dependency (closed, open after N failures in a window, half-open with a single probe) to fail fast instead of consuming every worker's timeout on a dead dependency, and reserve hedged requests for read paths where duplicate work is safe. Multiply the layers to see a retry storm: client SDK 3x times API 3x times queue consumer 5x is 45 attempts per failed call.",
-   "minutes": 30,
-   "resource": {
-    "label": "Amazon Builders' Library - Timeouts, retries, and backoff with jitter",
-    "url": "https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"
-   }
-  },
-  {
-   "name": "Unique IDs at scale: UUIDv4 vs UUIDv7, Snowflake, ULID, sequences",
-   "learn": "Random UUIDv4 primary keys scatter inserts across the whole B-tree, causing page splits, WAL amplification and cache misses on a large `messages` table; UUIDv7 (RFC 9562: 48-bit Unix milliseconds, then version, then 74 bits of random or counter) and ULID are k-sortable so inserts append at the right-hand edge, and PostgreSQL 18 ships `uuidv7()` natively. Know the Snowflake layout and its arithmetic: 41-bit millisecond timestamp (about 69 years), 10-bit worker id (1,024 generators), 12-bit sequence (4,096 ids per ms per worker), and the two operational problems, assigning worker ids without collision (ZooKeeper, StatefulSet ordinal, database lease) and refusing to issue ids when the clock moves backwards. `bigserial` sequences are simplest on one primary but leak volume to customers and do not survive sharding; sharded systems either embed the shard id in the key or use a k-sortable id plus a directory. Decide per table: `bigint` sequence for internal joins, UUIDv7 for anything externally visible or destined for a shard.",
-   "minutes": 30,
-   "resource": {
-    "label": "RFC 9562 - Universally Unique IDentifiers (UUIDv7)",
-    "url": "https://www.rfc-editor.org/rfc/rfc9562.html"
-   }
-  },
-  {
-   "name": "Idempotency keys and safe write APIs",
-   "learn": "Clients send an `Idempotency-Key` (a UUID they generate) on every POST that creates something; the server stores key, tenant/user scope, a fingerprint of the request body and the final response, with a TTL (Stripe keeps them 24 hours). A repeat with the same key and same body replays the stored status and body; the same key with a different body is rejected (Stripe returns 400, you may choose 422); a concurrent duplicate while the first is still running is fenced with `SET idem:{tenant}:{key} NX PX 30000` or a unique index on the key column and told 409 to retry later. Scope keys per tenant so two tenants using the same UUID cannot collide or leak. Chain it with consumer dedup so a retried webhook or a re-driven queue message cannot create a second document, and store the key with the row so support can answer 'why do I have two of these'.",
+   "name": "Lazy evaluation: transformations, actions, jobs, stages, tasks and the shuffle boundary",
+   "learn": "Transformations (`select`, `filter`, `withColumn`, `groupBy().agg`, `join`) only extend a logical plan; nothing executes until an action (`count`, `collect`, `show`, `take`, `first`, `write`, `foreach`) submits a job, so a bug in a `filter` raises at the `show()` ten lines later, and a DataFrame consumed by two actions is recomputed twice unless persisted. Each job is cut into stages at wide dependencies, meaning anything that regroups rows by key (`groupBy`, `join`, `distinct`, `repartition`, `orderBy`, a window with `partitionBy`); the rows between stages are written to local disk as shuffle files and fetched over the network by the next stage; a stage is a set of tasks with exactly one task per partition, and a task is the unit that runs on one executor core. Narrow transformations (`select`, `filter`, `union`, `coalesce`) stay inside a stage and are pipelined row by row. Inspect partition counts with `df.rdd.getNumPartitions()`: input partitions come from splitting files at `spark.sql.files.maxPartitionBytes` (128 MB), post-shuffle partitions from `spark.sql.shuffle.partitions` (200). The drill: read a job, write down how many jobs and stages it will produce and where each shuffle is, then run it and check the Jobs tab; if the prediction is wrong you do not yet understand the cost of the code.",
    "minutes": 25,
    "resource": {
-    "label": "Stripe API reference - Idempotent requests",
-    "url": "https://docs.stripe.com/api/idempotent_requests"
+    "label": "Spark docs: RDD Programming Guide (transformations, actions, shuffle operations)",
+    "url": "https://spark.apache.org/docs/latest/rdd-programming-guide.html"
    }
   },
   {
-   "name": "Search: inverted indexes, analyzers, BM25, Postgres FTS and when to add a search engine",
-   "learn": "An inverted index maps term to posting list; the analyzer (tokenise, lowercase, stop words, stem) runs at index time and query time and must be identical or recall silently collapses. Understand BM25 versus TF-IDF in one sentence each (term-frequency saturation and document-length normalisation) so you can explain a ranking to a customer. Start in Postgres: a stored generated column `GENERATED ALWAYS AS (to_tsvector('english', body)) STORED` with a GIN index, `@@ websearch_to_tsquery('english', $1)`, `ts_rank_cd` for ordering, and `pg_trgm` with `gin_trgm_ops` for fuzzy and `ILIKE '%x%'`; always AND a `tenant_id` predicate and let RLS enforce it. Move to OpenSearch or Elasticsearch when you need facets, relevance tuning, highlighting, or search QPS that competes with OLTP, and know the costs: near-real-time visibility governed by `refresh_interval` (1 s default, so 'I just uploaded it and cannot find it'), mapping changes requiring a reindex behind an alias, tenant isolation via a mandatory `term` filter on `tenant_id` or an index per whale tenant. Hybrid retrieval that fuses BM25 with vector search via reciprocal rank fusion is topic 49.",
-   "minutes": 40,
-   "resource": {
-    "label": "PostgreSQL docs - Full Text Search",
-    "url": "https://www.postgresql.org/docs/current/textsearch.html"
-   }
-  },
-  {
-   "name": "Telling the failure story: trigger, propagation, detection, mitigation, design change",
-   "learn": "Close every design with a three-to-five-minute 'what breaks first' narrative built from the cascading-failure catalogue: a replica lags and users see vanished messages; Redis restarts and the database takes a 10x read spike; one tenant's bulk import fills the classifier queue for everyone; a deploy with a short grace period leaves the balancer sending to dead pods. Use a fixed structure so it lands under time pressure: trigger, propagation (why it spread instead of staying local), detection (which SLI moved, which alert fired, how long until a human knew), the 3 a.m. mitigation (shed, fail over, flip a flag, scale), and the design change that prevents recurrence, each with a number attached (lag in ms, queue depth, minutes to detect). Rehearse aloud until the story takes under five minutes and names at least one thing you would monitor from day one.",
+   "name": "Reading CSV, JSON and Parquet: explicit schemas, malformed-record policy, partition discovery",
+   "learn": "`spark.read.option(\"header\", True).option(\"inferSchema\", True).csv(path)` performs a full extra pass over the data to guess types and will guess differently tomorrow when one row changes; on any real export pass a schema (a `StructType` or the DDL string `\"tenant_id STRING, ts TIMESTAMP, input_tokens BIGINT\"`) and choose `mode`: `PERMISSIVE` (default; bad rows become nulls plus a `_corrupt_record` column you must explicitly select to keep, named by `spark.sql.columnNameOfCorruptRecord`), `DROPMALFORMED`, or `FAILFAST` for anything feeding billing. Know that `enforceSchema` defaults to true, so header names are ignored and columns are matched by position, and learn `multiLine`, `escape`, `nullValue`, `timestampFormat` and `dateFormat` (patterns follow Spark's datetime pattern reference, not Java's `SimpleDateFormat`). JSON is line-delimited unless `multiLine=true`; nested fields are addressed as `F.col(\"usage.output_tokens\")`, arrays flattened with `F.explode`, and JSON strings parsed with `F.from_json(col, schema)`. Parquet carries its own schema, is columnar (only selected columns are read), pushes predicates down to row-group statistics, and turns `key=value` directories into partition columns; set `basePath` when reading a subset of partitions so the partition columns survive, and only set `mergeSchema=true` when files genuinely differ because it costs one footer read per file.",
    "minutes": 25,
    "resource": {
-    "label": "Google SRE Book - Addressing Cascading Failures",
-    "url": "https://sre.google/sre-book/addressing-cascading-failures/"
+    "label": "Spark docs: CSV Files data source options",
+    "url": "https://spark.apache.org/docs/latest/sql-data-sources-csv.html"
+   }
+  },
+  {
+   "name": "Types, nulls and ANSI mode: the silent-null era versus Spark 4",
+   "learn": "With `spark.sql.ansi.enabled=false` (the Spark 3.x default) an invalid cast, an integer overflow, an out-of-range array index and division by zero all return null, so `CAST(tokens AS INT)` on a bad row quietly shrinks a billing total without any error; Spark 4.0 flips the default to true and those become `CAST_INVALID_INPUT`, `ARITHMETIC_OVERFLOW` and `DIVIDE_BY_ZERO` exceptions, which is the first thing that breaks when a customer upgrades their runtime. Reach for `try_cast`, `F.try_divide`, `F.try_add` and `F.try_to_timestamp` where null-on-failure is the intended behaviour, and know the type ladder: `IntegerType` is 32-bit and overflows at 2.1 billion tokens per tenant per period, `DecimalType(18, 6)` for money, `TimestampType` is an instant rendered in the session zone while `TimestampNTZType` (3.4+) is wall-clock time, and `spark.sql.session.timeZone` decides how `F.date_trunc(\"day\", ts)` buckets rows, so set it to `UTC` in code or daily totals differ between your laptop and the cluster. Nulls are skipped by `sum`, `avg` and `count(col)` but counted by `count(\"*\")`, never equal in joins (every null key drops out, or with `eqNullSafe` hashes to one partition), and `F.when(...)` without `.otherwise(...)` yields null.",
+   "minutes": 15,
+   "resource": {
+    "label": "Spark SQL reference: ANSI Compliance",
+    "url": "https://spark.apache.org/docs/latest/sql-ref-ansi-compliance.html"
+   }
+  },
+  {
+   "name": "Rewriting the SQL aggregation in the DataFrame API: groupBy, agg, pivot, exact versus approximate distincts",
+   "learn": "Take DefenderMate's usage query (per tenant per day: calls, input and output tokens, cost, distinct users, p95 latency) and write it twice: as `spark.sql()` over `df.createOrReplaceTempView(\"llm_calls\")`, and as `df.groupBy(\"tenant_id\", F.date_trunc(\"day\", \"ts\").alias(\"day\")).agg(F.count(\"*\").alias(\"calls\"), F.sum(\"input_tokens\").alias(\"input_tokens\"), F.sum(F.col(\"output_tokens\") * F.col(\"price_per_token\")).alias(\"cost\"), F.countDistinct(\"user_id\").alias(\"users\"), F.percentile_approx(\"latency_ms\", 0.95, 10000).alias(\"p95_ms\"))`, then prove with `explain()` that both compile to the same physical plan, because they do. Know the traps: `F.countDistinct` over several columns forces an `Expand` operator that multiplies the row count, so use `F.approx_count_distinct(col, rsd=0.01)` (HyperLogLog++) for dashboards and exact counts only where money depends on them; `F.collect_list` and `F.first` have no defined order without a window; `pivot(\"model\", values=[...])` with explicit values avoids an extra distinct job; `rollup` and `cube` emit grouping-set rows with nulls you must label using `F.grouping_id`. Conditions use `&`, `|` and `~` with parentheses, never Python `and`/`or`; `F.expr(\"...\")` is fine when a SQL fragment is clearer. Alias every aggregate so the output schema is stable for tests and downstream readers.",
+   "minutes": 35,
+   "resource": {
+    "label": "PySpark API reference: pyspark.sql.functions",
+    "url": "https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/functions.html"
+   }
+  },
+  {
+   "name": "Window functions: dedup-to-latest, lag-based sessionisation, frame semantics, the single-partition trap",
+   "learn": "`w = Window.partitionBy(\"tenant_id\", \"conversation_id\").orderBy(F.col(\"ts\").desc())` then `F.row_number().over(w)` and `.filter(\"rn = 1\")` is the canonical dedup-to-latest; `F.lag(\"ts\", 1).over(w)` compared against a gap threshold, followed by a cumulative `F.sum(\"is_new_session\").over(w.rowsBetween(Window.unboundedPreceding, Window.currentRow))`, gives session ids with no UDF. Learn the frame rules that differ from intuition: with `orderBy` and no explicit frame the default is `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`, so tied rows share a running total; `rangeBetween` requires a single numeric or date ordering column while `rowsBetween` counts rows; without `orderBy` the frame is the whole partition, which is exactly what `F.max(\"ts\").over(Window.partitionBy(\"tenant_id\"))` wants. A window with no `partitionBy` logs `WARN WindowExec: No Partition Defined for Window operation!` and moves every row to a single task, the number one cause of a stage that never finishes on a customer cluster. Every window costs a shuffle plus a sort, but consecutive windows over identical partition and order keys share one Exchange, so define `w` once and reuse it. Run the same dedup and sessionisation as Postgres window queries (topic 29) on the same export and diff the results.",
+   "minutes": 25,
+   "resource": {
+    "label": "PySpark API reference: pyspark.sql.Window",
+    "url": "https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/window.html"
+   }
+  },
+  {
+   "name": "Joins: broadcast versus sort-merge, shuffle partitions, AQE, and salting a skewed key",
+   "learn": "For an equi-join Spark chooses BroadcastHashJoin when one side's estimated size is under `spark.sql.autoBroadcastJoinThreshold` (10 MB; `-1` disables) and otherwise SortMergeJoin, which shuffles both sides on the key into `spark.sql.shuffle.partitions` (200) partitions and sorts each; a non-equi join falls to BroadcastNestedLoopJoin or a Cartesian product that will not finish. Force a small dimension with `F.broadcast(tenants)` or `df.hint(\"broadcast\")` (`MERGE` and `SHUFFLE_HASH` hints also exist), remembering the broadcast side is collected to the driver first, so a 2 GB 'small' table kills the driver, and `spark.sql.broadcastTimeout` (300 s) fires when the build side is slow. Adaptive Query Execution (`spark.sql.adaptive.enabled`, on by default since 3.2) uses real shuffle statistics to coalesce the 200 partitions towards `spark.sql.adaptive.advisoryPartitionSizeInBytes` (64 MB), to swap a planned SMJ for a broadcast when a side turns out small, and to split skewed join partitions when `spark.sql.adaptive.skewJoin.enabled` sees one larger than `skewedPartitionFactor` (5) times the median and above `skewedPartitionThresholdInBytes` (256 MB). AQE does nothing for skew in a `groupBy`: for a tenant holding 40 percent of rows, salt with `F.concat(F.col(\"tenant_id\"), F.lit(\"_\"), (F.rand() * 16).cast(\"int\"))`, aggregate, strip the salt, aggregate again. Join with `on=[\"tenant_id\"]` (string form) so the key appears once and downstream selects avoid `AMBIGUOUS_REFERENCE`, and filter nulls out of join keys because every null hashes to the same partition.",
+   "minutes": 35,
+   "resource": {
+    "label": "Spark SQL guide: Performance Tuning (joins, AQE, broadcast hints)",
+    "url": "https://spark.apache.org/docs/latest/sql-performance-tuning.html"
+   }
+  },
+  {
+   "name": "Reading the physical plan: Exchange, partial/final HashAggregate, FileScan pushdown, codegen breaks",
+   "learn": "Run `df.explain(mode=\"formatted\")` and read bottom-up. `FileScan parquet [tenant_id#3, tokens#7] Batched: true, PartitionFilters: [(dt#9 = 2026-09-01)], PushedFilters: [IsNotNull(tenant_id)], ReadSchema: struct<...>` tells you column pruning worked, which partitions were skipped, and which predicates reached the Parquet reader; a UDF or a cast wrapped around the column in a filter removes it from `PushedFilters`. `HashAggregate(keys=[tenant_id#3], functions=[partial_sum(tokens#7)])` followed by `Exchange hashpartitioning(tenant_id#3, 200)` and a second `HashAggregate(... functions=[sum(tokens#7)])` is the map-side partial aggregation that makes `groupBy` cheap; `ObjectHashAggregate` shows up for `collect_list`, and `SortAggregate` is the slow fallback. Every `Exchange` is a shuffle and a stage boundary: `hashpartitioning` from groupBy or join, `rangepartitioning` from `orderBy`, `SinglePartition` from a window without `partitionBy` or a `coalesce(1)`, `BroadcastExchange` from a broadcast join. A `*(2)` prefix means WholeStageCodegen stage 2 fused those operators into one generated Java loop; `BatchEvalPython` or `ArrowEvalPython` in the tree marks exactly where a Python UDF broke that fusion. `AdaptiveSparkPlan isFinalPlan=false` means the printed plan is the pre-execution guess; the SQL tab in the UI renders the final plan with real row counts per operator.",
+   "minutes": 25,
+   "resource": {
+    "label": "PySpark API reference: DataFrame.explain (modes simple, extended, codegen, cost, formatted)",
+    "url": "https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.DataFrame.explain.html"
+   }
+  },
+  {
+   "name": "Spark UI and history server: diagnosing skew, spill, small tasks and GC from stage metrics",
+   "learn": "Open `http://localhost:4040` while the job runs, or set `spark.eventLog.enabled=true` and `spark.eventLog.dir` and read it afterwards through the history server on port 18080, which is what you will actually have on a customer cluster. Jobs tab: one job per action; click through to stages. Stages tab: 'Summary Metrics for N Completed Tasks' gives min, 25th percentile, median, 75th and max for Duration, GC Time, Input Size, Shuffle Read, Shuffle Write and Spill (Memory and Disk). Read them like vitals: a max duration many times the median with one giant Shuffle Read is key skew; any non-zero Spill means execution memory ran out and sorts or aggregations went to `spark.local.dir`, so add partitions or memory; thousands of tasks lasting tens of milliseconds means partitions too small (raise `spark.sql.files.maxPartitionBytes` or coalesce); GC Time above roughly 10 percent of duration means the heap is thrashing. The Executors tab shows per-executor task time and failures but not Python worker memory, which is why container kills look mysterious (next subtopic). The SQL/DataFrame tab renders the final adaptive plan with rows output and spill per operator. For monitoring, `spark.ui.prometheus.enabled=true` exposes executor metrics at `/metrics/executors/prometheus`, and the REST API at `/api/v1/applications/<id>/stages` lets a CI step fail a build whose stages spilled.",
+   "minutes": 20,
+   "resource": {
+    "label": "Spark docs: Web UI (Jobs, Stages, Storage, Executors, SQL tabs)",
+    "url": "https://spark.apache.org/docs/latest/web-ui.html"
+   }
+  },
+  {
+   "name": "Executor and driver memory: unified memory, overhead, Python worker memory, exit 137 versus Java OOM",
+   "learn": "An executor container is `spark.executor.memory` (JVM heap) plus `spark.executor.memoryOverhead` (max(384 MB, `spark.executor.memoryOverheadFactor` 0.10, or 0.40 for non-JVM jobs on Kubernetes) covering JVM native memory, shuffle buffers and, unless `spark.executor.pyspark.memory` is set, every Python UDF worker) plus `spark.memory.offHeap.size` when enabled. Inside the heap 300 MB is reserved and `spark.memory.fraction` (0.6) of the rest is unified memory shared between execution (shuffles, sorts, joins, aggregations) and storage (cached blocks), with `spark.memory.storageFraction` (0.5) as the soft floor storage can be evicted down to; the remaining 40 percent is user memory for your own objects and metadata. Learn the three deaths by their signatures: `java.lang.OutOfMemoryError: Java heap space` in executor stderr is the heap; `Container killed by YARN for exceeding memory limits` or a Kubernetes pod exiting 137 with no Java stack trace is the container total, which in PySpark almost always means Python workers, so raise overhead to 20 to 30 percent or bound them with `spark.executor.pyspark.memory`; a driver death traces to `collect()`, `toPandas()`, a broadcast build side or `collect_list` landing on the driver, guarded by `spark.driver.maxResultSize` (1 GB, error text 'Total size of serialized results ... is bigger than spark.driver.maxResultSize'). Start from 4 to 5 cores per executor, partitions of 100 to 200 MB, heap sized for the largest partition times cores, and only then tune.",
+   "minutes": 25,
+   "resource": {
+    "label": "Spark docs: Tuning Spark (memory management, data structures, GC)",
+    "url": "https://spark.apache.org/docs/latest/tuning.html"
+   }
+  },
+  {
+   "name": "Python UDFs, pandas UDFs and Arrow: what gets serialised and what Catalyst can no longer see",
+   "learn": "A plain `@F.udf(returnType=...)` runs row by row in a forked `pyspark.daemon` worker on each executor with rows pickled across a socket in batches, and Catalyst treats it as a black box: no predicate pushdown through it, no whole-stage codegen, no null short-circuit, and its cost appears as `BatchEvalPython` in the plan. A `pandas_udf` with type hints (`def f(s: pd.Series) -> pd.Series`) moves Arrow record batches of `spark.sql.execution.arrow.maxRecordsPerBatch` (10,000) rows instead and is routinely 10 to 100 times faster; `spark.sql.execution.arrow.pyspark.enabled=true` also makes `toPandas()` and `createDataFrame(pdf)` use Arrow. `mapInPandas(func, schema)` hands you an iterator of pandas frames per partition (model scoring), and `groupBy().applyInPandas(func, schema)` hands you one frame per group, which means one skewed tenant's entire group must fit in a single Python worker's memory. Spark 3.5 adds Arrow-optimised regular UDFs (`@udf(useArrow=True)`) and Python UDTFs. The rule before writing any UDF: check `pyspark.sql.functions` and the higher-order array functions (`F.transform`, `F.filter`, `F.aggregate`, `F.exists`) first, because most UDFs in customer code are `to_timestamp`, `regexp_extract`, `from_json` or `split` written by hand. Python exceptions inside a UDF surface as `PythonException` with the Python traceback in the driver output (`spark.sql.execution.pyspark.udf.simplifiedTraceback.enabled`); `print` inside a UDF goes to executor stderr, not to your notebook.",
+   "minutes": 25,
+   "resource": {
+    "label": "PySpark tutorial: Apache Arrow in PySpark (pandas UDFs, mapInPandas, applyInPandas)",
+    "url": "https://spark.apache.org/docs/latest/api/python/tutorial/sql/arrow_pandas.html"
+   }
+  },
+  {
+   "name": "Writing output: partitionBy, file sizing, overwrite semantics, and atomic commits on S3",
+   "learn": "`df.repartition(\"tenant_id\", \"dt\").write.mode(\"overwrite\").partitionBy(\"tenant_id\", \"dt\").option(\"compression\", \"zstd\").parquet(out)` yields one file per output directory because the rows for each partition value are colocated in one task; without the `repartition`, every task writes a file into every directory it touches, and 200 tasks times 500 tenants times 30 days is three million small files that make listing slower than reading. `coalesce(n)` merges partitions without a shuffle but also lowers the parallelism of the entire upstream stage, `repartition(n)` shuffles round-robin, `option(\"maxRecordsPerFile\", n)` caps file size; aim for files of 128 MB to 1 GB. Save modes are `append`, `overwrite`, `ignore` and `errorifexists` (default), and `overwrite` with `partitionBy` deletes the whole output path first under the default `spark.sql.sources.partitionOverwriteMode=static`; set `dynamic` so re-running one `dt` replaces only that partition, which is what makes the job idempotent per run date. On S3 there is no atomic rename, so the Hadoop `FileOutputCommitter` v1 renames every file twice and is slow, v2 (`mapreduce.fileoutputcommitter.algorithm.version=2`) leaves partial output visible on failure, and the correct answer is the S3A committers (`spark.hadoop.fs.s3a.committer.name=magic` with `spark.sql.sources.commitProtocolClass=org.apache.spark.internal.io.cloud.PathOutputCommitProtocol` and `spark.sql.parquet.output.committer.class=org.apache.spark.internal.io.cloud.BindingParquetOutputCommitter`) or a table format such as Delta. Readers gate on the `_SUCCESS` marker or a table commit, never on the presence of files.",
+   "minutes": 30,
+   "resource": {
+    "label": "Spark docs: Integration with Cloud Infrastructures (S3 committers, consistency, rename)",
+    "url": "https://spark.apache.org/docs/latest/cloud-integration.html"
+   }
+  },
+  {
+   "name": "Delta Lake: transaction log, MERGE for late data, time travel, OPTIMIZE and VACUUM, schema enforcement",
+   "learn": "Delta is Parquet plus a `_delta_log/` of JSON commits (with a Parquet checkpoint every 10) giving ACID table-level commits under optimistic concurrency, so a failed job leaves no partial files visible and two writers to the same partition get a `ConcurrentAppendException` instead of corrupt data. Enable it with `pip install delta-spark` and `configure_spark_with_delta_pip(builder)`, which sets `spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension` and `spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog`. Late-arriving DefenderMate events are absorbed with `DeltaTable.forPath(spark, out).alias(\"t\").merge(updates.alias(\"s\"), \"t.tenant_id = s.tenant_id AND t.day = s.day\").whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()`; dedupe the source first or MERGE fails with 'multiple source rows matched', and put partition predicates in the ON clause so it prunes files. `spark.read.format(\"delta\").option(\"versionAsOf\", 12).load(out)` and `DESCRIBE HISTORY` let you show a customer exactly what the billing table said last Tuesday. `OPTIMIZE ... ZORDER BY (tenant_id)` compacts the small files that MERGE and streaming create; `VACUUM ... RETAIN 168 HOURS` deletes unreferenced files and also destroys time travel past that horizon, which is why `spark.databricks.delta.retentionDurationCheck.enabled` refuses shorter windows by default. Schema enforcement rejects a write whose columns differ with an `AnalysisException`; evolve deliberately with `.option(\"mergeSchema\", \"true\")`, and use `.option(\"replaceWhere\", \"day = '2026-09-01'\")` for a partition-scoped overwrite. Databricks layers Photon, liquid clustering and deletion vectors on top; the log format is the same one you run locally.",
+   "minutes": 25,
+   "resource": {
+    "label": "Delta Lake docs: Table deletes, updates, and merges (MERGE INTO)",
+    "url": "https://docs.delta.io/delta-update/"
+   }
+  },
+  {
+   "name": "cache, persist and checkpoint: when materialisation helps and when it removes pushdown",
+   "learn": "`df.cache()` is `persist(StorageLevel.MEMORY_AND_DISK)` for DataFrames (RDDs default to `MEMORY_ONLY`), is lazy until the next action, and only pays off when the same DataFrame feeds two or more actions, such as a `count()` for a data-quality gate followed by a `write`, or an iterative algorithm; a frame cached and used once just costs memory plus the conversion to columnar blocks. Cache after your filters, not before: reads from a cached relation come from `InMemoryTableScan`, so predicates no longer reach the Parquet scan and partition pruning is gone for every downstream query. Watch the Storage tab for 'Fraction Cached' below 100 percent, meaning blocks were evicted because execution memory reclaimed the space and recomputation is happening anyway; call `unpersist()` when finished or `spark.catalog.clearCache()`. `checkpoint()` (after `sc.setCheckpointDir`) writes the data to reliable storage and truncates lineage, which is the fix when a plan is so deep that Catalyst analysis itself takes minutes or a `StackOverflowError` appears on the driver, typically in loops that keep re-assigning `df = df.join(...)`; `localCheckpoint()` does the same to executor disk without durability. Never `cache()` to make a one-shot job faster; fix the plan.",
+   "minutes": 15,
+   "resource": {
+    "label": "PySpark API reference: DataFrame.persist and StorageLevel",
+    "url": "https://spark.apache.org/docs/latest/api/python/reference/pyspark.sql/api/pyspark.sql.DataFrame.persist.html"
+   }
+  },
+  {
+   "name": "Testing and packaging a job that runs identically on a laptop and on the customer's cluster",
+   "learn": "Structure the job as pure functions, `def daily_usage(llm_calls: DataFrame, tenants: DataFrame) -> DataFrame`, with a thin `main()` that parses `--input`, `--output` and `--run-date` and builds the session, so tests call the functions on `spark.createDataFrame([...], schema)` using a session fixture built with `master(\"local[2]\")`, `spark.sql.shuffle.partitions=2` and `spark.ui.enabled=false` (session-scoped, since JVM startup costs seconds). Assert with `pyspark.testing.assertDataFrameEqual(actual, expected, checkRowOrder=False)` and `assertSchemaEqual`, and include one test that runs the reference Postgres SQL against exported fixtures and compares row for row; that is the test that catches time zone and null-handling drift. Packaging is where laptop-green jobs die on clusters: any module imported inside a UDF or transform must exist on every executor, so ship it with `--py-files src.zip` (pure Python) or build the environment with `venv-pack -o venv.tar.gz` and submit `--archives venv.tar.gz#env --conf spark.pyspark.python=./env/bin/python` (or `conda-pack`, or a Docker image on Kubernetes); `ModuleNotFoundError` thrown from inside `BatchEvalPython` is this bug every single time. Pin `pyspark` to the cluster's exact minor version in `pyproject.toml`, set `spark.sql.session.timeZone=UTC` in code rather than trusting the cluster, and log from the driver's Python logger only, because executor stderr is not yours to read on a customer's platform.",
+   "minutes": 25,
+   "resource": {
+    "label": "PySpark tutorial: Python Package Management (py-files, archives, venv-pack, conda-pack)",
+    "url": "https://spark.apache.org/docs/latest/api/python/tutorial/python_packaging.html"
+   }
+  },
+  {
+   "name": "Where PySpark lives in Databricks and Foundry, and what Spark Connect changes",
+   "learn": "On Databricks `spark` is pre-created in every notebook, production work runs as Jobs on job clusters (ephemeral, cheaper) rather than all-purpose clusters, tables live in Unity Catalog as `catalog.schema.table` and are Delta by default, Photon swaps the execution engine underneath without code changes, and Databricks Connect runs your local IDE's PySpark against a remote cluster because it is built on Spark Connect. In Palantir Foundry the unit is a dataset (a versioned, branchable Parquet or Delta directory) and the code is a transform: `@transform_df(Output(\"/Org/usage/daily\"), calls=Input(\"/Org/raw/llm_calls\"))` returning a DataFrame, built by Foundry's scheduler with lineage recorded, while `@incremental()` transforms read only `.dataframe(\"added\")` rows since the previous build, which is how a Palantir FDE ships a daily pipeline in an afternoon. Spark Connect (3.4+, `SparkSession.builder.remote(\"sc://host:15002\")`, the `pyspark-client` package in 4.0) replaces the in-process Py4J driver with a thin gRPC client: the DataFrame API is unchanged, but `sparkContext`, RDDs and `df.rdd.getNumPartitions()` are gone, and a client crash no longer kills the driver. Know these three well enough that a customer conversation about 'our pipelines' goes straight to their transform code.",
+   "minutes": 20,
+   "resource": {
+    "label": "Palantir Foundry docs: Python transforms overview",
+    "url": "https://www.palantir.com/docs/foundry/transforms-python/overview"
    }
   }
  ],
  "outcomes": [
-  "You can run a 45-minute design of a stated system (DefenderMate at 500 tenants, or an unfamiliar prompt) against a visible clock and leave behind written requirements, a numbers table, a component diagram, two deep dives and a failure story without being prompted for any of them.",
-  "You can produce a capacity estimate in under five minutes from stated assumptions (average and peak QPS, storage per year, bandwidth, cache size for a target hit ratio, worker count from Little's Law) and name the component that saturates first with the number that proves it.",
-  "You can choose a load-balancing algorithm and connection-reuse configuration for a stated workload (short JSON calls vs long SSE streams) and write the Nginx upstream block or ALB target-group settings, including health-check thresholds and a deregistration delay that matches the pod's grace period.",
-  "You can specify a cache layer end to end (key schema with tenant and version, TTL with jitter, eviction policy, invalidation trigger, stampede protection) and state the database load if the cache is lost.",
-  "You can pick a partition or shard key for a given query mix, state the hot-spot risk and which queries become scatter-gather, and describe the rebalancing and tenant-move procedure step by step.",
-  "You can design a per-tenant rate limiter (algorithm, storage, key, 429 and header contract) and a retry policy (timeouts per hop, jitter, retry budget, circuit breaker) that together provably cannot amplify a partial outage, and show it with a k6 run.",
-  "You can design an async pipeline (outbox, queue with visibility timeout and DLQ, idempotent consumer) and say exactly what happens to a message on a crash at each of the five points between the user's POST and the stored result.",
-  "You can decide between Postgres full-text search and a dedicated search engine for a stated workload and write either the generated tsvector column with its GIN index or the index mapping and mandatory tenant filter."
+  "You can rewrite DefenderMate's per-tenant, per-day usage aggregation (calls, tokens, cost, distinct users, p95 latency) as a PySpark job, run it with `spark-submit --master local[4]` over Parquet exports, and show with `assertDataFrameEqual` that it matches the Postgres query row for row, including on days with nulls and time zone edges.",
+  "You can draw the driver, executor and cluster-manager diagram from memory, place the Python process, the JVM, Py4J and the Python UDF workers on it, and state which process dies and with what error for `collect()`, an oversized broadcast, an `applyInPandas` group, and a large shuffle.",
+  "You can read `explain(mode=\"formatted\")` for an unfamiliar job and identify every Exchange and its cause, the join strategy chosen, whether filters reached the Parquet scan, and where a Python UDF broke codegen, and predict the number of stages before running it.",
+  "You can open the Spark UI on a slow stage and within five minutes distinguish key skew, spill, too many small tasks and GC pressure from the stage summary metrics, naming the code or config change for each.",
+  "You can choose between broadcast and sort-merge joins from table sizes, set `spark.sql.shuffle.partitions` and AQE deliberately, salt a skewed `groupBy` key, and demonstrate the stage time before and after on a synthetically skewed tenant.",
+  "You can write partitioned Parquet or Delta output that is idempotent per run date (dynamic partition overwrite or MERGE), produces files between 128 MB and 1 GB rather than thousands of small ones, and commits atomically on S3 with a committer you can name.",
+  "You can package the job so it runs unchanged on a laptop and on a customer's YARN or Kubernetes cluster (pure-function transforms, pytest with a local session, `--archives` venv, pinned pyspark), and explain each `spark-submit` flag you used.",
+  "You can tell a customer in one minute whether Spark is the right tool for their 50 GB or 5 TB, and if they are on Databricks or Foundry, describe where your transform would live and how it would be scheduled."
  ],
  "failureModes": [
-  "A Redis restart during a deploy expired every key at once; thousands of concurrent misses hit Postgres, connections pinned at `max_connections`, and the API served 500s for twenty minutes even though the database itself was healthy; jittered TTLs and a single-flight lock would have held.",
-  "The customer's Nginx ran round-robin with no upstream `keepalive` in front of SSE streams; every stream opened a fresh TCP connection and long conversations pinned one pod while others idled, tripling p99 time-to-first-token under mild load until `least_conn` and `keepalive 32` were added.",
-  "Reads were routed to a replica 400 ms behind the primary; a user posted a message, the conversation list did not show it, the frontend retried the POST without an idempotency key, and the tenant saw duplicates that support then had to delete by hand.",
-  "`created_at` was chosen as the shard key for `llm_calls`; every write landed on the newest shard, and one tenant's overnight bulk re-classification saturated that shard for all 500 tenants while the other shards sat idle.",
-  "Retries in the client SDK (3x), the API (3x) and the queue consumer (5x) compounded to 45 attempts per failed call during an upstream 529 event, exhausting the shared Claude rate limit for every tenant and leaving a backlog that took six hours to drain after the upstream recovered.",
-  "Deregistration delay was 300 s but `terminationGracePeriodSeconds` was 30 s, so on every rollout the ALB kept routing to pods that had already been SIGKILLed; the resulting five minutes of 502s per deploy were blamed on 'the network' for a month.",
-  "A CDN-cached per-tenant branding endpoint lacked `Vary` and a tenant-aware cache key; the first tenant to request after a purge had its logo and name served to every other tenant for the next five minutes."
+  "`inferSchema=true` on a nightly CSV export doubles the read and infers `tenant_id` as long on Monday and string on Tuesday when one UUID appears; the downstream join silently drops every row and the dashboard shows zero usage before anyone notices the schema flip.",
+  "`df.write.mode(\"overwrite\").partitionBy(\"dt\").parquet(path)` under the default `partitionOverwriteMode=static` deletes two years of history in the customer's bucket during a one-day backfill, and the only copy was the output of the job that deleted it.",
+  "A Python UDF parses timestamps over two billion rows: thirty times slower than `F.to_timestamp`, predicate pushdown gone, and the `pyspark.daemon` workers push each Kubernetes pod over its limit, so executors die with exit code 137 and no `OutOfMemoryError` anywhere in the logs.",
+  "One tenant holds 40 percent of rows; `groupBy(\"tenant_id\")` sends all of them to one task that runs three hours while the other 199 finish in seconds, AQE skew handling does not apply because it is an aggregation rather than a join, and the nightly SLA is missed until someone salts the key.",
+  "`toPandas()` on a 'small' filtered result that is actually 6 GB kills the driver with `spark.driver.maxResultSize` after two hours of upstream compute; the fix was to write the result to a table and read one partition, and to put a `count()` guard in front of any driver-side collection.",
+  "The job passes locally and fails on the cluster with `ModuleNotFoundError: No module named 'defendermate_utils'` inside `BatchEvalPython`, because the package was installed on the edge node only and never shipped with `--py-files` or an `--archives` environment.",
+  "`spark.sql.session.timeZone` is the laptop's local zone in development and UTC on the cluster, so `date_trunc(\"day\", ts)` buckets shift by several hours between environments; the PySpark daily totals disagree with the Postgres billing query and the discrepancy is blamed on Spark for a week."
  ],
  "interviewQuestions": [
-  "Design DefenderMate for 500 tenants: 100k users, 200k messages a day, each message one Claude call with a 60-second user budget, plus 50k document uploads a day. Walk me through the queues, the shard or partition key, the per-hop latency budget, and the one component you expect to saturate first, with numbers.",
-  "A customer says 'just add read replicas' to fix a slow dashboard and a slow conversation view. When does that help, when does it not, and how do you handle the user who just posted a message and immediately reloads? Show me the routing rule and how you would measure lag.",
-  "You have a Redis-backed per-tenant limiter and an upstream Claude tokens-per-minute limit shared by all tenants. Design the fairness policy: how do you apportion the upstream budget, what does a tenant see when they hit their share, and how does a bursty tenant not starve a steady one? What headers do you return?",
-  "Debug: after every deploy, 502s spike for about four minutes then recover. The path is ALB to Kubernetes pods running FastAPI. Give me the three most likely causes, the exact ALB access-log fields and pod events you would check for each, and the fix.",
-  "Explain the transactional outbox pattern. Why is writing to Postgres and then publishing to Kafka broken, what does the outbox change, why do consumers still need idempotency, and what happens to the primary if the Debezium replication slot stalls for a day?",
-  "The `messages` table has reached 2 TB and the customer wants sub-100 ms conversation loads. Walk through partitioning versus sharding: how you choose the key, which queries break, how you migrate with zero downtime, and how you prove afterwards that it worked.",
-  "A tenant reports two search problems: newly uploaded documents are missing for up to a minute, and once a document from another tenant appeared in results. Diagnose both, name the exact settings or query clauses involved, and say what you would monitor to catch each before the customer does."
+  "Walk me through exactly what happens, process by process, when this line runs: `df.groupBy(\"tenant_id\").agg(F.sum(\"tokens\")).write.parquet(path)`. How many jobs and stages, where is the shuffle, what does the driver do versus the executors, and what changes if `df` came from a Python UDF?",
+  "A customer's nightly PySpark job went from 20 minutes to 3 hours after they onboarded one large new client. The code did not change. Take me through your diagnosis in the Spark UI and the fixes you would try, in order, with the trade-off of each.",
+  "Design a pipeline that ingests LLM call logs (JSON, about 2 TB per day, events arriving up to 48 hours late) into a per-tenant daily usage table that finance bills from. Cover idempotent reruns, late data, partitioning and file sizing, and how you validate against the source of truth.",
+  "When would you use a pandas UDF versus a plain Python UDF versus a built-in expression? For each, what exactly is serialised, where does it run, and what does Catalyst lose the ability to do?",
+  "Executor containers are being killed with exit code 137 but there is no `OutOfMemoryError` in any JVM log. Explain the memory regions involved in a PySpark executor and what you would change, and how you would confirm the fix from the UI or metrics.",
+  "Explain sort-merge join versus broadcast hash join: how Spark chooses, what goes wrong when you force a broadcast, how AQE changes the decision at runtime, and why AQE still will not save a skewed groupBy.",
+  "A customer with 50 GB of data wants everything on Spark because 'that is what Databricks is for'. Are they right? How would you decide, what would you propose instead if not, and how would you say it to their head of data without losing the room?"
  ],
- "proofOfWork": "A public 'design dossier' repository that goes beyond the six written designs: (1) a numbers workbook for DefenderMate at 500 tenants in which every capacity figure is derived from a named assumption cell, with a sensitivity column showing what changes at 5,000 tenants and which component saturates first at each scale; (2) an executable slice in docker-compose: Nginx with `least_conn`, upstream `keepalive` and a documented drain sequence, Redis running a Lua sliding-window per-tenant limiter that returns 429 with `Retry-After` and `RateLimit` headers, Postgres with a range-partitioned `llm_calls` table, a streaming replica, and a lag probe reading `pg_stat_replication`, plus an outbox table drained into Redpanda; (3) three k6 scripts that reproduce three failure stories (cache-flush stampede, replica-lag read-your-writes, layered retry storm) with before/after Grafana screenshots showing the mitigation working; and (4) a recorded 45-minute self-run of the DefenderMate design against a timer, scored on a written rubric (requirements, numbers, diagram, two deep dives, failure story) with timestamps for each section. A reviewer can clone the repo, run `make demo`, and watch each failure story happen and then not happen."
+ "proofOfWork": "A public repository `defendermate-spark-usage` containing: (1) an exporter that dumps `llm_calls`, `messages` and `tenants` from DefenderMate's Postgres to Parquet partitioned by `dt`; (2) `jobs/usage_daily.py` written as pure-function transforms with an argparse `main()` taking `--input`, `--output` and `--run-date`, writing with dynamic partition overwrite so any day can be rerun; (3) `sql/usage_daily.sql`, the reference query run in Postgres, and a pytest that asserts the PySpark output equals it with `assertDataFrameEqual`; (4) `NOTES.md` holding the annotated `explain(mode=\"formatted\")` output with every Exchange and the join strategy labelled, a before-and-after table of stage summary metrics (median versus max task duration, shuffle read, spill) from salting a synthetically skewed tenant given 40 percent of rows, and a memory table listing the four OOM scenarios you actually triggered (`collect()`, oversized broadcast, `applyInPandas` on the skewed tenant, shuffle spill) with the exact error text and which process died; (5) a Delta variant of the writer that absorbs a replayed batch of late events via MERGE, with the `DESCRIBE HISTORY` output showing the commit and a `versionAsOf` read proving the previous state is recoverable. This is the artefact you open when a Databricks or Palantir interviewer says 'show me Spark you have written'."
 }

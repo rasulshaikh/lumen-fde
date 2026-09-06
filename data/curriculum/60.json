@@ -1,209 +1,200 @@
 {
  "i": 60,
- "topic": "Platform fluency for take-homes: Anthropic and OpenAI APIs side by side",
+ "topic": "Model gateway, routing, fallbacks, canaries",
  "track": "H. AI in Production",
  "month": 7,
- "hours": 5,
- "why": "FDE take-homes and customer POCs are timeboxed, and the person grading you is watching whether your budget went into the problem or into plumbing you should already know. Customers almost never let you pick the vendor either — they are already on Bedrock, or Azure, or have a procurement contract with one provider — so 'can you do this on our stack?' has to be answerable with a running demo rather than a maybe. Being able to write the tool loop, the strict output schema, the streaming consumer and the batch job on either API from memory turns a two-day integration into an afternoon, and turns a vendor-migration question into a one-page diff instead of a project.",
+ "hours": 6,
+ "why": "The gateway is the one piece of an AI deployment an FDE can change on a Tuesday without asking the customer's platform team for anything: it is where you swap models, cap spend, survive a provider outage, and prove a new model is better before you make it everyone's problem. Enterprise customers do not accept 'we upgraded the model and it feels better' - they accept a 10% canary with a written comparison of quality, p95 latency, cost per request and error rate, and a rollback that took one config change. Without a gateway you are hard-coding a vendor SDK into the customer's application, which means every model decision becomes a code deploy, a change-advisory-board ticket, and a three-week delay you will personally own.",
  "prerequisites": [
-  "Topic 47 (tool use, structured outputs and MCP servers): the concepts of a tool schema, a tool-execution loop and a JSON output contract. This topic is those same ideas executed twice, fast, from memory, under a stopwatch.",
-  "Topic 46 (prompt engineering as code): a versioned prompt file, a golden set of inputs, and a one-command regression run — you need these to prove the two implementations actually produce equivalent output rather than merely both returning 200.",
-  "Fluent Python (and enough TypeScript to read SDK examples): `httpx`/`requests`, SSE parsing, `asyncio.gather`, Pydantic v2 models, `os.environ` secret handling, and comfort reading a raw `curl -i` response including headers.",
-  "JSON Schema literacy: `type`, `properties`, `required`, `additionalProperties`, `enum`, `const`, `anyOf`, `$ref`/`$defs`, and specifically the difference between a property that is not in `required` and one whose type is a union with `null`.",
-  "Topic 43 (LLM-era system design): retries with exponential backoff and jitter, timeouts, idempotency and latency budgets — without these your client is tutorial-shaped, not production-shaped, and graders notice.",
-  "Two funded API keys (Anthropic and OpenAI, roughly $20 each) and a stopwatch. This topic is a drill; without live keys against current models you are reading documentation, not building fluency."
+  "Evals as infrastructure (topic 53): a versioned eval set, a judge you have calibrated against human labels, and a CI gate - a canary without a quality metric is just a slower way to ship a regression.",
+  "LLM observability (topic 54): per-request traces carrying model, tokens, cost and latency, so 'the canary is worse' can be traced to specific requests rather than argued about.",
+  "Observability fundamentals (topic 21): Prometheus histograms, PromQL rate() and histogram_quantile(), Grafana dashboards, and OpenTelemetry span attributes.",
+  "SRE fundamentals (topic 20): SLIs, SLOs, error budgets - a canary is an error-budget spend decision and you need to be able to say how much budget it may consume.",
+  "LLM-era system design (topic 43): retries, rate limits, latency budgets, streaming and TTFT versus total latency, because a gateway multiplies every one of those concerns.",
+  "Kubernetes production ops (topic 8) and Redis (topic 31): the gateway runs as a horizontally scaled Deployment whose routing state (cooldowns, TPM/RPM counters) lives in Redis, not in process memory."
  ],
  "subtopics": [
   {
-   "name": "Auth, base URLs, and a scaffold you can type from memory",
-   "learn": "Both platforms are POST-JSON over HTTPS and the auth differs in exactly one header. Anthropic: `POST https://api.anthropic.com/v1/messages` with `x-api-key: $ANTHROPIC_API_KEY`, `anthropic-version: 2023-06-01` (required — omitting it is a 400), and `content-type: application/json`. OpenAI: `POST https://api.openai.com/v1/responses` with `Authorization: Bearer $OPENAI_API_KEY`, plus optional `OpenAI-Organization` and `OpenAI-Project` headers. Both SDK clients read the key from the environment with zero arguments (`anthropic.Anthropic()`, `OpenAI()`). Build yourself a scaffold — pinned SDK versions, `.env.example`, a `smoke.py` that makes one call on each provider, and the equivalent `curl` in the README — and time it: keys to first 200 should be under ten minutes on both.",
+   "name": "What a gateway must own, and what it must not",
+   "learn": "A model gateway is a seam: one OpenAI-compatible endpoint (`/v1/chat/completions`, `/v1/embeddings`, `/v1/responses`) in front of N providers, so the application never imports a vendor SDK and never learns a model id. Get clear on what belongs at the seam - credential custody, model aliasing, routing, retries, fallbacks, rate limits, budgets, cost attribution, logging and canary allocation - and what does not: prompt construction, retrieval, business retries, and anything requiring request-body semantics the gateway would have to parse and reinterpret. Know the cost you are accepting in exchange: one more network hop (measure it, LiteLLM exposes `x-litellm-overhead-duration-ms`), one more thing that can be down, and a shared blast radius across every team using it. Run `litellm --config config.yaml` locally and point an unmodified `openai` client at `base_url=\"http://0.0.0.0:4000\"` to feel why the seam is the whole point.",
    "minutes": 15,
    "resource": {
-    "label": "Claude Docs — API getting started",
-    "url": "https://platform.claude.com/docs/en/api/overview"
+    "label": "LiteLLM docs - Proxy quick start",
+    "url": "https://docs.litellm.ai/docs/proxy/quick_start"
    }
   },
   {
-   "name": "Request and response shapes, memorised in parallel",
-   "learn": "Anthropic minimal body: `{model, max_tokens (REQUIRED — omitting it 400s), messages: [{role, content}], system (top-level, there is no \"system\" role)}`, returning `{id, type: \"message\", role: \"assistant\", content: [blocks], stop_reason, usage: {input_tokens, output_tokens}}`. OpenAI Responses minimal body: `{model, input (string or item array), instructions, max_output_tokens (optional)}`, returning `{id: \"resp_...\", status, output: [items], usage: {input_tokens, output_tokens, total_tokens}}` with `output_text` as an SDK-only convenience. Anthropic `content` is always a list, so `response.content[0].text` breaks the moment a `thinking` or `tool_use` block precedes the text. Know the `stop_reason` enum — `end_turn`, `max_tokens`, `stop_sequence`, `tool_use`, `pause_turn`, `refusal`, `model_context_window_exceeded` — and its OpenAI counterpart `status: \"incomplete\"` plus `incomplete_details.reason`. Know too that `temperature`, `top_p` and `top_k` are deprecated on Claude models released after Opus 4.6 (non-default values are rejected with a 400) and that OpenAI reasoning models reject `temperature` as well.",
+   "name": "config.yaml anatomy and the alias indirection",
+   "learn": "Learn the four blocks and what each governs: `model_list` (deployments, each with `model_name` as the client-facing alias, `litellm_params` for the real upstream model/api_base/api_key, and `model_info` for `id`, `mode` and metadata), `router_settings` (routing strategy, fallbacks, cooldowns), `litellm_settings` (callbacks, caching, global defaults) and `general_settings` (master key, database, health-check behaviour). The single most important idea: many `model_list` entries can share one `model_name`, and that is simultaneously how you load-balance, how you fail over and how you canary - one alias, several deployments. Keep secrets out of YAML with `os.environ/ANTHROPIC_API_KEY` references, pin a stable `model_info.id` per deployment so metrics and headers stay comparable across restarts, and treat config.yaml as code in the customer's repo with review and a diff, never as something edited in the admin UI.",
    "minutes": 20,
    "resource": {
-    "label": "Claude Docs — Messages API reference (body parameters and returns)",
-    "url": "https://platform.claude.com/docs/en/api/messages"
+    "label": "LiteLLM docs - Proxy config settings",
+    "url": "https://docs.litellm.ai/docs/proxy/configs"
    }
   },
   {
-   "name": "System prompt placement and who owns conversation state",
-   "learn": "Anthropic has no system role: the system prompt is the top-level `system` parameter, either a string or an array of `TextBlockParam` (the array form exists so you can attach `cache_control` to it). OpenAI Responses uses top-level `instructions`, or a `developer`/`system` role item inside `input` — and `instructions` is not carried forward when you chain with `previous_response_id`, which surprises people mid-conversation. The larger difference is statefulness: Anthropic is always stateless, so you resend the full `messages` array every turn and you own truncation; OpenAI Responses can be stateful via `store: true` plus `previous_response_id`. Decide deliberately and be able to defend it: stateful means fewer tokens on the wire and less code, stateless is what most enterprise customers with data-retention rules will actually approve. Practise forcing stateless on OpenAI with `store: false` and resending the item list yourself.",
-   "minutes": 15,
+   "name": "Routing strategies and where the state lives",
+   "learn": "Know the strategies by behaviour, not by name: `simple-shuffle` (the default and the production recommendation - weighted pick using per-deployment `weight`, or `rpm`/`tpm` as implicit weights, with effectively zero routing overhead), `usage-based-routing-v2` (async, picks the deployment with TPM/RPM headroom), `latency-based-routing`, `least-busy`, and `cost-based-routing`. The trap that catches everyone: routing state - cooldowns, in-flight counts, TPM/RPM windows - is per-process, so with `--num_workers 4` behind three pods you have twelve independent opinions unless you configure Redis, at which point a Redis stall becomes a routing stall. Understand that latency- and usage-based strategies add a read to the hot path and can oscillate (everyone stampedes the deployment that just looked fast), which is exactly why the docs recommend weighted shuffle in production. Set weights explicitly rather than relying on implicit rpm-derived weights, because that is the knob a canary turns.",
+   "minutes": 30,
    "resource": {
-    "label": "OpenAI Platform — Conversation state guide",
-    "url": "https://developers.openai.com/api/docs/guides/conversation-state"
+    "label": "LiteLLM docs - Router: load balancing and routing strategies",
+    "url": "https://docs.litellm.ai/docs/routing"
    }
   },
   {
-   "name": "Content blocks and multimodal input on both",
-   "learn": "Anthropic message `content` is a string or a list of typed blocks: `{\"type\":\"text\"}`, `{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":...}}` or a `{\"type\":\"url\"}` source, `{\"type\":\"document\"}` for PDFs, plus `tool_use`, `tool_result` and `thinking`. OpenAI Responses uses input parts `{\"type\":\"input_text\"}`, `{\"type\":\"input_image\",\"image_url\": <data URI or https URL>}` and `{\"type\":\"input_file\"}`, with model text returning as `output_text` parts carrying `annotations`. Drill both directions: base64 a PNG and a five-page PDF and get the same structured extraction out of each API. Respect the ceilings — an Anthropic Messages request caps at 32 MB and returns 413 `request_too_large` above it, so anything larger goes through the Files API rather than inline base64.",
-   "minutes": 15,
-   "resource": {
-    "label": "Claude Docs — Vision (image and document inputs)",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/vision"
-   }
-  },
-  {
-   "name": "Tool schemas: three envelopes around one JSON Schema",
-   "learn": "The parameter schema is identical JSON Schema on both platforms; only the wrapper differs, and this is the single most-fumbled thing under time pressure. Anthropic: `tools: [{name, description, input_schema: {type: \"object\", properties, required}}]` — note `input_schema`, not `parameters`. OpenAI Responses: `tools: [{type: \"function\", name, description, parameters, strict}]`, flat. OpenAI Chat Completions: `tools: [{type: \"function\", function: {name, description, parameters, strict}}]`, nested one level deeper. Build a `toolspec.py` that holds the raw JSON Schema once plus two adapter functions emitting the two envelopes, and unit-test the adapters. That file is the reusable asset a take-home actually rewards, and it is what you paste into a customer repo on day one.",
-   "minutes": 20,
-   "resource": {
-    "label": "OpenAI Platform — Function calling guide",
-    "url": "https://developers.openai.com/api/docs/guides/function-calling"
-   }
-  },
-  {
-   "name": "The agent loop: tool_result vs function_call_output",
-   "learn": "Write both loops from memory. Anthropic: the response arrives with `stop_reason: \"tool_use\"` and one or more `{\"type\":\"tool_use\",\"id\":\"toolu_...\",\"name\",\"input\"}` blocks where `input` is already a parsed object; you append the assistant message verbatim with all blocks in original order, then append a **user** message whose content is `[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_...\",\"content\": <string or blocks>, \"is_error\": bool}]`, and every `tool_use` in a turn must get a matching `tool_result` in the immediately following message or the API 400s. OpenAI Responses: the model emits a `function_call` item with `call_id` and `arguments` as a **JSON string** you must `json.loads` (and defend against malformed JSON unless `strict: true`); you append that item plus `{\"type\":\"function_call_output\",\"call_id\":...,\"output\":\"<string>\"}`. Chat Completions instead uses `tool_calls` on the assistant message answered by a `{\"role\":\"tool\",\"tool_call_id\":...}` message. Always add a hard `max_iterations` guard.",
+   "name": "Timeouts, retries and cooldowns as one budget",
+   "learn": "Set `router_settings.timeout` globally and override per deployment with `litellm_params.timeout` (cap on the complete response) and `stream_timeout` (cap on time-to-first-chunk - the one that catches a provider that accepts your connection and then sits there). Understand the multiplication: `num_retries` x `timeout` x fallback chain length is your true worst-case latency, and if the caller's own client timeout is shorter than that product you will burn provider spend on responses nobody will ever read. Know `allowed_fails` and `cooldown_time` - after N failures a deployment is pulled from the pool for a cooldown window, which is why a single bad Azure region degrades gracefully instead of taking the alias down. Add `keepalive_seconds` on slow-first-token deployments so an intermediate load balancer does not kill an idle-looking SSE stream (it emits `: ping` comment frames), and remember it is operator-only unless `allow_client_keepalive_override: true` is set.",
    "minutes": 25,
    "resource": {
-    "label": "Claude Docs — Implementing tool use (the tool-result round trip)",
-    "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools"
+    "label": "LiteLLM docs - Timeouts (timeout, stream_timeout, keepalive_seconds)",
+    "url": "https://docs.litellm.ai/docs/proxy/timeout"
    }
   },
   {
-   "name": "tool_choice, forcing, and parallel tool calls",
-   "learn": "Anthropic `tool_choice` takes `{\"type\":\"auto\"}`, `{\"type\":\"any\"}` (must call some tool), `{\"type\":\"tool\",\"name\":\"x\"}` (must call that one) and `{\"type\":\"none\"}`, with `disable_parallel_tool_use: true` capping a turn at one call. OpenAI takes `tool_choice: \"auto\" | \"none\" | \"required\" | {\"type\":\"function\",\"name\":\"x\"}` plus `parallel_tool_calls: false`. Understand what forcing costs before you reach for it: forced tool use is incompatible with some thinking configurations on Claude and returns a 'Forced tool use not supported' 400, and on both platforms forcing removes the model's ability to say 'I don't have enough information to call this' — exactly the behaviour a customer-facing agent needs. Handle the multi-call case properly: one assistant turn can contain N tool calls, you execute all N (concurrently is fine), and you return all N results together in the next turn.",
-   "minutes": 15,
-   "resource": {
-    "label": "Claude Docs — Tool use overview (tool_choice and parallel use)",
-    "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview"
-   }
-  },
-  {
-   "name": "Structured output on OpenAI: text.format and the strict subset",
-   "learn": "Responses API: `text: {format: {type: \"json_schema\", name: \"...\", schema: {...}, strict: true}}`. Chat Completions: `response_format: {type: \"json_schema\", json_schema: {name, schema, strict: true}}`. Under `strict: true` every object needs `\"additionalProperties\": false` and every declared property must appear in `required`; optionality is expressed as a union with null (`\"type\": [\"string\", \"null\"]`), and getting this wrong is the most common 400 in this whole topic. Prefer the SDK helpers over hand-rolled schemas: `client.responses.parse(..., text_format=MyPydanticModel)` then read `.output_parsed`, or `zodTextFormat()` in TypeScript. Handle the two escape hatches that both return HTTP 200 and neither matches your schema: a `refusal`, and `status: \"incomplete\"` with `incomplete_details.reason == \"max_output_tokens\"`.",
-   "minutes": 20,
-   "resource": {
-    "label": "OpenAI Platform — Structured Outputs guide",
-    "url": "https://developers.openai.com/api/docs/guides/structured-outputs"
-   }
-  },
-  {
-   "name": "Structured output on Anthropic: output_config.format and strict tools",
-   "learn": "Anthropic gives two independent levers you can use together. JSON outputs: top-level `output_config: {format: {type: \"json_schema\", schema: {...}}}` constrains the assistant's text block to schema-valid JSON. Strict tool use: `strict: true` on an individual tool grammar-constrains that tool's name and inputs. Note the migration trap — the older beta field was `output_format` with header `structured-outputs-2025-11-13`, still accepted for a transition period, so old sample code compiles and modern SDKs may raise a `TypeError` on it. Use `client.messages.parse()` with a Pydantic model for the ergonomic path. Keep the portable fallback in muscle memory too: define one tool and force it with `tool_choice: {\"type\":\"tool\",\"name\":\"emit\"}`, then read `block.input` — it works on every model, every gateway, and older Bedrock deployments where constrained decoding is unavailable.",
-   "minutes": 20,
-   "resource": {
-    "label": "Claude Docs — Structured outputs",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/structured-outputs"
-   }
-  },
-  {
-   "name": "The schema subset both engines refuse, and grammar limits",
-   "learn": "Constrained decoding compiles your schema into a grammar, so both platforms support only a subset, and the subsets differ. On Anthropic, supported: `enum`, `const`, `anyOf`, `$ref`/`$defs`, `default`, string formats (`date-time`, `date`, `email`, `uri`, `uuid`, `ipv4`), and array `minItems` of 0 or 1 only. Not supported: recursive schemas, external `$ref`, numeric constraints (`minimum`, `maximum`, `multipleOf`), `minLength`/`maxLength`, and regex lookahead/lookbehind or backreferences — each returns a 400. Hard limits per request: 20 strict tools, 24 optional parameters across all strict schemas, 16 union-typed parameters, plus an internal compiled-grammar ceiling that surfaces as 'Schema is too complex for compilation' and a 180-second compile timeout. Compiled grammars cache for 24 hours from last use, so never benchmark latency on a cold schema. Finally: enum capitalisation is not guaranteed, so compare enum values case-insensitively.",
-   "minutes": 15,
-   "resource": {
-    "label": "Claude Docs — Strict tool use",
-    "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/strict-tool-use"
-   }
-  },
-  {
-   "name": "Streaming Anthropic: the content-block state machine",
-   "learn": "With `stream: true` you get SSE with typed events: `message_start` (carries `usage.input_tokens`), then per block `content_block_start` → repeated `content_block_delta` → `content_block_stop`, then `message_delta` (carries the final `stop_reason` and cumulative `usage.output_tokens`), then `message_stop`, with `ping` and `error` interleaved. Learn the delta types: `text_delta`; `input_json_delta`, whose `partial_json` fragments you must concatenate before parsing (tool arguments stream as a fragmented JSON string even though the non-streaming field is an object); `thinking_delta`; and `signature_delta`. Use `with client.messages.stream(...) as stream:` and `stream.get_final_message()` (TypeScript `stream.finalMessage()`) rather than reassembling blocks by hand. Know the operational reason this matters: long non-streaming requests hit a server-side time limit, so high-`max_tokens` calls must stream.",
-   "minutes": 20,
-   "resource": {
-    "label": "Claude Docs — Streaming Messages (event types and deltas)",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/streaming"
-   }
-  },
-  {
-   "name": "Streaming OpenAI: semantic events vs raw token deltas",
-   "learn": "The Responses API streams semantic events with a `type` and a monotonic `sequence_number`: `response.created`, `response.output_item.added`, `response.content_part.added`, `response.output_text.delta`, `response.function_call_arguments.delta`, `response.output_text.done`, then `response.completed` / `response.failed` / `response.incomplete`. Chat Completions instead streams raw `choices[0].delta` chunks terminated by `data: [DONE]`, and returns no usage numbers at all unless you pass `stream_options: {include_usage: true}` — forgetting that flag is why a cost dashboard goes blank the day someone enables streaming. Write one normaliser that reduces both providers' streams to the same `(event, text_chunk, tool_arg_fragment, usage)` tuple, and instrument it to report time-to-first-text-token separately from total wall-clock, because those two numbers move independently and customers feel the first one.",
-   "minutes": 20,
-   "resource": {
-    "label": "OpenAI Platform — Streaming responses guide",
-    "url": "https://developers.openai.com/api/docs/guides/streaming-responses"
-   }
-  },
-  {
-   "name": "Anthropic thinking blocks inside a tool loop",
-   "learn": "Configure with `thinking: {type: \"enabled\", budget_tokens: N}` where N >= 1024 and N < `max_tokens`, or `{type: \"adaptive\"}`. Responses then carry `thinking` blocks before text, each with an encrypted `signature`. The rule that breaks people: in multi-turn and tool-use conversations you must pass thinking blocks back unchanged and in original order — you cannot edit, reorder or partially drop them (including `redacted_thinking` blocks) or you get a 400 saying the thinking block no longer matches the conversation, which typically fires on turn three of a live demo. Use `display: \"omitted\"` when you are not showing reasoning to users: the thinking text is empty but the signature is preserved for continuity, and time-to-first-text improves because the server skips streaming thinking tokens. Remember thinking tokens count against `max_tokens`, so a 10k budget under an 8k cap is a 400.",
-   "minutes": 20,
-   "resource": {
-    "label": "Claude Docs — Thinking (signatures, preservation, tool use)",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/thinking"
-   }
-  },
-  {
-   "name": "OpenAI reasoning items, effort, and reasoning tokens",
-   "learn": "Set `reasoning: {effort: \"low\"|\"medium\"|\"high\", summary: \"auto\"}` on reasoning models. You pay for hidden reasoning tokens, reported at `usage.output_tokens_details.reasoning_tokens`; they bill as output and they consume `max_output_tokens`, so a tight cap plus high effort yields `status: \"incomplete\"`, an empty message, and a full invoice. In a tool loop you must preserve reasoning context across turns: either chain with `previous_response_id`, or when running stateless (`store: false`) pass the reasoning items back in `input` and request `include: [\"reasoning.encrypted_content\"]`. Build the same two-tool agent with reasoning enabled on both platforms and record tokens, latency and answer quality per effort level — that comparison table is precisely the kind of evidence a take-home write-up should lead with.",
-   "minutes": 20,
-   "resource": {
-    "label": "OpenAI Platform — Reasoning models guide",
-    "url": "https://developers.openai.com/api/docs/guides/reasoning"
-   }
-  },
-  {
-   "name": "Prompt caching: explicit breakpoints vs automatic prefix caching",
-   "learn": "Anthropic is explicit: put `cache_control: {\"type\": \"ephemeral\"}` on a content block, or once at the top level of the request to let the breakpoint auto-advance as the conversation grows. The cached prefix spans `tools`, then `system`, then `messages`, in that order, up to and including the marked block; default TTL is 5 minutes, refreshed free on every hit, with a 1-hour option. Writes cost 1.25x base input and reads 0.1x, and you verify a hit by comparing `usage.cache_creation_input_tokens` against `usage.cache_read_input_tokens` — if reads stay zero your prefix is not byte-identical, and a timestamp in the system prompt, a reordered tool list, or a changed `output_config.format` will each do that silently. OpenAI caches automatically above roughly 1024 tokens with no breakpoints; you steer routing with `prompt_cache_key` and verify with `usage.input_tokens_details.cached_tokens`. Same discipline on both: static content first, volatile content last.",
-   "minutes": 20,
-   "resource": {
-    "label": "Claude Docs — Prompt caching",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
-   }
-  },
-  {
-   "name": "Batch: inline requests array vs JSONL file upload",
-   "learn": "Both are 50% cheaper with a 24-hour window; the mechanics are entirely different. Anthropic: `POST /v1/messages/batches` with `requests: [{custom_id, params: {<full Messages body>}}]` sent inline, up to 100,000 requests or 256 MB, where `custom_id` must match `^[a-zA-Z0-9_-]{1,64}$`; poll `processing_status` until it reads `\"ended\"` (not `\"completed\"`), read `request_counts.{processing,succeeded,errored,canceled,expired}`, then stream the `.jsonl` at `results_url` — results are unordered, so you join on `custom_id`. `max_tokens: 0` cache pre-warming is rejected inside a batch. OpenAI: first upload a JSONL of `{custom_id, method: \"POST\", url: \"/v1/responses\", body: {...}}` with `purpose: \"batch\"`, then `POST /v1/batches` with `input_file_id`, `endpoint` and `completion_window: \"24h\"`; poll `status` through `validating → in_progress → finalizing → completed`, then download `output_file_id` and, separately, `error_file_id`. Write one bulk-classification job both ways and record wall-clock and cost.",
+   "name": "The three fallback types and their different meanings",
+   "learn": "LiteLLM splits failover into `fallbacks` (everything else - rate limits, 5xx, timeouts), `context_window_fallbacks` (for `ContextWindowExceededError`, i.e. route to a longer-context model) and `content_policy_fallbacks` (for `ContentPolicyViolationError`, i.e. route to a differently-filtered provider), plus `default_fallbacks` for a misconfigured group. They are applied in list order, so `[\"model-b\", \"model-c\"]` means b then c, and each hop costs another full timeout. The design questions matter more than the syntax: is a cheaper/weaker fallback model actually acceptable for this workload, or is a 503 better than a quietly worse answer? Does the fallback support the same tool schema, JSON mode and system-prompt semantics, or will the retry fail differently? And is a content-policy fallback a compliance decision the customer's legal team must sign off on rather than an engineering default? Note that `mock_testing_fallbacks` is stripped on the proxy path from v1.85.0 - to test proxy fallbacks you point a deployment at a deliberately broken api_base and send a real request.",
    "minutes": 25,
    "resource": {
-    "label": "Claude Docs — Batch processing (Message Batches API)",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/batch-processing"
+    "label": "LiteLLM docs - Fallbacks (provider failover)",
+    "url": "https://docs.litellm.ai/docs/proxy/reliability"
    }
   },
   {
-   "name": "Errors, retries, timeouts, rate-limit headers, request IDs",
-   "learn": "Memorise the Anthropic taxonomy: 400 `invalid_request_error`, 401 `authentication_error`, 403 `permission_error`, 404 `not_found_error`, 413 `request_too_large` (32 MB on Messages), 429 `rate_limit_error`, 500 `api_error`, 529 `overloaded_error`. Retry 429/500/529 with exponential backoff and jitter, honour `retry-after`, and never retry a 400. Read your remaining budget from `anthropic-ratelimit-{requests,input-tokens,output-tokens}-{limit,remaining,reset}` — `reset` is an RFC 3339 timestamp, not a seconds count — and from OpenAI's `x-ratelimit-remaining-{requests,tokens}` and `x-ratelimit-reset-*`. Both SDKs retry by default: set `max_retries` and a per-request `timeout` explicitly instead of inheriting defaults, and think hard about retrying a stream, since a mid-stream failure has already emitted partial output to the user. Log the `request-id` header (Anthropic) and `x-request-id` (OpenAI) on every call — without it you cannot file a useful support ticket, and filing one is a real FDE deliverable.",
-   "minutes": 20,
+   "name": "Exception mapping: normalising provider errors",
+   "learn": "The gateway's quiet superpower is turning every provider's idiosyncratic failure into one taxonomy - `RateLimitError`, `ContextWindowExceededError`, `ContentPolicyViolationError`, `AuthenticationError`, `ServiceUnavailableError`, `Timeout`, `APIConnectionError` - because fallback rules, retry policy and alerting all key off that classification. Learn which errors are retryable at all: a 429 with a `retry-after` is, a 400 for a malformed tool schema is not, and retrying it just multiplies the failure. Know that misclassification is a real production bug - a provider that returns a 500 for an over-length prompt will be retried three times and then failed over instead of being routed to a long-context model - so verify the mapping for the specific providers in the customer's stack rather than assuming. Wire the normalised class into your alerts (`exception_class` and `exception_status` are Prometheus labels) so 'the gateway is erroring' becomes 'Bedrock us-east-1 is throttling'.",
+   "minutes": 15,
    "resource": {
-    "label": "Claude Docs — Rate limits (response headers and 429 handling)",
-    "url": "https://platform.claude.com/docs/en/api/rate-limits"
+    "label": "LiteLLM docs - Exception mapping",
+    "url": "https://docs.litellm.ai/docs/exception_mapping"
    }
   },
   {
-   "name": "The portability layer and the 90-minute timed port",
-   "learn": "Build the thinnest abstraction that survives contact: one `generate(messages, tools, schema) -> Result` interface, two adapters, and a golden-file test asserting both providers parse to the same object across 20 fixed inputs. Resist the urge to add a config DSL — abstract the request envelope and the tool-result plumbing, and deliberately leave caching, thinking and batch leaky per-provider. Know the shortcut and its price: Anthropic exposes an OpenAI-SDK-compatible endpoint (point the OpenAI client at `base_url=\"https://api.anthropic.com/v1/\"` with an Anthropic key), which is fine for a same-day bake-off but drops thinking, prompt caching, PDF support and citations, so it never ships to a customer. Then drill: set a 90-minute timer and rebuild the same feature — tool loop, strict schema, streaming, and a cost/latency report — on the other API without looking at the first repo. Log every stall and turn each one into a snippet in your scaffold.",
+   "name": "Response headers as the attribution spine",
+   "learn": "You cannot analyse a canary you cannot attribute, and the headers are how attribution leaves the gateway. Learn them cold: `x-litellm-model-group` (the alias the client asked for), `x-litellm-model-id` (which deployment row actually answered - this is your canary arm label), `x-litellm-call-id` (join key into logs and traces), `x-litellm-attempted-retries` and `x-litellm-attempted-fallbacks` (a request that fell back is not a clean sample and must be excluded or bucketed separately), `x-litellm-response-cost` plus its input/output/cache-read/cache-creation components, and `x-litellm-response-duration-ms` versus `x-litellm-overhead-duration-ms` to separate your hop from the provider's. Note the sharp edge: the response body's `model` field is often restamped to the client-facing alias, so parsing the body to find out which model answered gives you the wrong answer - read the header. Provider headers are passed through prefixed `llm_provider-`, which is where you find real rate-limit remaining counts.",
    "minutes": 20,
    "resource": {
-    "label": "Claude Docs — OpenAI SDK compatibility (and its documented limitations)",
-    "url": "https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk"
+    "label": "LiteLLM docs - Response headers",
+    "url": "https://docs.litellm.ai/docs/proxy/response_headers"
+   }
+  },
+  {
+   "name": "Tag-based routing as a canary allocator",
+   "learn": "Weights give you a random 10%; tags give you a chosen 10%, which is usually what a customer actually wants ('canary internal users first, never the regulated tenant'). Set `router_settings.enable_tag_filtering: true`, put `tags: [\"canary\"]` on the candidate deployment and `tags: [\"default\"]` on the incumbent so untagged traffic has a home, then send `metadata.tags` in the body or the `x-litellm-tags` header. Learn the full grammar because it is how you express real customer constraints: plain tags are OR, `&` prefix means required (AND), `!` prefix is a denylist that removes exactly-matching deployments (`!provider:anthropic` for a tenant with a vendor restriction), and matching is exact string comparison with no regex. Know the failure mode by name: if negation removes every candidate the request fails with `no_deployments_with_tag_routing`, and a banned primary group falls through to the configured `fallbacks` chain - which can silently send your 'never Anthropic' tenant to Anthropic if the fallback is untagged.",
+   "minutes": 25,
+   "resource": {
+    "label": "LiteLLM docs - Tag-based routing",
+    "url": "https://docs.litellm.ai/docs/proxy/tag_routing"
+   }
+  },
+  {
+   "name": "Deterministic bucketing and sticky assignment",
+   "learn": "Per-request randomness is wrong for anything stateful: a conversation whose turn 1 came from model A and turn 3 from model B produces incoherent output and an uninterpretable comparison. Implement assignment as `bucket = crc32(salt + unit_id) % 1000`, where `unit_id` is the session, conversation or tenant - not the request - and `salt` is the experiment name so two concurrent canaries do not correlate their populations. Emit the arm as an explicit tag and as a span attribute so every downstream log, eval and trace carries it, and make the bucketing function a pure, unit-tested function with a test asserting the same unit_id always lands in the same arm and that allocation is within a point of the target across 100k synthetic ids. Decide the exclusion list up front - opt-out tenants, anything under a contractual model commitment, anything in a compliance scope - and enforce it as a denylist tag before bucketing rather than as a downstream filter.",
+   "minutes": 20,
+   "resource": {
+    "label": "OpenFeature docs - flag evaluation and targeting concepts",
+    "url": "https://openfeature.dev/docs/reference/intro/"
+   }
+  },
+  {
+   "name": "Canary design: population, dose, duration, blast radius",
+   "learn": "Write the canary plan before touching config: which population (internal, then low-risk tenants, then general), what percentage and for how long, which metrics decide, what the abort thresholds are, and who can press the button. Understand exposure as dose x duration - 10% for 24 hours and 100% for 2.4 hours expose comparable request counts but wildly different blast radius, and only one of them lets a slow-burning failure surface. Plan the ramp explicitly (1% -> 5% -> 25% -> 50% -> 100%) with a bake time per step long enough to cover at least one full traffic cycle, because an AI canary started at 09:00 on Monday sees a completely different prompt mix than the same canary at 03:00. Know the two canary-specific traps: a canary that is too small never reaches statistical power on a quality metric with high variance, and a canary that runs too long normalises an unresolved decision into permanent dual-model production.",
+   "minutes": 20,
+   "resource": {
+    "label": "Google SRE Workbook - Canarying Releases",
+    "url": "https://sre.google/workbook/canarying-releases/"
+   }
+  },
+  {
+   "name": "The Prometheus surface you actually need for a canary",
+   "learn": "Enable `litellm_settings.callbacks: [\"prometheus\"]` and scrape `/metrics`; with multiple workers you must set `PROMETHEUS_MULTIPROC_DIR` or your counters are per-worker fiction, and `--prometheus_metrics_port 4001` moves scrape rendering off the inference path. Know the specific series a canary report is built from: `litellm_deployment_success_responses` and `litellm_deployment_failure_responses` (split by `model_id`, so per-arm error rate), `litellm_request_total_latency_metric` (end-to-end histogram in seconds), `litellm_llm_api_time_to_first_token_metric` (streaming only - the number users actually feel), `litellm_llm_api_latency_metric` versus `litellm_overhead_latency_metric` to prove the gateway is not the problem, `litellm_deployment_cooled_down`, `litellm_deployment_successful_fallbacks` / `litellm_deployment_failed_fallbacks`, and `litellm_spend_metric` for cost per arm. Watch label cardinality: `end_user`, `client_ip`, `hashed_api_key` and `user_agent` on high-traffic metrics will melt a small Prometheus, so use `prometheus_exclude_labels` deliberately.",
+   "minutes": 25,
+   "resource": {
+    "label": "LiteLLM docs - Prometheus metrics",
+    "url": "https://docs.litellm.ai/docs/proxy/prometheus"
+   }
+  },
+  {
+   "name": "Histograms and quantiles without lying to yourself",
+   "learn": "Compute quantiles the correct way - `histogram_quantile(0.95, sum by (le, model_id) (rate(litellm_request_total_latency_metric_bucket[5m])))` - and understand exactly why you can never average or take the max of two arms' p95s: quantiles are not linear and aggregating them is arithmetically meaningless. Know that a classic histogram quantile is an interpolation within a bucket, so its accuracy is capped by the bucket boundaries: if your buckets top out at 10s and the candidate model routinely takes 25s, its p99 will read as +Inf-adjacent garbage and you will conclude nothing. Always report p50, p95 and p99 together plus the request count per arm, because a p95 computed from 40 canary requests is noise wearing a decimal point. For LLM traffic specifically, separate TTFT from total latency and normalise by output tokens (`litellm_deployment_latency_per_output_token`), otherwise a more verbose model looks slower when it is merely wordier.",
+   "minutes": 20,
+   "resource": {
+    "label": "Prometheus docs - Histograms and summaries",
+    "url": "https://prometheus.io/docs/practices/histograms/"
+   }
+  },
+  {
+   "name": "Measuring quality on the canary slice, not in a notebook",
+   "learn": "Latency and error rate are the easy half; the reason model canaries are hard is that the regression is usually in output quality and it is invisible to the gateway. Build three layers: your offline eval set run against both arms as a gate before the canary starts, online proxy signals during it (refusal rate, JSON-parse failure rate, tool-call schema validity, empty-response rate, retry rate, output-token distribution shift - all cheap, all computable without a judge), and a sampled LLM-as-judge pass over paired production requests. Prefer paired comparison where possible: replay the same canary-arm prompts through the incumbent offline and judge A/B with position randomised, which removes population variance and needs far fewer samples than comparing two independent traffic slices. Route all of this through the tracing backend from topic 54 keyed on `x-litellm-call-id` and the arm tag, and capture explicit user feedback (thumbs, edits, regenerate clicks) as the one signal a customer executive will actually believe.",
+   "minutes": 25,
+   "resource": {
+    "label": "Langfuse docs - tracing, scores and evaluation",
+    "url": "https://langfuse.com/docs"
+   }
+  },
+  {
+   "name": "Enough statistics to defend the promote decision",
+   "learn": "Decide the minimum detectable effect and the sample size before you start, not after you look. For a rate metric (error rate, refusal rate, judge win rate) use a two-proportion test and know roughly what you can detect: distinguishing 2% from 3% at 80% power needs thousands of requests per arm, which tells you immediately whether a 10% canary for one day is even capable of answering the question. Understand the peeking problem - repeatedly checking a fixed-horizon p-value inflates the false-positive rate badly - so either fix the horizon in advance, or use a sequential/always-valid method, or state honestly that the canary is a guardrail rather than an experiment. Report effect sizes with confidence intervals, never bare p-values, and pre-register the decision rule ('promote if judge win rate CI lower bound > 0.45 and p95 regression < 15% and error rate not worse by >0.5pp') so the promote conversation is arithmetic rather than advocacy.",
+   "minutes": 25,
+   "resource": {
+    "label": "SciPy documentation - statistical functions (scipy.stats)",
+    "url": "https://docs.scipy.org/doc/scipy/reference/stats.html"
+   }
+  },
+  {
+   "name": "Automated analysis and one-action rollback",
+   "learn": "A canary a human has to watch is a canary that runs unattended at 3am. Study the Argo Rollouts model even if you implement it yourself: an `AnalysisTemplate` with metric providers (Prometheus queries), a `successCondition` expression, `interval`, `count`, `failureLimit` and `inconclusiveLimit`, attached to canary `steps` with `setWeight` and `pause` so a failing metric aborts and reverts the weight automatically. Map that onto the gateway: a controller that queries per-`model_id` error rate and p95 every 60s and rewrites `weight` in config, or the simpler and more honest version - a documented one-command rollback (`weight: 0` on the candidate, reload) with the exact command in the runbook, tested at least once before the canary goes live. Distinguish abort thresholds (hard, automatic, no discussion: error rate > 2x baseline, p95 > 2x, any content-policy or auth failure spike) from investigate thresholds, and make rollback strictly faster than diagnosis.",
+   "minutes": 20,
+   "resource": {
+    "label": "Argo Rollouts docs - Analysis and progressive delivery",
+    "url": "https://argo-rollouts.readthedocs.io/en/stable/features/analysis/"
+   }
+  },
+  {
+   "name": "Spend attribution and budget guardrails during the canary",
+   "learn": "A model canary is a spend experiment as much as a quality one, and 'the new model is 3x the price' is the finding that most often kills a promotion. Turn on cost tracking with a database configured, verify per-request cost lands in `x-litellm-response-cost` and `litellm_spend_metric` broken down by `model_id`, and set `custom_pricing` for any self-hosted or enterprise-contract model where LiteLLM's public price map would be wrong by an order of magnitude. Report cost per successful request rather than cost per token, because a model that is cheaper per token but retries more, thinks longer or produces more output tokens is not cheaper. Put a hard budget on the canary itself - a virtual key or team with `max_budget` and a reset interval scoped to the experiment - so a runaway loop against a premium model is capped by policy rather than discovered on the customer's monthly invoice.",
+   "minutes": 15,
+   "resource": {
+    "label": "LiteLLM docs - Cost tracking",
+    "url": "https://docs.litellm.ai/docs/proxy/cost_tracking"
+   }
+  },
+  {
+   "name": "Running the gateway as production infrastructure",
+   "learn": "The moment the gateway is in front of everything it is the highest-blast-radius component you introduced, so treat it accordingly. Wire `GET /health/liveliness` and `GET /health/readiness` as the Kubernetes probes (readiness returns 503 when the configured database is unreachable, which correctly pulls the pod), and keep `GET /health` - which issues real billed requests to every model - off the probe path; use `background_health_checks: true` with `health_check_interval` instead. Know the production checklist items that bite: run multiple workers and multiple replicas with Redis for shared routing state, do not put the spend database on the request critical path in a way that a slow write stalls inference, set `PROMETHEUS_MULTIPROC_DIR`, disable verbose request logging (customer prompts are PII), and pin the LiteLLM image to a digest because routing behaviour changes between minor versions. Finally, write down what the application does when the gateway itself is down - a direct-to-provider break-glass path is a legitimate design, and 'we never thought about it' is not.",
+   "minutes": 25,
+   "resource": {
+    "label": "LiteLLM docs - Production deployment checklist",
+    "url": "https://docs.litellm.ai/docs/proxy/prod"
    }
   }
  ],
  "outcomes": [
-  "You can open a blank file with no documentation and write a working multi-turn tool-calling loop on the Anthropic Messages API and on the OpenAI Responses API in under twenty minutes each, including correct `tool_result` and `function_call_output` plumbing and a `max_iterations` guard.",
-  "You can recite the field-level diffs on demand — `input_schema` vs `parameters`, top-level `system` vs `instructions`, `max_tokens` required vs `max_output_tokens` optional, parsed `input` object vs `arguments` JSON string — and correct a colleague's code by reading it, without running it.",
-  "You can enforce a JSON contract three ways (OpenAI `text.format` with `strict: true`, Anthropic `output_config.format`, and the forced-tool fallback) and justify which one you would deploy on a customer's Bedrock estate and why.",
-  "You can consume both streaming protocols, reassemble a complete tool call from `input_json_delta` and `response.function_call_arguments.delta` fragments, and report time-to-first-token separately from total latency on the same prompt.",
-  "You can push the same 5,000-item job through both Batch APIs, join unordered results on `custom_id`, account for expired and errored requests, and produce a cost and wall-clock comparison table.",
-  "You can demonstrate a prompt-cache hit on both platforms by pointing at `cache_read_input_tokens` and `input_tokens_details.cached_tokens`, and diagnose in one sentence why a previously-hitting cache stopped hitting.",
-  "You can classify any API failure as retryable or not within seconds, name the header that tells you how long to wait, and produce the provider request ID needed to open a support ticket.",
-  "You can complete a 90-minute timed port of a feature from one API to the other and hand a grader a README they can run end to end with two commands."
+  "You can stand up a LiteLLM proxy in front of at least three providers where one `model_name` alias resolves to multiple deployments, and point an unmodified `openai` Python client at it with no application code change beyond `base_url`.",
+  "You can send 10% of traffic to a candidate model using a deterministic, session-sticky bucketing function plus tag routing, and prove from `x-litellm-model-id` on 10,000 requests that the realised split is within one percentage point of the target.",
+  "You can write the PromQL that produces a per-arm comparison table - request count, error rate, p50/p95/p99 end-to-end latency, p95 TTFT, fallback count and cost per successful request - each series broken down by `model_id`, and explain why averaging two arms' p95 values is meaningless.",
+  "You can demonstrate three distinct failover behaviours on demand by breaking a deployment: `fallbacks` on a 429, `context_window_fallbacks` on an over-length prompt, and `content_policy_fallbacks` on a refusal, each visible as a `litellm_deployment_successful_fallbacks` increment.",
+  "You can state, before starting a canary, the minimum detectable effect your traffic volume supports for the chosen quality metric, and say honestly when the canary is a guardrail rather than an experiment.",
+  "You can roll back a canary to 0% in under two minutes with a single documented command, and show a rehearsal timestamp proving you have executed that command before the canary went live.",
+  "You can produce a written canary report that ends in an explicit PROMOTE / HOLD / ROLLBACK recommendation with pre-registered thresholds, and defend the cost-per-successful-request figure to a customer who only cares about the invoice.",
+  "You can explain and mitigate the gateway's own failure modes: shared routing state in Redis, health probes that do not bill you, PII-safe logging, image pinning, and a documented break-glass path when the gateway itself is unavailable."
  ],
  "failureModes": [
-  "Returning only some of a turn's `tool_result` blocks — or dropping the assistant's `tool_use` blocks while trimming history for context — producing an opaque 400 that only appears on the third turn of a live customer demo.",
-  "Treating OpenAI's `arguments` as a dict because the Anthropic equivalent is one: the code passes on happy-path fixtures and throws the first time a real customer prompt yields a nested object under load.",
-  "Carrying `temperature=0` across from an older repo onto a current Claude or an OpenAI reasoning model, which hard-400s in the customer's environment while continuing to work locally against a pinned older model.",
-  "Setting `max_tokens` / `max_output_tokens` below the thinking or reasoning budget, so responses come back `stop_reason: \"max_tokens\"` or `status: \"incomplete\"` with empty content and a full bill, and the team spends a day blaming the prompt.",
-  "Enabling streaming on Chat Completions without `stream_options: {include_usage: true}`, silently zeroing the token counts that feed the customer's cost dashboard and internal chargeback report.",
-  "Putting a timestamp, session ID or reordered tool list at the front of the prompt, destroying every prompt-cache hit and roughly tripling input cost with no error surfacing anywhere.",
-  "Shipping the OpenAI-compatibility endpoint into a customer POC because it made the demo fast, then discovering during hardening that prompt caching, thinking and PDF support are unavailable on that path and the rewrite lands in the go-live week."
+  "Routing state lives in per-process memory because Redis was never configured, so with four workers across three pods a deployment that should be in cooldown keeps receiving traffic from eleven other processes and the 'failover' never actually fails over.",
+  "The canary is assigned per request instead of per session, so a single conversation alternates between two models mid-thread, the output style flips between turns, and the customer reports the product as broken rather than as being tested.",
+  "A tenant with a contractual restriction is excluded from the candidate model with a `!provider:x` tag, but the fallback chain is untagged, so the first 429 on their primary silently routes their data to exactly the provider the contract forbids.",
+  "Latency histogram buckets were sized for the incumbent model and top out at 10 seconds; the reasoning-model candidate routinely takes 25 seconds, so its p95 reads as an artefact, the dashboard looks fine, and the regression is discovered by users.",
+  "The canary decision is made by watching the dashboard and calling it when the numbers look good, which is peeking at a fixed-horizon test - the team promotes on noise and the 'improvement' evaporates at 100%.",
+  "`num_retries: 3` with a 120-second timeout and a two-deep fallback chain produces a worst-case of over ten minutes, so during a provider brownout the gateway's connection pool fills with requests whose callers timed out minutes ago and the whole endpoint stops serving healthy traffic.",
+  "Cost is compared per token instead of per successful request, so the 'cheaper' candidate ships and the next invoice is 40% higher because it retries more, emits more output tokens, and gets no prompt-cache hits since its cached prefix differs."
  ],
  "interviewQuestions": [
-  "Whiteboard the tool-calling loop for the Anthropic Messages API and the OpenAI Responses API in parallel columns. Where does the tool result go in each, what is its identifier called, and what does the API do if you return two results for one call or none for one that was requested?",
-  "A customer must run on Bedrock and needs guaranteed schema-valid JSON on every request. Walk me through your options, what each costs in latency and flexibility, and what you do if their pinned model version does not support constrained decoding.",
-  "We swapped models and p95 latency doubled while input and output token counts stayed flat. Give me your debugging order across both APIs — what do you check first, and which specific usage field settles the argument?",
-  "Design a provider-agnostic LLM client for a team shipping to three customers on three different clouds. What do you abstract, what do you deliberately leave leaky, and how do you test that the abstraction has not started lying to you?",
-  "A bulk-extraction job over 200,000 documents must finish overnight at minimum cost. Compare the two Batch APIs concretely — submission, polling, result retrieval — and tell me exactly what you do about the requests that expire at the 24-hour boundary.",
-  "Explain prompt caching on both platforms to a customer's finance lead in plain language, then tell me three changes an engineer could ship tomorrow that would silently destroy the savings without raising a single error.",
-  "You have ninety minutes and a take-home that says 'build a research agent, any provider.' Which do you pick, what do you cut, what do you instrument, and what goes in the README?"
+  "A customer wants to move from GPT-class to Claude-class models across a live support product with 200k requests a day. Design the rollout end to end: allocation mechanism, what you measure, how long you run it, your abort criteria, and what you tell their VP of Engineering at each stage.",
+  "Your canary shows the candidate model is 4% better on judge win rate and 30% slower at p95. How do you decide? Walk me through what additional data you would pull and what you would need to know about the product before you had an opinion.",
+  "Explain the difference between load balancing, failover and canarying when all three are implemented by putting multiple deployments behind one model alias. Where do they conflict, and how do you keep a canary's traffic share from being distorted by cooldowns and retries?",
+  "Traffic to your gateway is 5% errors and the customer says 'the AI is down'. You have Prometheus and the gateway's response headers. Give me your first five minutes: what you query, what each result would rule in or out, and where you look for the difference between a provider outage, a gateway saturation problem and a bad config push.",
+  "Design a fallback policy for a healthcare intake workflow where a wrong answer is worse than no answer. Which of the three fallback classes do you enable, which do you deliberately leave off, and how do you make that decision auditable for their compliance team?",
+  "You have a 10% canary running for 24 hours on a metric that moves from 2% to 3%. Is that a real regression? Show me how you would reason about sample size and how your answer changes if the customer will only give you 1% of traffic.",
+  "The gateway is now a single point of failure for every AI feature in the customer's product and their platform team is nervous. Convince them it is the right architecture, then tell them honestly what you would build to survive the gateway itself being down."
  ],
- "proofOfWork": "Beyond the two per-API repos, publish a third repo called `llm-api-parity` whose entire purpose is to prove the two are interchangeable and to document precisely where they are not. It contains one provider-neutral scenario file of roughly thirty cases — plain completion, single tool call, parallel tool calls, a tool that raises and must come back as `is_error` / an error string, strict-schema extraction, a deliberately unsupported schema feature, an oversized image, a forced stop at `max_tokens`, a cache-warm then cache-hit pair, and a ten-item batch — plus two thin adapters and a single `pytest` suite that runs every scenario against both providers and asserts the same parsed result object. `PARITY.md` is generated by the run, not hand-written: a table with one row per scenario and columns for both providers showing pass/fail, the exact request field names used, latency p50 and TTFT, input/output/cached/reasoning token counts, and cost, with a footnote for each behavioural divergence you found (for example which schema keywords 400 on which side, and what each returns when a tool result is missing). Add `CHEATSHEET.md`: a one-page side-by-side of endpoint, auth header, required fields, tool envelope, tool-result envelope, structured-output field, streaming event names, batch submission shape, and error taxonomy — short enough to read in ninety seconds before an interview. Add `PORT_LOG.md` recording the timed drill: start time, stop time, every point where you had to look something up, and the snippet you added to your scaffold so it never costs you a lookup again. Finally include `scripts/verify.sh` that runs the whole suite against live keys in under five minutes and prints a spend total, so anyone — a grader, a customer architect, a future you — can reproduce the parity claims rather than take your word for them."
+ "proofOfWork": "Ship a reusable `canary-kit` against the Kaupex stack: a LiteLLM proxy deployed on the cluster with a single `chat` alias fronting three deployments (incumbent, candidate, and a deliberately hostile fake provider you write as a small FastAPI service with configurable latency, 429 rate, content-policy refusals and over-length errors), a pure `assign_arm(unit_id, salt) -> str` bucketing module with tests asserting stickiness and allocation accuracy over 100k synthetic ids, and a `canary.py` CLI with three verbs - `start --pct 10`, `report`, `rollback` - where `rollback` is timed and its execution time recorded. The report verb queries Prometheus for per-`model_id` request count, error rate, p50/p95/p99 total latency, p95 TTFT, fallback and cooldown counts and cost per successful request, joins them to per-request quality signals (JSON validity, refusal rate, tool-schema validity, and a sampled paired LLM-as-judge run with randomised position) keyed on `x-litellm-call-id`, and emits a markdown report with a pre-registered decision rule at the top and a PROMOTE / HOLD / ROLLBACK verdict at the bottom. Include a Grafana dashboard JSON with the arm-split panels, a chaos script that drives the fake provider through each of the three fallback classes and captures the resulting `litellm_deployment_successful_fallbacks` deltas as evidence each path works, and a RUNBOOK.md giving the abort thresholds, the one-command rollback, the break-glass direct-to-provider path, and a short 'what I would tell the customer' section written for a non-engineer."
 }

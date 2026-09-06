@@ -1,227 +1,227 @@
 {
-  "i": 44,
-  "topic": "System design mocks (six, timed, recorded)",
-  "track": "F. Distributed Systems and System Design",
-  "month": 5,
-  "hours": 10,
-  "why": "An FDE does system design live and unprepared: in a customer's conference room, in front of their principal architect, with requirements that arrive as complaints rather than specs, and with a hard stop when the VP has to leave. The system design round in a Palantir, Anthropic or Databricks FDE loop is a compressed version of that meeting, and both reward the same muscle: turn a vague ask into numbers, draw something a stranger can follow, name the two things that will actually break, choose between options out loud, and stay coherent when someone pushes back. Topics 39 to 43 gave you the material; this topic trains delivery under a clock, and the recording is what lets you see the gap between what you know and what you can show in 45 minutes.",
-  "prerequisites": [
-    "The component playbook from 'System design playbook' (topic 42): you should already be able to explain consistent hashing, cache-aside versus write-through, fan-out on write versus read, Kafka partitioning, token buckets and Snowflake IDs without notes; the mocks test whether you can reach for them under time pressure, not learn them.",
-    "The consistency vocabulary from 'DDIA' (topic 39) and 'MIT 6.824 selected lectures' (topic 40): linearizable versus eventual, leader-based replication and its failover, quorums, and why 'exactly once' means at-least-once plus idempotency.",
-    "The LLM serving constraints from 'LLM-era system design' (topic 43): token-based rate limits, p99 latency in seconds not milliseconds, and queue-plus-worker rather than synchronous model calls, so the one LLM-flavoured mock does not derail.",
-    "SLIs and SLOs from topic 20 and the four golden signals from topic 21, because the non-functional requirements you write in the first five minutes are SLOs and the operability close in the last five minutes is a monitoring design.",
-    "A working recording rig: OBS or QuickTime capturing screen plus microphone, Excalidraw open with a saved template, a visible countdown timer, and a private folder or repo to store six 45-minute recordings.",
-    "One peer (Exponent match or a friend who has run design interviews) who agrees to two sessions as interviewer and to score with your rubric, plus a written set of interviewer cards so solo mocks still get interrupted."
-  ],
-  "subtopics": [
-    {
-      "name": "The 45-minute time budget and phase transitions",
-      "learn": "Fix a budget and rehearse the transitions until they are reflexive: 0-5 requirements (three core functional requirements, explicit 'below the line' list, non-functional requirements with numbers), 5-8 estimation (only the numbers that change a decision), 8-12 API and data model, 12-22 high-level design that satisfies every functional requirement end to end, 22-40 two or three deep dives on the parts you named as hardest, 40-45 failure modes, operability and what you would build first. Know the two universal failure patterns: spending 15 minutes on requirements and never reaching a deep dive, and drawing a 'perfect' architecture before checking it against the functional requirements. Practise saying the transition sentence out loud ('I have the core flow working, let me name the two things that will break at this scale and go deep on them') because the interviewer is scoring whether you drive or wait to be driven.",
-      "minutes": 15,
-      "resource": {
-        "label": "Hello Interview - System Design in a Hurry: Delivery Framework",
-        "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/delivery"
-      }
-    },
-    {
-      "name": "Writing the rubric: what 4/5 means on each dimension",
-      "learn": "Adapt the Hello Interview evaluation dimensions (problem navigation, high-level design, technical excellence, communication and collaboration) into a 1-5 rubric where every level is an observable behaviour you can timestamp in a recording. Define 4 concretely: problem navigation 4 = you named the hardest two components unprompted and spent at least 15 minutes on them; high-level design 4 = every box traces to a stated requirement and the diagram satisfies all core functional requirements before any deep dive; technical excellence 4 = each deep dive presents two options, a quantified reason for the choice, and its failure mode; communication 4 = you talked while drawing, checked in at each phase, and changed course on pushback without defending a bad choice. Write 5 as 'taught the interviewer something' and 2 as 'needed a hint to proceed'. This is the document a peer scores against, so it must be legible to someone who did not watch you prepare.",
-      "minutes": 20,
-      "resource": {
-        "label": "Hello Interview - System Design in a Hurry: Introduction (how you are evaluated)",
-        "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/introduction"
-      }
-    },
-    {
-      "name": "Choosing six problems that cover six archetypes",
-      "learn": "Pick one problem per archetype so the six mocks exercise different bottlenecks rather than the same one six times: read-heavy fan-out (news feed or timeline), write-heavy ingestion (metrics or log pipeline at millions of events per second), real-time bidirectional (chat with presence and ordering), geospatial matching (ride dispatch or nearby search), contended inventory with money (ticket booking or payments with idempotency and holds), and the FDE-flavoured one: a multi-tenant document ingestion and LLM classification platform where one tenant must run inside their own VPC. Use the primer's solved questions to sanity-check that each archetype has a known 'hard part' and write that hard part on the interviewer card before you start, so afterwards you can check whether you found it unprompted. Do not pick a problem you have already watched a full walkthrough of; the mock measures reasoning, not recall.",
-      "minutes": 15,
-      "resource": {
-        "label": "GitHub - donnemartin/system-design-primer (interview questions with solutions)",
-        "url": "https://github.com/donnemartin/system-design-primer"
-      }
-    },
-    {
-      "name": "Recording rig and whiteboard template",
-      "learn": "Set up OBS with a display-capture source and your microphone, confirm audio levels and that the cursor is visible, and record a two-minute test before mock one so a broken recording never wastes a session. Build an Excalidraw template you reuse every time: a legend (solid arrow = synchronous call, dashed = asynchronous, cylinder = store, numbered circles for the core flow steps), a requirements box top-left, an estimation box below it, and a timer window pinned on top. Name recordings `mock-NN-problem-YYYY-MM-DD.mp4` and export the `.excalidraw` file alongside; the diagram file is what a reviewer will actually open. Never pause the timer or the recording; running out of time on camera is the data you are collecting.",
-      "minutes": 10,
-      "resource": {
-        "label": "OBS Studio Knowledge Base - Quick Start Guide (display capture source, audio setup, first recording)",
-        "url": "https://obsproject.com/kb/quick-start-guide"
-      }
-    },
-    {
-      "name": "Requirements in five minutes: functional scope and NFRs as SLOs",
-      "learn": "Drive the first five minutes with questions that change the design, not a checklist: who are the users and how many, what are the three operations that must work, what is explicitly out of scope, and for each core operation what consistency it needs (booking a seat is linearizable, viewing a seat map is eventual). Write non-functional requirements as numbers you can be held to: availability target and the consistency cost of the higher one (99.9 versus 99.99), p99 latency per operation, peak QPS with a stated peak-to-average ratio, retention, durability, and any compliance constraint (PII residency, audit). Phrase them as SLOs from topic 20 ('99.9 percent of reads under 200 ms over 30 days') because that is exactly how a customer architect will later ask you to commit. State 'I am designing for 10x today's numbers' and move on; a candidate still gathering requirements at minute ten has already lost the design phase.",
-      "minutes": 20,
-      "resource": {
-        "label": "Google SRE Book - Service Level Objectives",
-        "url": "https://sre.google/sre-book/service-level-objectives/"
-      }
-    },
-    {
-      "name": "Estimation that changes decisions, not estimation for show",
-      "learn": "Memorise the handful of numbers you will use every time: 1 day is about 1e5 seconds, so 1M DAU doing 10 actions each is about 100 QPS average and roughly 1,000 at peak; a single well-tuned Postgres handles on the order of 10k simple reads per second and low thousands of writes; one Redis node does about 100k ops per second; a Kafka partition sustains tens of MB per second; memory access is about 100 ns, SSD random read about 100 us, same-region RPC about 1 ms, cross-region round trip about 100 ms. Compute only what decides something: does the hot dataset fit in memory on one node, do writes exceed one primary, does storage over the retention period force tiering, does fan-out multiply writes past what one partition can take. Round to powers of ten, write the number on the board next to the component it justifies, and say the decision it drives ('200 GB fits on one Postgres primary with replicas, so I will not shard yet').",
-      "minutes": 20,
-      "resource": {
-        "label": "Latency Numbers Every Programmer Should Know (jboner gist)",
-        "url": "https://gist.github.com/jboner/2841832"
-      }
-    },
-    {
-      "name": "API design in four minutes: resources, idempotency, pagination, async",
-      "learn": "Sketch the three or four endpoints that map to your core functional requirements as resources and verbs (`POST /v1/bookings`, `GET /v1/events/{id}/seats`), and state the non-obvious decisions rather than reading fields aloud: an `Idempotency-Key` header on every mutating call with server-side deduplication keyed by (tenant, key), cursor pagination with an opaque token instead of `offset` because deep offsets scan the table, `202 Accepted` plus a status resource for anything that takes longer than a request timeout, tenant and user identity taken from the token and never from the body, and a consistent error shape with a retryable flag. Mention versioning and rate-limit headers only if the problem is a public API. Be ready to defend REST versus gRPC versus WebSocket per endpoint in one sentence each, then move to the data model.",
-      "minutes": 15,
-      "resource": {
-        "label": "GitHub - microsoft/api-guidelines (REST API guidelines)",
-        "url": "https://github.com/microsoft/api-guidelines"
-      }
-    },
-    {
-      "name": "Data model and store selection from access patterns",
-      "learn": "List the entities and the top three access patterns first, then pick the store, and say the sentence that shows judgement: 'relational, a few hundred GB, needs transactions across seats and payments, so Postgres with an index on (event_id, status) and a partial index on held seats; I shard by tenant_id only when a primary can no longer absorb writes'. Know when a key-value or wide-column store is the right answer (single-row access by key at very high write rates, time-series with TTL) and what it costs you (no joins, secondary indexes that double writes, hot partitions). For any partitioned store, state the partition key and check it against cardinality, distribution and access locality; a tenant_id key with one tenant at 60 percent of traffic is a hot partition you must call out before the interviewer does. Name the write-amplification of every secondary index you add and whether the store gives you conditional writes for the contended path.",
-      "minutes": 20,
-      "resource": {
-        "label": "AWS DynamoDB Developer Guide - Best practices for designing and using partition keys effectively",
-        "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html"
-      }
-    },
-    {
-      "name": "High-level design: C4 container level, numbered flows, narrated",
-      "learn": "Draw at the C4 'container' level (deployable units and stores, not classes and not cloud icons) left to right: clients, edge (CDN, load balancer, API gateway with auth and rate limiting), stateless services, stores, and the asynchronous spine (queue, workers, schedulers) below. Number the arrows for the primary flow and walk each core functional requirement through the diagram out loud before any deep dive, ticking them off; a box you cannot trace to a requirement gets deleted on camera. Start boring (one service, Postgres, Redis, one queue) and add components only where a number from estimation forces it; the interviewer is scoring whether each box is justified, not how many there are. Talk while drawing; more than 30 seconds of silent drawing is a communication deduction in your own rubric.",
-      "minutes": 15,
-      "resource": {
-        "label": "C4 model - software architecture diagrams (container level)",
-        "url": "https://c4model.com/"
-      }
-    },
-    {
-      "name": "Deep dive pattern: the read path (caching, replicas, stampedes, hot keys)",
-      "learn": "For a read-heavy bottleneck present the options and choose with a number: cache-aside with TTL versus write-through with event-driven invalidation, and the staleness each allows against the NFR you wrote. Name the failure modes and their fixes as a unit: stampede on expiry (lock or lease, request coalescing, jittered or probabilistic early expiration), hot keys (local in-process cache, key replication across cache nodes), replica lag breaking read-your-writes (route the writer's next read to the primary, or carry a version token), and consistent hashing so a cache node loss does not flush everything. Say where the CDN ends and the application cache begins. Close the deep dive with the metric you would watch (hit ratio, origin QPS, replica lag seconds) so it connects to the operability close.",
-      "minutes": 15,
-      "resource": {
-        "label": "AWS ElastiCache Developer Guide - Caching strategies",
-        "url": "https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Strategies.html"
-      }
-    },
-    {
-      "name": "Deep dive pattern: the write path (queues, ordering, idempotent consumers, outbox)",
-      "learn": "For a write-heavy or asynchronous bottleneck, decouple with a log or queue and immediately state the three questions that follow: partition key for ordering (per entity, never global), delivery semantics (at-least-once plus a consumer dedupe table keyed by event id, because exactly-once at the application level is idempotency, not a broker feature), and backpressure (bounded consumer lag alerts, producer-side shedding, dead-letter topic with replay). Use the transactional outbox for the 'write to DB and publish an event' atomicity problem and say why dual writes fail. Quantify the partition count from throughput per partition and the retention from replay needs, and name the hot-partition risk of your chosen key. Know when a queue is the wrong answer: a synchronous confirmation the user is waiting for cannot hide behind eventual processing.",
-      "minutes": 15,
-      "resource": {
-        "label": "Microservices.io - Pattern: Transactional outbox (atomic database write plus event publish, why dual writes fail)",
-        "url": "https://microservices.io/patterns/data/transactional-outbox.html"
-      }
-    },
-    {
-      "name": "Deep dive pattern: consistency, replication and failover",
-      "learn": "Decide consistency per operation, not per system, and say it in Jepsen's vocabulary: the seat decrement is linearizable (single leader per shard with a conditional update or row lock), the seat map is eventual (replicas), the payment-to-booking relationship is a saga with compensations, not a distributed transaction. Explain what synchronous versus asynchronous replication buys and costs in RPO and write latency, how leader failover works and why unfenced failover produces split brain, and why a distributed lock without a fencing token is a bug rather than a design. When the interviewer asks for active-active across regions, know the honest answer: either partition the data so each key has one home region, or accept conflicts and define the merge; there is no third option that keeps linearizability. Quantify the availability you give up for the consistency you need and tie it back to the NFR line.",
-      "minutes": 20,
-      "resource": {
-        "label": "Jepsen - Consistency Models",
-        "url": "https://jepsen.io/consistency"
-      }
-    },
-    {
-      "name": "Handling curveballs: 10x traffic, region loss, hot tenant, slow dependency",
-      "learn": "Rehearse a fixed response shape for any mid-design change: restate the change, point at the diagram component it stresses, quantify the new load against the number you already wrote, offer two options, choose one and name its cost, all inside three minutes. Prepare the standard set on interviewer cards: traffic grows 10x, one region is lost, one tenant becomes half the traffic, a downstream API caps you at 100 requests per second, the product adds a feature that changes the access pattern, the interviewer asks 'why not just use X'. For the dependency-failure card, reach for the cascading-failure toolkit by name: timeouts with deadline propagation, retries with exponential backoff and jitter capped by a budget, circuit breakers, load shedding by priority, graceful degradation, and a queue as a buffer during the outage. The score is for locating and quantifying the bottleneck, not for having anticipated the specific card.",
-      "minutes": 15,
-      "resource": {
-        "label": "Google SRE Book - Addressing Cascading Failures",
-        "url": "https://sre.google/sre-book/addressing-cascading-failures/"
-      }
-    },
-    {
-      "name": "The operability close: golden signals, rollout, phasing",
-      "learn": "Spend the last five minutes proving you have run systems, not just drawn them: name the four golden signals for each service tier (latency, traffic, errors, saturation), map the NFRs from minute two onto SLO alerts, and say how the system rolls out (canary by tenant or percentage, feature flags, expand-and-contract migrations, backfills that can be paused). Give an order-of-magnitude cost and a phased plan ('phase one is the monolith plus Postgres plus one queue and ships in six weeks; sharding and the second region are phase three when the numbers demand them'). Finish with the two failure modes you are least comfortable with and how you would detect each; interviewers rate candour about weaknesses above a design that claims to have none.",
-      "minutes": 10,
-      "resource": {
-        "label": "Google SRE Book - Monitoring Distributed Systems (four golden signals)",
-        "url": "https://sre.google/sre-book/monitoring-distributed-systems/"
-      }
-    },
-    {
-      "name": "The FDE twist: designing inside the customer's constraints",
-      "learn": "In at least two of the six mocks, add the constraints an FDE actually faces and practise adapting the design out loud: deploy inside the customer's VPC or on-premises (so every managed service becomes a swap table: DynamoDB to Postgres, SQS to Redis Streams or Kafka, Lambda to a worker deployment), data residency that forces per-region shards and per-region key management, integration with systems you do not control (a CRM with a 100 requests-per-second limit, a nightly SFTP drop, an IdP you must federate with), change windows and a security review that will ask about every arrow on the diagram. Practise the migration story as part of the design: dual-write, backfill, verify, cut over, roll back. Use the Well-Architected pillars as the checklist a customer architect will use on you, and be able to say which pillar you consciously traded down in phase one and why.",
-      "minutes": 15,
-      "resource": {
-        "label": "AWS Well-Architected Framework - Overview and pillars",
-        "url": "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html"
-      }
-    },
-    {
-      "name": "When the problem contains an LLM step",
-      "learn": "Treat a model call as an external dependency with unusual numbers and say them: p50 in seconds, p99 in tens of seconds, rate limits expressed in requests and tokens per minute (RPM, TPM, ITPM) per organisation rather than per user, 429 responses that carry a `retry-after` header, and cost per call that makes 'call it for every request' a budget conversation. Put it behind a queue and workers instead of in the request path, add a semantic or exact-match cache keyed by prompt hash, define a fallback (smaller model, rules, or 'pending' state) for rate-limit and outage cases, and make the output idempotent so a retried classification does not double-write to the customer's CRM. Say explicitly that evals and observability for the model step exist and that you will treat them as a separate design (topics 53 and 54), so the interviewer sees scope control rather than avoidance.",
-      "minutes": 10,
-      "resource": {
-        "label": "Claude Developer Platform docs - Rate limits",
-        "url": "https://platform.claude.com/docs/en/api/rate-limits"
-      }
-    },
-    {
-      "name": "Mocks 1 and 2: solo, timed, recorded, interviewer cards",
-      "learn": "Run the news-feed and metrics-ingestion problems alone under the full 45-minute clock with the recording running, using a shuffled deck of interviewer cards you draw at minutes 12, 25 and 35 to force interruptions you did not pick. Play both roles honestly: read the card aloud, respond, do not skip it because it is inconvenient. Expect these two to score around 3 and to overrun the requirements phase; the purpose is a baseline and a working rig, not a good score. Within 24 hours run the self-review protocol and write the three fixes for mock three before you forget what it felt like.",
-      "minutes": 90,
-      "resource": {
-        "label": "Hello Interview - System Design in a Hurry: Core Concepts",
-        "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/core-concepts"
-      }
-    },
-    {
-      "name": "Mocks 3 and 4: peer sessions on Exponent, both chairs",
-      "learn": "Book two peer practice sessions and take the chat and ride-dispatch problems as candidate, sending your rubric to the peer beforehand so their score is on your scale. Sit in the interviewer chair for an equal number of sessions; running someone else's design interview teaches you what silence, unjustified boxes and unquantified claims look like from the other side faster than any amount of candidate practice. Give feedback with timestamps and rubric dimensions, ask for the same, and record your own sessions (with consent) so the peer score can be compared against your self-score. A gap of more than one point on any dimension between your score and theirs is the most important finding of the week.",
-      "minutes": 90,
-      "resource": {
-        "label": "US Office of Personnel Management - Structured Interviews (developing, conducting and rating with a fixed scale)",
-        "url": "https://www.opm.gov/policy-data-oversight/assessment-and-selection/structured-interviews/"
-      }
-    },
-    {
-      "name": "Mocks 5 and 6: contended inventory and the FDE tenant platform, under pushback",
-      "learn": "Run the ticket-booking problem and the multi-tenant ingestion and classification platform with the peer instructed to push back at least once every five minutes ('why not Kafka for everything', 'the customer will not allow a managed database', 'a tenant with 40 percent of traffic just signed'). These are the two archetypes whose hard parts (linearizable decrement under contention; a design that must survive being redeployed into a customer VPC) most resemble what an FDE loop asks. Your target is the third consecutive 4/5 across all rubric dimensions; if either falls short, the seventh mock is the same problem again with the same peer, not a new problem. Keep the `.excalidraw` from mock six, it becomes the design doc in the proof of work.",
-      "minutes": 90,
-      "resource": {
-        "label": "Hello Interview - System Design in a Hurry: Common Patterns",
-        "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/patterns"
-      }
-    },
-    {
-      "name": "Self-review protocol and the pattern ledger",
-      "learn": "Within 24 hours of each mock, watch the recording at 1.5x with the rubric open and log: the timestamp of each phase transition against the budget, the number of design-changing questions asked in the first five minutes, boxes drawn without a stated requirement, statements that included a number versus statements that did not, seconds of silent drawing, and every moment you defended a choice after the interviewer gave you a reason to change it. Score each dimension with at least one timestamp as evidence and record it in a running table alongside the peer's score. Maintain a pattern ledger with two columns, 'reached for' and 'should have reached for', per mock; the second column across six mocks is your revision list for topic 42, and a pattern appearing there twice means a targeted 30-minute drill before the next mock. Write exactly three fixes for the next session and re-read them five minutes before it starts.",
-      "minutes": 120,
-      "resource": {
-        "label": "Hello Interview - System Design in a Hurry: Key Technologies (checklist for the 'should have reached for' column)",
-        "url": "https://www.hellointerview.com/learn/system-design/in-a-hurry/key-technologies"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can run a 45-minute design mock in which the recording shows each phase transition (requirements, estimation, API and data model, high-level design, deep dives, close) within two minutes of the planned budget, with no phase skipped.",
-    "You can, for any of the six archetypes, state three core functional requirements, an explicit out-of-scope list, and non-functional requirements with numbers (availability, p99 latency, peak QPS, retention, consistency per operation) inside five minutes without prompting.",
-    "You can derive QPS, storage and bandwidth in powers of ten in under three minutes and, for each number, say which design decision it changes (shard or not, in-memory or not, one primary or many).",
-    "You can draw a container-level diagram with numbered flows and a sync/async legend, walk every core requirement through it before deep diving, and delete or justify on camera any box that does not trace to a requirement.",
-    "You can name the two hardest components unprompted and deep dive each with two options, a quantified reason for the choice, its failure mode and the metric you would watch, spending at least 15 of the 45 minutes there.",
-    "You can respond to any of eight rehearsed curveballs (10x traffic, region loss, hot tenant, capped dependency, on-prem only, new access pattern, 'why not X', active-active demand) by locating it on the diagram, quantifying it and choosing, in three minutes or less.",
-    "You can score your own recording against the rubric with timestamped evidence and land within half a point of a peer's independent score on at least three of four dimensions.",
-    "You can show three consecutive peer-scored mocks at 4/5 or better on every rubric dimension, with the score table, recordings and diagrams as evidence."
-  ],
-  "failureModes": [
-    "A design that scored well in the mock assumed DynamoDB, SQS and Lambda; the customer's security team requires everything inside their VPC with no managed services, and the FDE has to redesign the write path on site in a week because the swap table (Postgres, Kafka or Redis Streams, worker deployments) was never practised.",
-    "The read path uses cache-aside with a ten-minute TTL and no invalidation events, so after a customer changes a tenant's entitlements their users keep seeing the old plan for ten minutes and the customer files it as a security incident rather than a staleness bug.",
-    "The feed was designed fan-out-on-write because it demoed cleanly; a tenant with five million followers onboards, one post produces five million timeline writes, the queue backs up for hours and every other tenant's feed goes stale until someone adds the hybrid pull path for high-follower accounts.",
-    "Estimation used average traffic; the customer's users all log in at 09:00 Monday with a peak-to-average ratio above ten, the connection pool saturates, retries without jitter triple the load and the primary falls over exactly when the customer's leadership is watching.",
-    "The queue consumer was described as exactly-once in the interview but shipped as at-least-once with no dedupe table; a broker rebalance replays a batch and the classifier writes duplicate contacts into the customer's HubSpot, which the customer's sales team notices before your monitoring does.",
-    "Sharding by tenant_id was chosen because it sounded natural; one tenant is 60 percent of all writes, that shard's primary runs hot while the others idle, and rebalancing a live shard becomes a multi-week project that was avoidable by discussing key skew in the design review.",
-    "Offset pagination shipped because the API sketch used `?page=`; a customer's export job pages through 80 million rows, each deeper page scans further, p99 climbs past the gateway timeout on page 4,000 and the export never completes."
-  ],
-  "interviewQuestions": [
-    "Design a document ingestion and LLM classification platform for 30 enterprise tenants where one tenant requires the whole thing to run inside their own VPC with no managed services. Walk me through the shared design first, then tell me exactly which components change for that tenant, what you lose, and how you keep one codebase.",
-    "You designed a news feed with fan-out on write. A customer account with five million followers is about to onboard. What breaks first, how would you have detected it before the customer did, and how do you evolve the design to a hybrid without downtime or a re-backfill of every timeline?",
-    "For a ticket-booking system, how do you guarantee no seat is sold twice? Tell me which operation needs linearizability, how you get it on a single shard, what happens at leader failover, and what you say when the customer insists on active-active across two regions.",
-    "A customer reports that users see stale data for several minutes after an update. Walk me through diagnosing it on your diagram: cache TTL versus missing invalidation versus replica lag versus CDN, what evidence distinguishes each, and what you tell the customer at each step before you know the cause.",
-    "Your pipeline needs to write into a CRM API that allows 100 requests per second for the whole customer account while your system produces bursts of 5,000 events per second. Design the shaping layer: where the buffer lives, how you prioritise, what you drop or delay, how the customer sees progress, and what your on-call alert is.",
-    "I am going to push back on your choice of Postgres plus an outbox instead of Kafka as the source of truth. Defend it with numbers, tell me the point at which you would switch, and tell me what the migration from one to the other looks like for a live customer.",
-    "You had 45 minutes and chose to deep dive on two components. Which did you skip, why was that the right call given the requirements, and what would you have said if I had told you at minute 30 that the skipped component was the one the customer cares about?"
-  ],
-  "proofOfWork": "A public `system-design-mocks` repository (or a section of the FDE dashboard) that a hiring manager can read in ten minutes and a peer can reuse in one. It contains: (1) `rubric.md` with the 1-5 definitions per dimension written as observable behaviours, plus the score table for all six mocks showing self-score, peer score and the gap per dimension, with the three consecutive 4/5 sessions highlighted; (2) six `.excalidraw` files and PNG exports, each with the requirements and estimation boxes filled in on the canvas, and a `scorecard-NN.md` per mock listing phase-transition timestamps against budget, the curveball cards drawn and the three fixes carried into the next session; (3) `interviewer-cards.md`, the deck of twelve curveballs with the 'hard part' for each of the six archetypes, usable by anyone running a mock for you or for themselves; (4) `pattern-ledger.md` with the 'reached for' and 'should have reached for' columns across all six mocks and the drills that resulted; and (5) a two-page `design-doc-tenant-platform.md` written from the mock-six diagram in the form a customer architect would review: requirements as SLOs, container diagram, the two deep dives, the managed-to-self-hosted swap table for the VPC tenant, a phased delivery plan with what ships in six weeks, and the failure modes you are least comfortable with and how each is detected."
+ "i": 44,
+ "topic": "MIT 6.824 selected lectures: Raft, linearizability, transactions",
+ "track": "F. Distributed Systems and System Design",
+ "month": 5,
+ "hours": 8,
+ "why": "Every customer environment you land in already runs consensus somewhere you did not choose: etcd under their Kubernetes control plane, ZooKeeper or KRaft under their Kafka, a MongoDB replica set, a Consul cluster, a CockroachDB or Spanner tier. When the platform team asks 'is it safe if we lose one node', 'why did the API server time out for 40 seconds', or 'why did two workers both think they held the lock', the FDE in the room has to answer from mechanism, not folklore, and then translate the answer into a flag change, a topology change, or a redesign of the customer's retry logic. The same vocabulary (quorum, commit, linearizable, stale read, blocking 2PC, idempotency across failover) is exactly what a Palantir, Databricks or Anthropic system-design loop probes, so the whiteboard fluency this topic builds is doing double duty.",
+ "prerequisites": [
+  "Topic 39 (DDIA and Kleppmann lectures): chapters 5 (replication), 7 (transactions) and 9 (consistency and consensus) read, so terms like quorum, leader-based replication, snapshot isolation and total order broadcast are already familiar",
+  "Topic 2 (Networking): what a partition really looks like on the wire (dropped or delayed packets, asymmetric reachability, a slow link that is not down), TCP retransmit and connection timeouts, and why 'the node is unreachable' is indistinguishable from 'the node is slow'",
+  "Topic 29 (PostgreSQL at depth): MVCC, READ COMMITTED vs REPEATABLE READ vs SERIALIZABLE, row locks, and what a transaction ID and xmin horizon are",
+  "Topic 1 (Linux internals): fsync/fdatasync semantics, why a write is not durable until the flush returns, and roughly what a flush costs on local NVMe vs a network block device",
+  "Topic 33 (Kafka): ISR, acks and min.insync.replicas, so the contrast between Kafka's data-plane replication and Raft-style consensus lands",
+  "Can read Go at the level of the Raft paper's pseudocode and the etcd/raft or hashicorp/raft README; the 6.824 lectures and the optional lab (Topic 41) assume it"
+ ],
+ "subtopics": [
+  {
+   "name": "Replicated state machines, split brain and why majorities",
+   "learn": "State the problem Raft solves: N servers each applying the same deterministic log in the same order so that any one can take over, under a crash-stop plus network-partition failure model (no Byzantine nodes, unbounded message delay, clocks not trusted for safety). Be able to show on a whiteboard why a naive primary-backup with a single 'view server' can split-brain when the network partitions, and why requiring a majority of 2f+1 servers for every decision guarantees any two decisions share at least one server and hence carry the other's history. Know the practical consequences: 3 nodes tolerate 1 failure, 5 tolerate 2, 4 tolerate the same as 3 but is slower, and an even-sized cluster is never a good trade. This is 6.824 lecture 'Fault Tolerance: Raft (1)' and section 5 of the paper.",
+   "minutes": 25,
+   "resource": {
+    "label": "MIT 6.824 schedule (lecture videos and notes for Raft 1 and 2)",
+    "url": "https://pdos.csail.mit.edu/6.824/schedule.html"
+   }
+  },
+  {
+   "name": "Terms, elections and the election restriction",
+   "learn": "Walk the state machine follower -> candidate -> leader with the exact RequestVote fields (term, candidateId, lastLogIndex, lastLogTerm) and reply (term, voteGranted), and be able to say what a server does on receiving any RPC with a higher term (adopt it, become follower, reset votedFor) or lower term (reject). Explain why election timeouts are randomised (paper uses 150-300 ms; etcd defaults heartbeat 100 ms / election 1000 ms), how a split vote resolves, and the requirement broadcastTime << electionTimeout << MTBF. Nail the election restriction: a voter grants only if the candidate's log is at least as up to date, comparing lastLogTerm first and lastLogIndex second, and be able to argue why this alone is what makes Leader Completeness hold. Step through the visualisation until you can predict every transition before clicking.",
+   "minutes": 35,
+   "resource": {
+    "label": "The Secret Lives of Data - Raft interactive walkthrough",
+    "url": "https://thesecretlivesofdata.com/raft/"
+   }
+  },
+  {
+   "name": "AppendEntries, the consistency check and log repair",
+   "learn": "Know the AppendEntries fields (term, leaderId, prevLogIndex, prevLogTerm, entries[], leaderCommit) and the follower's algorithm: reject if the entry at prevLogIndex does not have prevLogTerm, otherwise delete any conflicting suffix and append. Explain the leader's per-follower nextIndex (initialised to lastLogIndex+1) and matchIndex (initialised to 0), how a rejection decrements nextIndex and retries, and the fast-backup optimisation from the 6.824 notes where the follower returns the conflicting term and the first index of that term (XTerm/XIndex/XLen) so the leader skips a whole term per round trip. Work every case of Figure 7 (a-f) by hand: for each follower, say what prevLogIndex the leader will settle on and which entries get truncated. Be able to state the Log Matching property and why a follower may never keep an entry the leader does not have.",
+   "minutes": 35,
+   "resource": {
+    "label": "Raft extended paper (6.824 copy) - sections 5.3 and Figure 7",
+    "url": "https://pdos.csail.mit.edu/6.824/papers/raft-extended.pdf"
+   }
+  },
+  {
+   "name": "Commitment, Figure 8 and the five safety properties",
+   "learn": "Define commit precisely: the leader advances commitIndex to N only when a majority have matchIndex >= N and log[N].term == currentTerm; followers learn it via leaderCommit and apply entries up to it. Reproduce Figure 8 on a whiteboard from memory: a leader in term 2 replicates index 2 to a majority, crashes, a term-3 leader with a different index-2 entry overwrites it later, so counting replicas of a prior-term entry would have 'committed' something that gets deleted; hence prior-term entries are only committed indirectly when a current-term entry above them commits, which is why real implementations append a no-op entry on election. Recite and justify Election Safety, Leader Append-Only, Log Matching, Leader Completeness and State Machine Safety, and be able to say which mechanism enforces each.",
+   "minutes": 35,
+   "resource": {
+    "label": "In Search of an Understandable Consensus Algorithm (Raft paper, Figure 8 and section 5.4)",
+    "url": "https://raft.github.io/raft.pdf"
+   }
+  },
+  {
+   "name": "Figure 2 as an executable spec: what is persistent and when to fsync",
+   "learn": "Classify every variable in Figure 2: persistent (currentTerm, votedFor, log[]) versus volatile (commitIndex, lastApplied, and on leaders nextIndex[], matchIndex[]) and be able to explain the bug that appears if each persistent one is lost (two votes in one term, forgetting a granted vote, resurrecting a deleted entry). Know that persistence means fsync before replying to the RPC, which is why every Raft deployment's latency floor is the WAL fsync and why etcd exposes etcd_disk_wal_fsync_duration_seconds. Read the TLA+ spec alongside Figure 2 and map each action (Timeout, RequestVote, AppendEntries, BecomeLeader, ClientRequest, AdvanceCommitIndex) to the paper's rules; noticing that the spec has no clocks and no timeouts as safety inputs is the point.",
+   "minutes": 25,
+   "resource": {
+    "label": "ongardie/raft.tla - formal TLA+ specification of Raft",
+    "url": "https://github.com/ongardie/raft.tla"
+   }
+  },
+  {
+   "name": "Snapshots and log compaction",
+   "learn": "Explain why an unbounded log is fatal (restart replays forever, disk fills) and how snapshotting works: the service serialises its state at some applied index, Raft discards the log prefix and remembers lastIncludedIndex and lastIncludedTerm so the consistency check still works for the next AppendEntries; lagging followers receive InstallSnapshot (lastIncludedIndex, lastIncludedTerm, offset, data, done). In etcd terms: --snapshot-count (default 100000 entries) triggers a Raft snapshot, --max-snapshots and --max-wals (default 5 each) bound retention, while the separate MVCC history is bounded by --auto-compaction-mode=periodic|revision and --auto-compaction-retention plus etcdctl defrag to reclaim file space. Know that hitting --quota-backend-bytes (default 2 GiB, hard cap 8 GiB) raises the NOSPACE alarm and makes the cluster read-only until you compact, defrag and etcdctl alarm disarm.",
+   "minutes": 25,
+   "resource": {
+    "label": "etcd v3.5 operations guide - Maintenance (compaction, defragmentation, space quota, snapshots)",
+    "url": "https://etcd.io/docs/v3.5/op-guide/maintenance/"
+   }
+  },
+  {
+   "name": "Membership changes, learners and the quorum arithmetic trap",
+   "learn": "Explain why a naive switch from C_old to C_new can elect two leaders, and the two fixes: the paper's joint consensus (C_old,new) and the dissertation's simpler single-server-at-a-time change where any two adjacent configurations overlap in a majority. Know the operational hazards that follow: adding a fourth member to a 3-node cluster that already has one dead member drops you from quorum 2-of-3 with 2 healthy to quorum 3-of-4 with 2 healthy, an outage, which is why etcd enforces --strict-reconfig-check and why the rule is remove-then-add. Use etcdctl member add <name> --peer-urls=... --learner then etcdctl member promote so the new node catches up without counting toward quorum, and know that removing the current leader triggers a fresh election you should schedule for a quiet window.",
+   "minutes": 25,
+   "resource": {
+    "label": "etcd v3.5 operations guide - Runtime reconfiguration",
+    "url": "https://etcd.io/docs/v3.5/op-guide/runtime-configuration/"
+   }
+  },
+  {
+   "name": "Linearizability: definition and checking a history by hand",
+   "learn": "State the definition operationally: a history is linearizable if you can assign each operation a single point between its invocation and response such that the sequence of points is a legal sequential history of the object. Practise the 6.824 lecture method: draw the invocation/response intervals for concurrent reads and writes to one register, try to place the points, and either produce the order or exhibit the cycle that proves there is none (a read returning a value whose write started after the read completed, or two reads observing writes in opposite orders). Contrast with sequential consistency (no real-time constraint) and eventual consistency, and be able to say in one sentence why linearizability is the model that lets you ignore replication: it behaves like a single copy.",
+   "minutes": 30,
+   "resource": {
+    "label": "Jepsen - Linearizability (consistency models reference)",
+    "url": "https://jepsen.io/consistency/models/linearizable"
+   }
+  },
+  {
+   "name": "Linearizable vs stale reads: ReadIndex, leader leases and the deposed-leader problem",
+   "learn": "Explain why a Raft leader cannot simply answer reads from local state: it may have been deposed by a partition and be serving values a new leader has already overwritten. Know the two remedies: ReadIndex (record commitIndex, confirm leadership with a heartbeat round to a majority, wait until lastApplied >= that index, then serve) and lease-based reads (serve within a lease shorter than the election timeout, which trades a clock-drift assumption for a network round trip). Map this to etcd: etcdctl get --consistency=l (default, ReadIndex) vs --consistency=s (serializable, served locally by any member, may be stale), and know which one your customer's Kubernetes clients and any custom config loaders are actually using. Know what etcd guarantees for a linearizable read after a linearizable write from another client, and what 'serializable' means in etcd's vocabulary versus SQL's.",
+   "minutes": 30,
+   "resource": {
+    "label": "etcd v3.5 - API guarantees (linearizability, serializable reads, revisions)",
+    "url": "https://etcd.io/docs/v3.5/learning/api_guarantees/"
+   }
+  },
+  {
+   "name": "Client sessions, duplicate detection and exactly-once semantics",
+   "learn": "Work through the failure: client sends Put, leader commits it, leader crashes before replying, client retries to the new leader, the Put executes twice. Know the standard fix from Raft dissertation chapter 6: each client registers a session ID, tags requests with a monotonically increasing sequence number, and the state machine (not the Raft layer) keeps a per-client table of last-applied sequence and cached reply so a duplicate returns the cached result without re-executing; the table must live in the replicated state so it survives failover, and it needs an expiry policy the cluster agrees on. Translate this to FDE work: an idempotency key column plus unique index in Postgres, or a Redis SETNX with TTL (Topic 31), is the same idea and has the same expiry problem.",
+   "minutes": 25,
+   "resource": {
+    "label": "Diego Ongaro - Consensus: Bridging Theory and Practice (Raft dissertation, ch. 6 client interaction)",
+    "url": "https://web.stanford.edu/~ouster/cgi-bin/papers/OngaroPhD.pdf"
+   }
+  },
+  {
+   "name": "ZooKeeper's weaker model: linearizable writes, FIFO client order, watches",
+   "learn": "Understand why ZooKeeper deliberately serves reads from any replica (throughput scales with followers) and what it promises instead of full linearizability: writes are linearizable and totally ordered by zxid, each client's operations execute in the order it issued them, and a read after your own write sees that write; a client that needs a fresh read calls sync() first. Know the primitives that make it a coordination service rather than a database: ephemeral znodes tied to the session (so a crashed lock holder releases the lock), sequential znodes for fair locks, one-shot watches, and the herd-effect fix of watching only your predecessor. Be able to describe the 'ready znode' pattern for atomic multi-key config updates and why it depends on FIFO client order.",
+   "minutes": 25,
+   "resource": {
+    "label": "ZooKeeper Programmer's Guide - consistency guarantees, watches, znodes",
+    "url": "https://zookeeper.apache.org/doc/current/zookeeperProgrammers.html"
+   }
+  },
+  {
+   "name": "Timeouts, disks and leader flapping in a real etcd cluster",
+   "learn": "Diagnose the most common customer-cluster pathology: leader elections every few minutes with kube-apiserver logging 'etcdserver: request timed out'. Know the causal chain (slow fsync or network delays heartbeats -> followers time out -> election -> writes stall) and the metrics that separate the causes: etcd_disk_wal_fsync_duration_seconds p99 should be under 10 ms and etcd_disk_backend_commit_duration_seconds under 25 ms, etcd_network_peer_round_trip_time_seconds for network, etcd_server_leader_changes_seen_total for the symptom, plus log lines 'failed to send out heartbeat on time' and 'apply request took too long'. Know the tuning levers and their limits: --heartbeat-interval should be near the peer RTT, --election-timeout about 10x heartbeat and never above 50000 ms, etcd on its own disk (never a shared network volume behind a busy database), and etcdctl check perf to baseline before and after.",
+   "minutes": 25,
+   "resource": {
+    "label": "etcd v3.5 - Tuning (heartbeat, election timeout, disk and network)",
+    "url": "https://etcd.io/docs/v3.5/tuning/"
+   }
+  },
+  {
+   "name": "Quorum loss and disaster recovery",
+   "learn": "Enumerate etcd's failure classes (minority loss: fine, elect if needed; leader loss: election within one election timeout; majority loss: read-only at best and unrecoverable without operator action) and know which one the customer is in from etcdctl endpoint status -w table and etcdctl endpoint health. Practise the recovery path: regular etcdctl snapshot save, then etcdutl snapshot restore <file> --name <m> --initial-cluster ... --initial-cluster-token ... --initial-advertise-peer-urls ... --data-dir <new>, which rewrites member and cluster IDs so the old members cannot rejoin, and understand that everything after the snapshot is lost. Know --force-new-cluster as the single-surviving-member last resort and why it is dangerous if another old member later comes back. Tie this to Topic 24 (HA and DR): the RPO for a Kubernetes control plane is your etcd snapshot cadence.",
+   "minutes": 25,
+   "resource": {
+    "label": "etcd v3.5 operations guide - Disaster recovery",
+    "url": "https://etcd.io/docs/v3.5/op-guide/recovery/"
+   }
+  },
+  {
+   "name": "Testing consistency: Porcupine, Jepsen and fault injection",
+   "learn": "Learn how a linearizability checker works so you can use one on a customer system: record every operation's invocation time, response time, inputs and outputs, define a sequential model (a register or key-value map with a step function), and let the checker search for a valid ordering; Porcupine is the Go checker the 6.824 labs use, Knossos and Elle are Jepsen's. Read one Jepsen analysis end to end (jepsen.io/analyses) and identify the nemesis used (partition, clock skew, process kill, pause), the claimed model, and the minimal history that violated it. Know the fault-injection toolkit you can run on a customer's staging cluster: docker pause or kill -STOP for stop-the-world, iptables DROP or docker network disconnect for partitions, tc netem for latency, and why a paused process is worse than a dead one.",
+   "minutes": 25,
+   "resource": {
+    "label": "anishathalye/porcupine - linearizability checker used by the 6.824 labs",
+    "url": "https://github.com/anishathalye/porcupine"
+   }
+  },
+  {
+   "name": "Two-phase commit and why it blocks",
+   "learn": "Draw 2PC precisely: coordinator sends PREPARE, each participant writes a prepare record (locks held, must survive crash) and votes, coordinator durably logs the decision then sends COMMIT/ABORT, participants ack. Identify the blocking window: participants that voted yes cannot unilaterally decide if the coordinator is unreachable, so they hold locks until it returns; contrast with Raft/Paxos where the decision is replicated and a new leader can finish it (Spanner's trick is to make the coordinator itself a Paxos group). Practise the Postgres mechanics: PREPARE TRANSACTION 'gid', COMMIT PREPARED / ROLLBACK PREPARED, max_prepared_transactions (default 0, i.e. disabled), and the pg_prepared_xacts view, and know that an orphaned prepared transaction is invisible in pg_stat_activity yet holds its row locks and pins the xmin horizon so VACUUM cannot advance.",
+   "minutes": 25,
+   "resource": {
+    "label": "PostgreSQL docs - PREPARE TRANSACTION",
+    "url": "https://www.postgresql.org/docs/current/sql-prepare-transaction.html"
+   }
+  },
+  {
+   "name": "Spanner: TrueTime, commit-wait and external consistency",
+   "learn": "Explain Spanner's architecture in FDE terms: data split into tablets, each replicated by its own Paxos group across zones, read-write transactions use 2PL for locks and 2PC across groups with a Paxos-replicated coordinator, and timestamps come from TrueTime, an API returning an interval [earliest, latest] bounded by GPS and atomic clocks. Nail commit-wait: a transaction is assigned timestamp s = TT.now().latest and the leader waits until TT.after(s) before releasing locks, so any transaction that starts after this one returns is guaranteed a larger timestamp, which yields external consistency (strict serializability); remove commit-wait and a later transaction could get an earlier timestamp and read-only transactions would observe an impossible order. Know why read-only transactions are lock-free (pick a timestamp, read the snapshot from any sufficiently up-to-date replica) and how Cloud Spanner exposes strong, bounded-staleness (max_staleness, min_read_timestamp) and exact-staleness (exact_staleness, read_timestamp) reads.",
+   "minutes": 25,
+   "resource": {
+    "label": "Cloud Spanner docs - TrueTime and external consistency",
+    "url": "https://docs.cloud.google.com/spanner/docs/true-time-external-consistency"
+   }
+  },
+  {
+   "name": "Isolation levels versus consistency models",
+   "learn": "Separate two axes that customers conflate: consistency models (linearizability) are about single operations on single objects across replicas and real time, while isolation levels (serializability) are about multi-object transactions on one logical database and say nothing about real time; strict serializability is both. Be able to give the classic anomaly per level with Postgres specifics: READ COMMITTED (default) allows non-repeatable reads, REPEATABLE READ is snapshot isolation and allows write skew (two doctors both going off-call), SERIALIZABLE uses SSI and aborts with SQLSTATE 40001 'could not serialize access', so every caller needs a retry loop. Then give the cross-system example: a Raft-backed key-value store is linearizable per key but not transactional across keys, and a single-node Postgres at SERIALIZABLE is serializable but its async read replica is neither.",
+   "minutes": 25,
+   "resource": {
+    "label": "PostgreSQL docs - Transaction Isolation",
+    "url": "https://www.postgresql.org/docs/current/transaction-iso.html"
+   }
+  },
+  {
+   "name": "Leases and fencing: leader election without owning a consensus library",
+   "learn": "Understand how Kubernetes components elect a leader without implementing Raft themselves: a coordination.k8s.io/v1 Lease object with holderIdentity, leaseDurationSeconds, acquireTime, renewTime and leaseTransitions, updated with optimistic concurrency against etcd (which is the actual consensus); client-go's defaults are LeaseDuration 15 s, RenewDeadline 10 s, RetryPeriod 2 s, and kube-controller-manager exposes them as --leader-elect-lease-duration and friends. Be able to explain why a lease is not a fence: a holder paused by GC or the hypervisor for longer than the lease can resume and act after a new holder exists, so any external side effect must carry a fencing token (etcd revision, ZooKeeper zxid, or a monotonically increasing epoch column) that the downstream store rejects if it is lower than the last one seen. Apply the same reasoning to any customer 'distributed lock' built on Redis SET NX PX.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs - Leases (coordination.k8s.io)",
+    "url": "https://kubernetes.io/docs/concepts/architecture/leases/"
+   }
+  },
+  {
+   "name": "Consensus in the systems you will inherit: KRaft, MongoDB, CockroachDB",
+   "learn": "Build the Rosetta stone you will use on site. Kafka: KRaft replaces ZooKeeper with a Raft-style controller quorum (process.roles, controller.quorum.voters or the dynamic controller.quorum.bootstrap.servers, the __cluster_metadata log) that is pull-based rather than push-based, while data partitions still use ISR replication where durability depends on acks=all, min.insync.replicas>=2 and unclean.leader.election.enable=false, not on Raft. MongoDB: replica-set elections with electionTimeoutMillis (default 10000 ms) and member priority, writeConcern w:majority to avoid rollback of acknowledged writes after failover, readConcern majority vs linearizable (primary only, re-confirms leadership). CockroachDB: each range (default 512 MiB) is its own Raft group, a leaseholder serves reads without a Raft round, and clock uncertainty (--max-offset, default 500 ms) is handled with hybrid logical clocks instead of TrueTime. For each, be able to state what 'lost one node' and 'lost a majority' mean operationally.",
+   "minutes": 25,
+   "resource": {
+    "label": "Apache Kafka documentation - KRaft (section 6.9 and replication design)",
+    "url": "https://kafka.apache.org/documentation/#kraft"
+   }
+  },
+  {
+   "name": "Whiteboard rehearsal: the 15-minute Raft explanation",
+   "learn": "Script and rehearse the deliverable: (1) the problem and the majority argument, (2) normal-case election with RPC fields and randomised timeouts, (3) normal-case replication with prevLogIndex/prevLogTerm and commit, (4) a leader failure with a Figure 7-style divergence and the repair, (5) the Figure 8 trap and the current-term commit rule, (6) a one-minute coda on persistence, snapshots and linearizable reads. Use RaftScope on raft.github.io to stage each scenario, pause it, and practise narrating the exact state on screen without reading it, then redo the same scenario on a blank whiteboard. Time yourself; if any segment exceeds its budget, cut detail rather than speed up, because the interviewer will interrupt at the point they care about.",
+   "minutes": 25,
+   "resource": {
+    "label": "raft.github.io - Raft homepage with RaftScope interactive visualisation",
+    "url": "https://raft.github.io/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can draw a 5-node Raft cluster on a whiteboard and narrate election, replication and commit with the correct RPC fields and persistence points, including the Figure 8 case, in under 15 minutes with no notes and survive interruptions at any step",
+  "You can take any Figure 7-style log configuration and state, per server, whether it can win an election, what prevLogIndex the leader will settle on for each follower, and which entries will be truncated",
+  "You can decide by hand whether a short history of concurrent reads and writes is linearizable, and confirm it by feeding the same history to Porcupine with a register model",
+  "You can look at etcd metrics and logs from a customer cluster and attribute leader flapping to fsync latency, network RTT or misconfigured timeouts, naming the exact flag or infrastructure change that fixes it",
+  "You can explain when two-phase commit blocks, list orphaned prepared transactions in Postgres from pg_prepared_xacts, and articulate why Spanner's Paxos-replicated coordinator does not block",
+  "You can explain commit-wait and external consistency to a non-Google engineer and translate it into what a customer should expect from Cloud Spanner's strong versus stale reads",
+  "You can map the words quorum, leader, commit, linearizable and stale to their concrete equivalents in Kafka KRaft, MongoDB replica sets, CockroachDB ranges and Kubernetes Leases in a live customer conversation",
+  "You can spot an unsafe distributed lock or leader lease in a customer's code and propose a fencing-token design with a specific token source and enforcement point"
+ ],
+ "failureModes": [
+  "etcd placed on a shared network volume alongside a busy database: WAL fsync p99 climbs past 10 ms, heartbeats are late, the cluster elects a new leader every few minutes and kube-apiserver returns 'etcdserver: request timed out' across the whole platform",
+  "Operator 'fixes' a 3-node cluster with one dead member by adding a replacement before removing the dead one: quorum goes from 2-of-3 to 3-of-4 with only 2 healthy, and the control plane goes read-only mid-incident",
+  "A config or leader-election loader reads etcd with --consistency=s (or ZooKeeper without sync()) and occasionally acts on a value the customer overwrote seconds earlier, producing two workers that both believe they own a shard",
+  "A JVM app using XA against Postgres crashes between PREPARE and COMMIT; the orphaned prepared transaction never shows up in pg_stat_activity but holds row locks for days and pins the xmin horizon until autovacuum warnings about wraparound appear",
+  "A client library retries a write after a leader change with no idempotency key, so the payment or Kafka publish executes twice; the team blames the database for 'duplicating data'",
+  "Kafka producers run with acks=1 or min.insync.replicas=1 plus unclean.leader.election.enable=true; a broker failover silently discards acknowledged messages and the customer's audit reconciliation fails weeks later",
+  "A worker holding a Redis or Lease-based lock is paused by a stop-the-world GC longer than the TTL, another worker acquires the lock, and both write to the downstream store because nothing checked a fencing token"
+ ],
+ "interviewQuestions": [
+  "Whiteboard this: a 5-node Raft cluster, the term-3 leader has replicated index 7 to two followers and then crashes. Walk through the possible elections that follow, state in each case what happens to index 7, and explain precisely why Raft refuses to count replicas of prior-term entries when advancing commitIndex.",
+  "A customer's 3-node etcd cluster under Kubernetes shows a leader change every few minutes and intermittent API server timeouts. What do you check, in what order, what metrics and log lines do you expect to see for each hypothesis, and what would you change first?",
+  "Explain the difference between linearizability, serializability and strict serializability with one concrete anomaly each. Name a production system that is serializable but not linearizable and describe the customer-visible symptom.",
+  "A service reads its shard assignment from etcd using serializable reads and a customer reports that after a rebalance two instances occasionally process the same shard for a few seconds. Explain the mechanism and propose three fixes with their latency and availability trade-offs.",
+  "Design exactly-once processing for inbound webhooks in a service that runs three replicas behind a load balancer and restarts during deploys. Where does the deduplication state live, how does it survive failover, and how do you expire it without reintroducing duplicates?",
+  "Why does Spanner make committing transactions wait, what would break if you removed commit-wait, and how does a system without TrueTime such as CockroachDB approximate the same guarantee?",
+  "A customer wants to coordinate two databases with two-phase commit from their application server. Walk through what happens if the application server dies after both participants voted yes, then tell me when you would push back and what you would build instead."
+ ],
+ "proofOfWork": "A public 'stale read lab' repository: a docker-compose file that stands up a 3-member etcd 3.5 cluster plus Prometheus, a small Go or Python driver that runs N concurrent clients issuing put/get against a handful of keys while recording invocation and response timestamps and values, and a fault script that pauses the current leader (docker pause, simulating a stop-the-world) and partitions one member (docker network disconnect) during the run. The driver is run twice, once with reads at --consistency=s and once at --consistency=l, and both histories are fed to Porcupine with a register model; the repository commits the two checker outputs (the serializable run fails with the minimal violating sub-history highlighted, the linearizable run passes), Grafana screenshots of etcd_server_leader_changes_seen_total and etcd_disk_wal_fsync_duration_seconds across the fault window, and a one-page README that names the exact Raft mechanism (ReadIndex) responsible for the difference, what the same misconfiguration looks like in a customer's Kubernetes or ZooKeeper setup, and the flag or code change an operator should make. As a bonus, include annotated RaftScope screenshots reproducing the Figure 8 scenario step by step."
 }

@@ -1,218 +1,218 @@
 {
  "i": 36,
- "topic": "Warehouse layer: dbt, DuckDB, dimensional modelling",
+ "topic": "Temporal at depth: signals, queries, versioning, sagas, worker tuning",
  "track": "E. Backend and Data",
- "month": 5,
- "hours": 6.0,
- "why": "FDEs are routinely the person a customer asks for 'just a weekly report' out of the product database, and the naive answer - a cron job running SELECTs against the OLTP primary - is what pages their DBA at 03:00 and produces numbers that disagree with the invoice. A tested, documented dbt + DuckDB mart is the smallest thing that gives you a stable grain, history that survives source overwrites, a reconciliation you can show the customer, and a project that ports to their Snowflake/BigQuery/Databricks by swapping the adapter when they outgrow one box. Dimensional-modelling vocabulary (grain, SCD2, conformed dimensions, additivity) is also the shared language with the customer's data team, and Palantir/Databricks-style loops test it directly.",
+ "month": 4,
+ "hours": 8,
+ "why": "Kaupex-style engagements live or die on long-running, side-effecting orchestration: an LLM compile step, a CRM write, a Postgres commit, a webhook back to the customer, each of which fails independently and none of which can be blindly re-run. Temporal is what lets you promise a customer 'nothing is lost and nothing is duplicated' after a node reboot, but only if you can change workflow code while thousands of their executions are mid-flight, unwind a half-finished business transaction without a human reconciling spreadsheets, and size workers so the backlog drains inside the SLO you signed. FDE loops at Temporal-heavy shops probe exactly these three things, because the FDE is the person who will be standing in the customer's cluster when a deploy strands 2,000 workflows.",
  "prerequisites": [
-  "SQL beyond SELECT: CTEs, window functions, multi-aggregate GROUP BY, joins with time-range predicates (Topic 29, PostgreSQL at depth)",
-  "DefenderMate's Postgres schema (tenants, users, conversations, messages, llm_calls, tool_calls, audit_log) and its RLS policies, because the extraction role must read across tenants (Topic 30, Data modelling for multi-tenant AI systems)",
-  "Python 3.11+ virtualenv hygiene and pinned requirements - dbt-core and dbt-duckdb are pip packages and version drift between them bites",
-  "YAML and Jinja2 basics: dbt projects are mostly YAML config and Jinja-templated SQL",
-  "Tests-as-assertions mindset from Topic 35 (Testing and contracts) - dbt tests are assertions over data, not code",
-  "Git branches plus a CI runner (GitHub Actions) for scheduling the nightly run and doing state-based builds"
+  "Temporal basics from 'Load testing and chaos' (topic 22): start a workflow, run a Python worker on the `kaupex` task queue, read `temporal workflow show`, and the timeout/retry/heartbeat behaviour you measured when killing a worker mid-activity",
+  "asyncio fluency: tasks, `await`, `asyncio.gather`, `asyncio.shield`, `CancelledError`, `asyncio.Lock`; Temporal's Python workflows run on a custom deterministic event loop and everything below assumes you can reason about interleaving at await points",
+  "The layered Kaupex Task Compiler from 'Production Python architecture' (topic 25): activities become ten-line adapters over service functions and idempotency lives in the repository, not in the workflow",
+  "Postgres transactions and unique constraints from topic 29, because idempotency keys land as `INSERT ... ON CONFLICT DO NOTHING` on a `(workflow_id, activity_id)` unique index",
+  "Kubernetes pod lifecycle (SIGTERM, `terminationGracePeriodSeconds`, `preStop`) from topic 8 and Prometheus/Grafana from topic 21, so worker SDK metrics land on the existing Kaupex dashboard",
+  "A local `temporal server start-dev --db-filename ./dev.db`, the Kaupex k3s deployment reachable, Python SDK `temporalio` >= 1.11 and server >= 1.29.1 (Worker Versioning needs both)"
  ],
  "subtopics": [
   {
-   "name": "When a warehouse layer is the right call, and when DuckDB is the right warehouse",
-   "learn": "Know the three reasons to stop reporting from the OLTP primary: row-store scan cost (Postgres reads whole 8 KB heap pages to aggregate three columns; a columnar engine reads only those columns and skips row groups via min/max zone maps), lock and IO contention with the production write path, and the need for history the application overwrites or deletes. Place DuckDB on the spectrum: in-process, single-node, vectorised, zero infrastructure, comfortable from gigabytes to low terabytes on one box; versus a Postgres read replica (no new tech but still row-store) versus Snowflake/BigQuery/Databricks (multi-user concurrency, governance, per-query cost). State the customer-facing rule you will use: start with DuckDB + Parquet + dbt when there is one consumer and the data fits on a disk, because the dbt project moves to a cloud warehouse later by changing profiles.yml, not by rewriting SQL.",
-   "minutes": 15,
+   "name": "Event history, commands and deterministic replay",
+   "learn": "Read a history end to end with `temporal workflow show -w <id> --detailed` and name what each event means: `WorkflowTaskScheduled/Started/Completed` brackets one run of your Python code, `ActivityTaskScheduled` is the `ScheduleActivityTask` command your code emitted, `MarkerRecorded` is a patch or local-activity marker, `TimerStarted` is an `asyncio.sleep`. The worker rebuilds state by re-running `@workflow.run` from the top against the recorded events and checking each command it produces against the next event; any divergence (a new activity call, a different activity type name, a missing timer, reordered `asyncio.gather` branches) is a non-determinism error that fails the workflow *task*, not the workflow, so the execution sits in Running with `WorkflowTaskFailed` events retrying on backoff until the code is fixed. Know the Python sources of non-determinism and their replacements: `datetime.now()` -> `workflow.now()`, `random`/`uuid.uuid4` -> `workflow.random()`/`workflow.uuid4()`, threads and I/O -> activities, iterating an unordered `set` -> sort first. Know the ceilings: warning at 10,240 events, termination at 51,200 events, 10,000 signals or 2,000 updates per execution.",
+   "minutes": 35,
    "resource": {
-    "label": "DuckDB - Why DuckDB",
-    "url": "https://duckdb.org/why_duckdb"
+    "label": "Temporal docs: Workflow Execution - Events and Event History",
+    "url": "https://docs.temporal.io/workflow-execution/event"
    }
   },
   {
-   "name": "Kimball four-step design and declaring the grain",
-   "learn": "Apply the four steps to DefenderMate before writing a line of SQL: (1) pick the business process ('an LLM call was made', 'a conversation ran'), (2) declare the grain as a sentence - 'one row per llm_call', 'one row per tenant per day' - (3) identify dimensions as everything true at the moment of the event (tenant, user, model, date, tool), (4) identify facts as numeric measurements at that grain (input_tokens, output_tokens, cache_read_tokens, latency_ms, cost_usd). Recognise a mixed-grain fact table (conversation-level fields repeated on call-level rows) as the root cause of double counting in every downstream sum. Make the grain sentence the model's description: in YAML and enforce it with a unique test on the natural key or dbt_utils.unique_combination_of_columns, so a duplicated extract fails the build instead of inflating the email.",
-   "minutes": 25,
-   "resource": {
-    "label": "Kimball Group - Four-Step Dimensional Design Process",
-    "url": "https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/four-4-step-design-process/"
-   }
-  },
-  {
-   "name": "Fact table types and additivity: transaction, periodic snapshot, accumulating snapshot",
-   "learn": "Distinguish the three fact shapes and pick one per question: transaction facts (fct_llm_calls, one row per call, fully additive tokens and cost), periodic snapshots (fct_tenant_daily, one row per tenant per day whether or not anything happened - built by cross-joining a date spine to dim_tenant and zero-filling), and accumulating snapshots (one row per conversation with started_at, first_tool_call_at, resolved_at columns that get updated as milestones land). Classify every measure: additive (tokens, cost_usd), semi-additive (active_users - sums across tenants, not across days), non-additive (p95 latency, success ratio - never sum; store numerator and denominator, or recompute from the transaction grain). Understand why the weekly email must read the daily snapshot rather than re-aggregating transactions each time: stable, replayable numbers and explicit zero rows for silent tenants.",
-   "minutes": 20,
-   "resource": {
-    "label": "Kimball Group - Periodic Snapshot Fact Tables",
-    "url": "https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/periodic-snapshot-fact-table/"
-   }
-  },
-  {
-   "name": "Dimension design: surrogate keys, date dimension, conformed, role-playing, junk, degenerate, unknown member",
-   "learn": "Build dim_tenant, dim_user, dim_model, dim_date with a surrogate key (dbt_utils.generate_surrogate_key over natural key plus dbt_valid_from for versioned rows), keep the natural key alongside it, and seed an 'unknown' member (-1 / 'unknown') so a fact row never loses its join when a lookup fails. Date dimension: generate with dbt_utils.date_spine, key it as a YYYYMMDD integer, include iso_week, week_start_date, is_weekend and any fiscal columns the email needs; role-play it as started_date and resolved_date by joining twice with aliases. Know when to fold low-cardinality flags (finish_reason x is_tool_call x is_cached) into a junk dimension and when to leave conversation_id on the fact as a degenerate dimension. Denormalise hierarchies (tenant -> plan -> region) into the dimension row rather than snowflaking; dimensions are small, so redundancy is cheaper than the extra join.",
-   "minutes": 20,
-   "resource": {
-    "label": "Microsoft Learn - Modeling dimension tables (surrogate keys, SCD, special dimensions, date dimension)",
-    "url": "https://learn.microsoft.com/en-us/fabric/data-warehouse/dimensional-modeling-dimension-tables"
-   }
-  },
-  {
-   "name": "Slowly changing dimensions: Type 1 vs Type 2 with dbt snapshots",
-   "learn": "Decide per attribute whether a change is Type 1 (overwrite: user email, display name) or Type 2 (new version: tenant plan tier, model list price). Implement Type 2 with dbt snapshots: strategy: timestamp with updated_at when the source timestamp is trustworthy, strategy: check with check_cols when it is not; understand dbt_valid_from / dbt_valid_to (NULL means current), hard_deletes: invalidate | new_record (1.9+) and dbt_valid_to_current so you can avoid the NULL-handling branch in joins. Snapshots are append-only and cannot be regenerated from source - back the snapshot table up before any --full-refresh, and never snapshot an already-transformed or ephemeral model. Join facts to the version in effect at event time: f.created_at >= d.dbt_valid_from AND f.created_at < coalesce(d.dbt_valid_to, '9999-12-31'), and test that every fact row matches exactly one version.",
+   "name": "Failure taxonomy: workflow task failure vs execution failure vs activity failure",
+   "learn": "An arbitrary exception escaping `@workflow.run` fails the workflow task (retried, execution stays Running, fix-and-redeploy heals it), while `temporalio.exceptions.ApplicationError` fails the execution (terminal `WorkflowExecutionFailed`); promote specific types with `Worker(workflow_failure_exception_types=[...])` or `@workflow.defn(failure_exception_types=[...])`. Activities are the inverse: every exception is retried per `RetryPolicy(initial_interval, backoff_coefficient, maximum_interval, maximum_attempts, non_retryable_error_types)` until `schedule_to_close_timeout` expires, unless raised as `ApplicationError(..., non_retryable=True)` or its type is listed in `non_retryable_error_types`; the workflow sees an `ActivityError` whose `.cause` is that `ApplicationError` or a `TimeoutError` whose `.type` says START_TO_CLOSE or HEARTBEAT. Map Kaupex's domain exceptions from topic 25 onto this: `InvalidTaskSpec` non-retryable, `HubSpotRateLimited` retryable with a long `maximum_interval`, a `psycopg` `OperationalError` retryable but bounded. Be able to compute from a policy exactly how many attempts fit inside a given `schedule_to_close_timeout`.",
    "minutes": 30,
    "resource": {
-    "label": "dbt docs - Add snapshots to your DAG",
-    "url": "https://docs.getdbt.com/docs/build/snapshots"
+    "label": "Temporal Python SDK docs: Failure detection (timeouts, retry policies, heartbeats)",
+    "url": "https://docs.temporal.io/develop/python/best-practices/error-handling"
    }
   },
   {
-   "name": "Extracting from Postgres into DuckDB without hurting production",
-   "learn": "INSTALL postgres; LOAD postgres; ATTACH 'dbname=defendermate host=... user=reporting' AS pg (TYPE postgres, READ_ONLY); then CREATE OR REPLACE TABLE raw.llm_calls AS SELECT * FROM pg.public.llm_calls WHERE updated_at > (SELECT max(updated_at) FROM raw.llm_calls) - INTERVAL 1 HOUR. Use postgres_query('pg', '...') to push a filter to the server when the extension would otherwise pull the whole table; know that pg_use_ctid_scan and pg_pages_per_task parallelise the scan and what that does to the source's IO. Store credentials with CREATE SECRET (TYPE postgres, ...), not inline DSNs. Extraction hygiene an FDE is judged on: dedicated read-only role with statement_timeout, read from a replica when one exists, watermark on updated_at plus a lookback window for late-committing transactions, add an _extracted_at column, and reconcile nightly counts per day against the source. RLS from Topic 30 means the reporting role needs BYPASSRLS or a policy granting every tenant, otherwise the extract silently returns a subset.",
+   "name": "Signals and queries: async writes, sync reads, signal-with-start",
+   "learn": "Define `@workflow.signal async def approve(self, who: str)` handlers that only mutate state and set flags, and have the main coroutine block on `await workflow.wait_condition(lambda: self.approved, timeout=timedelta(days=3))`; signals are `WorkflowExecutionSignaled` events, delivered even if they arrive before the first workflow task or while every worker is down, and fire-and-forget from the client (`await handle.signal(MyWorkflow.approve, 'ops')`). Use `client.start_workflow(..., id=f'task-{uuid}', start_signal='approve', start_signal_args=[...])` so a retried webhook either starts or signals but never duplicates. `@workflow.query` methods must be synchronous, read-only and command-free (no `execute_activity`, no `asyncio.sleep`); a query against an execution evicted from the sticky cache forces a full replay on some worker, which is why polling queries against large histories hurt, and the built-in `__stack_trace` query is what the Web UI's Stack Trace tab uses to show where a stuck workflow is blocked. Drive Kaupex with `temporal workflow query -w <id> --type status` and `temporal workflow signal -w <id> --name approve --input '\"ops\"'`.",
+   "minutes": 35,
+   "resource": {
+    "label": "Temporal Python SDK docs: Message passing (signals, queries, updates)",
+    "url": "https://docs.temporal.io/develop/python/workflows/message-passing"
+   }
+  },
+  {
+   "name": "Updates: validated, synchronous, tracked writes",
+   "learn": "Use `@workflow.update` when the caller needs a result or a rejection: the paired `@my_update.validator` runs before anything is recorded and raising in it rejects the update with no history written, while the handler body runs as a workflow coroutine that can await activities and return a value. From the client `await handle.execute_update(MyWorkflow.add_step, step)` waits for completion; `await handle.start_update(..., wait_for_stage=WorkflowUpdateStage.ACCEPTED)` returns once the validator passes and lets you fetch the result later by update id. Update-with-Start (server 1.28+) lets one round trip create-or-address a workflow and get a synchronous answer, which is the right primitive for a FastAPI endpoint that must return 201 with the compiled plan id. Know the ceiling of 2,000 updates per execution and that entity workflows must Continue-As-New long before it.",
    "minutes": 25,
    "resource": {
-    "label": "DuckDB docs - PostgreSQL extension (ATTACH, postgres_query, COPY, secrets)",
-    "url": "https://duckdb.org/docs/current/core_extensions/postgres/overview"
+    "label": "Temporal Encyclopedia: Workflow message passing (signals, queries, updates)",
+    "url": "https://docs.temporal.io/encyclopedia/workflow-message-passing"
    }
   },
   {
-   "name": "Parquet as the storage layer: COPY TO, hive partitioning, row groups, schema drift",
-   "learn": "Land raw extracts and published marts as Parquet: COPY (SELECT ...) TO 'lake/llm_calls' (FORMAT parquet, PARTITION_BY (event_date), COMPRESSION zstd, ROW_GROUP_SIZE 122880, OVERWRITE_OR_IGNORE). Read back with read_parquet('lake/llm_calls/*/*.parquet', hive_partitioning = true, union_by_name = true) and know partition pruning only happens when the WHERE clause is on the partition column. Sizing rules from the DuckDB performance guide: row groups of 100K-1M rows, files of 100 MB-10 GB, at least as many row groups as threads; per-tenant-per-hour partitions producing hundreds of thousands of tiny files is the classic mistake. Use parquet_metadata() and parquet_schema() to detect type drift between days (an INT64 column that became VARCHAR after an app deploy). Know dbt-duckdb's materialized='external' writes a model straight to Parquet using location and external_root from the profile.",
+   "name": "Handler concurrency, all_handlers_finished and safe message handlers",
+   "learn": "Handlers interleave with the main coroutine at every `await`, so two `add_step` updates can both read `len(self.steps) < limit`, both pass and both append; guard multi-step handlers with an `asyncio.Lock` created in `__init__` and held across the awaited activity. Before returning or calling `continue_as_new`, `await workflow.wait_condition(workflow.all_handlers_finished)` so an in-flight handler is not killed with the run; the SDK logs a warning per unfinished handler unless the handler sets `unfinished_policy=HandlerUnfinishedPolicy.ABANDON` because it is genuinely fire-and-forget. Make signal handlers idempotent on a caller-supplied id (`if req.id in self.seen: return`) because a client that timed out will send the same signal twice and both land in history. Port the lock-and-wait shape from the `safe_message_handlers` sample into the Kaupex compile workflow.",
    "minutes": 20,
    "resource": {
-    "label": "DuckDB docs - Reading and Writing Parquet Files",
-    "url": "https://duckdb.org/docs/current/data/parquet/overview"
+    "label": "temporalio/samples-python: message_passing/safe_message_handlers",
+    "url": "https://github.com/temporalio/samples-python/tree/main/message_passing/safe_message_handlers"
    }
   },
   {
-   "name": "dbt + dbt-duckdb project wiring: profiles.yml, dbt_project.yml, ref/source, compiled SQL",
-   "learn": "profiles.yml: type: duckdb, path: warehouse.duckdb, extensions: [parquet, httpfs, postgres], settings: {memory_limit: '8GB', threads: 4}, attach: for a second DuckDB file or Postgres; understand that threads at the profile top level is dbt's model-level parallelism, distinct from DuckDB's own threads setting. dbt_project.yml: model-paths, a models: block with per-folder +materialized and +schema, vars:, on-run-start / on-run-end, require-dbt-version. ref() and source() are what build the DAG - a hardcoded table name is an invisible dependency that will run out of order. Read target/compiled/ and target/run/ to see the exact SQL DuckDB executed; use dbt compile --select model when debugging Jinja; dbt debug verifies the profile and connection; dbt deps installs packages.yml.",
-   "minutes": 20,
-   "resource": {
-    "label": "dbt docs - DuckDB setup (dbt-duckdb profile)",
-    "url": "https://docs.getdbt.com/docs/local/connect-data-platform/duckdb-setup"
-   }
-  },
-  {
-   "name": "Layering: staging, intermediate, marts, and choosing a materialization per layer",
-   "learn": "Staging (stg_pg__llm_calls): one model per source table, view materialization, rename/cast/no joins, the only layer allowed to call source(). Intermediate (int_calls_with_costs): ephemeral or view, where joins and business rules live. Marts (fct_llm_calls, fct_tenant_daily, dim_tenant): table or incremental, the only layer consumers may query, landing in a marts schema via +schema. Decide materialization by asking: how often is it read versus how expensive is it to rebuild, does anyone query it directly, and how many rows. Understand that ephemeral models are injected as CTEs so compiled SQL balloons and error line numbers become useless - use views in dev and tables in prod by branching on target.name. Know why one model per source table matters: when the customer renames a column you fix one file.",
-   "minutes": 20,
-   "resource": {
-    "label": "dbt docs - How we structure our dbt projects",
-    "url": "https://docs.getdbt.com/best-practices/how-we-structure/1-guide-overview"
-   }
-  },
-  {
-   "name": "Incremental models: unique_key, strategies, lookback windows, late-arriving rows",
-   "learn": "{{ config(materialized='incremental', unique_key='llm_call_id', incremental_strategy='delete+insert', on_schema_change='append_new_columns') }} with {% if is_incremental() %} WHERE updated_at > (SELECT max(updated_at) FROM {{ this }}) - INTERVAL 1 HOUR {% endif %}. Know what each strategy does on a duplicate key (append duplicates, delete+insert replaces the key set, merge upserts) and which ones dbt-duckdb supports. The lookback window is what saves you from long-running source transactions that commit with older timestamps; on_schema_change defaults to ignore, which silently drops new source columns. dbt run --full-refresh rebuilds from scratch - guard expensive models with full_refresh: false. For fct_tenant_daily, key on (tenant_sk, date_day) and recompute the trailing N days each night rather than only yesterday so late events are absorbed. Late-arriving dimensions: coalesce a failed surrogate-key lookup to the unknown member and re-resolve within the lookback window.",
-   "minutes": 30,
-   "resource": {
-    "label": "dbt docs - Configure incremental models",
-    "url": "https://docs.getdbt.com/docs/build/incremental-models"
-   }
-  },
-  {
-   "name": "Jinja, macros and dbt_utils: surrogate keys, date spine, safe division, DRY logic",
-   "learn": "{{ }} renders a value, {% %} controls flow. Write a cents_to_usd(col) macro and a limit_in_dev() macro keyed on target.name. Use dbt_utils.generate_surrogate_key(['tenant_id', 'dbt_valid_from']) for versioned dimension keys, dbt_utils.date_spine(datepart='day', start_date=..., end_date=...) to build dim_date and the snapshot spine, dbt_utils.safe_divide(successes, attempts) for tool-success ratios that must not divide by zero, and dbt_utils.star(from=ref(...), except=[...]) to avoid hand-listing columns. Pin packages.yml versions and understand dispatch picks the adapter-specific implementation. Jinja runs at compile time: {{ run_started_at }} is fixed for the whole invocation while current_timestamp is evaluated per statement, which matters when you stamp _loaded_at on multiple models.",
-   "minutes": 20,
-   "resource": {
-    "label": "GitHub - dbt-labs/dbt-utils (macros and generic tests)",
-    "url": "https://github.com/dbt-labs/dbt-utils"
-   }
-  },
-  {
-   "name": "Data tests: generic, singular, thresholds and stored failures",
-   "learn": "Generic tests in YAML: unique and not_null on every key, accepted_values on finish_reason (end_turn, max_tokens, tool_use, stop_sequence), relationships so every fact tenant_sk exists in dim_tenant. dbt_utils tests that catch real regressions: unique_combination_of_columns (the grain), accepted_range (cost_usd >= 0, latency_ms between 0 and 600000), not_null_proportion, equal_rowcount between stg and raw, recency (mart refreshed within 26 hours). Singular tests in tests/*.sql for cross-model reconciliation: sum of fct_tenant_daily tokens per day must equal sum of fct_llm_calls tokens for that day. Configure severity: warn, warn_if: '>0', error_if: '>100' so a handful of bad rows does not block the email while a flood does; store_failures: true writes failing rows to <schema>_dbt_test__audit so you can show the customer the exact offending rows. Remember dbt build skips children of a failing test.",
-   "minutes": 30,
-   "resource": {
-    "label": "dbt docs - Add data tests to your DAG",
-    "url": "https://docs.getdbt.com/docs/build/data-tests"
-   }
-  },
-  {
-   "name": "Unit tests and model contracts: pinning logic and schema",
-   "learn": "Unit tests (dbt 1.8+) mock inputs and assert outputs: unit_tests: - name: prices_apply_cache_discount, model: int_calls_with_costs, given: [{input: ref('stg_pg__llm_calls'), rows: [...]}, {input: ref('dim_model'), rows: [...]}], expect: {rows: [...]}. Aim them at the pricing formula, UTC-vs-tenant-local day bucketing, and the SCD2 join-window predicate; use overrides to pin is_incremental() and vars. Model contracts: config: contract: enforced: true plus columns: - name: tenant_sk, data_type: bigint, constraints: [{type: not_null}] make the build fail when the SELECT's output schema drifts, which is what protects the email template from a renamed or retyped column. Contracts require every column listed with a data_type and are checked at build time before the table is swapped in.",
-   "minutes": 20,
-   "resource": {
-    "label": "dbt docs - Unit tests",
-    "url": "https://docs.getdbt.com/docs/build/unit-tests"
-   }
-  },
-  {
-   "name": "Source freshness and exposures: knowing the data is late, and who consumes it",
-   "learn": "Declare sources: with loaded_at_field: _extracted_at and freshness: warn_after: {count: 6, period: hour}, error_after: {count: 26, period: hour}; dbt source freshness writes target/sources.json and --select source_status:fresher+ builds only models whose sources actually moved. Add an exposures: entry (type: application, name: defendermate_weekly_email, owner:, url:, depends_on: [ref('fct_tenant_daily'), ref('dim_tenant')]) so the lineage graph ends at the customer email and dbt build --select +exposure:defendermate_weekly_email builds exactly that path. Treat the freshness thresholds as the mart's SLA contract with the customer and alert on them, not on 'the cron ran'.",
-   "minutes": 15,
-   "resource": {
-    "label": "dbt docs - Add sources to your DAG (incl. source freshness)",
-    "url": "https://docs.getdbt.com/docs/build/sources"
-   }
-  },
-  {
-   "name": "Documentation and lineage: descriptions, doc blocks, catalog and manifest",
-   "learn": "Every mart column gets a description:; define conformed definitions once as {% docs tenant_sk %}...{% enddocs %} blocks and reference them with '{{ doc(\"tenant_sk\") }}' so the same column is not described three different ways. dbt docs generate writes catalog.json and manifest.json; dbt docs serve renders the searchable site and lineage DAG. Put the grain sentence, the freshness SLA and the owner in the model description rather than a wiki so they cannot drift from the code. Know manifest.json is machine-readable: it drives state:modified selection and you can turn it into a customer-facing data dictionary with a 30-line script.",
-   "minutes": 15,
-   "resource": {
-    "label": "dbt docs - About documentation",
-    "url": "https://docs.getdbt.com/docs/build/documentation"
-   }
-  },
-  {
-   "name": "dbt build and node selection: tags, graph operators, state and result selectors",
-   "learn": "dbt build runs seeds, snapshots, models and tests in DAG order and skips descendants of failures. Selection syntax: --select tag:nightly, path:models/marts, stg_pg__llm_calls+ (downstream), +fct_tenant_daily (upstream), @fct_tenant_daily (children plus their parents), --exclude. State-based CI: keep the last production manifest.json and run dbt build --select state:modified+ --state prod-artifacts/ so a PR builds only what changed; after a partial failure rerun only the broken path with --select result:error+ --state target-prev/; --defer resolves unbuilt refs to production. Know --fail-fast to stop on first error and --empty for a schema-only dry run.",
-   "minutes": 15,
-   "resource": {
-    "label": "dbt docs - Node selection syntax overview",
-    "url": "https://docs.getdbt.com/reference/node-selection/syntax"
-   }
-  },
-  {
-   "name": "DuckDB analytical SQL for the mart: windows, QUALIFY, ASOF JOIN, PIVOT, list aggregates",
-   "learn": "Write the weekly-email queries idiomatically: lag(tokens, 7) OVER (PARTITION BY tenant_sk ORDER BY date_day) for week-over-week, sum(cost_usd) OVER (PARTITION BY tenant_sk ORDER BY date_day ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) for rolling 7-day, quantile_cont(latency_ms, 0.95) for p95, QUALIFY row_number() OVER (PARTITION BY tenant_id ORDER BY dbt_valid_from DESC) = 1 for current-version dedup without a subquery, ASOF JOIN dim_model_price p ON c.model = p.model AND c.created_at >= p.effective_from to attach the price in effect at call time, PIVOT fct_tenant_daily ON model_name USING sum(cost_usd), and list() / string_agg for the 'top 5 tools' line. Use GROUP BY ALL, SELECT * EXCLUDE (...), date_trunc('week', ...) and timezone(tz, ts) for tenant-local weeks. Confirm with EXPLAIN ANALYZE that filters push into the Parquet scan.",
-   "minutes": 20,
-   "resource": {
-    "label": "DuckDB docs - Window Functions (incl. QUALIFY and frame clauses)",
-    "url": "https://duckdb.org/docs/current/sql/functions/window_functions"
-   }
-  },
-  {
-   "name": "DuckDB operability: memory limits, spilling, threads, single-writer concurrency, EXPLAIN ANALYZE",
-   "learn": "SET memory_limit = '6GB'; SET threads = 4; SET temp_directory = '/data/tmp'; SET max_temp_directory_size = '50GB'; SET preserve_insertion_order = false for large loads. Understand that hash joins, aggregates and sorts spill to temp_directory once memory_limit is hit, and that a missing or full temp directory is an OOM in disguise. Concurrency: one process may open a .duckdb file read-write; other processes may only attach with access_mode = 'READ_ONLY' and only if no writer holds it - so the nightly dbt job and the email renderer must not both open the same file read-write. Pattern: dbt writes warehouse.duckdb, then publish marts to Parquet or copy the file and atomically rename for readers. Threads within a process use MVCC and the second writer to the same row fails with a conflict error. Read EXPLAIN ANALYZE: estimated vs actual cardinality per operator, timings, and the accidental cross join that turns 4 minutes into 90.",
-   "minutes": 20,
-   "resource": {
-    "label": "DuckDB docs - Tuning Workloads (performance guide)",
-    "url": "https://duckdb.org/docs/current/guides/performance/how_to_tune_workloads"
-   }
-  },
-  {
-   "name": "Nightly orchestration and the weekly-email consumer: scheduling, run_results.json, alerting, idempotency",
-   "learn": "A nightly run is: extract (DuckDB postgres ATTACH -> raw Parquet) -> dbt source freshness -> dbt build --select tag:nightly -> publish -> notify. Schedule with GitHub Actions on: schedule: cron: (know it runs on the default branch and can be delayed or dropped at high load) or a Temporal schedule from Topic 34 when you need retries and visibility; make every step idempotent so a 03:00 rerun is safe. Parse target/run_results.json: results[].status (success, error, fail, skipped, warn), failures, execution_time, adapter_response.rows_affected; post a summary to Slack and persist it to an ops.dbt_runs table via on-run-end. The weekly-email renderer (Python + Jinja2) opens the published DuckDB file with read_only=True or reads the Parquet marts, queries fct_tenant_daily for the trailing seven complete tenant-local days, and refuses to send when the recency test or freshness check failed - a late email beats a wrong one. Define the SLA explicitly: mart complete by 06:00 tenant-local, with freshness thresholds aligned to it.",
+   "name": "Durable timers, wait_condition timeouts and Continue-As-New",
+   "learn": "`await asyncio.sleep(timedelta(hours=6).total_seconds())` inside a workflow is a server-side timer (`TimerStarted`/`TimerFired`) that survives worker restarts; `workflow.wait_condition(pred, timeout=...)` raises `asyncio.TimeoutError` and is how you implement 'wait for approval or escalate after 48 h'. For entity-style workflows (one long-lived execution per Kaupex project receiving signals for months) check `workflow.info().is_continue_as_new_suggested()` and `workflow.info().get_current_history_length()` at the top of each loop iteration, drain handlers with `all_handlers_finished`, then `workflow.continue_as_new(State(...))` to carry state into a fresh run with the same workflow id and a new run id; signals the old run has not processed are carried over by the server. Design the state dataclass so every field is serialisable by the default converter and versionable (optional fields with defaults) because the new run may be picked up by a newer worker build. Test it with a `max_history_length` hook rather than waiting for 10k events.",
    "minutes": 25,
    "resource": {
-    "label": "dbt docs - Run results JSON artifact",
-    "url": "https://docs.getdbt.com/reference/artifacts/run-results-json"
+    "label": "Temporal Python SDK docs: Continue-As-New",
+    "url": "https://docs.temporal.io/develop/python/workflows/continue-as-new"
+   }
+  },
+  {
+   "name": "Patch-based versioning: patched(), deprecate_patch(), and when the old branch can go",
+   "learn": "Wrap any change that alters the command sequence (new or removed activity, changed timer, reordered calls, renamed activity type) in `if workflow.patched('compile-v2'):`; new executions record a `MarkerRecorded` for the patch and take the new branch, old executions replay without the marker and take the old branch, so one worker build serves both. Changing only an activity's implementation, retry policy or timeouts needs no patch; changing the arguments passed to an activity does not fail replay but changes behaviour, so patch it if old runs must keep old semantics. Lifecycle: ship `patched()` with both branches; once `temporal workflow list --query 'WorkflowType=\"CompileTask\" AND ExecutionStatus=\"Running\" AND StartTime < \"<deploy time>\"'` returns nothing, replace the conditional with a bare `workflow.deprecate_patch('compile-v2')` plus only the new code; once every execution that contains the deprecated marker is past retention (they can still be queried or reset until then), delete the call. Patch ids are per workflow type and must be evaluated at the same logical point on every code path; a `patched()` inside a branch only some runs reach is a classic replay failure. Do it live on Kaupex: deploy the patched worker while ten compile workflows are mid-activity and prove none fail.",
+   "minutes": 40,
+   "resource": {
+    "label": "Temporal Python SDK docs: Versioning (patching and Worker Versioning)",
+    "url": "https://docs.temporal.io/develop/python/workflows/versioning"
+   }
+  },
+  {
+   "name": "Replay testing against production histories in CI",
+   "learn": "Before any worker image ships, replay real histories through the new code: `temporal workflow show -w <id> -o json > histories/<id>.json`, then `await Replayer(workflows=[CompileTask]).replay_workflow(WorkflowHistory.from_json('<id>', json_text))`; for breadth, iterate `client.list_workflows('WorkflowType=\"CompileTask\" AND CloseTime > \"<7 days ago>\"')`, feed each `client.get_workflow_handle(wf.id, run_id=wf.run_id).fetch_history()` into `replay_workflows`, and fail CI on the first `NondeterminismError`. Keep a curated corpus in the repo (one history per patch state, one with a cancellation, one with a signal burst) so the check runs offline in seconds, and refresh it from production weekly. This gate is what makes step three of the patch lifecycle safe: deleting a deprecated branch is only allowed when the replay job over all Running histories passes.",
+   "minutes": 30,
+   "resource": {
+    "label": "temporalio/samples-python: replay (fetch and replay histories)",
+    "url": "https://github.com/temporalio/samples-python/tree/main/replay"
+   }
+  },
+  {
+   "name": "Worker Versioning: deployment versions, pinned vs auto-upgrade, ramp and rollback",
+   "learn": "Worker Versioning (server >= 1.29.1, Python SDK >= 1.11) replaces most patching for services shipped as immutable builds, and Temporal now recommends it over patching where you can run versioned deployments: start the worker with `Worker(..., deployment_config=WorkerDeploymentConfig(version=WorkerDeploymentVersion(deployment_name='kaupex-worker', build_id=GIT_SHA), use_worker_versioning=True))` and give each workflow type a `versioning_behavior`: `VersioningBehavior.PINNED` (an execution finishes on the build it started on, so no patches) or `AUTO_UPGRADE` (moves to the current version, so patch discipline still applies). Roll out with `temporal worker deployment set-ramping-version --percentage 10`, verify, then `set-current-version`, or roll back instantly; old pinned builds must keep running until `temporal worker deployment describe` shows no executions on them, then sunset and `delete-version`. Know the trade: pinning means N versions of the worker alive in k3s, each costing pods and Postgres connections; patching means one build and more code. Decide per Kaupex workflow type and write the decision down.",
+   "minutes": 25,
+   "resource": {
+    "label": "Temporal docs: Worker Versioning (worker deployments)",
+    "url": "https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning"
+   }
+  },
+  {
+   "name": "Saga: compensation stack, reverse-order rollback, cancellation shielding",
+   "learn": "Implement the Kaupex compile-and-publish path as a saga: after each side-effecting activity succeeds, push its compensation (`self.compensations.append((undo_hubspot_record, record_id))`); on an `ActivityError` whose cause is non-retryable, or on a business rejection, walk the list in reverse and `await workflow.execute_activity(undo, arg, start_to_close_timeout=..., retry_policy=RetryPolicy(maximum_attempts=0))` for each, catching per-step failures so one stuck compensation does not skip the others, and finish with `ApplicationError('compensated', non_retryable=True)` or a `wait_condition` for a human `resolve` signal when a compensation is exhausted. Separate what to compensate (HubSpot record created, customer notified, credits deducted) from what simply did not happen (the Postgres write inside the activity that failed). Cancellation arrives as `asyncio.CancelledError` at the current await; catch it, run the compensation loop under `asyncio.shield(...)` so the cleanup activities are not themselves cancelled, then re-raise so the execution ends Cancelled rather than Completed. Compensations must be idempotent and must tolerate the forward action never having happened (a HubSpot 404 on delete is success).",
+   "minutes": 40,
+   "resource": {
+    "label": "Temporal Design Patterns: Saga Pattern",
+    "url": "https://docs.temporal.io/design-patterns/saga-pattern"
+   }
+  },
+  {
+   "name": "Activity contracts for sagas: idempotency keys, heartbeat details, timeout budgets",
+   "learn": "Every side-effecting Kaupex activity derives its idempotency key from `activity.info().workflow_id` plus `activity.info().activity_id` (stable across retries, unique per scheduled activity) and sends it as the partner API's idempotency header or as the `ON CONFLICT DO NOTHING` key in Postgres, so a retry after a worker crash post-commit is a no-op. Long activities call `activity.heartbeat(progress)` at least every `heartbeat_timeout / 3`; on retry, read `activity.info().heartbeat_details` to resume from `progress` instead of restarting (a 500-record batch resumes at record 312). Set timeouts as a budget: `start_to_close_timeout` = worst honest single attempt, `heartbeat_timeout` = how fast a dead worker must be detected (topic 22 measured the gap), `schedule_to_close_timeout` = the total the business tolerates, and leave `schedule_to_start_timeout` unset on normal activities because a slow worker pool would then fail healthy work. Log `activity.info().attempt` on every attempt so the customer's log search shows retries explicitly.",
+   "minutes": 30,
+   "resource": {
+    "label": "Temporal Encyclopedia: Detecting Activity failures (timeouts, heartbeats, retries)",
+    "url": "https://docs.temporal.io/encyclopedia/detecting-activity-failures"
+   }
+  },
+  {
+   "name": "Child workflows, parent close policy and cancellation propagation",
+   "learn": "Reach for `workflow.execute_child_workflow(PublishTask.run, arg, id=f'publish-{task_id}', parent_close_policy=ParentClosePolicy.REQUEST_CANCEL)` when a sub-process needs its own history (size), its own id for signals and visibility, or a different task queue; otherwise an activity or a plain function is simpler and cheaper. Know the three `ParentClosePolicy` values and their production consequences: TERMINATE (default) kills children when the parent closes, ABANDON detaches them (fan-out where the parent is only a launcher), REQUEST_CANCEL sends a cooperative cancel so the child's saga can compensate. Cancelling a parent cancels the awaited child future; cancelling an activity only takes effect when the activity heartbeats (`activity.is_cancelled()` or `CancelledError` at the next heartbeat), and the `cancellation_type` (`ActivityCancellationType`) on the activity call decides whether the workflow waits for the activity to acknowledge or proceeds immediately. `id_reuse_policy` on child start decides whether a retried parent collides with a previous child of the same id; `WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY` is the usual choice for publish steps.",
+   "minutes": 25,
+   "resource": {
+    "label": "Temporal Python SDK docs: Child Workflows",
+    "url": "https://docs.temporal.io/develop/python/workflows/child-workflows"
+   }
+  },
+  {
+   "name": "Sync vs async activities, the activity executor and the workflow sandbox",
+   "learn": "An `async def` activity runs on the worker's event loop, so one blocking call inside it (synchronous `requests`, `psycopg2`, a 30 s pandas transform) stalls every other activity, every heartbeat and every workflow task on that worker; either make it truly async (`httpx.AsyncClient`, asyncpg) or declare it `def` and pass `Worker(activity_executor=ThreadPoolExecutor(max_workers=N))` with N >= `max_concurrent_activities`, or for CPU-bound work a `ProcessPoolExecutor` plus `shared_state_manager=SharedStateManager.create_from_multiprocessing(multiprocessing.Manager())` so heartbeats and cancellation cross the process boundary. Workflow code runs in a sandbox that re-imports your module per run and blocks non-deterministic calls (`datetime.date.today`, `random`, file I/O); wrap heavy or stateful imports (pydantic models, SQLAlchemy models, the Kaupex domain package) in `with workflow.unsafe.imports_passed_through():` to avoid re-import cost and false positives, and reserve `workflow.unsafe.sandbox_unrestricted()` or `SandboxRestrictions.default.with_passthrough_modules(...)` for cases you can justify in a comment. Measure `temporal_workflow_task_replay_latency` before and after passing imports through.",
+   "minutes": 25,
+   "resource": {
+    "label": "Temporal Python SDK docs: Python SDK sandbox",
+    "url": "https://docs.temporal.io/develop/python/best-practices/python-sdk-sandbox"
+   }
+  },
+  {
+   "name": "Local activities: when the shortcut pays and when it bites",
+   "learn": "`workflow.execute_local_activity(fn, arg, start_to_close_timeout=timedelta(seconds=2))` runs the function inside the workflow worker and records only a `MarkerRecorded`, saving the schedule/start/complete round trips and three history events per call; use it for sub-second, idempotent lookups (feature flag, tenant config) executed thousands of times per workflow. Understand the costs: no heartbeats, in-worker retries until the workflow task timeout (10 s default) forces a workflow-task heartbeat that adds events and blocks signal processing, durability only when the enclosing workflow task completes, and a crash between the side effect and task completion re-runs it. Never put a non-idempotent write or a call that can stall behind a rate limit in a local activity; watch `local_activity_total` and marker counts in histories.",
+   "minutes": 20,
+   "resource": {
+    "label": "Temporal docs: Local Activity",
+    "url": "https://docs.temporal.io/local-activity"
+   }
+  },
+  {
+   "name": "Worker tuning: slots, pollers, sticky cache and the metric that drives each knob",
+   "learn": "Tune from SDK metrics scraped by Prometheus from `Runtime(telemetry=TelemetryConfig(metrics=PrometheusConfig(bind_address='0.0.0.0:9000')))`: `temporal_activity_schedule_to_start_latency` and `temporal_workflow_task_schedule_to_start_latency` (tasks waiting for a worker), `temporal_worker_task_slots_available{worker_type=...}` (zero means saturated), `temporal_sticky_cache_size` and `temporal_sticky_cache_total_forced_eviction` with `temporal_workflow_task_replay_latency` (evictions force full replays), plus `temporal_num_pollers`. Rules: high schedule-to-start with slots at zero -> raise `max_concurrent_activities` or add pods; high schedule-to-start with slots free -> too few pollers, raise `max_concurrent_activity_task_polls` or switch to `PollerBehaviorAutoscaling`; rising replay latency with forced evictions -> raise `max_cached_workflows` (memory per cached workflow is the price) and keep `sticky_queue_schedule_to_start_timeout` short so a dead worker's stickiness expires fast. Prefer `WorkerTuner.create_resource_based(target_memory_usage=0.8, target_cpu_usage=0.9)` in containers where the mix varies, and never combine a tuner with the `max_concurrent_*` kwargs (startup error). Load Kaupex with the k6 script from topic 22 and record the before/after of one knob change per run.",
+   "minutes": 40,
+   "resource": {
+    "label": "Temporal docs: Worker performance (metrics, slots, pollers, cache tuning)",
+    "url": "https://docs.temporal.io/develop/worker-performance"
+   }
+  },
+  {
+   "name": "Task queue topology, downstream rate limits and graceful shutdown on k3s",
+   "learn": "Split Kaupex into a workflow worker and activity workers on distinct task queues (`kaupex-wf`, `kaupex-llm`, `kaupex-crm`) so an LLM stall cannot starve compile-plan decisions, routing with `execute_activity(..., task_queue='kaupex-crm')`. Enforce a partner API's limit at the queue, not in code: `Worker(max_task_queue_activities_per_second=8.0)` is a server-side rate shared across every worker polling that queue, while `max_activities_per_second` caps one process; use the former for HubSpot's per-account limit. Use a worker-specific task queue (`samples-python/worker_specific_task_queues`) when consecutive activities need the same host (a downloaded file, a warmed model). On SIGTERM the pod must `await worker.shutdown()`, which stops polling, waits `graceful_shutdown_timeout` for running activities (which can observe `activity.is_worker_shutdown()` or `await activity.wait_for_worker_shutdown()` to checkpoint via heartbeat), then cancels the rest; set `terminationGracePeriodSeconds` above that timeout plus the `preStop` sleep from topic 8, and confirm with `temporal task-queue describe -t kaupex-crm` that the old worker identity stops appearing as a poller.",
+   "minutes": 30,
+   "resource": {
+    "label": "Temporal Python SDK API reference: temporalio.worker.Worker (all worker options)",
+    "url": "https://python.temporal.io/temporalio.worker.Worker.html"
+   }
+  },
+  {
+   "name": "Visibility, search attributes, batch operations and reset as the recovery tool",
+   "learn": "Register custom search attributes once per namespace (`temporal operator search-attribute create --name TenantId --type Keyword`, again for `Stage`), set them at start (`search_attributes=TypedSearchAttributes([...])`) and update them from the workflow with `workflow.upsert_search_attributes([TENANT.value_set(tid)])` so operators can answer 'which of Acme's compiles are stuck in publish' with `temporal workflow list --query 'TenantId=\"acme\" AND Stage=\"publish\" AND ExecutionStatus=\"Running\"'`. Batch operations take the same query: `temporal workflow signal --query ... --name pause`, `temporal workflow cancel --query ...`, and `temporal batch describe --job-id` / `temporal batch terminate` to watch or stop a job. Reset is how you recover from a bad deploy without losing progress: `temporal workflow reset -w <id> --event-id <WorkflowTaskCompleted id>` or `--type LastWorkflowTask` creates a new run that replays history to that point and then executes the corrected code; batch resets over a query are limited to `FirstWorkflowTask`, `LastWorkflowTask` or `BuildId`. Rehearse on Kaupex: bad worker image -> `WorkflowTaskFailed` with a non-determinism cause -> roll back the image (workflows heal by themselves) or, if the old code is gone, reset to the last workflow task.",
+   "minutes": 30,
+   "resource": {
+    "label": "Temporal CLI reference: temporal workflow (list, query, signal, reset, show)",
+    "url": "https://docs.temporal.io/cli/command-reference/workflow"
+   }
+  },
+  {
+   "name": "Testing workflows: time skipping, mocked activities and saga assertions",
+   "learn": "Use `async with await WorkflowEnvironment.start_time_skipping() as env:` so a workflow with a 48-hour escalation timer completes in milliseconds; time advances only when every coroutine is blocked, which also exposes accidental busy-waits. Register fakes with the real activity's name (`@activity.defn(name='publish_to_hubspot') async def fake_publish(...)`) on a `Worker(env.client, task_queue=..., workflows=[CompileTask], activities=[fake_publish, ...])` created inside the test, and have a fake raise `ApplicationError('boom', non_retryable=True)` on the third call to assert the compensations ran in reverse order and the result is the `compensated` failure. Test signals and updates by starting the workflow, calling `handle.signal` or `handle.execute_update`, then awaiting `handle.result()`. Unit-test activities alone with `ActivityEnvironment().run(fn, arg)` to check heartbeat details and idempotency-key derivation. Use `WorkflowEnvironment.start_local()` (a real dev server) for tests that need search attributes or replay of downloaded histories.",
+   "minutes": 25,
+   "resource": {
+    "label": "Temporal Python SDK docs: Testing suite (time skipping, mocking activities, replay)",
+    "url": "https://docs.temporal.io/develop/python/best-practices/testing-suite"
+   }
+  },
+  {
+   "name": "Observability: replay-safe logging, OpenTelemetry interceptors and context propagation",
+   "learn": "Use `workflow.logger` and `activity.logger` rather than `logging.getLogger` inside Temporal code: they attach workflow id, run id, type and attempt, and the workflow logger suppresses output during replay so a redeploy does not triple every log line. Add `TracingInterceptor()` from `temporalio.contrib.opentelemetry` to `Client.connect(interceptors=[...])` (the Worker built on that client inherits it) so a Kaupex API request, its workflow tasks and each activity attempt share one trace on the backend from topic 21, and use a header-propagating interceptor (`samples-python/context_propagation`) to carry `tenant_id` and `X-Request-ID` from the FastAPI request into every activity's `contextvars` for the logging filter from topic 25. Be able to correlate the three views a customer SRE will ask for: the trace, the workflow history in the Web UI, and the SDK metrics dashboard.",
+   "minutes": 20,
+   "resource": {
+    "label": "Temporal Python SDK docs: Observability (metrics, tracing, logging, visibility)",
+    "url": "https://docs.temporal.io/develop/python/platform/observability"
    }
   }
  ],
  "outcomes": [
-  "You can write the grain of each fact table as a single sentence, encode it as a unique_combination_of_columns test, and demonstrate the build failing when a duplicated extract is loaded.",
-  "You can run dbt build on a fresh clone with only a Postgres DSN and end with fct_llm_calls, fct_tenant_daily, dim_tenant (SCD2), dim_model and dim_date materialised in DuckDB, every test passing, and dbt docs generate producing a lineage graph that terminates at the defendermate_weekly_email exposure.",
-  "You can change a tenant's plan tier in Postgres, run dbt snapshot, and show two versions in dim_tenant with correct dbt_valid_from/dbt_valid_to while historic calls remain attributed to the old tier.",
-  "You can insert an llm_call with a created_at three days in the past, rerun the incremental models without --full-refresh, and show the corrected fct_tenant_daily row for that day.",
-  "You can prove reconciliation to a customer: a singular test comparing per-day token sums between raw and fct_tenant_daily passes, and when it fails you can name the exact rows from the dbt_test__audit schema.",
-  "You can read EXPLAIN ANALYZE output on a query over hive-partitioned Parquet, state whether partition pruning and filter pushdown happened, and fix the layout or predicate so they do.",
-  "You can open run_results.json after a failed nightly run, identify the failed node and its skipped descendants, rerun only result:error+ with --state, and state whether the email is safe to send.",
-  "You can size DuckDB for a customer's box (memory_limit, threads, temp_directory), show a larger-than-memory aggregation completing by spilling, and explain the single-writer constraint to their ops team in two sentences."
+  "You can deploy a patched Kaupex worker (`workflow.patched('compile-v2')`) while at least ten compile workflows are mid-activity, show with `temporal workflow show` that old runs finish on the old branch and new runs record the patch marker, and later remove the old branch only after a query for pre-deploy Running executions returns zero.",
+  "You can run a replay job in CI that pulls the last seven days of `CompileTask` histories, replays them through the candidate image, and fails the pipeline on the first `NondeterminismError`; you can demonstrate it catching a deliberately reordered activity.",
+  "You can force a non-retryable failure in the third step of the Kaupex publish saga and show the compensations execute in reverse order with idempotent retries, the execution ends Failed with `compensated`, and repeating the failure with a worker kill mid-compensation produces no duplicate HubSpot records.",
+  "You can cancel a running saga from the CLI and prove the shielded cleanup activities still ran, the execution ended Cancelled, and the history shows `WorkflowExecutionCancelRequested` followed by the compensation `ActivityTaskCompleted` events.",
+  "Given a Grafana panel of `temporal_activity_schedule_to_start_latency` climbing with `temporal_worker_task_slots_available` at zero, you name the knob (`max_concurrent_activities` or replica count) before touching anything, change it, and show p95 fall under the topic 22 k6 load; given the same latency with slots free, you name pollers instead.",
+  "You can drive a Kaupex workflow entirely through messages: signal-with-start from a retried webhook with no duplicate, a validated update that rejects a bad step with nothing written to history, a query for progress, and a Continue-As-New that carries state after `is_continue_as_new_suggested()` flips.",
+  "You can demonstrate on a live execution the difference between a workflow task failure and a workflow execution failure, and recover a stuck execution either by rolling back the worker image or with `temporal workflow reset --type LastWorkflowTask`.",
+  "You can enforce a downstream API's 8 req/s limit with `max_task_queue_activities_per_second` across three worker pods and show in the metrics that the aggregate rate holds while the backlog drains."
  ],
  "failureModes": [
-  "The reporting role extracted from a Postgres database with RLS enabled but had no BYPASSRLS and no policy; the extract silently returned rows for one tenant, not_null tests passed on the tiny table, and every other customer received a weekly email reporting zero usage.",
-  "An incremental fact filtered on created_at > max(created_at) with no lookback; a batch committed by a long-running transaction with older timestamps never landed, and weekly totals came in 4 percent below the invoice, which the customer noticed first.",
-  "Someone ran dbt snapshot --full-refresh on dim_tenant after adding a column, wiping version history; every historic fact then joined to the current plan tier and three months of reports silently changed.",
-  "Parquet partitioned by tenant_id and hour produced 400k files of a few kilobytes; DuckDB spent longer opening files than scanning them and the nightly run grew from 4 minutes to 90 before anyone looked.",
-  "The email renderer opened warehouse.duckdb with the default read-write mode while dbt was writing; the lock conflict surfaced on Monday morning as 'email service down' and was debugged as a networking problem for two hours.",
-  "on_schema_change was left at the default ignore, so a new cache_read_tokens column added upstream never reached fct_llm_calls; cost_usd omitted cache discounts for six weeks until the customer disputed the bill.",
-  "A refactor changed latency from milliseconds to seconds; the accepted_range test with max_value 600000 still passed and there was no contract pinning the unit, so p95 latency in the email read 0.8 for a month and nobody trusted the report afterward."
+  "An engineer inserted a new `send_notification` activity ahead of an existing one without a patch; every in-flight execution hit a non-determinism error on its next workflow task, sat Running with `WorkflowTaskFailed` retrying all weekend, and the on-call terminated 2,000 workflows by hand because nobody knew that rolling back the worker image would have healed them.",
+  "A saga compensation deleted the CRM record by the id stored in Postgres, but the forward activity had crashed after HubSpot committed and before the id was stored; the compensation found nothing to delete, returned success, and the orphan records surfaced when the customer's sales team started calling leads twice.",
+  "The compile activity was `async def` and called a synchronous vendor SDK; one slow LLM response blocked the worker's event loop, heartbeats stopped, the server timed out twelve unrelated activities, and their retries on other workers doubled the load on the API that was already slow.",
+  "Query handlers were used as a polling API by a dashboard hitting 5,000 executions every two seconds; each evicted execution forced a full replay, `temporal_workflow_task_replay_latency` went to seconds, the sticky cache thrashed, and real workflow progress slowed to a crawl while the customer stared at a dashboard that said everything was fine.",
+  "`terminationGracePeriodSeconds` stayed at the default 30 s while `graceful_shutdown_timeout` was five minutes; every rolling deploy SIGKILLed workers mid-activity, the activities were only retried after their ten-minute start-to-close timeout, and the customer logged each deploy as a ten-minute outage.",
+  "An entity workflow per tenant received one signal per event with no Continue-As-New; the busiest tenant crossed the 51,200-event ceiling after five months, the server terminated the execution, and the tenant's accumulated state existed only inside that history.",
+  "A patch was deprecated and deleted after checking for Running executions but not for closed executions still inside retention; during an incident a week later, `temporal workflow reset` replayed a history containing the marker against code with no `deprecate_patch` and the reset the customer needed failed."
  ],
  "interviewQuestions": [
-  "A customer wants a weekly usage-and-cost email per tenant from a Postgres OLTP database holding 200 million llm_call rows. Design the warehouse layer: which fact tables at which grain, which dimensions are SCD2, how you extract without hurting the primary, and what runs fine on a 16 GB box versus when you would move them to Snowflake or Databricks.",
-  "Explain the difference between a transaction fact and a periodic snapshot fact and why the weekly email should be built from the snapshot. What exactly goes wrong if you sum a p95 latency column across days, and how do you store it so the email is still right?",
-  "Your incremental model filters on updated_at > max(updated_at). Give me three concrete ways rows get lost or duplicated, and say which of unique_key, incremental strategy and a lookback window addresses each.",
-  "A tenant moved from 'pro' to 'enterprise' on March 3rd. Write the SQL that joins March calls to the plan in effect at call time using a dbt snapshot table, and tell me what breaks if dbt_valid_to is NULL for current rows and you forgot the coalesce.",
-  "dbt build failed at 03:14 on a relationships test between fct_llm_calls and dim_model. What do you look at in run_results.json and the stored-failures table, what are the two most likely root causes, and how do you decide whether the 07:00 customer email can still go out?",
-  "Why does DuckDB allow only one writer process, and how do you architect a nightly writer plus a daytime read service around that constraint? Separately, what is the difference between threads in profiles.yml and DuckDB's own threads setting?",
-  "A query over two years of hive-partitioned Parquet takes 40 seconds filtered on tenant_id but 400 milliseconds filtered on event_date. Explain why, and describe two different ways you would change the layout or the query so both are fast."
+  "You need to insert a new approval step into a workflow with 30,000 executions in flight, some of which will run for another six weeks. Walk through the options (patching, Worker Versioning with pinning, a new workflow type on a new task queue), what each costs operationally, how you verify safety before deploying, and how you know when the old code path can be deleted.",
+  "Design the compensation strategy for a workflow that charges a card, reserves inventory in a partner system with a 60 s p99, and emails the customer. Which steps are compensated, which are idempotent by construction, what happens when a compensation itself fails permanently, and what does the history look like when the workflow is cancelled halfway through?",
+  "A customer reports 400 workflows have been Running for two days with no progress. Using only the CLI and Prometheus, how do you determine whether this is a non-determinism error, a starved task queue, no worker polling, or an activity retrying against a dead dependency, and what is the remediation for each?",
+  "Explain what a worker does when it receives a workflow task for an execution that is not in its sticky cache, why that makes queries against large histories expensive, and how slots, pollers, cache size and sticky timeout interact under a burst of 10,000 new workflows.",
+  "A signal handler and the main workflow coroutine both mutate the same list, and in production the list occasionally has duplicates. Explain the interleaving that causes it, how you fix it while staying deterministic, and how you write a test that reproduces the race reliably.",
+  "Why does Temporal retry a workflow task forever on an unexpected exception but fail the execution on `ApplicationError`? Give a case where the default is wrong for a customer, show how you change it, and describe the blast radius if you get it backwards.",
+  "A partner API allows 10 requests per second per account across your entire fleet and you run six worker pods. Where do you enforce the limit, what breaks if you do it inside the activity, and how do you prove the aggregate rate to the partner from your own metrics?"
  ],
- "proofOfWork": "A reproducible customer-handover package for the DefenderMate warehouse, checked into the repo alongside the dbt project: a single make nightly target that, from a fresh clone plus a Postgres DSN, extracts to Parquet via the DuckDB postgres extension, runs dbt source freshness and dbt build --select tag:nightly, publishes the marts, and appends the parsed run_results.json to an ops.dbt_runs table; a recorded drift drill in which you change a tenant's plan tier and insert a back-dated llm_call in Postgres, rerun the pipeline, and show dim_tenant with two versions, the corrected fct_tenant_daily row, the singular reconciliation test passing, and dbt docs lineage terminating at the weekly-email exposure; and a one-page ops runbook stating the mart SLA, the DuckDB memory_limit/threads/temp_directory settings for the customer's box, the single-writer constraint and how the email service avoids it, and the exact rerun command (dbt build --select result:error+ --state ...) after a partial failure. Finish with a rendered weekly email for one sample tenant generated from the mart, showing week-over-week token, cost and p95 deltas."
+ "proofOfWork": "A public repository plus a fifteen-minute recorded walkthrough titled 'Change Kaupex while it runs'. The repo holds the Kaupex compile-and-publish saga (forward activities with idempotency keys derived from `workflow_id` and `activity_id`, a heartbeat-resumable batch step, reverse-order compensation with shielded cleanup under cancellation), a `histories/` corpus of real histories covering every patch state, a cancellation and a signal burst, and a CI pipeline with three gates: pytest under `start_time_skipping()` asserting compensation order and idempotency, a replay job that replays the corpus plus the last seven days of live `CompileTask` executions through the candidate image, and a load stage that runs the topic 22 k6 script against a kind cluster and asserts `temporal_activity_schedule_to_start_latency` p95 under a threshold. The recording shows, on the live k3s deployment: ten compile workflows started; a patched worker image rolled out mid-flight with old and new runs finishing on their respective branches; a deliberately non-deterministic image rolled out, the resulting `WorkflowTaskFailed` events, and the heal on rollback; one execution recovered with `temporal workflow reset --type LastWorkflowTask`; a saga forced to fail at step three with its compensations visible in history; and one worker-tuning change chosen from the Grafana panels with the before/after p95. A one-page `VERSIONING_POLICY.md` records, per workflow type, whether Kaupex uses patching or pinned Worker Versioning and the exact conditions under which a patch may be deprecated and then deleted."
 }

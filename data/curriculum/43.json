@@ -1,209 +1,218 @@
 {
  "i": 43,
- "topic": "LLM-era system design: serving, caching, batching, rate limits, retries, latency budgets",
+ "topic": "Designing Data-Intensive Applications and Kleppmann's lectures",
  "track": "F. Distributed Systems and System Design",
  "month": 5,
- "hours": 8,
- "why": "An LLM call breaks every assumption the classic system design playbook is built on: latency is a function of output length rather than of work done, the dependency is a metered third party that returns 429 and 529 under load you do not control, cost is per request and visible on the customer's invoice, and the response is non-deterministic so a naive retry can double-charge and double-write. As the FDE you are the one who has to tell the customer's architect, before go-live, what p95 will be at their peak, what a request costs, and what the system does when the model provider is degraded for forty minutes. Getting the answer wrong is not an SLO miss, it is a checkout page that hangs on Black Friday and a bill nobody approved.",
+ "hours": 16.0,
+ "why": "Every FDE engagement eventually reaches the meeting where the customer's architect asks 'is this strongly consistent', 'what happens when the replica is behind', or 'can we just add a distributed lock', and the FDE either answers in terms of user-visible anomalies and concrete costs or loses the room. DDIA plus Kleppmann's Cambridge lectures are the shared vocabulary that Palantir, Databricks and Anthropic loops assume you already have: replication lag, quorums, isolation levels, linearizability, total order broadcast, Raft, CDC. The Gossip Glomers force you to feel the failures (lost messages, partitions, stale reads on a sequentially consistent store) in code, so that when a customer's Kafka consumer double-counts or a Postgres failover loses writes you recognise the mechanism inside a minute instead of a week.",
  "prerequisites": [
-  "The system design playbook from topic 42: back-of-envelope estimation, load balancing, cache key design and stampede protection, partitioning, queues, and the 45-minute delivery frame you will now run against an LLM-shaped prompt",
-  "FastAPI in production from topic 26 (async event loop, timeouts, graceful shutdown, worker sizing) and Redis from topic 31 (TTL, `maxmemory` eviction, Lua atomicity, token-bucket limiter, idempotency store)",
-  "Temporal from topic 34 and Kafka/queues from topic 33: retry policies, activity heartbeats and timeouts, visibility timeout, DLQ, and what an idempotent consumer actually requires",
-  "SLIs/SLOs and error budgets from topic 20, OpenTelemetry and Prometheus histograms from topic 21, and k6 load testing from topic 22 so latency claims are measured with `histogram_quantile()` rather than asserted",
-  "Working knowledge of the Anthropic Messages API: system vs user blocks, `stream: true` SSE events, `usage.input_tokens` / `output_tokens`, `stop_reason`, and the shape of a 429 vs a 529 (topic 60 goes deeper; the vocabulary is assumed now)",
-  "The Kaupex Task Compiler running locally under Docker Compose (FastAPI + Postgres + Temporal + httpx to Claude) with at least a few days of real per-request token counts and durations to anchor the numbers"
+  "PostgreSQL at depth (Topic 29): MVCC (xmin/xmax), WAL, EXPLAIN, row locks, SELECT ... FOR UPDATE - replication and isolation levels here build directly on that mental model",
+  "Kafka and event-driven design (Topic 33): partitions, keys, consumer groups, offsets, log compaction - Kafka is the worked example of a partitioned replicated log throughout",
+  "Networking (Topic 2): TCP retransmission and timeouts, why a timeout is not a failure signal, what a network partition physically looks like (asymmetric loss, one-way links)",
+  "High availability and DR (Topic 24): failover, promotion, RPO/RTO vocabulary, and the idea that an async replica is a lossy backup, not a hot standby",
+  "Enough Go to write a 300-line program with goroutines, sync.Mutex, context.WithTimeout, time.Ticker and encoding/json - the supported Gossip Glomers path is the Go Maelstrom library (if you insist on Python you must write the stdin/stdout JSON loop and RPC correlation yourself)",
+  "Temporal sagas (Topic 34): compensation-based workflows, because the 2PC subtopic compares against them"
  ],
  "subtopics": [
   {
-   "name": "The LLM latency model: prefill vs decode, TTFT and TPOT, why p95 tracks output length",
-   "learn": "Internalise that an LLM request has two phases with completely different scaling behaviour: prefill is compute-bound and roughly linear in input tokens, producing time-to-first-token (TTFT); decode is memory-bandwidth-bound and produces one token per forward pass, so total latency is approximately TTFT + output_tokens x TPOT (time-per-output-token). The consequence is that trimming a 4k-token prompt to 2k saves tens of milliseconds while capping `max_tokens` from 1000 to 250 saves seconds; latency is governed by what the model writes, not what you send. Learn to read the four numbers that matter on any serving stack (TTFT, TPOT, end-to-end, queue wait) and to recognise from a latency histogram whether you are queueing (bimodal, flat right tail) or generating long outputs (smooth right tail correlated with `output_tokens`). Record `output_tokens` as an exemplar or label on every latency observation so you can prove which one you are looking at.",
-   "minutes": 30,
-   "resource": {
-    "label": "vLLM docs - Production metrics (TTFT, TPOT, queue time histograms)",
-    "url": "https://docs.vllm.ai/en/latest/usage/metrics/"
-   }
-  },
-  {
-   "name": "Streaming as a latency product decision: SSE contract, cancellation, and what p95 you publish",
-   "learn": "Decide per endpoint whether the SLI is TTFT or full-completion latency, because streaming changes what the user experiences without changing total work. Know the Anthropic SSE event sequence (`message_start`, `content_block_start`, `content_block_delta`, `content_block_stop`, `message_delta` carrying `stop_reason` and final `usage`, `message_stop`, plus periodic `ping`) and that the token counts only settle on `message_delta`, so cost accounting must happen at the end of the stream, not the start. Handle the two failure cases customers actually hit: a client disconnect mid-stream, where you must propagate cancellation (in httpx, exit the `stream()` context; in FastAPI, detect `await request.is_disconnected()` or catch `asyncio.CancelledError`) or you keep paying for tokens nobody reads; and an error emitted mid-stream after a 200 status, which no HTTP status code will tell you about. Set the proxy correctly: `proxy_buffering off` in Nginx and an idle timeout longer than the longest generation, or the customer's load balancer will cut streams at 60 s.",
-   "minutes": 25,
-   "resource": {
-    "label": "Anthropic docs - Streaming Messages",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/streaming"
-   }
-  },
-  {
-   "name": "Building a per-hop latency budget table and defending it",
-   "learn": "Write the budget as a table before you write code: ingress TLS + auth 15 ms, tenant lookup and RLS query 20 ms, retrieval (embed 40 ms + vector search 60 ms + rerank 120 ms), model call 1800 ms, post-processing and persistence 50 ms, egress 10 ms, leaving explicit slack. Then state the rule that a p95 end-to-end budget is not the sum of per-hop p95s: independent hops compose closer to the sum of means plus a tail allowance, and any hop you retry contributes its timeout, not its median. Set each hop's timeout from the budget (hop timeout = remaining budget, never a global 30 s default) and propagate a deadline down the call chain so a request that has already burned 4 s does not start a fresh 30 s model call. Publish the budget as two SLIs (TTFT and completion) with a stated `histogram_quantile(0.95, sum by (le) (rate(..._bucket[5m])))` expression so the customer's SRE can verify it on their own Grafana.",
-   "minutes": 30,
-   "resource": {
-    "label": "Google SRE Workbook - Implementing SLOs",
-    "url": "https://sre.google/workbook/implementing-slos/"
-   }
-  },
-  {
-   "name": "Cost per request: token accounting, the unit-economics formula, and where it silently doubles",
-   "learn": "Write cost per request explicitly as (input_tokens x input_price + output_tokens x output_price + cache_write_tokens x write_price + cache_read_tokens x read_price) / 1e6, then multiply by the hidden multipliers nobody puts in the first draft: retries, an agent loop that makes N model calls per user action, tool-use round trips that resend the entire conversation each turn, and a reranker or judge model called per request. Learn to count tokens before you send with the count-tokens endpoint so you can enforce a per-request ceiling and reject oversized inputs at the edge with a 413-style error rather than discovering them on the invoice. Instrument `usage` from every response into a `llm_calls` table with tenant, feature, model, token counts and cache fields, because 'what does this feature cost per tenant per month' is a question the customer will ask in week two and you cannot answer retroactively.",
-   "minutes": 25,
-   "resource": {
-    "label": "Anthropic docs - Token counting",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/token-counting"
-   }
-  },
-  {
-   "name": "Prompt caching: cache_control breakpoints, prefix stability, TTL, and the economics of a hit",
-   "learn": "Understand that prompt caching is a prefix cache: everything before a `cache_control` breakpoint is cached, and a single changed byte anywhere in that prefix invalidates the whole thing. Structure the prompt so the stable material comes first (tool definitions, system instructions, the customer's schema or policy document, few-shot examples) and the volatile material last (retrieved chunks, user turn, timestamps); the classic bug is a rendered `datetime.now()` or a shuffled retrieval order at the top of the prompt driving a permanent 0% hit rate. Know the price asymmetry (a cache write costs more than an uncached token, a cache read costs a small fraction), which means caching is a loss on a one-shot request and a large win on a conversation or a fan-out where the same prefix is reused within the TTL. Verify with `cache_creation_input_tokens` and `cache_read_input_tokens` in `usage` on every response and alert when the hit ratio drops, because a prompt-template PR is the usual cause of an overnight cost spike.",
+   "name": "Storage engines and encoding in 35 minutes (DDIA ch 3-4 skim)",
+   "learn": "Cover just enough of chapters 3-4 to answer the two questions customers actually ask: 'why is our write-heavy store slow to read' and 'will old consumers break when we add a field'. LSM-tree path: memtable, flush to immutable SSTables, leveled versus tiered compaction, bloom filters to skip files, and the write/read/space amplification triangle; versus B-tree: in-place page writes plus a WAL for crash recovery and more predictable read latency. Encoding: Avro/Protobuf/Thrift field tags, the compatibility rules (never reuse a field number, only add optional fields with defaults, never change a field's type), and why a jsonb column in Postgres breaks in exactly the same ways without any tooling to warn you.",
    "minutes": 35,
    "resource": {
-    "label": "Anthropic docs - Prompt caching",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+    "label": "RocksDB wiki - RocksDB Overview (LSM architecture, compaction, bloom filters)",
+    "url": "https://github.com/facebook/rocksdb/wiki/RocksDB-Overview"
    }
   },
   {
-   "name": "Response caching: exact-match keys, semantic caching, and why tenant isolation is non-negotiable",
-   "learn": "Layer three caches with different keys and different risks. Exact-match: key = hash(model, prompt_version, normalised_input, temperature, tool_schema_hash) with the tenant id in the key prefix, TTL with jitter, and a stampede lock so a cold key does not fan out; this is safe and boring and should exist first. Semantic: embed the query, nearest-neighbour search, serve the cached answer above a cosine threshold; know that the threshold is a precision/recall dial where a wrong answer is served confidently, so it belongs on FAQ-shaped traffic and never on anything personalised. Understand the correctness trap in both: if the answer depends on retrieved documents, the cache key must include a version of the retrieval corpus or you will serve pre-update answers after the customer uploads a new policy. Never key on user text alone in a multi-tenant system: one tenant seeing another tenant's cached completion is a breach, not a bug.",
-   "minutes": 25,
+   "name": "System models, the two generals problem and failure detectors (Kleppmann lectures 1-2)",
+   "learn": "State the assumptions every later argument rests on: network model (reliable / fair-loss / arbitrary), node model (crash-stop / crash-recovery / Byzantine), timing model (synchronous / partially synchronous / asynchronous). Explain why the two generals problem means 'did the customer's payment go through' cannot be answered with certainty over a lossy link, and why every real system resolves it with idempotency keys, retries and a reconciliation job rather than a cleverer protocol. Know that a perfect failure detector is impossible in an asynchronous system, that timeouts give you an eventually-perfect one at best, and that FLP says deterministic consensus cannot be guaranteed to terminate under fully asynchronous assumptions - which is exactly why Raft uses randomised election timeouts and assumes partial synchrony.",
+   "minutes": 45,
    "resource": {
-    "label": "GPTCache - semantic cache for LLM queries (official repo)",
-    "url": "https://github.com/zilliztech/GPTCache"
+    "label": "Kleppmann - Distributed Systems lecture notes (Cambridge, PDF)",
+    "url": "https://www.cl.cam.ac.uk/teaching/2122/ConcDisSys/dist-sys-notes.pdf"
    }
   },
   {
-   "name": "Async batch APIs: 50% cheaper, hours of latency, and the workloads that qualify",
-   "learn": "Learn the Message Batches shape: submit up to tens of thousands of requests with `custom_id` per item, poll `processing_status`, results return unordered as JSONL keyed by `custom_id`, with a completion window measured in hours and roughly half the per-token price. The design skill is classification: nightly re-scoring, backfills, bulk document extraction, eval runs and re-embedding jobs all qualify; anything a human is waiting on does not. Build the plumbing once (a submitter that chunks and records `custom_id` to row-id mapping, a poller with exponential backoff, a results reader that is idempotent because a re-read must not double-write) and reuse it. State the failure mode clearly in the design doc: a batch is not a queue with SLA, so a job that must complete before the customer's 06:00 report needs a deadline check and a synchronous fallback path, not hope.",
-   "minutes": 25,
+   "name": "Clocks: wall time, monotonic time, Lamport and vector clocks, TrueTime",
+   "learn": "Distinguish CLOCK_REALTIME (NTP-slewed or stepped, can jump backwards, leap seconds) from CLOCK_MONOTONIC (only for measuring durations; time.monotonic() in Python, Go's time.Now() carries both readings). Know realistic NTP skew (tens of milliseconds on well-run hosts, seconds on neglected VMs) and conclude that timestamps from two machines never establish order. Lamport clocks: t = max(local, received) + 1 gives a total order consistent with causality but cannot detect concurrency; vector clocks / version vectors detect concurrent writes (neither dominates), which is how Dynamo-style stores decide to keep siblings rather than overwrite. Spanner TrueTime exposes an [earliest, latest] interval and commit-waits until latest has passed, so external consistency is bought with latency proportional to clock uncertainty. Be able to explain, with a two-node timeline, why last-writer-wins on wall clocks silently discards acknowledged writes.",
+   "minutes": 50,
    "resource": {
-    "label": "Anthropic docs - Batch processing (Message Batches API)",
-    "url": "https://platform.claude.com/docs/en/build-with-claude/batch-processing"
+    "label": "Lamport - Time, Clocks, and the Ordering of Events in a Distributed System (PDF)",
+    "url": "https://lamport.azurewebsites.net/pubs/time-clocks.pdf"
    }
   },
   {
-   "name": "Continuous batching and KV cache when you self-host: the throughput/latency dial",
-   "learn": "For customers who must run in their own VPC on their own GPUs, know that modern servers use continuous (in-flight) batching: new requests join the running batch at each decode step instead of waiting for a static batch to drain, and PagedAttention stores the KV cache in fixed-size blocks so memory is not fragmented by variable sequence lengths. Learn the four knobs and what each trades: `--gpu-memory-utilization` (how much VRAM is given to the KV cache, so how many concurrent sequences fit), `--max-num-seqs` and `--max-num-batched-tokens` (bigger batch = more throughput, worse TTFT for everyone), `--max-model-len` (a long context reserves KV blocks and cuts concurrency), and tensor parallel size. Understand preemption: when KV blocks run out, running sequences get swapped or recomputed, which shows up as latency cliffs rather than errors, and is visible in the preemption counter. Compute the KV cache footprint per sequence (2 x layers x kv_heads x head_dim x bytes_per_element x seq_len) so you can answer 'how many concurrent users on one A100?' with arithmetic.",
-   "minutes": 30,
+   "name": "Single-leader replication mechanics in PostgreSQL",
+   "learn": "Trace one write: WAL record, fsync on the primary, walsender streams to the standby's walreceiver, standby writes then replays. Know the settings and what each waits for: wal_level = replica | logical; max_wal_senders; synchronous_commit = off | local | remote_write | on | remote_apply; synchronous_standby_names with FIRST n (...) and ANY n (...) quorum syntax; physical replication slots (they stop WAL recycling and will fill the disk if the consumer dies - cap with max_slot_wal_keep_size); hot_standby_feedback trading primary-side bloat for fewer 'canceling statement due to conflict with recovery' errors. Failover: pg_ctl promote or SELECT pg_promote(), the timeline switch, and why the old primary must be fenced before the new one accepts writes (split brain); know what Patroni does with a DCS lease to automate exactly that. Distinguish statement-based, WAL-shipping and logical (row-level) replication and which one survives a major-version upgrade.",
+   "minutes": 70,
    "resource": {
-    "label": "vLLM docs - Optimization and tuning",
-    "url": "https://docs.vllm.ai/en/latest/configuration/optimization/"
+    "label": "PostgreSQL docs - Log-Shipping Standby Servers (streaming replication, synchronous replication)",
+    "url": "https://www.postgresql.org/docs/current/warm-standby.html"
    }
   },
   {
-   "name": "Model routing and cascades: cheap-first, escalate on a measurable signal",
-   "learn": "Design the router as an explicit policy object, not scattered `if` statements: route by task class (extraction and classification to a small fast model, synthesis and reasoning to a frontier model), by tenant tier, and by a cascade where the small model runs first and escalates only when a checkable condition fails (schema validation error, low self-reported confidence, `stop_reason` of `max_tokens`, or a retrieval score below threshold). Price the cascade honestly: escalation rate e means cost = cheap + e x (cheap + expensive) and latency = cheap_latency + e x expensive_latency, so a cascade at e = 0.5 is usually worse than routing directly. Keep the model id, prompt version and routing decision on the request record and in the trace so a regression can be attributed. Build the routing layer behind one internal interface with per-model timeouts and fallbacks so swapping a model is a config change the customer can approve, not a deploy.",
-   "minutes": 30,
+   "name": "Replication lag anomalies and how to actually deliver read-your-writes",
+   "learn": "Name the three guarantees weaker than linearizability that customers actually want and the anomaly each prevents: read-your-writes (user saves profile, refreshes, sees the old one), monotonic reads (page goes back in time between two refreshes hitting different replicas), consistent prefix reads (the answer appears before the question). Implementations you can defend: route a user's reads to the primary for N seconds after their last write; or capture pg_current_wal_lsn() after commit, store it in the session, and on the replica wait until pg_last_wal_replay_lsn() >= that LSN before serving; or pay for synchronous_commit = remote_apply on the write path. Measure lag from pg_stat_replication (write_lag, flush_lag, replay_lag) and alert on byte lag (pg_wal_lsn_diff) as well as time, because time-based lag reads zero on an idle replica that is actually disconnected.",
+   "minutes": 40,
    "resource": {
-    "label": "LiteLLM docs - Routing, fallbacks and load balancing",
-    "url": "https://docs.litellm.ai/docs/routing"
+    "label": "PostgreSQL docs - System Administration Functions (pg_current_wal_lsn, pg_last_wal_replay_lsn, pg_promote)",
+    "url": "https://www.postgresql.org/docs/current/functions-admin.html"
    }
   },
   {
-   "name": "Provider rate limits: RPM, input/output TPM, 429 vs 529, and reading the limit headers",
-   "learn": "Know that provider limits are multi-dimensional and enforced per organisation, not per process: requests per minute plus input tokens per minute plus output tokens per minute, typically with a token-bucket refill rather than a fixed window, so a burst can exhaust the bucket and then trickle. Read the response headers (`anthropic-ratelimit-requests-remaining`, `anthropic-ratelimit-tokens-remaining`, the corresponding `-reset` timestamps, and `retry-after` on a 429) and feed them into your own admission control rather than discovering limits by failing. Distinguish the error classes and their correct handling: 429 means slow down and honour `retry-after`; 529 (overloaded) means the provider is saturated and is retryable with heavy backoff; 400 and 422 mean your request is wrong and retrying is pure waste; 500 is retryable but only within a budget. Understand that in a multi-worker deployment the limit is shared, so every replica retrying independently converges on a synchronised stampede unless the budget is coordinated in Redis.",
-   "minutes": 25,
+   "name": "Multi-leader and leaderless replication: quorums, conflicts, anti-entropy",
+   "learn": "Do the quorum arithmetic (w + r > n) and then list why it is still not linearizable: sloppy quorums and hinted handoff, concurrent writes to different replicas, partial write failures with no rollback, and read repair racing with a second read. Know read repair versus anti-entropy (Merkle-tree comparison), last-writer-wins and why Cassandra's cell-level LWW with client-supplied timestamps loses writes under skew, and version vectors with sibling resolution as the alternative. Map Cassandra consistency levels (ONE, QUORUM, LOCAL_QUORUM, EACH_QUORUM, ALL) onto multi-datacenter latency and availability, and know that DynamoDB ConsistentRead=true costs double the read capacity units. Multi-leader use cases (multi-region active-active, offline clients, collaborative editing), conflict avoidance by giving each record a home region, and convergent merge functions or CRDTs when you cannot avoid conflicts.",
+   "minutes": 70,
    "resource": {
-    "label": "Anthropic docs - Rate limits",
-    "url": "https://platform.claude.com/docs/en/api/rate-limits"
+    "label": "Amazon - Dynamo: Amazon's Highly Available Key-value Store (SOSP 2007, PDF)",
+    "url": "https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf"
    }
   },
   {
-   "name": "Client-side admission control: apportioning one upstream quota across tenants fairly",
-   "learn": "Build the limiter that sits between your tenants and the single shared provider quota, because a 429 from upstream is an outage for everyone while a 429 from you is a policy. Implement a distributed token bucket in Redis via a Lua script that debits estimated tokens (input counted exactly, output estimated at `max_tokens`) at admission and reconciles the difference from `usage` after the response, keyed `rl:{tenant}:{minute}` alongside a global `rl:org` bucket. Choose the fairness policy deliberately: hard per-tenant caps are simple and predictable; weighted fair queueing with a per-tenant deficit counter stops one bulk-import tenant starving interactive traffic; a small reserved share per tenant plus a shared burst pool is usually what customers accept. Return a correct contract on rejection: HTTP 429, `Retry-After`, and `RateLimit-Limit` / `RateLimit-Remaining` / `RateLimit-Reset` headers so the customer's client can behave, plus an error body naming which dimension was hit.",
-   "minutes": 30,
+   "name": "Partitioning: key choice, hot spots, secondary indexes, rebalancing, routing",
+   "learn": "Compare key-range partitioning (range scans work, sequential keys create a hot tail) with hash partitioning (even spread, range scans become scatter-gather). Know the fixed-slot schemes in tools your customers run: Redis Cluster's 16384 hash slots via CRC16, Kafka's murmur2(key) mod partition count - and why increasing a topic's partition count silently changes the key-to-partition mapping and breaks per-key ordering for in-flight consumers. Hot partitions: the celebrity-key problem, DynamoDB's per-partition ceiling (about 3000 RCU / 1000 WCU) and adaptive capacity, and the fix of salting a hot key with a small suffix and fanning reads back out. Secondary indexes: local/document-partitioned (scatter-gather reads, Cassandra, Elasticsearch) versus global/term-partitioned (asynchronous updates, DynamoDB GSIs). Rebalancing: many fixed partitions per node, dynamic splitting (HBase, DynamoDB), never hash mod N. Routing: coordination service (ZooKeeper in Kafka's older design), gossip (Cassandra), or smart clients following MOVED redirects (Redis).",
+   "minutes": 60,
    "resource": {
-    "label": "IETF draft - RateLimit header fields for HTTP",
-    "url": "https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/"
+    "label": "AWS DynamoDB Developer Guide - Partitions and Data Distribution",
+    "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.Partitions.html"
    }
   },
   {
-   "name": "Retries that cannot make things worse: jitter, budgets, circuit breakers, idempotency",
-   "learn": "Use exponential backoff with full jitter (`sleep = random(0, min(cap, base * 2**attempt))`) rather than fixed or equal-jitter backoff, and cap total attempts at three for interactive paths. Enforce a retry budget: a token bucket that allows retries only up to roughly 10% of successful request volume, so a total upstream outage produces 1.1x load instead of 3x. Add a circuit breaker per provider with explicit closed/open/half-open states and a failure-rate threshold over a rolling window, so an outage fails fast in 5 ms instead of burning the full timeout on every request. Understand the LLM-specific hazard: retries are only safe if the effects are idempotent, and an LLM call whose output triggers a tool that writes to the customer's CRM is not idempotent, so the unit of retry must be the whole workflow step guarded by an idempotency key, not the HTTP call. Never retry inside two layers at once; count the multiplication (3 client x 3 gateway x 3 SDK = 27) and pick exactly one layer that owns retry.",
-   "minutes": 30,
+   "name": "Transactions: isolation levels, their anomalies, and Postgres specifics",
+   "learn": "Define each anomaly with a two-session example you can type into psql: dirty read/write, read skew (non-repeatable read), lost update, write skew, phantom. Map them to levels as PostgreSQL actually implements them: READ COMMITTED takes a snapshot per statement (the default); REPEATABLE READ is snapshot isolation with first-updater-wins (ERROR 40001 on a concurrent update); SERIALIZABLE is SSI, tracking rw-dependencies with SIReadLocks and aborting with 'could not serialize access due to read/write dependencies' (also SQLSTATE 40001), so the application needs a retry loop. Know the four fixes for lost updates (atomic UPDATE ... SET x = x + 1, SELECT ... FOR UPDATE, compare-and-set WHERE version = $1, or SSI) and the write-skew canon (on-call doctors, double-booked rooms) including the materialise-conflicts trick with a row per bookable slot when you cannot afford SERIALIZABLE. Run Hermitage's scripts against Postgres and one store your customer uses and record where the isolation names lie.",
+   "minutes": 75,
    "resource": {
-    "label": "Amazon Builders' Library - Timeouts, retries and backoff with jitter",
-    "url": "https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter"
+    "label": "PostgreSQL docs - Transaction Isolation (Read Committed, Repeatable Read, Serializable/SSI)",
+    "url": "https://www.postgresql.org/docs/current/transaction-iso.html"
    }
   },
   {
-   "name": "Queueing, backpressure and load shedding: bounded queues and deadline-aware dropping",
-   "learn": "Accept that an LLM tier has a hard concurrency ceiling and design the queue in front of it on purpose: a bounded in-flight semaphore sized to the provider concurrency you actually have, a bounded wait queue, and a rejection when the queue is full. Learn why an unbounded queue is the worst option: under overload it grows until every request in it has already exceeded the client's timeout, so the server does 100% of the work and delivers 0% of the value. Apply the fixes from the SRE playbook: drop requests whose deadline has already passed before dispatching them, prefer LIFO over FIFO under sustained overload so at least the newest requests are still wanted, shed by criticality (interactive chat before batch enrichment), and return 503 with `Retry-After` for capacity versus 429 for policy. Use Little's Law (L = lambda x W) to size the queue: at 20 rps with a 2 s service time you need 40 concurrent slots, and a queue deeper than a few seconds of service time is a latency bomb, not a buffer.",
-   "minutes": 25,
+   "name": "Linearizability, CAP, and what 'strong consistency' means in a design review",
+   "learn": "Define linearizability precisely: every operation appears to take effect atomically at some instant between its invocation and its response, and once any read returns the new value every later read returns it - a single-copy illusion in real time. Separate it from serializability (ordering of multi-object transactions, no real-time constraint) and strict serializability (both). Know the defaults of the systems you will meet: etcd reads are linearizable by default, ZooKeeper writes are but reads are not unless preceded by sync(), single-node Postgres is for single-object operations, Cassandra QUORUM is not, DynamoDB is only with ConsistentRead. Know where it is genuinely required (leader election, uniqueness constraints, locks, cross-channel timing such as 'file uploaded then message queued') and what it costs (a quorum or leader round trip, unavailability during partition). Retire CAP as a design tool - it is a theorem about one narrow model - and reason instead with 'linearizable or not' plus 'available under partition or not' plus the latency you pay even with no partition. Understand how Jepsen's checker (Knossos/Elle) tests a history for linearizability so you can read a Jepsen report and explain it to a customer.",
+   "minutes": 50,
    "resource": {
-    "label": "Google SRE Book - Handling overload",
-    "url": "https://sre.google/sre-book/handling-overload/"
+    "label": "Jepsen - Consistency Models: Linearizable",
+    "url": "https://jepsen.io/consistency/models/linearizable"
    }
   },
   {
-   "name": "Fallback paths that actually hold: the degradation ladder and its rehearsal",
-   "learn": "Write the ladder explicitly, most to least preferred: retry same provider, switch to a secondary provider or region behind the same interface, drop to a smaller/faster model with a shortened prompt, serve a cached or template answer clearly labelled as degraded, queue the request for async completion with a notification, and finally fail with an honest error. For each rung state the trigger, the user-visible difference, and who is told. Then internalise the hard lesson from the Builders' Library: untested fallback code is the most likely thing to fail, because it only runs during an outage and it fails at exactly the moment load is highest; a fallback that requires a cold connection pool, an unwarmed cache, or a different auth path will not work when you need it. The fix is to exercise the fallback continuously (route 1% of traffic through it always) and to add a kill switch the on-call can flip without a deploy, backed by a feature flag the customer's ops team also understands.",
-   "minutes": 25,
+   "name": "Ordering, total order broadcast, atomic commit and two-phase commit",
+   "learn": "Separate causal order from total order and show why Lamport timestamps alone cannot enforce a uniqueness constraint (you would have to hear from every node first). Define total order broadcast - reliable delivery plus identical order at every node - and know its equivalence to consensus and its real-world instances: ZooKeeper's ZAB and a single Kafka partition. Atomic commit across participants: 2PC prepare/commit, the coordinator's log write as the point of no return, in-doubt participants holding row locks forever after a coordinator crash (2PC is blocking), and why 2PC is not fault-tolerant consensus (one coordinator, no election). In PostgreSQL: PREPARE TRANSACTION 'gid', COMMIT PREPARED, ROLLBACK PREPARED, max_prepared_transactions defaults to 0, and pg_prepared_xacts to find orphaned in-doubt transactions that are blocking VACUUM. Know XA in the Java world and why most current systems replace 2PC with idempotent, log-based sagas (Topic 34).",
+   "minutes": 50,
    "resource": {
-    "label": "Amazon Builders' Library - Avoiding fallback in distributed systems",
-    "url": "https://builder.aws.com/content/3EuS9Sakq7L3VLQIF3qzfMfke1Y/avoiding-fallback-in-distributed-systems"
+    "label": "PostgreSQL docs - PREPARE TRANSACTION",
+    "url": "https://www.postgresql.org/docs/current/sql-prepare-transaction.html"
    }
   },
   {
-   "name": "Moving from sync to async: when the request/response model stops working",
-   "learn": "Recognise the tripwires that force a job model: work exceeding a hop timeout (multi-step agents, long extractions, anything over ~60 s), work that must survive a deploy or pod eviction, and work with side effects on the customer's systems. Design the async contract properly: POST returns 202 with a job id and a poll URL or webhook registration; state lives in Postgres and the orchestration in Temporal so retries, heartbeats and `start_to_close_timeout` are declarative rather than hand-rolled; the LLM call is an activity with its own timeout and retry policy separate from the workflow's. Get the semantics right at each hop: visibility timeout must exceed worst-case processing or the message is redelivered while still running, a DLQ with `maxReceiveCount` catches poison inputs, and the consumer must be idempotent on `custom_id` or `job_id` because at-least-once delivery is the only guarantee you get. State plainly what the user sees during each of the five crash points between their POST and the stored result.",
-   "minutes": 25,
+   "name": "Consensus: Raft mechanics, the Paxos family, safety versus liveness",
+   "learn": "Work through Raft at the level of the paper's Figure 2: terms as epochs; randomised election timeouts (150-300 ms in the paper); RequestVote's up-to-date check (compare last log term, then last log index); AppendEntries with prevLogIndex/prevLogTerm as the consistency check and how followers truncate conflicting suffixes; commitIndex advancing only when a majority stores an entry from the leader's current term (the Figure 8 subtlety); the Log Matching and Leader Completeness properties; why a leader never overwrites or deletes its own entries; membership change via joint consensus or single-server changes; snapshots and InstallSnapshot for log compaction. Know Paxos vocabulary (proposers, acceptors, ballots) and that Multi-Paxos with a stable leader is what Raft makes explicit. Quorum arithmetic for the customer: 2f+1 nodes tolerate f failures, so 3 tolerates 1, 5 tolerates 2, and 4 tolerates the same 1 as 3 while costing more; every cross-region write pays at least one WAN round trip to a majority.",
+   "minutes": 75,
    "resource": {
-    "label": "Azure Architecture Center - Queue-Based Load Leveling pattern",
-    "url": "https://learn.microsoft.com/en-us/azure/architecture/patterns/queue-based-load-leveling"
+    "label": "Ongaro and Ousterhout - In Search of an Understandable Consensus Algorithm (Raft paper, PDF)",
+    "url": "https://raft.github.io/raft.pdf"
    }
   },
   {
-   "name": "Autoscaling an LLM workload: why CPU% is the wrong signal",
-   "learn": "Understand that an LLM-calling service is IO-bound waiting on a provider, so a pod at 8% CPU can be completely saturated on in-flight requests; scaling on `resource: cpu` will never fire and the HPA will sit idle while p95 triples. Scale on the signal that reflects saturation: in-flight requests per pod, queue depth, or provider concurrency utilisation, exposed as a Prometheus custom metric and consumed via the `external`/`pods` metric types or KEDA's Prometheus scaler. Tune the behaviour block: `scaleUp.stabilizationWindowSeconds: 0` with a fast policy so a burst is absorbed, `scaleDown` at 300 s so a lull does not flap, plus `minReplicas` sized for the cold-start floor. Know the limits of horizontal scaling here: adding pods does not add provider quota, so past a point you are only redistributing 429s, and for self-hosted GPU serving the scaling unit is a node with a multi-minute image pull and model load, which means you pre-warm or you shed.",
-   "minutes": 25,
+   "name": "Coordination services in practice: leases, fencing tokens, ephemeral nodes",
+   "learn": "Know what ZooKeeper and etcd actually give you: linearizable writes, session or lease-scoped ephemeral keys (etcd Lease with TTL and KeepAlive; ZooKeeper session timeout and ephemeral znodes), watches, and a monotonic counter usable as a fencing token (ZooKeeper sequential znodes, etcd's revision / ModRevision). Understand the lease-expiry hole: a process paused by GC, VM live migration or SIGSTOP still believes it holds the lock after the lease expired; the correct fix is a fencing token that the protected resource checks and rejects if lower than the last one it saw - the lock alone is never sufficient. Know etcd's documented guarantees (linearizable reads by default, serializable reads when you opt in via --consistency=s, revision semantics) and why Redlock is contested. When a customer asks for a 'distributed lock', your first questions are 'what resource does it protect' and 'can that resource check a token'.",
+   "minutes": 40,
    "resource": {
-    "label": "KEDA docs - event-driven autoscaling for Kubernetes",
-    "url": "https://keda.sh/docs/2.20/"
+    "label": "etcd docs - API guarantees (linearizability, serializability, revisions)",
+    "url": "https://etcd.io/docs/v3.5/learning/api_guarantees/"
    }
   },
   {
-   "name": "Observability and cost attribution: OTel GenAI semantics, per-tenant dashboards, the alerts you actually set",
-   "learn": "Emit one span per model call using the OpenTelemetry GenAI semantic conventions (`gen_ai.system`, `gen_ai.request.model`, `gen_ai.request.max_tokens`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`) plus your own `tenant.id`, `prompt.version`, `cache.hit` and `retry.attempt`, so a trace answers 'why was this request slow and what did it cost' in one view. Build two dashboards and ship them with the deployment: an ops board (TTFT and completion p50/p95/p99, error rate split 429/529/5xx, in-flight and queue depth, provider quota headroom) and a cost board (spend per tenant per feature per day, cache hit ratio, tokens per request trend). Set the four alerts that earn their pager: cache hit ratio dropping more than 20 points day-over-day, 429 rate above threshold for 5 minutes, p95 TTFT breaching the published budget, and daily spend on pace to exceed the agreed ceiling. Anything else is a dashboard, not an alert.",
-   "minutes": 25,
+   "name": "Derived data: dual writes, outbox, log-based CDC (DDIA ch 11-12)",
+   "learn": "Diagnose the dual-write problem (write to Postgres, then publish to Kafka: either step can fail, and two writers can interleave differently in each system) and know the two fixes: a transactional outbox table drained by CDC, or log-based CDC straight from the database. For Postgres logical decoding know wal_level = logical, CREATE PUBLICATION, the logical replication slot, the pgoutput plugin, and that Debezium emits before/after images tagged with LSN and transaction id; know that an abandoned slot retains WAL until the disk fills. Distinguish CDC from event sourcing, use log compaction to hold keyed state, and describe rebuilding a search index, cache or warehouse table by replaying the log from offset zero. Make consumers idempotent on (source LSN or event id) and evolve schemas through the log, not around it.",
+   "minutes": 45,
    "resource": {
-    "label": "OpenTelemetry - Semantic conventions for generative AI spans",
-    "url": "https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/"
+    "label": "Debezium docs - PostgreSQL connector (logical decoding, slots, publications, event envelope)",
+    "url": "https://debezium.io/documentation/reference/stable/connectors/postgresql.html"
    }
   },
   {
-   "name": "The write-up: Kaupex under Black Friday, with numbers and a rehearsed failure story",
-   "learn": "Turn the whole topic into the artefact a customer signs off on. Fix the scenario: Kaupex normally compiles 2k tasks/hour, Black Friday week is 15x with a two-hour spike at 40x, and the customer's SLA says a task is acknowledged in under 2 s and compiled within 5 minutes. Produce (1) an assumptions table where every number is derived, not asserted; (2) a per-hop latency budget for the interactive path and a throughput budget for the compile path; (3) cost per task and cost for the peak day, with the prompt-caching hit ratio as an explicit sensitivity row; (4) the capacity plan against the provider quota, showing the arithmetic for how many concurrent calls the quota permits and therefore where you queue; (5) the degradation ladder with triggers and kill switches; and (6) a failure story with a timeline: what breaks first, at what number, what the customer sees, and what the runbook says. Close with the one sentence the architect will repeat to their CTO. Then rehearse it aloud in 20 minutes and cut anything you cannot defend with a number.",
+   "name": "Stream processing semantics: event time, watermarks, exactly-once (DDIA ch 11)",
+   "learn": "Separate event time from processing time and explain why a late-arriving mobile event changes an already-emitted hourly count. Know the window types (tumbling, hopping, sliding, session), watermarks as the operator's promise that no earlier events will arrive, and what to do with late data (drop, side output, retract). Cover the three join shapes (stream-stream, stream-table, table-table) and why stream-table joins are time-dependent. Fault tolerance via periodic checkpointing plus replay from the log, and the honest definition of exactly-once: at-least-once delivery plus idempotent or transactional sinks - Kafka's enable.idempotence, transactional.id and isolation.level = read_committed cover Kafka-to-Kafka, but an external sink still needs its own idempotency key.",
    "minutes": 35,
    "resource": {
-    "label": "Eugene Yan - Patterns for building LLM-based systems and products",
-    "url": "https://eugeneyan.com/writing/llm-patterns/"
+    "label": "Apache Flink docs - Concepts: Timely Stream Processing (event time, watermarks, lateness)",
+    "url": "https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/"
+   }
+  },
+  {
+   "name": "Maelstrom harness and Glomers 1-2: echo and unique IDs under partition",
+   "learn": "Install Maelstrom (a JDK, Graphviz and gnuplot) and run the echo workload. Learn the protocol cold: newline-delimited JSON on stdin/stdout, every message is {src, dest, body}, body carries type, msg_id and in_reply_to; the first message is init with node_id and node_ids; replies use type = request type + '_ok'; errors carry a numeric code (0 timeout, 11 temporarily-unavailable, 13 crash, 14 abort, 20 key-does-not-exist, 22 precondition-failed) and are either definite or indefinite; logs go to stderr because stdout is the wire. In the Go library: maelstrom.NewNode(), n.Handle(type, fn), n.Reply(msg, body), n.Send(dest, body), n.RPC(dest, body, callback), n.SyncRPC(ctx, dest, body), n.Run(), n.ID(), n.NodeIDs(). Challenge 1 is echo. Challenge 2 runs with --node-count 3 --rate 1000 --availability total --nemesis partition: generate IDs with no coordination (node id plus a local counter, or a timestamp-node-sequence layout) and be able to say why any scheme that talks to another node would fail the total-availability check. Read results.edn and store/latest until 'Everything looks good' means something to you.",
+   "minutes": 75,
+   "resource": {
+    "label": "Maelstrom docs - Protocol (message format, init, RPC, error codes)",
+    "url": "https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md"
+   }
+  },
+  {
+   "name": "Glomers 3a-3c: broadcast, gossip, and fault tolerance under partitions",
+   "learn": "3a (single node): handle broadcast, read and topology; store a set of ints behind a sync.Mutex; return read_ok with messages. 3b (multi-node): forward each newly-seen value to your neighbours from the topology message (or a topology you choose), deduplicate so you only forward on first sight, and avoid echoing back to the sender. 3c runs with --node-count 5 --time-limit 20 --rate 10 --nemesis partition: inter-node messages will be dropped, so keep a per-neighbour pending set and retry unacknowledged sends from a background goroutine (ticker plus n.RPC callback or n.SyncRPC with a context timeout) until acked; never block the request handler on the network, never spawn an unbounded goroutine per retry, and run go test -race or go build -race to catch the shared-map race you almost certainly have. Success criteria from the challenge text: values propagate to all nodes by the end of the test, and each node returns only its own local values.",
+   "minutes": 80,
+   "resource": {
+    "label": "Fly.io Gossip Glomers - Challenge 3c: Fault Tolerant Broadcast",
+    "url": "https://fly.io/dist-sys/3c/"
+   }
+  },
+  {
+   "name": "Glomers 3d-3e: efficient broadcast and reading Maelstrom's stats",
+   "learn": "Run with --node-count 25 --time-limit 20 --rate 100 --latency 100 and hit the stated limits: 3d requires messages-per-operation below 30, median latency below 400 ms and maximum below 600 ms; 3e requires below 20, below 1 s and below 2 s. Read results.edn properly: :net :servers :msgs-per-op counts only inter-server traffic, and :workload :stable-latencies gives quantiles {0, 0.5, 0.95, 0.99, 1} measured from broadcast acknowledgement to the value being present on every node. Do the arithmetic before coding: with 100 ms per hop a grid topology is several hops deep, so switch to a spanning tree or hub-and-spoke (one or two hops), and batch pending values per neighbour on a ticker (every 100-500 ms) so one message carries many values. Re-run with --nemesis partition after every optimisation, because the challenge text is explicit that you must not trade safety for the numbers.",
+   "minutes": 70,
+   "resource": {
+    "label": "Fly.io Gossip Glomers - Challenge 3d: Efficient Broadcast, Part I",
+    "url": "https://fly.io/dist-sys/3d/"
+   }
+  },
+  {
+   "name": "Glomers 4: grow-only counter on a sequentially consistent KV",
+   "learn": "Use maelstrom.NewSeqKV(n): seq-kv offers Read, Write and CompareAndSwap with sequential consistency, meaning operations are totally ordered and each client's order is respected, but a read may return a value that is old in real time. Two designs: (a) a single shared counter updated by a CAS loop - kv.ReadInt, then kv.CompareAndSwap(ctx, key, from, to, createIfNotExists) and retry on PreconditionFailed (code 22), handling KeyDoesNotExist (code 20) on first write; (b) a G-counter CRDT where each node only increments its own key (its node id) and read sums every node's key, which has no contention and survives partitions cleanly. Handle stale reads honestly: because reads are only sequentially consistent, perform a write (to a throwaway key with a unique value) before reading so your subsequent reads are ordered after it, or merge the store's value with your local knowledge. Run with --node-count 3 --rate 100 --time-limit 20 --nemesis partition; the final read must equal the sum of all acknowledged adds. Be able to explain why this design passes while an LWW register keyed on wall time would not.",
+   "minutes": 70,
+   "resource": {
+    "label": "Maelstrom docs - Services (lin-kv, seq-kv, lww-kv semantics and operations)",
+    "url": "https://github.com/jepsen-io/maelstrom/blob/main/doc/services.md"
+   }
+  },
+  {
+   "name": "The client-architect explanation: a 20-minute whiteboard script without notes",
+   "learn": "Assemble and rehearse the explanation the depth target demands. Replication: leader/follower, sync vs async, what lag means, and which of read-your-writes / monotonic reads / consistent prefix their product actually needs. Partitioning: key choice, hot spots, rebalancing, and the cost of secondary indexes. Consistency: linearizable versus eventual versus the in-between guarantees, each expressed as a user-visible anomaly rather than a term of art. Consensus: why 3 or 5 nodes, what a lease is, what happens during a partition, what a fencing token protects. Transactions across services: outbox or saga, never 2PC by default. Use the 'stop calling databases CP or AP' framing to head off the CAP conversation, carry a one-page decision table (use case, required guarantee, cost in latency and availability), record yourself, time each section, and cut every sentence you cannot back with an anomaly example.",
+   "minutes": 45,
+   "resource": {
+    "label": "Martin Kleppmann - Please stop calling databases CP or AP",
+    "url": "https://martin.kleppmann.com/2015/05/11/please-stop-calling-databases-cp-or-ap.html"
    }
   }
  ],
  "outcomes": [
-  "You can write a per-hop latency budget for an LLM feature that sums to a stated p95, set every hop timeout from it, propagate a deadline down the chain, and show the `histogram_quantile()` query that proves the budget is being met in Grafana.",
-  "You can state cost per request as a formula with named token terms, name the four multipliers that inflate it (retries, agent loops, tool round-trips, judge models), and produce a per-tenant per-feature monthly cost number from a `llm_calls` table you designed.",
-  "You can restructure a prompt so the stable prefix is cacheable, place `cache_control` correctly, and demonstrate a measured cache hit ratio with `cache_read_input_tokens` before and after, including the cost break-even point where caching starts paying.",
-  "You can design a per-tenant admission controller over one shared provider quota (Redis Lua token bucket debiting estimated tokens and reconciling from `usage`) with a stated fairness policy and a correct 429 contract including `Retry-After` and `RateLimit-*` headers.",
-  "You can write a retry and circuit-breaker policy that provably cannot amplify an outage beyond ~1.1x (full jitter, single retrying layer, 10% retry budget, breaker thresholds) and explain which LLM operations are unsafe to retry and what idempotency key makes them safe.",
-  "You can draw the degradation ladder for a given feature with a trigger, user-visible effect and owner per rung, and show the always-on traffic slice and kill switch that keep the fallback from being dead code.",
-  "You can choose sync vs streaming vs async-job vs batch-API for a stated workload and defend it with the latency SLA, the cost delta and the crash-safety requirement rather than with preference.",
-  "You can run a 45-minute LLM system design end to end (requirements, numbers, diagram, two deep dives, failure story) and finish with 'the thing that saturates first is X at Y rps, and here is what the customer sees'."
+  "You can draw PostgreSQL single-leader replication on a whiteboard and, for each synchronous_commit setting (off, local, remote_write, on, remote_apply), state exactly which failure loses acknowledged writes and how a client would observe it.",
+  "You can take a user story such as 'saved my profile, refreshed, saw the old one', name the missing guarantee (read-your-writes), and describe two implementations, one of them the LSN-tracking approach using pg_current_wal_lsn() and pg_last_wal_replay_lsn().",
+  "You can take five concurrent-transaction scenarios, predict which anomaly occurs under READ COMMITTED and under REPEATABLE READ in PostgreSQL, and prove it in two psql sessions, then show the SERIALIZABLE retry loop or explicit lock that removes it.",
+  "You can explain Raft leader election and log replication from memory, including why a candidate with a longer log but an older last-entry term loses the vote, and answer 'why five nodes and not four' with quorum arithmetic.",
+  "You can complete Gossip Glomers 1 through 4 with Maelstrom reporting 'Everything looks good', including 3d and 3e within the stated messages-per-operation and latency limits and still correct under --nemesis partition.",
+  "You can read a Jepsen analysis or a Maelstrom results.edn, identify the consistency model being checked, and state whether the anomaly found would affect a named customer use case.",
+  "You can deliver the 20-minute explanation of replication, partitioning, consistency and consensus to a non-specialist architect without notes, recorded, with every claim tied to a user-visible anomaly.",
+  "You can spot the dual-write problem in a customer's architecture diagram and redraw it with an outbox plus CDC path, naming wal_level = logical, the replication slot, and the slot-lag disk risk that comes with it."
  ],
  "failureModes": [
-  "A prompt template rendered the current timestamp in the system block, so every prompt-cache lookup missed silently, and the customer's bill quadrupled over a weekend with no latency or error signal to catch it.",
-  "Retries were configured in the SDK, the internal gateway and the customer's frontend simultaneously; a 90-second provider degradation turned into 27x load, exhausted the org token quota, and kept the system down for twenty minutes after the provider had recovered.",
-  "An unbounded asyncio queue in front of the model tier absorbed a burst until every queued request had already exceeded the client's 30-second timeout, so the service spent an hour generating tokens for connections that were long closed while users saw only errors.",
-  "The provider outage fallback to a secondary region had never run in production; when it finally fired, its connection pool was cold, its API key had expired six weeks earlier, and the fallback path failed faster than the primary it was replacing.",
-  "Latency was tuned by shrinking the prompt from 6k to 3k tokens with no measurable effect, because p95 was dominated by a `max_tokens: 4096` default and a model that habitually wrote 1,200-token answers.",
-  "The semantic cache used a cosine threshold of 0.85 with no tenant prefix in the key, and one customer's support agent was served another customer's cached answer containing their account details.",
-  "The HPA was configured on CPU utilisation for an IO-bound LLM service; pods sat at 7% CPU while p95 tripled, no scaling event ever fired, and the postmortem blamed the model provider."
+  "An asynchronous Postgres replica was promoted after the primary died; the last thirty seconds of acknowledged writes were gone, and the old primary rebooted and kept accepting writes because nothing fenced it, leaving two divergent timelines that had to be merged by hand.",
+  "A Debezium connector was decommissioned but its logical replication slot was not dropped; the primary retained WAL for weeks until the disk filled at 03:00 and PostgreSQL stopped accepting writes.",
+  "A Cassandra cluster using last-writer-wins with client timestamps had one app server forty seconds behind on NTP; every update from that host was silently overwritten by older writes from the others and the team chased a 'random data loss' bug for three weeks.",
+  "A Kafka topic was bumped from 12 to 24 partitions to add throughput; the key-to-partition mapping changed under live consumers, per-key ordering broke, and the downstream aggregator emitted duplicate and out-of-order state that reached the customer's reports.",
+  "A 'distributed lock' built on Redis SET NX PX with a 30-second TTL and no fencing token; a JVM garbage-collection pause exceeded the TTL, two workers processed the same batch, and the storage layer happily accepted both.",
+  "A check-then-insert for booking a slot ran at Postgres's default READ COMMITTED; write skew let two customers book the same slot on a busy day, and the fix (a unique index plus a SERIALIZABLE retry loop) arrived only after the refund.",
+  "A three-node etcd cluster was split two-plus-one across two data centres; the two-node site lost power, the surviving node could not form a quorum, and the Kubernetes control plane was down even though every application node was healthy."
  ],
  "interviewQuestions": [
-  "Design the LLM layer of an order-triage system that normally handles 2,000 requests an hour and hits 40x during a two-hour Black Friday spike, with a 2-second acknowledgement SLA and a 5-minute completion SLA. Give me the latency budget, the cost per request, where you queue, and the first thing that saturates, with numbers.",
-  "Your p95 latency is 9 seconds against a 4-second target. Walk me through diagnosis: what do you measure first, how do you tell queueing from generation, and what are the three levers you would pull in order of effect per unit of risk?",
-  "You have one organisation-level token-per-minute quota shared by 200 tenants, and one of them starts a bulk import. Design the admission control: what do you meter, where does the state live, what does a throttled tenant see, and how do you keep interactive traffic alive without hard-capping everyone?",
-  "The model provider is returning 529s for 40% of calls. Walk me through exactly what your system does in the first 60 seconds and the next 30 minutes, and tell me what the customer's users see at each stage. Then tell me how you tested that path before it happened.",
-  "When is it correct to retry an LLM call, and when does a retry corrupt state? Give me a concrete example from a system that writes to a customer's CRM, and show me the idempotency design that makes the retry safe.",
-  "A customer wants sub-second responses and refuses to accept streaming as an answer because their UI is a batch report. What options do you actually have, what does each cost, and which would you recommend for a 3,000-token summarisation task?",
-  "Prompt caching gives you a 10x read discount but costs more to write. Derive the break-even and tell me for which of these three workloads it pays: a single-turn classifier, a 20-turn support conversation, and a nightly fan-out of 50,000 documents against the same 8k-token policy prompt."
+  "A customer runs Postgres with one asynchronous streaming replica and asks for 'zero data loss on failover'. Walk me through exactly what you would change - synchronous_commit, synchronous_standby_names, quorum shape, fencing - what it costs in write latency and availability, and what you tell them when the replica is in another region.",
+  "Explain linearizability as if I were a solutions architect with no distributed-systems background, then name three places in a typical SaaS application that genuinely need it and three that do not, with the cost of getting it in each case.",
+  "Design a globally unique, roughly time-ordered ID generator across three regions that stay available during partitions. What do you give up relative to a database sequence, and what happens when one node's clock jumps backwards?",
+  "An orders service writes to Postgres and then publishes to Kafka; users report missing events roughly once a day. Diagnose the mechanism, redesign it with an outbox or CDC, and state the new operational risks you have introduced and how you would monitor them.",
+  "A five-node Raft cluster: the leader in term 7 has committed through index 100; node B was partitioned and holds uncommitted entries 101-105 from term 6. The partition heals. Walk through what happens to B's log, step by step, and why those entries can or cannot be discarded safely.",
+  "Given this history - A writes x = 1 and gets an ack; B's read of x starts after A's ack and returns 0; C's read returns 1 - is it linearizable? Sequentially consistent? Which real databases produce it, under which configuration, and how would you stop it?",
+  "Your Gossip Glomers broadcast passes cleanly without a nemesis but under --nemesis partition some values never reach every node. Give me the three most likely bugs in order of probability and how you would prove each one from Maelstrom's logs and results.edn."
  ],
- "proofOfWork": "A public `llm-load-lab` repository that turns the two written designs into something a reviewer can run. It contains a docker-compose stack with the Kaupex API in front of a deliberately hostile fake provider: a small FastAPI service that emulates a model endpoint with configurable TTFT and per-token delay, a token-bucket RPM/TPM quota that returns real 429s with `retry-after` and `anthropic-ratelimit-*`-style headers, a 529 injection rate, and a mid-stream error mode. Against it run four k6 `ramping-arrival-rate` scenarios that each reproduce one failure and then its fix, with before/after Grafana panels committed as PNGs: (1) a layered-retry storm showing 27x amplification collapsing to ~1.1x once full jitter, a single retry layer and a 10% retry budget are enabled; (2) an unbounded queue showing every request completing after its client deadline, fixed by a bounded semaphore plus deadline-aware LIFO shedding; (3) a prompt-cache regression where a timestamp in the system block drops the hit ratio to zero and doubles cost per request, caught by a hit-ratio alert rule checked into the repo; (4) an HPA-on-CPU non-event replaced by a KEDA Prometheus scaler on in-flight requests. Alongside the code sit the two design documents themselves, each with an assumptions table, a per-hop budget, a cost model with a prompt-caching sensitivity row, a degradation ladder with kill switches, and a dated failure timeline. The README opens with a one-paragraph summary written for a customer architect, and `make demo` reproduces every chart from scratch in under ten minutes."
+ "proofOfWork": "A recorded 'consistency anomaly lab' checked into the portfolio repo next to the Glomers solutions: a docker-compose with a Postgres primary and one streaming replica plus a set of scripted demonstrations, each captured as a terminal recording with the exact commands and output. Demo one reproduces a stale read-after-write on the replica and then fixes it with the pg_current_wal_lsn / pg_last_wal_replay_lsn wait and separately with synchronous_commit = remote_apply, timing the latency cost of each. Demo two shows write skew on a slot-booking table at REPEATABLE READ in two psql sessions, then the SERIALIZABLE retry loop catching SQLSTATE 40001, and finally the unique-index alternative. Demo three kills the primary with synchronous_commit = off versus on, promotes the replica with pg_promote(), and counts the acknowledged rows that were lost in each case. Alongside it sits a Maelstrom results table for challenges 3d, 3e and 4 showing msgs-per-op and the stable-latency quantiles with and without --nemesis partition, and the recorded 20-minute architect explanation with its one-page decision table (use case, required guarantee, cost). A reviewer should be able to clone, run make lab, and reproduce every anomaly and every fix in under fifteen minutes."
 }

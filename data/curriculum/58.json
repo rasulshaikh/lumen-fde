@@ -1,191 +1,227 @@
 {
  "i": 58,
- "topic": "Experiment tracking and prompt versioning as CI",
+ "topic": "Evals as infrastructure: eval sets, LLM-as-judge, human review, CI gates",
  "track": "H. AI in Production",
  "month": 7,
- "hours": 6,
- "why": "The prompt is the highest-frequency change on a customer's production path and usually the only one that a non-engineer can make - a solutions consultant tweaking wording in a UI during a workshop is a production deploy with no PR, no review and no rollback plan. As the FDE you are the person the customer's change-management process points at, so you need to answer 'what changed on Tuesday, what did it do to the numbers, and how fast can you undo it' without a redeploy and without a hedge. Everything in topic 53 measures a system at one moment; this topic is what turns those measurements into a run history with lineage, a gate that blocks a regression before it reaches the customer's tenant, and a rollback you have actually rehearsed with a stopwatch.",
+ "hours": 12,
+ "why": "At the end of every pilot an FDE has to answer one question in front of the customer's engineering lead and their exec sponsor: how do you know it works? Without a labelled set you own, per-class numbers with intervals, and a gate that blocks regressions before merge, the honest answer is a demo and a feeling - so the pilot converts on trust rather than evidence, and the first bad week kills it. Evals are also the only mechanism that lets you change a prompt, swap a model or ship a retrieval improvement on a customer's production path without gambling with their data, and the only artefact that turns 'it got worse this month' into a specific class, a specific date and a specific commit.",
  "prerequisites": [
-  "Prompt-as-code from topic 46: prompt files with pinned dated model snapshots, structured output schemas, and a committed baseline you can diff against. This topic moves that artefact into a registry and adds rollout mechanics; it does not re-teach prompt authoring.",
-  "The eval machinery from topic 53: a labelled dataset with a content hash, per-class metrics with Wilson intervals, at least one validated judge, and the notion of a noise budget derived from repeated runs of an unchanged system. Without a dataset that can actually go down, everything here is ceremony.",
-  "GitHub Actions at working depth from topic 18: pull_request vs push vs schedule vs workflow_dispatch vs repository_dispatch, job permissions, required status checks, path filters, artifacts, concurrency groups, and how secrets behave on forked PRs.",
-  "Tracing from topic 54: you need trace and observation ids in your production path already, because prompt-version lineage is attached to generations, not to log lines.",
-  "Git at depth from topic 4: tags, reflog, revert vs reset, and why an immutable content-addressed history is the right mental model for a prompt registry.",
-  "Audit-trail and multi-tenant modelling from topic 30: who-changed-what-when tables, and per-tenant scoping, since prompt labels are frequently tenant-scoped in real deployments."
+  "The prompt-as-code machinery from 'Prompt engineering as code' (topic 46): versioned prompt files with pinned model snapshots, the deterministic assertion ladder, a committed baseline.json, and an eval runner with response caching, bounded concurrency and a USD ceiling. This topic layers labels, judges and statistics on top of that runner - it does not rebuild it.",
+  "Classification metrics at working depth: confusion matrix, precision, recall, F1, class imbalance, and enough pandas/numpy to pivot a results file by class and tag. Have scikit-learn, scipy and statsmodels installed and know how to call them.",
+  "LLM mechanics from topic 45: run-to-run variance at temperature 0, dated snapshots versus moving aliases, and the fact that fluency and correctness are close to uncorrelated - which is the entire reason a judge needs validating.",
+  "pytest and GitHub Actions from topics 35 and 18: parametrize and fixtures, required status checks, path filters, workflow_dispatch, artifacts, and posting a sticky comment on a pull request.",
+  "A real system with real traffic: DefenderMate's classifier plus several hundred stored production traces (the llm_calls and audit_log tables from topic 30), and commitment from one domain expert for about four hours of labelling and adjudication. Without a domain expert this topic degenerates into statistics homework.",
+  "RAG basics from topic 49 if you intend to evaluate a retrieval path - chunking, top-k retrieval, and the difference between a retrieval failure and a generation failure."
  ],
  "subtopics": [
   {
-   "name": "Source of truth: Git only, registry only, or both (the two-writer problem)",
-   "learn": "Decide explicitly, in writing, which system is authoritative for prompt text, because the common failure is that both are and neither is. Git-only gives you review, blame and atomic rollback with the code, but couples every wording fix to a deploy and locks out the domain expert who actually knows the wording. Registry-only gives non-engineers a UI and decouples rollout from deploy, but ships with no review, no diff in the PR, and a SaaS dependency on the request path. Learn the pragmatic split most teams land on: the registry is the deployment source of truth, and a webhook mirrors every version into Git for review tooling and disaster recovery - the mirror is a read model, never a writer. Write the decision into the engagement's ADR with the escape hatch named.",
-   "minutes": 20,
+   "name": "The three eval levels and what each one can actually prove",
+   "learn": "Separate Level 1 (assertions on a single component: schema validity, exact match, retrieval recall@k - cheap, deterministic, runs on every commit), Level 2 (human or judge review of a whole trace, i.e. the output the user actually sees, including multi-step agent runs), and Level 3 (production outcome metrics: acceptance rate, edit distance between the model's draft and the analyst's final text, escalation rate, task completion). A Level 1 pass never licenses a Level 3 claim, and this is the most common way an FDE oversells a pilot. Write the mapping down per feature: for DefenderMate, 'retrieval recall@10' is Level 1, 'the finding summary is defensible from the evidence' is Level 2, 'the analyst accepted it without editing' is Level 3. Decide explicitly which level owns the release decision for each feature before you build anything.",
+   "minutes": 40,
    "resource": {
-    "label": "Langfuse docs - Prompt management, get started",
-    "url": "https://langfuse.com/docs/prompt-management/get-started"
+    "label": "Hamel Husain - Your AI Product Needs Evals",
+    "url": "https://hamel.dev/blog/posts/evals/"
    }
   },
   {
-   "name": "Immutable versions, mutable labels: the pointer indirection",
-   "learn": "Internalise the one structural idea the whole topic rests on: versions are immutable and monotonically numbered, and what production reads is a mutable named pointer at a version. In Langfuse those pointers are labels - `production` is the default label served when you pass none, `latest` auto-tracks the newest version, and custom labels carry environments (`staging`), tenants (`tenant-acme`) or experiment arms (`prod-a`, `prod-b`). Fetch deliberately with `langfuse.get_prompt(\"finding-summary\", label=\"production\")` for the serving path and `version=7` for a reproduction, and never let application code compute a version number. The consequence to state out loud: promotion and rollback become label moves, which are O(1), auditable, and require no artefact rebuild.",
-   "minutes": 25,
+   "name": "Error analysis: open-coding a sample of real traces",
+   "learn": "Before any metric exists, pull a stratified sample of 50-100 real production traces, read each end to end, and write one free-text sentence naming the first thing that goes wrong - no categories, no scores, no 1-5 ratings. Do the first 30 yourself sitting next to the domain expert; delegating this step is why most eval efforts measure the wrong thing. Stop when 10-15 consecutive traces produce no new kind of note (theoretical saturation), which usually happens well before 100. The deliverable of this step is a spreadsheet with trace_id, input, output and a notes column - deliberately not a number.",
+   "minutes": 45,
    "resource": {
-    "label": "Langfuse docs - Prompt version control (labels, protected labels, rollback)",
-    "url": "https://langfuse.com/docs/prompt-management/features/prompt-version-control"
+    "label": "Hamel Husain - A Field Guide to Rapidly Improving AI Products (the error analysis process)",
+    "url": "https://hamel.dev/blog/posts/field-guide/"
    }
   },
   {
-   "name": "MLflow prompt registry mechanics end to end",
-   "learn": "Do the same shape in the other ecosystem so you can walk into either customer. `mlflow.genai.register_prompt(name=..., template=..., commit_message=..., tags={...}, response_format=PydanticModel)` creates version N+1 - it never mutates version N; the template uses `{{double_brace}}` variables and both plain strings and chat-style message lists are accepted. Aliases are the pointer layer: `mlflow.genai.set_prompt_alias(\"finding-summary\", alias=\"production\", version=2)`, loaded as `mlflow.genai.load_prompt(\"prompts:/finding-summary@production\")`, with `prompts:/finding-summary/2` for a pinned version and the reserved `@latest` alias for newest. Know `prompt.format(**vars)` and `prompt.to_single_brace_format()` for LangChain/LlamaIndex interop, and that a prompt version can carry a JSON response schema and a model configuration block so decoding params version together with the text.",
-   "minutes": 25,
+   "name": "Axial coding: notes into a counted failure taxonomy",
+   "learn": "Cluster the free-text notes into 8-15 mutually exclusive, named failure categories - you can have a model propose the clustering, but you arbitrate the boundaries and the names. Count each category and sort by frequency multiplied by business cost; the distribution is almost always brutally skewed, with two categories accounting for over half the errors, which is what tells you where to spend the next fortnight. Every category then gets exactly one disposition: a deterministic assertion, a dedicated judge, or an explicitly documented known limitation in the customer report. Re-run open plus axial coding monthly on fresh traces - a frozen taxonomy is how you stop noticing new failure kinds.",
+   "minutes": 35,
    "resource": {
-    "label": "MLflow docs - Create and edit prompts (prompt registry)",
-    "url": "https://mlflow.org/docs/latest/genai/prompt-registry/create-and-edit-prompts/"
+    "label": "Hamel Husain & Shreya Shankar - AI Evals FAQ: axial coding into a failure taxonomy",
+    "url": "https://hamel.dev/blog/posts/evals-faq/#axial-coding"
    }
   },
   {
-   "name": "The fetch path in production: caching, staleness, fallback, cold start",
-   "learn": "A registry on the request path is a new dependency in your p99 and your availability budget, so learn its cache semantics exactly. Langfuse caches per process with `cache_ttl_seconds` (default 60; `0` disables) and serves stale-while-revalidate - an expired entry is returned immediately while a background refresh runs, which is why a label move is not instantaneous across a fleet. Always pass `fallback=` with the last-known-good template compiled into the image so a registry outage degrades to a slightly old prompt instead of a 500. Prefetch at startup rather than lazily on first request, and never call `get_prompt` at module import time in a long-lived worker - that pins the version for the process lifetime and quietly defeats every rollout mechanism you are about to build.",
-   "minutes": 25,
+   "name": "Building the 200-case set: sampling frame, stratification, provenance",
+   "learn": "Write the sampling frame down before you sample: which tenants, which date range, which document types, which languages, and what you deliberately excluded. Stratify across every dimension you intend to report on and oversample rare-but-expensive classes so each class has enough support to produce a usable interval - 8 examples of your most important class is not a measurement. Fix the case schema as {id, inputs{}, expected{}, class, tags[], source, labeller, labelled_at, notes} and populate from exactly three streams: stratified production traffic, every customer-reported bug converted into a case on the day it is reported, and deliberate degenerate/adversarial inputs. Mark synthetic cases with source='synthetic' and keep them under about a quarter of the set, or you end up measuring your own imagination.",
+   "minutes": 45,
    "resource": {
-    "label": "Langfuse docs - Prompt caching (cache_ttl_seconds, fallbacks)",
-    "url": "https://langfuse.com/docs/prompt-management/features/caching"
+    "label": "OpenAI Platform docs - Evals guide",
+    "url": "https://developers.openai.com/api/docs/guides/evals"
    }
   },
   {
-   "name": "What exactly is 'a run': the fingerprint you must record",
-   "learn": "Define a run as a tuple and record every element as a param or tag, because any unrecorded element makes the number unattributable: prompt name and version, dated model snapshot, decoding params (temperature, top_p, max_tokens, seed if supported), dataset name and content hash, judge prompt version and judge model snapshot, eval-harness version, git SHA, and the run's total USD and token counts. In MLflow that is `mlflow.start_run()` plus `log_param` for the fingerprint, `log_metric(key, value, step=)` for scores over time, `set_tag` for the git SHA and environment, and `log_artifact` for the per-case results file; use nested runs so a sweep over five prompt versions is one parent with five children. The test of whether you got this right: given only a run id, can you rebuild the exact call that produced it six months later without asking anyone a question.",
-   "minutes": 25,
-   "resource": {
-    "label": "MLflow docs - Tracking API (runs, params, metrics, tags, artifacts)",
-    "url": "https://mlflow.org/docs/latest/ml/tracking/tracking-api/"
-   }
-  },
-  {
-   "name": "Lineage both directions: attaching prompt versions to production generations",
-   "learn": "An offline run history is half the value; the other half is being able to slice live traffic by prompt version. Pass the fetched prompt object through to the observation - Python `update_current_generation(prompt=prompt)`, `start_as_current_observation(..., prompt=prompt)`, or `propagate_attributes(prompt=prompt)` when several generations share it; JS `generation.update({ prompt })`. Once linked you get median latency, input/output tokens, cost, generation count and median score per prompt version for free, which is the chart you put in front of the customer when they ask whether last week's change helped. Also emit the version as a span attribute in your own OpenTelemetry pipeline so the same slice exists in Grafana and does not depend on one vendor.",
-   "minutes": 25,
-   "resource": {
-    "label": "Langfuse docs - Link prompts to traces (per-version metrics)",
-    "url": "https://langfuse.com/docs/prompt-management/features/link-to-traces"
-   }
-  },
-  {
-   "name": "Versioning the model and the decoding config with the prompt",
-   "learn": "A prompt version that does not carry its model and parameters is only two thirds of a configuration, and the missing third is where silent regressions live. Put the model id, temperature, max_tokens and any tool set into the prompt version's `config` object (Langfuse) or model-configuration block (MLflow) so a label move swaps text and settings atomically. Pin dated snapshots, never floating aliases, in anything a customer touches - a vendor rotating an alias underneath you produces a score change with no commit, and you will spend two days looking for a code cause that does not exist. Record the resolved model id returned in the API response next to the requested one, so you can prove after the fact which weights answered.",
-   "minutes": 20,
-   "resource": {
-    "label": "Langfuse docs - Prompt config (model and params on the version)",
-    "url": "https://langfuse.com/docs/prompt-management/features/config"
-   }
-  },
-  {
-   "name": "The longitudinal ledger: append-only history you can chart for a year",
-   "learn": "Treat run results as an append-only ledger, not a dashboard's cache: one immutable row per (run_id, case_id) with the full fingerprint denormalised onto it, written to object storage or a warehouse table you own, mirrored into whatever tool renders it. Content-hash datasets and archive rather than delete old versions, because a chart of score-over-time is meaningless the moment the measuring instrument changes without a marker - so plot vertical annotations for dataset version bumps, judge changes and model snapshot changes on the same axis. Guard against the classic silent break: a metric renamed from `recall` to `recall_macro` splits the series in two and the old half quietly stops updating, so assert metric-key stability in CI. Six months of this ledger is the single most persuasive artefact in a renewal conversation.",
-   "minutes": 20,
-   "resource": {
-    "label": "MLflow docs - GenAI version tracking",
-    "url": "https://mlflow.org/docs/latest/genai/version-tracking/"
-   }
-  },
-  {
-   "name": "The experiment script as a first-class CI artefact",
-   "learn": "Learn the `langfuse/experiment-action` script contract precisely because it is a good general shape: export a function `experiment(context: RunnerContext)`, call `context.run_experiment(name=..., task=..., evaluators=[...], run_evaluators=[...])`, pull the aggregate you gate on out of `result.run_evaluations` by name, and `raise RegressionError(result=result)` when it breaches the threshold. The distinction the action encodes is the one that matters operationally: a `RegressionError` (the system got worse) and a script crash (your harness is broken) are different failures with different owners, controlled by `should_fail_on_regression` and `should_fail_on_script_error`. Keep the script thin - dataset selection, task, evaluators, threshold, raise - and put everything reusable in a package that also runs from the CLI, so a red build is reproducible on a laptop with one command.",
-   "minutes": 25,
-   "resource": {
-    "label": "GitHub - langfuse/experiment-action (script contract, inputs, outputs)",
-    "url": "https://github.com/langfuse/experiment-action"
-   }
-  },
-  {
-   "name": "Wiring the gate into the workflow: triggers, permissions, outputs",
-   "learn": "Build the workflow deliberately: `on: pull_request` with path filters so unrelated PRs do not burn tokens, `permissions:` narrowed to `contents: read`, `pull-requests: write` (needed to post the result comment) and `actions: read` (so the comment links the specific job and matrix legs are distinguishable), and third-party actions pinned to a release commit SHA rather than a tag so a moved tag cannot execute new code against your customer's keys. Pass `experiment_path`, `dataset_name` and `dataset_version` explicitly - pinning the dataset version is what stops a dataset edit from masquerading as a prompt improvement - and forward `experiment_metadata` with your prompt version and model snapshot so the run is findable later. Capture `steps.<id>.outputs.result_json` and `outputs.failed`, write the JSON to an artifact with `actions/upload-artifact`, and make the smoke tier finish in under two minutes so nobody has a reason to bypass it.",
-   "minutes": 25,
-   "resource": {
-    "label": "GitHub Docs - Events that trigger workflows",
-    "url": "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows"
-   }
-  },
-  {
-   "name": "Choosing the baseline: production label, not main HEAD",
-   "learn": "The gate must compare the candidate against the version currently serving the customer - the run recorded for whatever `production` points at - not against the previous commit, or you get boiling-frog drift where three PRs each lose two points, each passes, and the system is six points worse with no red build in the history. Record `baseline_run_id` in the candidate run's tags so the comparison is auditable rather than recomputed and forgotten. Apply the paired-comparison discipline from topic 53 (same cases, McNemar or paired bootstrap, interval on the delta) rather than comparing two aggregate numbers, and set the failure threshold from a measured noise budget - run the unchanged system five times, take the spread, gate at roughly two sigma below the per-class floor. Gate the non-accuracy budgets in the same job: p95 latency, tokens per case and USD per thousand cases are regressions too.",
-   "minutes": 25,
-   "resource": {
-    "label": "Langfuse docs - Experiments via SDK (including testing in CI)",
-    "url": "https://langfuse.com/docs/evaluation/experiments/experiments-via-sdk"
-   }
-  },
-  {
-   "name": "Secrets, forks, cost and flakiness: keeping the gate cheap and safe",
-   "learn": "Know why the experiment step fails with an empty key on an external contributor's PR - `pull_request` runs from forks get no repository secrets - and know why the obvious fix is dangerous: `pull_request_target` runs in the base repo's context with secrets available, so checking out and executing PR code under it hands the customer's registry keys to an arbitrary contributor. Prefer a labelled or manually dispatched job for fork PRs. Control spend with `concurrency: { group: ..., cancel-in-progress: true }` so force-pushes do not stack full eval runs, a hard USD ceiling inside the harness that aborts rather than warns, response caching keyed on model plus rendered prompt plus params, and a small stratified smoke tier on PRs with the full set on `schedule`. Treat a re-run that passes as a signal, not a resolution: track flake rate per gate, because a gate that flakes twice gets demoted from required and then it is just a document.",
-   "minutes": 20,
-   "resource": {
-    "label": "GitHub Docs - Using secrets in GitHub Actions",
-    "url": "https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets"
-   }
-  },
-  {
-   "name": "Closing the loop from the UI: prompt-version webhook to repository_dispatch",
-   "learn": "A registry UI edit bypasses your PR gate entirely, so close that hole with an event path: Langfuse emits prompt-version events to an HTTPS endpoint with an HMAC signature; a small receiver verifies the signature (constant-time compare, reject on clock skew, dedupe on event id because delivery is at-least-once) and calls the GitHub REST `POST /repos/{owner}/{repo}/dispatches` with an `event_type` and a `client_payload` carrying the prompt name and version. The workflow triggers on `repository_dispatch`, runs the same experiment script against the new version, and writes the result back as a comment or a status - so an edit made in a customer workshop is measured within minutes without anyone opening an editor. Make the receiver idempotent and rate-limited: someone iterating in the playground will fire twenty version events in ten minutes.",
-   "minutes": 20,
-   "resource": {
-    "label": "Langfuse docs - Webhooks and Slack integrations for prompt events",
-    "url": "https://langfuse.com/docs/prompt-management/features/webhooks-slack-integrations"
-   }
-  },
-  {
-   "name": "Promotion and approval: who may move the pointer",
-   "learn": "Separate the right to create a version from the right to promote one - the whole safety property collapses if anyone who can edit text can also point `production` at it. Use protected labels where the platform offers them (Langfuse restricts modifying a protected label to admins and owners) and mirror the same control on the Git side with a GitHub environment carrying required reviewers and a wait timer on the promotion job, so promotion is a reviewed deployment with a record rather than a click. Emit a structured audit event for every pointer move - actor, prompt, from_version, to_version, run_id of the passing eval, timestamp, ticket - into the audit table from topic 30, because 'who approved this change' is a question that arrives in writing during the customer's first security review, not during the pilot.",
-   "minutes": 25,
-   "resource": {
-    "label": "GitHub Docs - Using environments for deployment (required reviewers)",
-    "url": "https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments"
-   }
-  },
-  {
-   "name": "Rollback as a rehearsed drill, and why it is never instant",
-   "learn": "Rollback is one operation - repoint `production` at the previous version (`update_prompt(name=..., version=N-1, new_labels=[\"production\"])` or `set_prompt_alias(..., alias=\"production\", version=N-1)`) - but treat the claim 'rolled back' as unproven until you can measure convergence. The tail is real: cache TTL on every process, stale-while-revalidate serving one more request per worker, in-flight requests, warm autoscaled pods that fetched at startup, and any CDN or gateway layer in front. Write the runbook with the actual numbers: trigger condition, the exact command, the verification query (count generations by prompt version over the last five minutes until the old version is zero), the expected convergence time from your TTL, and who to tell. Then rehearse it against staging with a stopwatch and put the measured number in the runbook - a rollback path first executed during an incident is a hypothesis, and drift-driven auto-rollback policy is topic 57's problem, not this one's.",
+   "name": "Splits, contamination and freezing a held-out test set",
+   "learn": "Split stratified into dev and test (roughly 60/40 at this size), iterate only against dev, and look at test only at release. Any example used as a few-shot in the production prompt or inside a judge prompt is banned from both splits - contamination here inflates the number you will quote to a customer. Keep a counter of how many times the test set has been evaluated: every look leaks information, and after twenty looks it is a dev set with a fancy name. Version the dataset (dataset_id plus a content hash recorded in every results file), rotate fresh production cases in quarterly, and archive rather than delete old versions so historical scores stay interpretable.",
    "minutes": 30,
    "resource": {
-    "label": "Google SRE Book - Release Engineering",
-    "url": "https://sre.google/sre-book/release-engineering/"
+    "label": "GitHub - openai/evals (eval registry, dataset and JSONL case format)",
+    "url": "https://github.com/openai/evals"
    }
   },
   {
-   "name": "Reproducibility six months on, and the changelog the customer reads",
-   "learn": "Test the property directly: pick a run from three months ago and replay it from its fingerprint alone. Enumerate what breaks it - a vendor deprecating a dated snapshot, a dataset edited in place instead of versioned, a judge prompt changed without a version bump, a `@latest` alias in a recorded config, a deleted branch taking the git SHA with it - and mitigate each (retention policy, content hashes, judge versioning, alias bans in serving code, tags not branches). Then render a human-readable prompt changelog straight from the ledger: date, version, one-line intent, who promoted it, the eval delta with its interval, and any rollback. That document is what you hand the customer at the QBR, and generating it from the run history rather than writing it by hand is what guarantees it is true.",
-   "minutes": 20,
+   "name": "Labelling guidelines, a single label owner, and a fast review UI",
+   "learn": "Write a one-to-two page guideline containing a decision procedure, a worked example at the boundary of every class, and explicit tie-break rules; version it in Git alongside the dataset. Name one principal domain expert who owns the label definition and settles disputes - labels defined by committee drift, and drifting labels silently move every metric. Build the fastest possible review surface: keyboard-only, one keystroke per class, input and model output side by side, writing straight into a table with labeller and timestamp. Do the arithmetic before you start: 200 cases at 30 seconds each is 100 minutes and will get done; at 3 minutes each it is 10 hours and will not.",
+   "minutes": 40,
    "resource": {
-    "label": "Langfuse docs - Releases and versioning",
-    "url": "https://langfuse.com/docs/observability/features/releases-and-versioning"
+    "label": "GitHub - HumanSignal/label-studio (annotation interfaces and label config)",
+    "url": "https://github.com/HumanSignal/label-studio"
+   }
+  },
+  {
+   "name": "Inter-annotator agreement and the ceiling it sets on your metrics",
+   "learn": "Double-label 20-30% of the set with a second annotator and compute Cohen's kappa - never raw percent agreement, because with 90% negatives two coin-flippers agree 82% of the time. Read the number as a verdict on your guideline, not on the annotators: below about 0.4 the guideline is broken and must be rewritten before another label is collected; 0.6-0.8 is workable; a suspiciously perfect 1.0 usually means you are labelling something trivial that did not need a model. Human-human agreement is the hard ceiling on any score you can claim for the model, so quote it in the report. Adjudicate every disagreement with the label owner and fold each resolution back into the guideline as a new worked example.",
+   "minutes": 35,
+   "resource": {
+    "label": "scikit-learn - sklearn.metrics.cohen_kappa_score",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.cohen_kappa_score.html"
+   }
+  },
+  {
+   "name": "Per-class metrics: confusion matrix, macro vs micro, support",
+   "learn": "Report a confusion matrix plus per-class precision, recall and F1 with support - a single blended accuracy on imbalanced data is a number that structurally cannot go down and therefore carries no information. Know precisely what the averages hide: macro-F1 weights every class equally so rare classes dominate the mean, micro-F1 equals accuracy in the single-label case, and weighted-F1 is the one that lets a broken rare class disappear behind a healthy common one. Use classification_report(y_true, y_pred, labels=ALL_CLASSES, zero_division=0) and always pass labels explicitly, otherwise a class the model never predicts silently vanishes from the table instead of showing as a row of zeros. For multi-label extraction, compute set precision/recall per document and micro-average across the corpus, and state which one you used.",
+   "minutes": 45,
+   "resource": {
+    "label": "scikit-learn User Guide - Metrics and scoring",
+    "url": "https://scikit-learn.org/stable/modules/model_evaluation.html"
+   }
+  },
+  {
+   "name": "Operating points: PR curve, cost-weighted thresholds, abstention",
+   "learn": "A scored classifier is not one system but a family of them; pick the operating point deliberately from a precision-recall curve computed on dev and confirm it on test, rather than inheriting whatever threshold the first prototype used. Choose it in the customer's cost units: for DefenderMate a missed critical finding is a breach-notification conversation while a false positive costs an analyst three seconds to dismiss, so gate on recall at a fixed acceptable precision and say so out loud. Add a third outcome - abstain and route to human review - and then always report coverage alongside accuracy-on-covered, because a system that answers 40% of cases perfectly is a different product from one that answers all of them. Check calibration before trusting any score: LLM verbal confidences are usually not calibrated probabilities, so bin them and plot observed correctness per bin before you threshold on 0.8.",
+   "minutes": 40,
+   "resource": {
+    "label": "scikit-learn - sklearn.metrics.precision_recall_curve",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.precision_recall_curve.html"
+   }
+  },
+  {
+   "name": "Confidence intervals and how many examples you actually need",
+   "learn": "Every eval score is an estimate from a sample, so report an interval with it: proportion_confint(count, nobs, method='wilson') rather than the normal approximation, which misbehaves near 0 and 1 and at small n. Internalise the scale so you can do it in a customer meeting: about 50 examples of a class gives roughly plus or minus 13 points at 95%, 200 gives about plus or minus 7, and resolving a 3-point difference needs thousands. The direct consequence is what your 200-case set can and cannot support - it can prove 'this class is badly broken' and 'this is broadly working at the level we agreed', but it cannot prove that 94.1% beats 92.8% on its own. Put n and the interval next to every number in every report, and refuse to ship a table without them.",
+   "minutes": 40,
+   "resource": {
+    "label": "statsmodels - proportion_confint (Wilson and other binomial intervals)",
+    "url": "https://www.statsmodels.org/stable/generated/statsmodels.stats.proportion.proportion_confint.html"
+   }
+  },
+  {
+   "name": "Comparing two systems: paired bootstrap, McNemar, multiple comparisons",
+   "learn": "Run both variants over identical cases and compare per-case outcomes rather than two independent aggregate scores; pairing removes case-difficulty variance and is exactly why n=200 can detect changes an unpaired comparison would need thousands for. For binary correctness use McNemar's test on the discordant cells (b = old right and new wrong, c = old wrong and new right), with the exact binomial version when b+c is under about 25 - note that the concordant cells contribute nothing, so a change touching 6 cases is weak evidence no matter how big the set. For any other metric, use a paired bootstrap: resample case indices with replacement 10,000 times, recompute the delta each time, and report the 2.5 and 97.5 percentiles. When you slice by twelve classes you are running twelve tests, so either apply Benjamini-Hochberg or state plainly that the slice view is exploratory.",
+   "minutes": 40,
+   "resource": {
+    "label": "statsmodels - McNemar test for paired nominal data",
+    "url": "https://www.statsmodels.org/stable/generated/statsmodels.stats.contingency_tables.mcnemar.html"
+   }
+  },
+  {
+   "name": "LLM-as-judge: the three modes, and when not to use one at all",
+   "learn": "Know the modes and their reliability ordering: pairwise comparison (A vs B, the most reliable signal and how arena-style rankings work, but yields no absolute number), reference-based grading (compare against a gold answer, closest to a deterministic check), and direct scoring against a rubric (most convenient, least stable). The governing rule: never use a judge where a deterministic check exists - exact and normalised match, set F1, JSON schema validity, regex must-contain/must-not-contain, SQL execution equality, or citation-span containment are all cheaper, free to run and perfectly reproducible. Judges earn their keep only on genuinely open-ended properties: is this summary faithful to the evidence, is the tone appropriate for a regulator, does this actually answer the question asked. Reject any request for an undefined 1-10 quality scale; a binary verdict with a written definition is both more reliable and more actionable.",
+   "minutes": 35,
+   "resource": {
+    "label": "Eugene Yan - Evaluating the Effectiveness of LLM-Evaluators (direct scoring vs pairwise vs reference-based)",
+    "url": "https://eugeneyan.com/writing/llm-evaluators/"
+   }
+  },
+  {
+   "name": "Writing the judge: one failure mode, binary rubric, critique-then-verdict",
+   "learn": "Build one judge per category in your failure taxonomy, each testing a single narrowly-defined criterion and returning pass/fail - a single omnibus 'quality' judge is unstable across runs and tells you nothing you can act on. Structure the prompt as role, the exact criterion with its boundary cases spelled out, then 3-6 few-shot examples drawn from your own human-labelled disagreements including near-miss failures, and force reasoning before commitment by ordering the output schema as {\"reasoning\": ..., \"verdict\": \"pass\"|\"fail\"} so the verdict token is generated after the critique. Give the judge exactly what a human reviewer needs and nothing more - input, output, and the reference if one exists - because extra context invites the judge to invent criteria. Pin the judge's model snapshot and version the judge prompt like any other prompt (topic 46): changing the judge retroactively changes every number you have ever reported.",
+   "minutes": 45,
+   "resource": {
+    "label": "Claude docs - Define your success criteria (test and evaluate)",
+    "url": "https://platform.claude.com/docs/en/test-and-evaluate/develop-tests"
+   }
+  },
+  {
+   "name": "Validating the judge against humans, and correcting its estimates",
+   "learn": "A judge is itself a classifier and must be evaluated as one: assemble a set of judge decisions with human ground truth, then compute per-class true positive rate and true negative rate plus Cohen's kappa against the human - not 'judge accuracy', which on a skewed set is meaningless. Iterate the judge prompt against this validation set until kappa clears a stated floor (0.7 is a reasonable target) and accept that you cannot beat your own human-human agreement. Once TPR and TNR are known you can debias the judge's estimate on unlabelled data with p_true = (p_observed - (1 - TNR)) / (TPR + TNR - 1), which is the difference between reporting a judge's opinion and reporting a measurement. Re-validate on a fresh 50-case sample whenever the judge model snapshot changes, the judge prompt changes, or the input distribution shifts - all three happen more often than teams expect.",
+   "minutes": 45,
+   "resource": {
+    "label": "Hamel Husain - Using LLM-as-a-Judge for Evaluation (critique shadowing: aligning the judge with a domain expert)",
+    "url": "https://hamel.dev/blog/posts/llm-judge/"
+   }
+  },
+  {
+   "name": "Judge pathologies: position, verbosity, self-preference, score clustering",
+   "learn": "Position bias in pairwise judging is large and systematic, so always run both orderings and count only the verdicts that survive the swap, treating flips as ties and reporting the flip rate as a health metric. Verbosity bias means longer answers score higher independent of quality, so either control for length or report token counts next to scores. Self-preference means a model favours its own generations, so never let the same model family be both generator and judge for a release decision - use a different vendor or at minimum a different family and say which in the report. Score clustering is why 1-10 rubrics fail in practice: judges pile verdicts on 7 and 8 and never use the extremes, so a two-point 'improvement' is inside the noise; this is the strongest practical argument for binary rubrics.",
+   "minutes": 35,
+   "resource": {
+    "label": "arXiv - Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (Zheng et al.)",
+    "url": "https://arxiv.org/abs/2306.05685"
+   }
+  },
+  {
+   "name": "Graders for retrieval and open-ended output",
+   "learn": "Decompose a RAG answer into separately measurable properties instead of grading it as one blob: retrieval quality (recall@k, MRR, nDCG against a labelled query-to-chunk set), groundedness/faithfulness (split the answer into atomic claims and check each against the retrieved context), answer relevance, and context precision. Prefer mechanical citation checking where you can get it - require the model to emit chunk ids and verify the quoted span appears verbatim in that chunk - over asking a judge whether the text 'is faithful'. This decomposition is what lets you attribute a score drop to the retriever rather than the prompt, which ties directly back to topic 49; without it you will spend a week rewriting a prompt to fix a chunking bug.",
+   "minutes": 35,
+   "resource": {
+    "label": "GitHub - explodinggradients/ragas (RAG evaluation metrics)",
+    "url": "https://github.com/vibrantlabsai/ragas"
+   }
+  },
+  {
+   "name": "The harness: promptfoo config, caching, and a results schema you own",
+   "learn": "Learn the promptfoo config surface: providers, prompts, tests with vars and assert blocks, assertion types (equals, contains, is-json with a schema, javascript/python custom asserts, llm-rubric and model-graded variants), defaultTest for shared assertions, and per-test thresholds. Drive it with promptfoo eval -c evals/classifier.yaml --output results.json, use --no-cache for the authoritative pre-release run, and promptfoo view for local triage of individual failures. Whatever tool you pick, insist on the same invariants: one row per case in the results file (case id, class, expected, actual, each assertion outcome, tokens, latency, USD), deterministic case ordering, response caching keyed on model plus rendered prompt plus params, bounded concurrency with backoff on 429, and a hard spend ceiling that aborts the run. Emit your own stable results.jsonl schema on top of whatever the tool produces, so your reporting and history survive migrating harnesses - which you will do at least once.",
+   "minutes": 40,
+   "resource": {
+    "label": "promptfoo documentation - Introduction",
+    "url": "https://www.promptfoo.dev/docs/intro/"
+   }
+  },
+  {
+   "name": "The CI gate: tiers, per-class floors, noise budget, and staying required",
+   "learn": "Run two tiers: a smoke suite of about 30 stratified cases finishing in under two minutes as a required check on pull_request behind path filters, and the full 200-case suite nightly on schedule plus workflow_dispatch. Gate on per-class floors and per-class deltas rather than a global mean - fail when any class's recall falls more than two sigma below its baseline, where sigma comes from actually running the suite five times against an unchanged system rather than from a number someone liked. Gate the non-accuracy budgets in the same job: p95 latency, tokens per case, and USD per 1,000 cases, so a change that doubles cost fails like any other regression. Make the failure legible - sticky PR comment with the per-class table, the delta against baseline, and the ids of the cases that flipped in each direction, plus results.jsonl as an artifact - because an unexplained red X gets overridden twice and then removed from required checks, and a gate that is not required is a runbook paragraph.",
+   "minutes": 45,
+   "resource": {
+    "label": "GitHub Actions documentation",
+    "url": "https://docs.github.com/en/actions"
+   }
+  },
+  {
+   "name": "The production loop: online scoring, review queue, uncertainty sampling",
+   "learn": "An offline set decays the moment the customer changes what they send you, so sample production continuously: run the cheap judges online over a 1-5% sample plus 100% of high-risk classes, attach the scores to the trace, and alert on the failure rate over a window rather than on individual failures. Build a human review queue prioritised by uncertainty (scores near the operating threshold), disagreement (judge versus deterministic check, or two models disagreeing), and business impact - and make every human decision write a new labelled case with source='review_queue', which is how the eval set grows without a labelling sprint. Instrument implicit feedback as well as explicit: whether the analyst edited the draft and by how much, dismissed the finding, or escalated it, because thumbs up/down has both terrible response rates and worse calibration. Drift detection and the rollout mechanics live in topics 57 and 58; here you are building the label supply that feeds them.",
+   "minutes": 40,
+   "resource": {
+    "label": "Langfuse docs - Annotation Queues (prioritised human review of production traces)",
+    "url": "https://langfuse.com/docs/evaluation/evaluation-methods/annotation-queues"
+   }
+  },
+  {
+   "name": "The eval report the customer can forward to their exec",
+   "learn": "Write one page that an engineering lead and a non-technical sponsor can both read: what was measured, on how many examples, sampled how and from what window; a per-class table with precision, recall, support and 95% intervals; the confusion matrix; the top three failure categories with counts and one real example each; what changed since the last report; and an explicit section on what is not measured. State the chosen operating point and the human-agreement ceiling, so nobody expects 99% from a task where two experts agree 85% of the time. Frame the target as an SLO with an error budget rather than a promise of perfection - that framing is what converts an argument about a single bad output into a conversation about a budget - and never publish a number without n and an interval beside it.",
+   "minutes": 30,
+   "resource": {
+    "label": "Google SRE Book - Service Level Objectives",
+    "url": "https://sre.google/sre-book/service-level-objectives/"
    }
   }
  ],
  "outcomes": [
-  "You can stand up a prompt registry with immutable versions and environment labels, and show the same prompt served to staging and production from two different versions with zero code differences between the two deployments.",
-  "You can make a pull request fail on an eval regression using langfuse/experiment-action, with the PR comment showing the score, the baseline it was compared against, and the result JSON attached as an artifact.",
-  "You can produce, from a run id alone, the prompt version, model snapshot, decoding params, dataset hash, judge version and git SHA that produced any number you have ever reported.",
-  "You can slice production traffic by prompt version and show median latency, token counts, cost and score per version, then point at the exact hour a version was promoted.",
-  "You can execute a rollback by moving one label, and state a measured convergence time backed by a query showing generations on the old version falling to zero.",
-  "You can explain and demonstrate why a fork PR cannot run the eval gate, and show a workflow that handles it without ever exposing the registry keys via pull_request_target.",
-  "You can wire a registry UI edit to a CI eval run through a signature-verified webhook and repository_dispatch, so a prompt changed by a non-engineer is scored within minutes.",
-  "You can generate a customer-facing prompt changelog directly from the run ledger, with per-change eval deltas and intervals, and defend every line of it."
+  "You can produce a 200-case labelled set for DefenderMate with a written sampling frame, at least 20% double-labelled, a reported Cohen's kappa, and every case carrying source, labeller and labelled_at provenance.",
+  "You can report per-class precision, recall and F1 with support and 95% Wilson intervals plus a confusion matrix, and can explain in one sentence why you refuse to answer 'what's the accuracy?' with a single number.",
+  "You can state whether the difference between two prompt or model versions is real: paired run over identical cases, McNemar or paired bootstrap, an interval on the delta, and the sample size that would be needed to detect the effect the customer cares about.",
+  "You can build an LLM judge for one named failure mode and show its TPR, TNR and kappa against human labels on a held-out set of judge decisions, then quote the bias-corrected estimate rather than the raw judge pass rate.",
+  "You can make CI fail a pull request on a per-class recall regression beyond two sigma, with the flipped case ids named in the failure output and a sticky per-class score comment, with the smoke tier finishing under two minutes.",
+  "You can run an error-analysis session over 50 real traces and finish with a counted, mutually exclusive failure taxonomy in which the top two categories account for the majority of errors, each with an assigned disposition.",
+  "You can choose and defend an operating point from a precision-recall curve in the customer's cost units, including an abstain path, and report coverage next to accuracy-on-covered.",
+  "You can hand the customer a one-page eval report they forward to their exec unedited, including the section listing what is explicitly not measured."
  ],
  "failureModes": [
-  "A solutions consultant edits the prompt in the registry UI during a customer workshop and saves it onto the production label; no eval runs, the added examples double the token count, and the change is discovered a week later in the cost report rather than in CI.",
-  "The application calls get_prompt once at module import in a long-lived worker, so the fetched version is pinned for the process lifetime and every rollout and rollback silently does nothing until the next restart.",
-  "Rollback moves the label and everyone declares the incident over, but stale-while-revalidate plus a 60-second TTL plus warm pods that prefetched at startup means part of the fleet serves the bad version for another cache cycle, and the graph keeps showing failures nobody can explain.",
-  "The gate compares each PR against main HEAD instead of the version currently labelled production, so three individually-passing changes drift the score down eight points with no red build anywhere in the history.",
-  "A prompt change and a dataset edit land in the same afternoon, the delta is uninterpretable because two things moved, and the team burns a day arguing about a number that no longer means anything.",
-  "The eval step silently no-ops on external contributor PRs because forks get no secrets, someone switches the trigger to pull_request_target to fix it, and now arbitrary PR code executes with the customer's registry and model API keys in scope.",
-  "Serving code resolves prompts:/finding-summary@latest and the registry sits on the request path with no compiled-in fallback, so an engineer's laptop can ship an unreviewed draft into the customer's tenant and a two-minute SaaS blip becomes a full outage of the customer-facing feature."
+  "The eval set was assembled from cases the current system already passes, so it reads 97% every run, provides zero signal on every pull request, and the first genuinely new failure is still discovered by the customer's analyst.",
+  "A single blended accuracy figure hides that the rarest and most contractually important class has recall of 0.3 on 11 examples, and it stays hidden until the quarterly review when someone asks for the breakdown.",
+  "The judge is written, eyeballed on five examples and shipped without ever being scored against human labels, so a 'faithfulness: 92%' number goes into a QBR deck while the judge is in fact passing every fluent answer regardless of evidence.",
+  "The judge model is silently upgraded or its prompt is tweaked mid-quarter, so every historical score shifts and the longitudinal improvement chart in the customer report is entirely an artefact of the measuring instrument.",
+  "Two annotators labelled without a written guideline, kappa comes out at 0.35, and three weeks of prompt iteration turns out to have been fitting noise in the labels rather than improving the system.",
+  "Test-set cases leak into the production prompt's few-shot block (or into the judge's few-shots), so the headline score is measured on the system's own worked examples and does not survive contact with the customer's next batch of documents.",
+  "The CI gate is set exactly at the baseline with no noise allowance, produces four false failures in a fortnight, gets quietly removed from required checks, and now the only thing standing between a prompt edit and the customer's production data is code review."
  ],
  "interviewQuestions": [
-  "Your customer wants their compliance analyst to be able to change the wording of a generated summary without waiting for an engineering deploy. Design the whole path: where the text lives, who can promote it, what runs before it reaches production, and what happens when it turns out to be wrong at 4pm on a Friday.",
-  "You move the production label back to the previous prompt version and tell the customer the rollback is done. Their dashboard still shows failures for another eight minutes. Explain every mechanism that could cause that, and how you would have known the number in advance.",
-  "Walk me through the fingerprint you record for a single eval run, field by field, and for each field tell me the specific bug that field exists to catch.",
-  "A team hands you a repo where prompts live in Git and are also editable in a registry UI, and both are 'the source of truth'. Describe the failure this guarantees, and what you would change in what order - given you cannot take the UI away from the customer.",
-  "Design the CI gate for prompt changes on a customer-facing extraction pipeline: what triggers it, what it compares against, where the thresholds come from, how much it costs per week, and what specifically stops the team from marking it non-required after the third false failure.",
-  "Six months into a deployment the customer asks you to reproduce the accuracy number from your Q2 report. Tell me exactly what you need to have stored to do that, what commonly makes it impossible, and what you would say if you could not reproduce it.",
-  "You inherit a system where prompt changes are deployed via a UI, evals exist but run manually and nobody remembers the last result, and the model id in config is a floating alias. Rank the fixes and justify the ordering to a customer who is asking why you are not shipping features this sprint."
+  "A customer asks 'how do you know your classifier works?' You have two weeks and one domain expert who can give you four hours total. Walk me through exactly what you build, in what order, what number you put in front of them at the end, and what you explicitly refuse to claim.",
+  "Your eval says 94% accuracy and the customer's analysts say it's wrong all the time. Both statements are true. Explain how that happens mechanically, and tell me how you find out which of the two matters for renewal.",
+  "Design an LLM-as-judge for 'is this finding summary faithful to the retrieved evidence'. Then convince a sceptical staff engineer that the judge itself is trustworthy - and tell me what you do if it agrees with your human labeller only 65% of the time.",
+  "You change a prompt and the score moves from 91.5% to 93.0% on 200 labelled cases. Is that an improvement? Show me the actual arithmetic that answers it, and tell me what would be different in your answer if the move had been 91.5% to 96.0%.",
+  "Design the eval CI gate for a customer-facing extraction pipeline end to end: what runs on every PR versus nightly, what the thresholds are and how you derived the numbers, what stops it costing four hundred dollars a day, and what specifically prevents the team from marking it non-required after the third false failure.",
+  "You inherit a system with no evals, no labels and 40,000 stored production traces. What do you do on day one? Be concrete about how you sample, what you write down, who you sit with, and what artefact you have at the end of the week.",
+  "The customer wants a single 'quality score' out of 10 on their dashboard, refreshed daily. Explain what you push back on, what you offer instead, and how you make whatever number you do publish stable enough to trend over six months without the instrument itself drifting."
  ],
- "proofOfWork": "A public repository, `prompt-registry-ci`, that demonstrates the full loop against a self-hosted registry brought up by `docker compose up` so a reviewer needs no vendor account and no API key - the model calls run against a recorded-fixture provider by default. It contains a `prompts/` package whose only public surface is `get(name, env)` returning a compiled prompt plus its resolved version, model snapshot and decoding config, with a compiled-in fallback template and a unit test that asserts the process still serves a prompt when the registry is unreachable and that no call site anywhere resolves `@latest`. The CI workflow runs the eval gate on `pull_request` with path filters, third-party actions pinned to release SHAs, `concurrency: cancel-in-progress`, a hard USD ceiling in the harness, and a `repository_dispatch` twin triggered by a signature-verifying webhook receiver (`receiver/`, with tests for HMAC verification, replay dedupe and rate limiting) so a version created in the registry UI is scored without a PR. The repository history is the evidence: one merged PR where the gate passed with the paired delta and interval in the comment, one PR where it failed on a per-class floor with the flipped case ids named and the baseline run id shown, and one commit reverting a promoted version. `RUNBOOK.md` documents the rollback with the real measured convergence time from a rehearsal (stopwatch value, the verification query counting generations by prompt version, and the graph before and after), and `scripts/changelog.py` renders `CHANGELOG.md` - date, version, intent, promoter, eval delta with interval, rollbacks - purely from the append-only run ledger in `runs/`, with a CI check that fails if the committed changelog differs from the regenerated one, so the customer-facing document cannot drift from the runs that produced it."
+ "proofOfWork": "A public repository, `defendermate-evals`, that a stranger can clone and run end to end in five minutes with `make eval` against a recorded-response fixture mode requiring no API key, so a reviewer can reproduce every number in the README for free. It contains the frozen 200-case dataset as JSONL with the schema above (real cases scrubbed or synthesised, `source` distinguishing production, bug-report and adversarial origins), the versioned `LABELLING_GUIDE.md` with worked boundary examples, and an `agreement/` directory holding the double-labelled subset plus the script that computes Cohen's kappa and prints the adjudication log for every disagreement. It ships the failure taxonomy as `TAXONOMY.md` with counts from a real open-coding session over 50 traces and a disposition column mapping each category to a deterministic assertion, a judge, or a documented limitation; a `judges/` package with one binary judge per open-ended category, each pinned to a dated model snapshot and accompanied by its own validation set of human-labelled judge decisions and a reported TPR/TNR/kappa table plus the bias-corrected pass rate; and a `stats.py` implementing Wilson intervals, McNemar and the paired bootstrap, with a test that fails if any published number in the README lacks an interval. The GitHub Actions workflow runs the 30-case smoke tier on `pull_request` behind path filters and posts a sticky per-class delta comment, with the repository history showing at least one real PR where the gate failed on a single class's recall, the comment naming the flipped case ids, and the follow-up commit that fixed it. Finally, `REPORT.md` is the customer-facing one-pager - per-class table with support and intervals, confusion matrix, top three failure categories with examples, the human-agreement ceiling, the chosen operating point and coverage, and a 'what this does not measure' section - rendered from the results file by a script, so it can never drift from the run that produced it."
 }

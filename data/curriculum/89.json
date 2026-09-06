@@ -1,0 +1,191 @@
+{
+ "i": 89,
+ "topic": "Hermes write-up and LinkedIn positioning",
+ "track": "L. Portfolio, Positioning, Pipeline",
+ "month": 3,
+ "hours": 4,
+ "why": "FDE hiring is a trust problem before it is a skills problem: the manager has to believe you can be put in front of someone else's infrastructure, with their credentials and their risk, and not break it. A public write-up of an agent you actually operate - what it is allowed to execute, what stopped it, what it cost, what broke at 03:00 - is the cheapest way to transfer that belief before the loop starts, because it is the same artifact you would hand a customer's platform team during a pilot review. The profile is the index for it: if a recruiter's search never returns you, or the headline says 'full-stack developer', the write-up is a good essay nobody with hiring authority ever reads.",
+ "prerequisites": [
+  "A Hermes agent you actually run on a box you own - container up, gateway responding, at least one cron job that has been firing for a few weeks - not a local demo. The deep operational pass on this system is topic 52 in month 6; this topic publishes the version you have now.",
+  "Shell, SSH and Docker fluency (topics 0, 1 and 5): you can read journalctl and docker logs, inspect a running container, and describe the host's firewall rules from memory.",
+  "Working knowledge of MCP servers and tool schemas (topic 47), enough to explain your HubSpot server's tool surface and which calls are read-only.",
+  "A publishing surface you control - rasul.in building and deploying, with the ability to add a route, dates, an OG image and a feed - plus the case-study template and the site work from topic 80 in month 2.",
+  "Secrets hygiene from topic 62: you know the difference between removing a key and rotating it, and you can scan git history rather than only the working tree.",
+  "Three to five hard numbers you can substantiate from logs or a provider dashboard: jobs run per day, success rate, per-job token and dollar cost, wall-clock latency, host cost per month."
+ ],
+ "subtopics": [
+  {
+   "name": "Fix the one claim and the one reader before writing a word",
+   "learn": "Write a single sentence of the form 'reader X should believe Y after reading this' and keep it above the draft. Here the reader is a hiring manager or platform lead deciding whether you can be trusted to put an autonomous agent inside someone else's perimeter, and the claim is operational, not architectural - something like 'a self-hosted agent with shell and CRM access can run unattended for weeks if you constrain it exactly this way, and here is the bill.' Reject the two default framings that produce forgettable posts: the tutorial ('how to install Hermes') and the tour ('here is my setup'). Test it by asking whether a competent engineer could disagree with the sentence; if nobody could, it is a description, not a claim.",
+   "minutes": 15,
+   "resource": {
+    "label": "Google Technical Writing One - Audience",
+    "url": "https://developers.google.com/tech-writing/one/audience"
+   }
+  },
+  {
+   "name": "Reconstruct ground truth from logs before you write prose",
+   "learn": "Assemble the evidence first into one scratch file of dated facts: git log of the config repo, the current config.yaml and jobs.json, docker logs and journalctl for the last 30 days, hermes doctor output, the model provider's usage page for tokens and dollars, and the date of every incident (container OOM, HubSpot 429s, a cron that stopped firing, a context blowup). Writing first and looking up numbers afterwards is how you end up publishing 'roughly 5x faster'. Mark every fact you cannot substantiate - those become sentences you delete, not sentences you hedge.",
+   "minutes": 20,
+   "resource": {
+    "label": "NousResearch/hermes-agent",
+    "url": "https://github.com/NousResearch/hermes-agent"
+   }
+  },
+  {
+   "name": "The spine: constraint, options, decision, mechanism, result, regret",
+   "learn": "Use the ADR shape (context / decision / consequences) stretched to narrative length, and outline all six sections as bullets before drafting. For this piece: the constraint (an agent that reaches a live CRM and must run on infrastructure you control), the two or three options actually on the table (a hosted agent platform, an agent framework you assemble yourself, Hermes), what you chose and the trade-off you accepted, how it works at the level of config keys and tool names, what it produced with numbers, and what you would do differently. The regret section is not optional - the honest cost you paid is what makes a reader trust the rest of the document.",
+   "minutes": 15,
+   "resource": {
+    "label": "Architecture Decision Records - adr.github.io",
+    "url": "https://adr.github.io/"
+   }
+  },
+  {
+   "name": "Write the blast-radius section first - it is the part that gets you hired",
+   "learn": "The section that separates an operator from a demo is the one stating exactly what the agent may execute and what stops it: the terminal backend and the container limits it runs under, the approvals policy and hardline blocklist, the file-write allowlist, the MCP tools.include allowlist that keeps the HubSpot server read-only except for one confirm-gated write path, and what authenticates the gateway. Then state the threat you did not close: text arriving from the CRM is model input, so an instruction planted in a note reaches whatever tools remain enabled. Name concretely what an attacker gets in each case rather than asserting that it is 'sandboxed'.",
+   "minutes": 20,
+   "resource": {
+    "label": "Model Context Protocol - documentation",
+    "url": "https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro"
+   }
+  },
+  {
+   "name": "Numbers that survive a skeptical staff engineer",
+   "learn": "Every claim states baseline, method, window, sample size and percentile. Concretely: host spec and monthly cost, jobs executed per day over N days, success rate with success explicitly defined, p50/p95 wall clock per job, tokens in and out and dollars per job by model pin, and the cost delta after context compression or model routing. Never a bare average for latency and never 'reliable' without a denominator. Frame delivery against a stated objective - 'the 07:00 digest arrived on 27 of 30 days, the three misses were HubSpot rate limits' - rather than a nine-count, and label any figure that came from a single manual run.",
+   "minutes": 20,
+   "resource": {
+    "label": "Google SRE Book - Service Level Objectives",
+    "url": "https://sre.google/sre-book/service-level-objectives/"
+   }
+  },
+  {
+   "name": "One diagram, one level, with the trust boundary drawn",
+   "learn": "Draw a single system-context diagram: caller to gateway, gateway to the Hermes container, container to the model provider, container to your HubSpot MCP server, MCP server to the HubSpot API, plus the cron scheduler - with the host you control as an explicit dashed boundary and every arrow labelled with protocol and who initiates. Stay at one C4 level; mixing a container, a Python class and a cloud account in one picture is the most common diagram failure. Author it as Mermaid inside the repo so it cannot drift from the config, caption it with its claim ('everything inside the dashed box runs on hardware you control'), and put the same content in the alt text.",
+   "minutes": 15,
+   "resource": {
+    "label": "The C4 model for visualising software architecture",
+    "url": "https://c4model.com/"
+   }
+  },
+  {
+   "name": "The companion repo: make the claim reproducible in one command",
+   "learn": "The write-up is only as credible as the artifact it links to. Ship a public repo with a version-pinned compose file, a redacted and diffable config.yaml, jobs.json, and a bootstrap target that takes a bare instance to a responding gateway. Tag a release and link the tag, never main, so the commands in the post cannot drift under you. Make every command copy-pasteable: no leading dollar sign inside the copy region, placeholders as <HUBSPOT_TOKEN>, long flags rather than short ones, and the expected output shown immediately after. Run the entire sequence on a clean instance before publishing.",
+   "minutes": 15,
+   "resource": {
+    "label": "GitHub Docs - Repositories",
+    "url": "https://docs.github.com/en/repositories"
+   }
+  },
+  {
+   "name": "Redaction, rotation, and not publishing an attack surface",
+   "learn": "Run a secret scan over the full git history, not just the working tree, before the repo goes public - a clean HEAD means nothing if a token sat in commit 40. Anything that ever appeared (HubSpot private app token, model provider key, gateway bearer) is burned: rotate it, do not blur it or rewrite history and hope. Strip host identifiers from prose and screenshots - public IP, SSH port, gateway hostname, the portal ID inside HubSpot URLs, shell prompts, internal email addresses. Assume that publishing the gateway path means scanners arrive within hours, so verify the firewall exposes only what you intend and that auth is enforced before the post goes live, not after.",
+   "minutes": 15,
+   "resource": {
+    "label": "gitleaks - secret scanning for git repos",
+    "url": "https://github.com/gitleaks/gitleaks"
+   }
+  },
+  {
+   "name": "Publishing mechanics: title, slug, canonical, card, dates",
+   "learn": "Ship with a title that states the specific claim rather than the topic, a TL;DR paragraph above the fold carrying the headline numbers, a stable slug you will never change, a canonical link tag, and both published and updated dates. Add og:title, og:description and a real og:image so the link renders as a card in LinkedIn and Slack instead of a bare URL; unfurls are cached aggressively, so get the tags right before the first share and force a refresh with the platform's own post inspector if you change them afterwards. Confirm the page is statically generated or server-rendered so crawlers and unfurlers see the text.",
+   "minutes": 15,
+   "resource": {
+    "label": "The Open Graph protocol",
+    "url": "https://ogp.me/"
+   }
+  },
+  {
+   "name": "Headline and About: what a recruiter's boolean search actually matches",
+   "learn": "Recruiters search literal strings across the headline, About and experience fields, so the headline (220 characters) must contain the exact title you are targeting - 'Forward Deployed Engineer' - plus two or three systems words that filter you in (agents, LLM, Kubernetes, Python) and zero adjectives. About allows 2,600 characters but is read through the first two lines before 'see more', so open with the claim, not the origin story, then three short blocks: what you deploy, evidence with numbers, what you are looking for. Ban 'passionate', 'results-driven', emoji bullets and third person. Turn off 'Share profile updates with your network' in settings before you start editing.",
+   "minutes": 20,
+   "resource": {
+    "label": "LinkedIn Help - Use Boolean search on LinkedIn",
+    "url": "https://www.linkedin.com/help/linkedin/answer/a524335"
+   }
+  },
+  {
+   "name": "Experience entries that read like delivery, not employment",
+   "learn": "Give each role a one-line scope statement, then three to five bullets in the shape: shipped X under Y constraint, by this mechanism, with this measured result. Reuse the exact numbers from the write-up so the two documents corroborate each other rather than contradicting each other in a screening call. The title field drives filters more than the bullets do - keep the legal title and put the functional description in the scope line rather than inventing 'Forward Deployed Engineer' for a role that was not one. Compress anything older than about eight years to a single line, and run the same sentence surgery you would run on a doc: active voice, no nominalisations, no vague quantifiers.",
+   "minutes": 20,
+   "resource": {
+    "label": "Federal Plain Language Guidelines",
+    "url": "https://digital.gov/guides/plain-language"
+   }
+  },
+  {
+   "name": "Featured, Skills, custom URL, and the open-to-work decision",
+   "learn": "Featured is the only place a profile reader clicks through from, so pin exactly three items in order - the Hermes write-up, the tagged repo, one case study from month 2 - each with a rewritten one-line description rather than the auto-pulled meta text. Skills feed matching, so order them deliberately, lead with the ones you would be filtered on, and delete anything you would not defend under questioning. Set the custom URL, a banner that is not a stock gradient, and a real headshot. Then decide consciously between the recruiter-only open-to-work signal and the public photo frame: the public frame produces more inbound and is visible to everyone you currently work with.",
+   "minutes": 15,
+   "resource": {
+    "label": "LinkedIn Help - Let recruiters know you're Open to Work",
+    "url": "https://www.linkedin.com/help/linkedin/answer/a507508"
+   }
+  },
+  {
+   "name": "The launch post: 3,000 characters, only the first three lines matter",
+   "learn": "The post is not the write-up. Write roughly 150 words: line one is the surprising number or fact, then three or four short lines on what you built and what broke, then one line inviting a specific disagreement, then the link. Truncation hits after a couple of lines on mobile, so nothing load-bearing goes below the fold. Two or three hashtags maximum, no 'thoughts?' bait, and no asking people to comment for the link. Post once rather than as a series - a second post two weeks later about the thing you got wrong outperforms reposting the same URL.",
+   "minutes": 15,
+   "resource": {
+    "label": "Google Technical Writing Two",
+    "url": "https://developers.google.com/tech-writing/two"
+   }
+  },
+  {
+   "name": "Distribution: five venues, fifteen direct sends, zero flame wars",
+   "learn": "Publishing is not distribution. Choose venues where the reader lives - LinkedIn, the project's own GitHub discussions or community, one relevant subreddit, X, and direct one-to-one sends to ten to fifteen named people (former colleagues, hiring managers, anyone visibly doing agent deployments) with one sentence saying why you thought of them. The direct sends produce nearly all of the useful replies. On community forums use the plain descriptive title, never editorialised bait, read the venue's rules first, and be present for the first few hours to answer substantively. When someone finds a real error, fix the post, add a dated correction note and thank them; when someone is merely hostile, do not reply.",
+   "minutes": 15,
+   "resource": {
+    "label": "Hacker News guidelines",
+    "url": "https://news.ycombinator.com/newsguidelines.html"
+   }
+  },
+  {
+   "name": "Instrument the funnel and read signal, not vanity metrics",
+   "learn": "Before publishing, confirm the page is indexed and that your name plus 'forward deployed' surfaces both the profile and the post; add the URL to the sitemap and check coverage in Search Console. Afterwards, the metrics that matter are which companies and titles viewed the profile in the two weeks following the post, how many inbound messages named the write-up specifically, and whether anyone you do not know forwarded it - not impressions and not reactions. Log every inbound with its source and outcome in a sheet, because that is the seed of the target list and pipeline work in the following months.",
+   "minutes": 15,
+   "resource": {
+    "label": "Google Search Central - documentation",
+    "url": "https://developers.google.com/search/docs"
+   }
+  },
+  {
+   "name": "Keep it from rotting: version pins, a verified-against line, a cadence",
+   "learn": "A deployment write-up starts decaying the moment the agent, the MCP spec or the HubSpot API changes. Pin the version everywhere it appears, put a dated 'verified against vX.Y on <date>' line at the top, and hold a 30-minute block each month to re-run the bootstrap on a clean instance and either update the post or add a note. Watch the upstream repo for releases so you learn about breaking changes before a reader does, and run a link checker on a schedule rather than only on push. Add an issue template inviting reproduction reports - an issue from a stranger who actually ran your repo is the strongest hiring signal the artifact can generate.",
+   "minutes": 10,
+   "resource": {
+    "label": "Semantic Versioning 2.0.0 specification",
+    "url": "https://semver.org/spec/v2.0.0.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can state in one sentence the claim the write-up makes and name the kind of engineer who would plausibly disagree with it.",
+  "You can defend every number in the piece - baseline, method, window, sample size, percentile - and point at the log line, command or dashboard each one came from.",
+  "You can describe the agent's blast radius in under two minutes: what it may execute, what the approvals policy and tool allowlist block, what authenticates the gateway, and what a prompt injection arriving through a CRM note would still reach.",
+  "You can hand someone a tagged repo and have them go from a bare instance to a responding gateway with one command, with a clean secret scan over the full git history and every previously exposed credential rotated.",
+  "You can show a profile whose headline contains the exact target title, whose About makes the claim in its first two lines before truncation, and whose Featured section pins the write-up, the repo and one case study in that order.",
+  "You can name the ten to fifteen people you sent the piece to directly, the one-line note you used, and what each replied.",
+  "You can produce a two-week readout showing profile views by company and title, inbound messages that referenced the write-up by name, and at least one forward from someone you do not know.",
+  "You can re-run the published commands on a clean instance and show they still work, or show the dated correction note where they did not."
+ ],
+ "failureModes": [
+  "A HubSpot private-app token sat in an early commit of the config repo, the working tree scan passes, the repo goes public, and the key is scraped and used before you notice.",
+  "The write-up covers only the happy path, the first serious comment asks what happens when the model decides to run a destructive shell command, and with no answer in the post the whole thing reads as a demo.",
+  "The commands link to main instead of a tag, an upstream release renames a config key two weeks later, and every new reader fails at step three while the top comment is a stack trace.",
+  "The profile rewrite happens with 'Share profile updates with your network' still enabled, so the entire network - including the current employer - gets notified line by line that you are repositioning.",
+  "The headline stays 'Full-Stack Developer | React | Node | Python', so every recruiter search for 'forward deployed' or 'solutions architect' misses the profile no matter how good the write-up is.",
+  "A terminal screenshot leaves the host IP, gateway hostname and shell prompt visible, and scanners find the exposed port before the post is 24 hours old.",
+  "The post goes out cold with no direct sends, collects a few hundred impressions from people who cannot hire you, and the conclusion drawn is that writing does not work rather than that distribution never happened."
+ ],
+ "interviewQuestions": [
+  "Walk me through the deployment in your write-up. What would you refuse to run that way for a customer with a SOC 2 audit next quarter, and what would you put in its place?",
+  "Your agent has shell access and a CRM it can write to. Draw the blast radius. If I get an injected instruction into a record the agent reads, what do I actually get, and what stops me?",
+  "The scheduled job silently stopped delivering three days ago and nobody noticed. Walk me through detection and diagnosis using only what is on that box, then tell me what you would add so the third day never happens again.",
+  "A customer wants exactly this, inside their VPC, with no egress to a hosted model provider and their own SSO in front of it. What in your design survives, what has to be replaced, and what is the first thing you tell them they cannot have?",
+  "Your post claims a specific cost and latency per job. I am skeptical. Tell me how you measured it, what the sample was, and what you did not control for.",
+  "Your titles have been engineering titles, but your profile and this post position you as a forward deployed engineer. Make the case for the jump - what have you shipped that is FDE work rather than backend work?",
+  "You are the first FDE we hire and we want the team publishing deployment write-ups. Design the process: what gets written, who reviews it, what the confidentiality and security gates are, and how you stop it becoming marketing."
+ ],
+ "proofOfWork": "Beyond the live write-up and the updated profile, build a dated positioning readout - a single page written to be shown to an interviewer, closing the loop between what you published and what it caused. It contains four parts. First, the before and after of the profile as screenshots plus an explicit diff of headline, About opener, job titles and Skills order, with one line on why each change was made. Second, the exact list of the ten to fifteen people you sent the piece to directly, the one-sentence note used for each, and the reply. Third, a two-week funnel table from profile-view and post analytics: viewers by company and title, inbound messages that named the write-up, forwards from strangers, and the referral conversations that resulted, each row carrying an outcome so it can be pasted straight into next month's target sheet. Fourth, an objection ledger with one row per hard question the piece received - the question, whether it exposed a real gap in the deployment or only in the writing, the paragraph or config change made in response, and the commit or edit link proving it landed. Close it with an eight-minute recorded screen teardown in which you clone the tagged repo onto a clean instance, run the bootstrap, show the health check green, trigger one scheduled job, and narrate the blast radius directly from the config file. That recording is what you send when a hiring manager asks whether you can show them something you actually operate, and it is most of the answer to the design question you will get in the loop."
+}

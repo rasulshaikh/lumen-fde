@@ -1,191 +1,191 @@
 {
  "i": 63,
- "topic": "Cloud and Kubernetes security games",
- "track": "I. Security and Compliance",
- "month": 8,
+ "topic": "Experiment tracking and prompt versioning as CI",
+ "track": "H. AI in Production",
+ "month": 7,
  "hours": 6,
- "why": "As an FDE you deploy into the customer's own AWS account and their Kubernetes cluster, often with a security team watching every IAM role you request and every Pod spec you apply, and 'the vendor's workload got popped and pivoted to our data' is the fastest way to be thrown off an account. Playing the attacker in flaws2.cloud and Kubernetes Goat teaches you exactly how a leaked credential, an SSRF, a privileged Pod or an over-broad Role turns into a full account compromise, so you can design the deployment that does not do that and defend the design in the architecture review. The tangible output is a client-facing hardening checklist you can hand a customer's platform team, which is worth more in a security review than any certificate.",
+ "why": "The prompt is the highest-frequency change on a customer's production path and usually the only one that a non-engineer can make - a solutions consultant tweaking wording in a UI during a workshop is a production deploy with no PR, no review and no rollback plan. As the FDE you are the person the customer's change-management process points at, so you need to answer 'what changed on Tuesday, what did it do to the numbers, and how fast can you undo it' without a redeploy and without a hedge. Everything in topic 53 measures a system at one moment; this topic is what turns those measurements into a run history with lineage, a gate that blocks a regression before it reaches the customer's tenant, and a rollback you have actually rehearsed with a stopwatch.",
  "prerequisites": [
-  "Kubernetes production ops and security (topics 8 and 10): RBAC verbs and resources, ServiceAccount tokens, requests/limits, NetworkPolicy and Pod Security concepts, plus kubectl -n, get -o yaml, exec, auth can-i.",
-  "IAM and cloud security (topic 15): IAM policies, roles vs users, STS temporary credentials, IRSA, and why long-lived access keys are the thing you are trying to eliminate.",
-  "AWS networking and compute (topic 13): VPC, security groups, EC2, Lambda, and the fact that 169.254.169.254 is the instance metadata endpoint.",
-  "Docker internals (topic 5): namespaces, cgroups, capabilities, the container filesystem, and what the Docker socket grants whoever can reach it.",
-  "Application security: OWASP Top 10 (topic 61) and threat modelling (topic 62): SSRF, broken access control, secrets management, and how to reason about an attacker's next hop.",
-  "Enough shell and curl to hit a metadata endpoint, decode a JWT, base64 a secret and read a kubeconfig without a tutorial."
+  "Prompt-as-code from topic 46: prompt files with pinned dated model snapshots, structured output schemas, and a committed baseline you can diff against. This topic moves that artefact into a registry and adds rollout mechanics; it does not re-teach prompt authoring.",
+  "The eval machinery from topic 53: a labelled dataset with a content hash, per-class metrics with Wilson intervals, at least one validated judge, and the notion of a noise budget derived from repeated runs of an unchanged system. Without a dataset that can actually go down, everything here is ceremony.",
+  "GitHub Actions at working depth from topic 18: pull_request vs push vs schedule vs workflow_dispatch vs repository_dispatch, job permissions, required status checks, path filters, artifacts, concurrency groups, and how secrets behave on forked PRs.",
+  "Tracing from topic 54: you need trace and observation ids in your production path already, because prompt-version lineage is attached to generations, not to log lines.",
+  "Git at depth from topic 4: tags, reflog, revert vs reset, and why an immutable content-addressed history is the right mental model for a prompt registry.",
+  "Audit-trail and multi-tenant modelling from topic 30: who-changed-what-when tables, and per-tenant scoping, since prompt labels are frequently tenant-scoped in real deployments."
  ],
  "subtopics": [
   {
-   "name": "Set up the three ranges and adopt the attacker's loop",
-   "learn": "Stand up all three environments before you learn any theory: run flaws2.cloud's attacker and defender tracks in the browser, deploy Kubernetes Goat into a local kind or minikube cluster (never a shared or production cluster) with its setup script, and register the two free TryHackMe rooms. Internalise the attacker loop you will repeat in every scenario: enumerate what identity/token you currently hold, find what it can reach, use that to obtain the next credential, escalate, then persist. Keep a running lab journal keyed by scenario with the exact command, the credential or path it exposed, and the single control that would have stopped it - that journal becomes the client checklist at the end.",
-   "minutes": 25,
+   "name": "Source of truth: Git only, registry only, or both (the two-writer problem)",
+   "learn": "Decide explicitly, in writing, which system is authoritative for prompt text, because the common failure is that both are and neither is. Git-only gives you review, blame and atomic rollback with the code, but couples every wording fix to a deploy and locks out the domain expert who actually knows the wording. Registry-only gives non-engineers a UI and decouples rollout from deploy, but ships with no review, no diff in the PR, and a SaaS dependency on the request path. Learn the pragmatic split most teams land on: the registry is the deployment source of truth, and a webhook mirrors every version into Git for review tooling and disaster recovery - the mirror is a read model, never a writer. Write the decision into the engagement's ADR with the escape hatch named.",
+   "minutes": 20,
    "resource": {
-    "label": "Kubernetes Goat - official site and setup",
-    "url": "https://madhuakula.com/kubernetes-goat/"
+    "label": "Langfuse docs - Prompt management, get started",
+    "url": "https://langfuse.com/docs/prompt-management/get-started"
    }
   },
   {
-   "name": "flaws2 attacker track: SSRF to IMDS to account credentials",
-   "learn": "Work the full attacker chain: an image-parsing endpoint that fetches a URL you control (SSRF), which you point at http://169.254.169.254/latest/meta-data/iam/security-credentials/ to steal the container/instance role's temporary credentials, then load them with aws configure or environment variables and run aws sts get-caller-identity to confirm who you now are. Understand each hop as a distinct control failure: the app trusting an attacker-supplied URL, the workload holding a role far broader than it needs, and the metadata service handing tokens to anything that can make a local HTTP request. This exact chain (Capital One, 2019) is the canonical cloud breach and the one a security reviewer will ask you about by name.",
+   "name": "Immutable versions, mutable labels: the pointer indirection",
+   "learn": "Internalise the one structural idea the whole topic rests on: versions are immutable and monotonically numbered, and what production reads is a mutable named pointer at a version. In Langfuse those pointers are labels - `production` is the default label served when you pass none, `latest` auto-tracks the newest version, and custom labels carry environments (`staging`), tenants (`tenant-acme`) or experiment arms (`prod-a`, `prod-b`). Fetch deliberately with `langfuse.get_prompt(\"finding-summary\", label=\"production\")` for the serving path and `version=7` for a reproduction, and never let application code compute a version number. The consequence to state out loud: promotion and rollback become label moves, which are O(1), auditable, and require no artefact rebuild.",
+   "minutes": 25,
+   "resource": {
+    "label": "Langfuse docs - Prompt version control (labels, protected labels, rollback)",
+    "url": "https://langfuse.com/docs/prompt-management/features/prompt-version-control"
+   }
+  },
+  {
+   "name": "MLflow prompt registry mechanics end to end",
+   "learn": "Do the same shape in the other ecosystem so you can walk into either customer. `mlflow.genai.register_prompt(name=..., template=..., commit_message=..., tags={...}, response_format=PydanticModel)` creates version N+1 - it never mutates version N; the template uses `{{double_brace}}` variables and both plain strings and chat-style message lists are accepted. Aliases are the pointer layer: `mlflow.genai.set_prompt_alias(\"finding-summary\", alias=\"production\", version=2)`, loaded as `mlflow.genai.load_prompt(\"prompts:/finding-summary@production\")`, with `prompts:/finding-summary/2` for a pinned version and the reserved `@latest` alias for newest. Know `prompt.format(**vars)` and `prompt.to_single_brace_format()` for LangChain/LlamaIndex interop, and that a prompt version can carry a JSON response schema and a model configuration block so decoding params version together with the text.",
+   "minutes": 25,
+   "resource": {
+    "label": "MLflow docs - Create and edit prompts (prompt registry)",
+    "url": "https://mlflow.org/docs/latest/genai/prompt-registry/create-and-edit-prompts/"
+   }
+  },
+  {
+   "name": "The fetch path in production: caching, staleness, fallback, cold start",
+   "learn": "A registry on the request path is a new dependency in your p99 and your availability budget, so learn its cache semantics exactly. Langfuse caches per process with `cache_ttl_seconds` (default 60; `0` disables) and serves stale-while-revalidate - an expired entry is returned immediately while a background refresh runs, which is why a label move is not instantaneous across a fleet. Always pass `fallback=` with the last-known-good template compiled into the image so a registry outage degrades to a slightly old prompt instead of a 500. Prefetch at startup rather than lazily on first request, and never call `get_prompt` at module import time in a long-lived worker - that pins the version for the process lifetime and quietly defeats every rollout mechanism you are about to build.",
+   "minutes": 25,
+   "resource": {
+    "label": "Langfuse docs - Prompt caching (cache_ttl_seconds, fallbacks)",
+    "url": "https://langfuse.com/docs/prompt-management/features/caching"
+   }
+  },
+  {
+   "name": "What exactly is 'a run': the fingerprint you must record",
+   "learn": "Define a run as a tuple and record every element as a param or tag, because any unrecorded element makes the number unattributable: prompt name and version, dated model snapshot, decoding params (temperature, top_p, max_tokens, seed if supported), dataset name and content hash, judge prompt version and judge model snapshot, eval-harness version, git SHA, and the run's total USD and token counts. In MLflow that is `mlflow.start_run()` plus `log_param` for the fingerprint, `log_metric(key, value, step=)` for scores over time, `set_tag` for the git SHA and environment, and `log_artifact` for the per-case results file; use nested runs so a sweep over five prompt versions is one parent with five children. The test of whether you got this right: given only a run id, can you rebuild the exact call that produced it six months later without asking anyone a question.",
+   "minutes": 25,
+   "resource": {
+    "label": "MLflow docs - Tracking API (runs, params, metrics, tags, artifacts)",
+    "url": "https://mlflow.org/docs/latest/ml/tracking/tracking-api/"
+   }
+  },
+  {
+   "name": "Lineage both directions: attaching prompt versions to production generations",
+   "learn": "An offline run history is half the value; the other half is being able to slice live traffic by prompt version. Pass the fetched prompt object through to the observation - Python `update_current_generation(prompt=prompt)`, `start_as_current_observation(..., prompt=prompt)`, or `propagate_attributes(prompt=prompt)` when several generations share it; JS `generation.update({ prompt })`. Once linked you get median latency, input/output tokens, cost, generation count and median score per prompt version for free, which is the chart you put in front of the customer when they ask whether last week's change helped. Also emit the version as a span attribute in your own OpenTelemetry pipeline so the same slice exists in Grafana and does not depend on one vendor.",
+   "minutes": 25,
+   "resource": {
+    "label": "Langfuse docs - Link prompts to traces (per-version metrics)",
+    "url": "https://langfuse.com/docs/prompt-management/features/link-to-traces"
+   }
+  },
+  {
+   "name": "Versioning the model and the decoding config with the prompt",
+   "learn": "A prompt version that does not carry its model and parameters is only two thirds of a configuration, and the missing third is where silent regressions live. Put the model id, temperature, max_tokens and any tool set into the prompt version's `config` object (Langfuse) or model-configuration block (MLflow) so a label move swaps text and settings atomically. Pin dated snapshots, never floating aliases, in anything a customer touches - a vendor rotating an alias underneath you produces a score change with no commit, and you will spend two days looking for a code cause that does not exist. Record the resolved model id returned in the API response next to the requested one, so you can prove after the fact which weights answered.",
+   "minutes": 20,
+   "resource": {
+    "label": "Langfuse docs - Prompt config (model and params on the version)",
+    "url": "https://langfuse.com/docs/prompt-management/features/config"
+   }
+  },
+  {
+   "name": "The longitudinal ledger: append-only history you can chart for a year",
+   "learn": "Treat run results as an append-only ledger, not a dashboard's cache: one immutable row per (run_id, case_id) with the full fingerprint denormalised onto it, written to object storage or a warehouse table you own, mirrored into whatever tool renders it. Content-hash datasets and archive rather than delete old versions, because a chart of score-over-time is meaningless the moment the measuring instrument changes without a marker - so plot vertical annotations for dataset version bumps, judge changes and model snapshot changes on the same axis. Guard against the classic silent break: a metric renamed from `recall` to `recall_macro` splits the series in two and the old half quietly stops updating, so assert metric-key stability in CI. Six months of this ledger is the single most persuasive artefact in a renewal conversation.",
+   "minutes": 20,
+   "resource": {
+    "label": "MLflow docs - GenAI version tracking",
+    "url": "https://mlflow.org/docs/latest/genai/version-tracking/"
+   }
+  },
+  {
+   "name": "The experiment script as a first-class CI artefact",
+   "learn": "Learn the `langfuse/experiment-action` script contract precisely because it is a good general shape: export a function `experiment(context: RunnerContext)`, call `context.run_experiment(name=..., task=..., evaluators=[...], run_evaluators=[...])`, pull the aggregate you gate on out of `result.run_evaluations` by name, and `raise RegressionError(result=result)` when it breaches the threshold. The distinction the action encodes is the one that matters operationally: a `RegressionError` (the system got worse) and a script crash (your harness is broken) are different failures with different owners, controlled by `should_fail_on_regression` and `should_fail_on_script_error`. Keep the script thin - dataset selection, task, evaluators, threshold, raise - and put everything reusable in a package that also runs from the CLI, so a red build is reproducible on a laptop with one command.",
+   "minutes": 25,
+   "resource": {
+    "label": "GitHub - langfuse/experiment-action (script contract, inputs, outputs)",
+    "url": "https://github.com/langfuse/experiment-action"
+   }
+  },
+  {
+   "name": "Wiring the gate into the workflow: triggers, permissions, outputs",
+   "learn": "Build the workflow deliberately: `on: pull_request` with path filters so unrelated PRs do not burn tokens, `permissions:` narrowed to `contents: read`, `pull-requests: write` (needed to post the result comment) and `actions: read` (so the comment links the specific job and matrix legs are distinguishable), and third-party actions pinned to a release commit SHA rather than a tag so a moved tag cannot execute new code against your customer's keys. Pass `experiment_path`, `dataset_name` and `dataset_version` explicitly - pinning the dataset version is what stops a dataset edit from masquerading as a prompt improvement - and forward `experiment_metadata` with your prompt version and model snapshot so the run is findable later. Capture `steps.<id>.outputs.result_json` and `outputs.failed`, write the JSON to an artifact with `actions/upload-artifact`, and make the smoke tier finish in under two minutes so nobody has a reason to bypass it.",
+   "minutes": 25,
+   "resource": {
+    "label": "GitHub Docs - Events that trigger workflows",
+    "url": "https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows"
+   }
+  },
+  {
+   "name": "Choosing the baseline: production label, not main HEAD",
+   "learn": "The gate must compare the candidate against the version currently serving the customer - the run recorded for whatever `production` points at - not against the previous commit, or you get boiling-frog drift where three PRs each lose two points, each passes, and the system is six points worse with no red build in the history. Record `baseline_run_id` in the candidate run's tags so the comparison is auditable rather than recomputed and forgotten. Apply the paired-comparison discipline from topic 53 (same cases, McNemar or paired bootstrap, interval on the delta) rather than comparing two aggregate numbers, and set the failure threshold from a measured noise budget - run the unchanged system five times, take the spread, gate at roughly two sigma below the per-class floor. Gate the non-accuracy budgets in the same job: p95 latency, tokens per case and USD per thousand cases are regressions too.",
+   "minutes": 25,
+   "resource": {
+    "label": "Langfuse docs - Experiments via SDK (including testing in CI)",
+    "url": "https://langfuse.com/docs/evaluation/experiments/experiments-via-sdk"
+   }
+  },
+  {
+   "name": "Secrets, forks, cost and flakiness: keeping the gate cheap and safe",
+   "learn": "Know why the experiment step fails with an empty key on an external contributor's PR - `pull_request` runs from forks get no repository secrets - and know why the obvious fix is dangerous: `pull_request_target` runs in the base repo's context with secrets available, so checking out and executing PR code under it hands the customer's registry keys to an arbitrary contributor. Prefer a labelled or manually dispatched job for fork PRs. Control spend with `concurrency: { group: ..., cancel-in-progress: true }` so force-pushes do not stack full eval runs, a hard USD ceiling inside the harness that aborts rather than warns, response caching keyed on model plus rendered prompt plus params, and a small stratified smoke tier on PRs with the full set on `schedule`. Treat a re-run that passes as a signal, not a resolution: track flake rate per gate, because a gate that flakes twice gets demoted from required and then it is just a document.",
+   "minutes": 20,
+   "resource": {
+    "label": "GitHub Docs - Using secrets in GitHub Actions",
+    "url": "https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets"
+   }
+  },
+  {
+   "name": "Closing the loop from the UI: prompt-version webhook to repository_dispatch",
+   "learn": "A registry UI edit bypasses your PR gate entirely, so close that hole with an event path: Langfuse emits prompt-version events to an HTTPS endpoint with an HMAC signature; a small receiver verifies the signature (constant-time compare, reject on clock skew, dedupe on event id because delivery is at-least-once) and calls the GitHub REST `POST /repos/{owner}/{repo}/dispatches` with an `event_type` and a `client_payload` carrying the prompt name and version. The workflow triggers on `repository_dispatch`, runs the same experiment script against the new version, and writes the result back as a comment or a status - so an edit made in a customer workshop is measured within minutes without anyone opening an editor. Make the receiver idempotent and rate-limited: someone iterating in the playground will fire twenty version events in ten minutes.",
+   "minutes": 20,
+   "resource": {
+    "label": "Langfuse docs - Webhooks and Slack integrations for prompt events",
+    "url": "https://langfuse.com/docs/prompt-management/features/webhooks-slack-integrations"
+   }
+  },
+  {
+   "name": "Promotion and approval: who may move the pointer",
+   "learn": "Separate the right to create a version from the right to promote one - the whole safety property collapses if anyone who can edit text can also point `production` at it. Use protected labels where the platform offers them (Langfuse restricts modifying a protected label to admins and owners) and mirror the same control on the Git side with a GitHub environment carrying required reviewers and a wait timer on the promotion job, so promotion is a reviewed deployment with a record rather than a click. Emit a structured audit event for every pointer move - actor, prompt, from_version, to_version, run_id of the passing eval, timestamp, ticket - into the audit table from topic 30, because 'who approved this change' is a question that arrives in writing during the customer's first security review, not during the pilot.",
+   "minutes": 25,
+   "resource": {
+    "label": "GitHub Docs - Using environments for deployment (required reviewers)",
+    "url": "https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments"
+   }
+  },
+  {
+   "name": "Rollback as a rehearsed drill, and why it is never instant",
+   "learn": "Rollback is one operation - repoint `production` at the previous version (`update_prompt(name=..., version=N-1, new_labels=[\"production\"])` or `set_prompt_alias(..., alias=\"production\", version=N-1)`) - but treat the claim 'rolled back' as unproven until you can measure convergence. The tail is real: cache TTL on every process, stale-while-revalidate serving one more request per worker, in-flight requests, warm autoscaled pods that fetched at startup, and any CDN or gateway layer in front. Write the runbook with the actual numbers: trigger condition, the exact command, the verification query (count generations by prompt version over the last five minutes until the old version is zero), the expected convergence time from your TTL, and who to tell. Then rehearse it against staging with a stopwatch and put the measured number in the runbook - a rollback path first executed during an incident is a hypothesis, and drift-driven auto-rollback policy is topic 57's problem, not this one's.",
    "minutes": 30,
    "resource": {
-    "label": "AWS docs - Instance metadata and user data",
-    "url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html"
+    "label": "Google SRE Book - Release Engineering",
+    "url": "https://sre.google/sre-book/release-engineering/"
    }
   },
   {
-   "name": "The IMDS fix: IMDSv2, hop limit, and blocking metadata from workloads",
-   "learn": "Learn the concrete defence you will recommend on every AWS engagement: enforce IMDSv2 (HttpTokens: required) so the metadata endpoint requires a PUT-issued session token that SSRF usually cannot obtain, set HttpPutResponseHopLimit to 1 so a container one network hop away cannot reach it, and on EKS block Pod egress to 169.254.169.254 entirely so workloads use IRSA instead of the node role. Know the difference between the node's instance role and the Pod's IRSA role, and why a Pod inheriting the node role is the single most common EKS privilege-escalation path. Be able to write the exact modify-instance-metadata-options call and the NetworkPolicy/iptables rule that implement this.",
+   "name": "Reproducibility six months on, and the changelog the customer reads",
+   "learn": "Test the property directly: pick a run from three months ago and replay it from its fingerprint alone. Enumerate what breaks it - a vendor deprecating a dated snapshot, a dataset edited in place instead of versioned, a judge prompt changed without a version bump, a `@latest` alias in a recorded config, a deleted branch taking the git SHA with it - and mitigate each (retention policy, content hashes, judge versioning, alias bans in serving code, tags not branches). Then render a human-readable prompt changelog straight from the ledger: date, version, one-line intent, who promoted it, the eval delta with its interval, and any rollback. That document is what you hand the customer at the QBR, and generating it from the run history rather than writing it by hand is what guarantees it is true.",
    "minutes": 20,
    "resource": {
-    "label": "EKS Best Practices - Security",
-    "url": "https://aws.github.io/aws-eks-best-practices/security/docs/"
-   }
-  },
-  {
-   "name": "flaws2 defender track: CloudTrail, Athena and GuardDuty",
-   "learn": "Switch sides and reconstruct the same attack from logs: query CloudTrail (the account's API audit log) to find the sequence of calls the stolen credential made, run those queries at scale in Athena over CloudTrail-in-S3, and read what GuardDuty flags automatically (for example UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration, which fires when a role's credentials are used from an IP outside the instance). Learn to read the fields that matter: userIdentity, sourceIPAddress, eventName, and the tell-tale sign of credential theft - an instance role suddenly calling APIs from an external IP. This is the evidence trail every incident review and every SOC 2 auditor expects to exist.",
-   "minutes": 30,
-   "resource": {
-    "label": "AWS docs - CloudTrail user guide",
-    "url": "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-user-guide.html"
-   }
-  },
-  {
-   "name": "Secrets baked into images and Kubernetes objects",
-   "learn": "Run the Goat scenarios that plant credentials where they always end up: hardcoded keys in a Docker image layer (docker history / dive shows them even after a later RUN deletes the file), tokens in ConfigMaps, and secrets passed as environment variables that leak into crash dumps, logs and any process that can read /proc/<pid>/environ. Learn to hunt them the way an attacker does and the way you should before shipping: scan image layers, grep the manifests, and check kubectl get secrets across namespaces. The FDE lesson is that a Secret object is base64, not encryption, and that build-time secrets in images survive forever in the registry - so the fix is a real secrets manager (External Secrets, IRSA-scoped Secrets Manager) plus image scanning in CI, not deletion.",
-   "minutes": 25,
-   "resource": {
-    "label": "Trivy docs - vulnerability and secret scanning",
-    "url": "https://trivy.dev/docs/latest/guide/"
-   }
-  },
-  {
-   "name": "Container escape: privileged Pods, capabilities and hostPath",
-   "learn": "Do the escape scenarios and learn precisely what grants them: privileged: true (disables most isolation, hands you the host devices), hostPID/hostNetwork/hostIPC sharing the node's namespaces, dangerous capabilities such as CAP_SYS_ADMIN, and a hostPath volume mounting the node filesystem so you write to /var/lib/kubelet or read every other Pod's secrets. Practise the classic breakout: a privileged Pod that mounts the host root and chroots into it, giving root on the node and therefore on every workload scheduled there. Tie each to its control in the securityContext you will mandate: runAsNonRoot, allowPrivilegeEscalation: false, readOnlyRootFilesystem, drop ALL capabilities, and no host namespaces.",
-   "minutes": 30,
-   "resource": {
-    "label": "Kubernetes docs - Configure a security context for a Pod",
-    "url": "https://kubernetes.io/docs/tasks/configure-pod-container/security-context/"
-   }
-  },
-  {
-   "name": "The mounted Docker socket and Docker-in-Docker",
-   "learn": "Exploit the scenario where /var/run/docker.sock is mounted into a container: whoever holds the socket can create a new container mounting the host root and is effectively root on the node, which is why 'just mount the socket for CI' is a full compromise waiting to happen. Understand the same risk for a shared containerd socket and for privileged Docker-in-Docker sidecars in build pipelines. Know the safe alternatives you will propose to customers - rootless build tooling such as Kaniko or Buildah, or a sandboxed builder - and be able to explain why mounting the socket is categorically different from any other volume mount.",
-   "minutes": 20,
-   "resource": {
-    "label": "Docker docs - Docker Engine security",
-    "url": "https://docs.docker.com/engine/security/"
-   }
-  },
-  {
-   "name": "Kubelet, NodePort and the exposed cluster attack surface",
-   "learn": "Enumerate the network-reachable attack surface the Goat scenarios expose: an unauthenticated or over-permissive kubelet API (port 10250) that lets you list Pods and exec into them, NodePort/LoadBalancer services that accidentally publish an internal dashboard or debug endpoint to the internet, and metadata or admin UIs reachable from inside the cluster. Practise using amicontained to fingerprint what your container can do (capabilities, seccomp, namespaces) and reasoning about what a compromised Pod can reach on the pod network. The FDE takeaway is an exposure review before every go-live: what did we accidentally publish, and can a single popped Pod talk to the control plane, the metadata service, or another tenant.",
-   "minutes": 25,
-   "resource": {
-    "label": "Kubernetes docs - Securing a cluster",
-    "url": "https://kubernetes.io/docs/tasks/administer-cluster/securing-a-cluster/"
-   }
-  },
-  {
-   "name": "RBAC as an attack graph: from a token to cluster-admin",
-   "learn": "Treat RBAC the way an attacker does. From a compromised ServiceAccount token (mounted by default at /var/run/secrets/kubernetes.io/serviceaccount/token), run kubectl auth can-i --list to map your rights, then find the escalation edges: get/list secrets (steal every credential in the namespace), create pods (schedule a privileged Pod and escape), pods/exec (jump into other workloads), bind/escalate on roles (grant yourself more), and impersonate (become another identity). Use kubectl-who-can to invert the question and find who holds a dangerous verb. Learn the deployment discipline this forces: never automountServiceAccountToken unless the workload calls the API, and scope every Role to named resources rather than wildcards.",
-   "minutes": 30,
-   "resource": {
-    "label": "Kubernetes docs - RBAC good practices",
-    "url": "https://kubernetes.io/docs/concepts/security/rbac-good-practices/"
-   }
-  },
-  {
-   "name": "Where Kubernetes secrets really live: etcd and encryption at rest",
-   "learn": "Follow a Secret from kubectl to storage: it is base64-encoded (trivially decoded) and, unless you configure an EncryptionConfiguration with a KMS provider, it sits in plaintext in etcd, so anyone with etcd access or an etcd backup has every credential in the cluster. Practise pulling secrets via the API with a stolen token and understand that RBAC on the secrets resource, not the base64, is the only thing protecting them. Know the controls you will require on a customer cluster: encryption at rest with an external KMS, tight RBAC on secrets, disabling token automounting, and moving real secrets to an external store synced in with least-privilege IRSA rather than storing them long-term in the cluster.",
-   "minutes": 25,
-   "resource": {
-    "label": "Kubernetes docs - Secrets",
-    "url": "https://kubernetes.io/docs/concepts/configuration/secret/"
-   }
-  },
-  {
-   "name": "Pod Security Standards and Admission enforcement",
-   "learn": "Learn the enforcement layer that would have blocked half the escapes above. Pod Security Admission applies the baseline and restricted profiles per namespace via labels (pod-security.kubernetes.io/enforce=restricted), rejecting privileged Pods, host namespaces, dangerous capabilities and root containers at admission time. Understand the three modes (enforce, audit, warn) so you can roll it out safely - run audit/warn first to find what breaks, then flip to enforce - and know restricted's exact requirements (runAsNonRoot, seccompProfile RuntimeDefault, drop ALL capabilities, no privilege escalation). This is the single highest-leverage cluster-wide control an FDE can turn on without rewriting any application.",
-   "minutes": 25,
-   "resource": {
-    "label": "Kubernetes docs - Pod Security Standards",
-    "url": "https://kubernetes.io/docs/concepts/security/pod-security-standards/"
-   }
-  },
-  {
-   "name": "Default-deny networking with NetworkPolicy",
-   "learn": "Reproduce the lateral-movement scenario where a compromised Pod freely reaches every other service, the metadata endpoint and the control plane, then shut it down. Apply a default-deny-all ingress and egress NetworkPolicy per namespace and add explicit allow rules only for the flows the app actually needs, including a rule that denies Pod egress to 169.254.169.254. Understand that NetworkPolicy is enforced by the CNI (Calico, Cilium), so a cluster whose CNI does not support it silently ignores your policies - a trap you must check for. The deliverable mindset: every namespace ships with a default-deny baseline, and each allowed connection is a documented decision, not an accident.",
-   "minutes": 20,
-   "resource": {
-    "label": "Kubernetes docs - Network Policies",
-    "url": "https://kubernetes.io/docs/concepts/services-networking/network-policies/"
-   }
-  },
-  {
-   "name": "Policy-as-code at admission: Kyverno and OPA Gatekeeper",
-   "learn": "Go beyond built-in Pod Security to custom guardrails enforced as admission webhooks. Write a Kyverno policy (or an OPA Gatekeeper ConstraintTemplate) that rejects, for example, images not from an approved registry, containers without resource limits, or any use of hostPath - and run it in audit mode before enforce. Understand the mechanism: a validating admission webhook that the API server calls on every create/update, which means a broken or slow webhook can block all deployments (failurePolicy matters), and that mutating policies can inject secure defaults such as dropping capabilities. This is how mature platform teams make insecure specs literally un-deployable, and knowing it lets you meet a customer's existing policy stack.",
-   "minutes": 25,
-   "resource": {
-    "label": "Kyverno docs",
-    "url": "https://kyverno.io/docs/introduction/"
-   }
-  },
-  {
-   "name": "Runtime detection and cluster audit logging",
-   "learn": "Prevention fails, so learn detection. Deploy Falco and trigger its rules by doing something suspicious in a Pod - spawning a shell in a container, reading /etc/shadow, writing below a system binary directory, or making an unexpected outbound connection - and read the alert it produces. Turn on the Kubernetes API audit log and find the entries for token use, exec into Pods, and secret reads, mapping each to the attacker actions from earlier scenarios. The FDE point is that a customer's SOC needs the signal to exist: without audit logging and runtime detection, a compromise of your workload is invisible until data leaves, and 'we had no logs' is the worst sentence in a post-incident review.",
-   "minutes": 20,
-   "resource": {
-    "label": "Falco docs",
-    "url": "https://falco.org/docs/"
-   }
-  },
-  {
-   "name": "Benchmarks and scanners: kube-bench, Trivy, Prowler",
-   "learn": "Run the automated tools that turn a subjective review into a scored report you can hand a customer. kube-bench checks a cluster against the CIS Kubernetes Benchmark; Trivy scans images for CVEs, misconfigured manifests and leaked secrets; Prowler (and ScoutSuite) audit the AWS account against CIS and surface public S3 buckets, over-permissive roles and missing CloudTrail. Learn to read their output as a prioritised list - not every finding is real or reachable - and to separate 'must fix before go-live' from 'noise'. These reports are the evidence backbone of your hardening checklist and exactly what a security team expects a competent vendor to produce unprompted.",
-   "minutes": 20,
-   "resource": {
-    "label": "kube-bench - CIS Kubernetes Benchmark checker",
-    "url": "https://github.com/aquasecurity/kube-bench"
-   }
-  },
-  {
-   "name": "TryHackMe rooms and the client-facing hardening checklist",
-   "learn": "Finish the two free TryHackMe rooms to reinforce the attacker chain in a graded setting, then convert your entire lab journal into the deliverable: a one-to-two page client-facing hardening checklist grouped by layer - cloud identity (IMDSv2, no long-lived keys, scoped IRSA, block public S3, CloudTrail on), cluster (Pod Security restricted, RBAC least privilege, secrets encryption, default-deny NetworkPolicy), workload (non-root, drop capabilities, read-only rootfs, no socket mounts), and detection (audit log, Falco/GuardDuty). Each item states the risk in one line, the control, and how to verify it (the exact command or console check), so a customer's platform engineer can act on it without you in the room.",
-   "minutes": 20,
-   "resource": {
-    "label": "Kubernetes docs - Security checklist",
-    "url": "https://kubernetes.io/docs/concepts/security/security-checklist/"
+    "label": "Langfuse docs - Releases and versioning",
+    "url": "https://langfuse.com/docs/observability/features/releases-and-versioning"
    }
   }
  ],
  "outcomes": [
-  "You can execute the full SSRF-to-IMDS-to-credentials chain in flaws2.cloud, load the stolen role, run aws sts get-caller-identity, and then name the three independent controls (app-level URL validation, least-privilege role, IMDSv2 with hop limit 1) that each break the chain.",
-  "You can reconstruct that same attack from CloudTrail in Athena, point to the exact fields that reveal instance-credential exfiltration, and say which GuardDuty finding would have fired.",
-  "You can escape a privileged Pod to root on the node in Kubernetes Goat and then write the securityContext plus Pod Security restricted profile that makes the escape impossible.",
-  "You can take a compromised ServiceAccount token, run kubectl auth can-i --list, identify the specific verb (secrets get, pods create, roles escalate, impersonate) that leads to cluster-admin, and remediate it to a scoped Role.",
-  "You can explain, and demonstrate, that a Kubernetes Secret is base64 not encryption, and configure encryption at rest plus RBAC so a leaked token cannot read every credential in the cluster.",
-  "You can apply a default-deny NetworkPolicy and a Kyverno/Pod Security admission rule to a namespace, verify they block a bad Pod, and explain the audit-then-enforce rollout that avoids breaking running workloads.",
-  "You can run kube-bench, Trivy and Prowler against a cluster and account, triage the findings into must-fix-before-go-live versus noise, and produce a scored report.",
-  "You can hand a customer's platform team a one-to-two page hardening checklist where every item has a risk, a control, and a verification command."
+  "You can stand up a prompt registry with immutable versions and environment labels, and show the same prompt served to staging and production from two different versions with zero code differences between the two deployments.",
+  "You can make a pull request fail on an eval regression using langfuse/experiment-action, with the PR comment showing the score, the baseline it was compared against, and the result JSON attached as an artifact.",
+  "You can produce, from a run id alone, the prompt version, model snapshot, decoding params, dataset hash, judge version and git SHA that produced any number you have ever reported.",
+  "You can slice production traffic by prompt version and show median latency, token counts, cost and score per version, then point at the exact hour a version was promoted.",
+  "You can execute a rollback by moving one label, and state a measured convergence time backed by a query showing generations on the old version falling to zero.",
+  "You can explain and demonstrate why a fork PR cannot run the eval gate, and show a workflow that handles it without ever exposing the registry keys via pull_request_target.",
+  "You can wire a registry UI edit to a CI eval run through a signature-verified webhook and repository_dispatch, so a prompt changed by a non-engineer is scored within minutes.",
+  "You can generate a customer-facing prompt changelog directly from the run ledger, with per-change eval deltas and intervals, and defend every line of it."
  ],
  "failureModes": [
-  "An FDE requests a broad node/instance role 'to move fast', the workload gets an SSRF, and the attacker uses the metadata endpoint to inherit that role and pivot across the customer's whole account.",
-  "A build or debug container ships with /var/run/docker.sock mounted, so a single application compromise becomes root on the node and every co-located tenant workload.",
-  "Pods run as root with default automounted ServiceAccount tokens and no Pod Security profile, so one popped container reads every Secret in the namespace and schedules a privileged escape Pod.",
-  "NetworkPolicies are written and applied but the cluster's CNI does not enforce them, so the team believes the namespace is isolated while all Pod-to-Pod and Pod-to-metadata traffic flows freely.",
-  "Secrets are stored as Kubernetes Secret objects with no encryption-at-rest configured, so an etcd backup copied to S3 exposes every credential in plaintext base64.",
-  "IMDSv2 is left optional (HttpTokens: optional) and the hop limit is default, so SSRF still trivially retrieves credentials despite the team assuming metadata is protected.",
-  "No API audit log or runtime detection is enabled, so the workload compromise is invisible until data exfiltration is noticed externally and the post-incident review finds no evidence to reconstruct the attack."
+  "A solutions consultant edits the prompt in the registry UI during a customer workshop and saves it onto the production label; no eval runs, the added examples double the token count, and the change is discovered a week later in the cost report rather than in CI.",
+  "The application calls get_prompt once at module import in a long-lived worker, so the fetched version is pinned for the process lifetime and every rollout and rollback silently does nothing until the next restart.",
+  "Rollback moves the label and everyone declares the incident over, but stale-while-revalidate plus a 60-second TTL plus warm pods that prefetched at startup means part of the fleet serves the bad version for another cache cycle, and the graph keeps showing failures nobody can explain.",
+  "The gate compares each PR against main HEAD instead of the version currently labelled production, so three individually-passing changes drift the score down eight points with no red build anywhere in the history.",
+  "A prompt change and a dataset edit land in the same afternoon, the delta is uninterpretable because two things moved, and the team burns a day arguing about a number that no longer means anything.",
+  "The eval step silently no-ops on external contributor PRs because forks get no secrets, someone switches the trigger to pull_request_target to fix it, and now arbitrary PR code executes with the customer's registry and model API keys in scope.",
+  "Serving code resolves prompts:/finding-summary@latest and the registry sits on the request path with no compiled-in fallback, so an engineer's laptop can ship an unreviewed draft into the customer's tenant and a two-minute SaaS blip becomes a full outage of the customer-facing feature."
  ],
  "interviewQuestions": [
-  "Walk me through the Capital One-style breach: an app has an SSRF, it runs on EC2/EKS, and the attacker ends up reading an S3 bucket. Name every hop and the control at each hop that would have stopped it.",
-  "We are deploying your workload into our EKS cluster. What IAM and Pod-level configuration will you insist on, and how do you prevent your Pod from ever using the node's instance role?",
-  "A container in our cluster has been compromised. Assume it has a mounted ServiceAccount token. Walk me through, as the attacker, how you would try to reach cluster-admin, and then tell me which single RBAC change would most reduce that blast radius.",
-  "Explain the difference between Pod Security Admission and an OPA Gatekeeper / Kyverno policy. When would you reach for each, and what breaks if the admission webhook is down?",
-  "A customer says 'our Kubernetes Secrets are secure, they're in etcd'. What's wrong or incomplete about that, and what would you change?",
-  "You have two days before go-live in a customer account you've never seen. What do you run to assess cloud and cluster security posture, and how do you decide what is a blocker versus acceptable risk?",
-  "How would you detect that a workload in the cluster has been compromised, and what would you have needed to set up in advance for that detection to be possible?"
+  "Your customer wants their compliance analyst to be able to change the wording of a generated summary without waiting for an engineering deploy. Design the whole path: where the text lives, who can promote it, what runs before it reaches production, and what happens when it turns out to be wrong at 4pm on a Friday.",
+  "You move the production label back to the previous prompt version and tell the customer the rollback is done. Their dashboard still shows failures for another eight minutes. Explain every mechanism that could cause that, and how you would have known the number in advance.",
+  "Walk me through the fingerprint you record for a single eval run, field by field, and for each field tell me the specific bug that field exists to catch.",
+  "A team hands you a repo where prompts live in Git and are also editable in a registry UI, and both are 'the source of truth'. Describe the failure this guarantees, and what you would change in what order - given you cannot take the UI away from the customer.",
+  "Design the CI gate for prompt changes on a customer-facing extraction pipeline: what triggers it, what it compares against, where the thresholds come from, how much it costs per week, and what specifically stops the team from marking it non-required after the third false failure.",
+  "Six months into a deployment the customer asks you to reproduce the accuracy number from your Q2 report. Tell me exactly what you need to have stored to do that, what commonly makes it impossible, and what you would say if you could not reproduce it.",
+  "You inherit a system where prompt changes are deployed via a UI, evals exist but run manually and nobody remembers the last result, and the model id in config is a floating alias. Rank the fixes and justify the ordering to a customer who is asking why you are not shipping features this sprint."
  ],
- "proofOfWork": "Produce a 'break-and-harden' report on a local Kubernetes Goat cluster and the flaws2.cloud ranges: for at least eight scenarios (SSRF-to-IMDS, privileged-Pod escape, mounted Docker socket, RBAC token escalation, secrets in image layers, exposed kubelet/NodePort, secret-in-etcd, and a lateral-movement path), document the exact attacker commands and captured evidence (the stolen credential, the node root shell, the auth can-i --list output), then remediate each and prove the fix - re-run the attack and show it now fails, with the securityContext, Pod Security label, RBAC Role, NetworkPolicy or Kyverno policy that blocked it. Attach machine-generated evidence: kube-bench, Trivy and Prowler reports before and after, plus a screenshot of a Falco alert and a CloudTrail/Athena query reconstructing the flaws2 attack. Conclude with the deployable one-to-two page client hardening checklist (cloud identity, cluster, workload, detection layers), where every line is a risk, a control, and the verification command a customer's engineer can run themselves."
+ "proofOfWork": "A public repository, `prompt-registry-ci`, that demonstrates the full loop against a self-hosted registry brought up by `docker compose up` so a reviewer needs no vendor account and no API key - the model calls run against a recorded-fixture provider by default. It contains a `prompts/` package whose only public surface is `get(name, env)` returning a compiled prompt plus its resolved version, model snapshot and decoding config, with a compiled-in fallback template and a unit test that asserts the process still serves a prompt when the registry is unreachable and that no call site anywhere resolves `@latest`. The CI workflow runs the eval gate on `pull_request` with path filters, third-party actions pinned to release SHAs, `concurrency: cancel-in-progress`, a hard USD ceiling in the harness, and a `repository_dispatch` twin triggered by a signature-verifying webhook receiver (`receiver/`, with tests for HMAC verification, replay dedupe and rate limiting) so a version created in the registry UI is scored without a PR. The repository history is the evidence: one merged PR where the gate passed with the paired delta and interval in the comment, one PR where it failed on a per-class floor with the flipped case ids named and the baseline run id shown, and one commit reverting a promoted version. `RUNBOOK.md` documents the rollback with the real measured convergence time from a rehearsal (stopwatch value, the verification query counting generations by prompt version, and the graph before and after), and `scripts/changelog.py` renders `CHANGELOG.md` - date, version, intent, promoter, eval delta with interval, rollbacks - purely from the append-only run ledger in `runs/`, with a CI check that fails if the committed changelog differs from the regenerated one, so the customer-facing document cannot drift from the runs that produced it."
 }

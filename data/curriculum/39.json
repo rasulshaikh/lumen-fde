@@ -1,218 +1,227 @@
 {
-  "i": 39,
-  "topic": "Designing Data-Intensive Applications and Kleppmann's lectures",
-  "track": "F. Distributed Systems and System Design",
-  "month": 5,
-  "hours": 16.0,
-  "why": "Every FDE engagement eventually reaches the meeting where the customer's architect asks 'is this strongly consistent', 'what happens when the replica is behind', or 'can we just add a distributed lock', and the FDE either answers in terms of user-visible anomalies and concrete costs or loses the room. DDIA plus Kleppmann's Cambridge lectures are the shared vocabulary that Palantir, Databricks and Anthropic loops assume you already have: replication lag, quorums, isolation levels, linearizability, total order broadcast, Raft, CDC. The Gossip Glomers force you to feel the failures (lost messages, partitions, stale reads on a sequentially consistent store) in code, so that when a customer's Kafka consumer double-counts or a Postgres failover loses writes you recognise the mechanism inside a minute instead of a week.",
-  "prerequisites": [
-    "PostgreSQL at depth (Topic 29): MVCC (xmin/xmax), WAL, EXPLAIN, row locks, SELECT ... FOR UPDATE - replication and isolation levels here build directly on that mental model",
-    "Kafka and event-driven design (Topic 33): partitions, keys, consumer groups, offsets, log compaction - Kafka is the worked example of a partitioned replicated log throughout",
-    "Networking (Topic 2): TCP retransmission and timeouts, why a timeout is not a failure signal, what a network partition physically looks like (asymmetric loss, one-way links)",
-    "High availability and DR (Topic 24): failover, promotion, RPO/RTO vocabulary, and the idea that an async replica is a lossy backup, not a hot standby",
-    "Enough Go to write a 300-line program with goroutines, sync.Mutex, context.WithTimeout, time.Ticker and encoding/json - the supported Gossip Glomers path is the Go Maelstrom library (if you insist on Python you must write the stdin/stdout JSON loop and RPC correlation yourself)",
-    "Temporal sagas (Topic 34): compensation-based workflows, because the 2PC subtopic compares against them"
-  ],
-  "subtopics": [
-    {
-      "name": "Storage engines and encoding in 35 minutes (DDIA ch 3-4 skim)",
-      "learn": "Cover just enough of chapters 3-4 to answer the two questions customers actually ask: 'why is our write-heavy store slow to read' and 'will old consumers break when we add a field'. LSM-tree path: memtable, flush to immutable SSTables, leveled versus tiered compaction, bloom filters to skip files, and the write/read/space amplification triangle; versus B-tree: in-place page writes plus a WAL for crash recovery and more predictable read latency. Encoding: Avro/Protobuf/Thrift field tags, the compatibility rules (never reuse a field number, only add optional fields with defaults, never change a field's type), and why a jsonb column in Postgres breaks in exactly the same ways without any tooling to warn you.",
-      "minutes": 35,
-      "resource": {
-        "label": "RocksDB wiki - RocksDB Overview (LSM architecture, compaction, bloom filters)",
-        "url": "https://github.com/facebook/rocksdb/wiki/RocksDB-Overview"
-      }
-    },
-    {
-      "name": "System models, the two generals problem and failure detectors (Kleppmann lectures 1-2)",
-      "learn": "State the assumptions every later argument rests on: network model (reliable / fair-loss / arbitrary), node model (crash-stop / crash-recovery / Byzantine), timing model (synchronous / partially synchronous / asynchronous). Explain why the two generals problem means 'did the customer's payment go through' cannot be answered with certainty over a lossy link, and why every real system resolves it with idempotency keys, retries and a reconciliation job rather than a cleverer protocol. Know that a perfect failure detector is impossible in an asynchronous system, that timeouts give you an eventually-perfect one at best, and that FLP says deterministic consensus cannot be guaranteed to terminate under fully asynchronous assumptions - which is exactly why Raft uses randomised election timeouts and assumes partial synchrony.",
-      "minutes": 45,
-      "resource": {
-        "label": "Kleppmann - Distributed Systems lecture notes (Cambridge, PDF)",
-        "url": "https://www.cl.cam.ac.uk/teaching/2122/ConcDisSys/dist-sys-notes.pdf"
-      }
-    },
-    {
-      "name": "Clocks: wall time, monotonic time, Lamport and vector clocks, TrueTime",
-      "learn": "Distinguish CLOCK_REALTIME (NTP-slewed or stepped, can jump backwards, leap seconds) from CLOCK_MONOTONIC (only for measuring durations; time.monotonic() in Python, Go's time.Now() carries both readings). Know realistic NTP skew (tens of milliseconds on well-run hosts, seconds on neglected VMs) and conclude that timestamps from two machines never establish order. Lamport clocks: t = max(local, received) + 1 gives a total order consistent with causality but cannot detect concurrency; vector clocks / version vectors detect concurrent writes (neither dominates), which is how Dynamo-style stores decide to keep siblings rather than overwrite. Spanner TrueTime exposes an [earliest, latest] interval and commit-waits until latest has passed, so external consistency is bought with latency proportional to clock uncertainty. Be able to explain, with a two-node timeline, why last-writer-wins on wall clocks silently discards acknowledged writes.",
-      "minutes": 50,
-      "resource": {
-        "label": "Lamport - Time, Clocks, and the Ordering of Events in a Distributed System (PDF)",
-        "url": "https://lamport.azurewebsites.net/pubs/time-clocks.pdf"
-      }
-    },
-    {
-      "name": "Single-leader replication mechanics in PostgreSQL",
-      "learn": "Trace one write: WAL record, fsync on the primary, walsender streams to the standby's walreceiver, standby writes then replays. Know the settings and what each waits for: wal_level = replica | logical; max_wal_senders; synchronous_commit = off | local | remote_write | on | remote_apply; synchronous_standby_names with FIRST n (...) and ANY n (...) quorum syntax; physical replication slots (they stop WAL recycling and will fill the disk if the consumer dies - cap with max_slot_wal_keep_size); hot_standby_feedback trading primary-side bloat for fewer 'canceling statement due to conflict with recovery' errors. Failover: pg_ctl promote or SELECT pg_promote(), the timeline switch, and why the old primary must be fenced before the new one accepts writes (split brain); know what Patroni does with a DCS lease to automate exactly that. Distinguish statement-based, WAL-shipping and logical (row-level) replication and which one survives a major-version upgrade.",
-      "minutes": 70,
-      "resource": {
-        "label": "PostgreSQL docs - Log-Shipping Standby Servers (streaming replication, synchronous replication)",
-        "url": "https://www.postgresql.org/docs/current/warm-standby.html"
-      }
-    },
-    {
-      "name": "Replication lag anomalies and how to actually deliver read-your-writes",
-      "learn": "Name the three guarantees weaker than linearizability that customers actually want and the anomaly each prevents: read-your-writes (user saves profile, refreshes, sees the old one), monotonic reads (page goes back in time between two refreshes hitting different replicas), consistent prefix reads (the answer appears before the question). Implementations you can defend: route a user's reads to the primary for N seconds after their last write; or capture pg_current_wal_lsn() after commit, store it in the session, and on the replica wait until pg_last_wal_replay_lsn() >= that LSN before serving; or pay for synchronous_commit = remote_apply on the write path. Measure lag from pg_stat_replication (write_lag, flush_lag, replay_lag) and alert on byte lag (pg_wal_lsn_diff) as well as time, because time-based lag reads zero on an idle replica that is actually disconnected.",
-      "minutes": 40,
-      "resource": {
-        "label": "PostgreSQL docs - System Administration Functions (pg_current_wal_lsn, pg_last_wal_replay_lsn, pg_promote)",
-        "url": "https://www.postgresql.org/docs/current/functions-admin.html"
-      }
-    },
-    {
-      "name": "Multi-leader and leaderless replication: quorums, conflicts, anti-entropy",
-      "learn": "Do the quorum arithmetic (w + r > n) and then list why it is still not linearizable: sloppy quorums and hinted handoff, concurrent writes to different replicas, partial write failures with no rollback, and read repair racing with a second read. Know read repair versus anti-entropy (Merkle-tree comparison), last-writer-wins and why Cassandra's cell-level LWW with client-supplied timestamps loses writes under skew, and version vectors with sibling resolution as the alternative. Map Cassandra consistency levels (ONE, QUORUM, LOCAL_QUORUM, EACH_QUORUM, ALL) onto multi-datacenter latency and availability, and know that DynamoDB ConsistentRead=true costs double the read capacity units. Multi-leader use cases (multi-region active-active, offline clients, collaborative editing), conflict avoidance by giving each record a home region, and convergent merge functions or CRDTs when you cannot avoid conflicts.",
-      "minutes": 70,
-      "resource": {
-        "label": "Amazon - Dynamo: Amazon's Highly Available Key-value Store (SOSP 2007, PDF)",
-        "url": "https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf"
-      }
-    },
-    {
-      "name": "Partitioning: key choice, hot spots, secondary indexes, rebalancing, routing",
-      "learn": "Compare key-range partitioning (range scans work, sequential keys create a hot tail) with hash partitioning (even spread, range scans become scatter-gather). Know the fixed-slot schemes in tools your customers run: Redis Cluster's 16384 hash slots via CRC16, Kafka's murmur2(key) mod partition count - and why increasing a topic's partition count silently changes the key-to-partition mapping and breaks per-key ordering for in-flight consumers. Hot partitions: the celebrity-key problem, DynamoDB's per-partition ceiling (about 3000 RCU / 1000 WCU) and adaptive capacity, and the fix of salting a hot key with a small suffix and fanning reads back out. Secondary indexes: local/document-partitioned (scatter-gather reads, Cassandra, Elasticsearch) versus global/term-partitioned (asynchronous updates, DynamoDB GSIs). Rebalancing: many fixed partitions per node, dynamic splitting (HBase, DynamoDB), never hash mod N. Routing: coordination service (ZooKeeper in Kafka's older design), gossip (Cassandra), or smart clients following MOVED redirects (Redis).",
-      "minutes": 60,
-      "resource": {
-        "label": "AWS DynamoDB Developer Guide - Partitions and Data Distribution",
-        "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.Partitions.html"
-      }
-    },
-    {
-      "name": "Transactions: isolation levels, their anomalies, and Postgres specifics",
-      "learn": "Define each anomaly with a two-session example you can type into psql: dirty read/write, read skew (non-repeatable read), lost update, write skew, phantom. Map them to levels as PostgreSQL actually implements them: READ COMMITTED takes a snapshot per statement (the default); REPEATABLE READ is snapshot isolation with first-updater-wins (ERROR 40001 on a concurrent update); SERIALIZABLE is SSI, tracking rw-dependencies with SIReadLocks and aborting with 'could not serialize access due to read/write dependencies' (also SQLSTATE 40001), so the application needs a retry loop. Know the four fixes for lost updates (atomic UPDATE ... SET x = x + 1, SELECT ... FOR UPDATE, compare-and-set WHERE version = $1, or SSI) and the write-skew canon (on-call doctors, double-booked rooms) including the materialise-conflicts trick with a row per bookable slot when you cannot afford SERIALIZABLE. Run Hermitage's scripts against Postgres and one store your customer uses and record where the isolation names lie.",
-      "minutes": 75,
-      "resource": {
-        "label": "PostgreSQL docs - Transaction Isolation (Read Committed, Repeatable Read, Serializable/SSI)",
-        "url": "https://www.postgresql.org/docs/current/transaction-iso.html"
-      }
-    },
-    {
-      "name": "Linearizability, CAP, and what 'strong consistency' means in a design review",
-      "learn": "Define linearizability precisely: every operation appears to take effect atomically at some instant between its invocation and its response, and once any read returns the new value every later read returns it - a single-copy illusion in real time. Separate it from serializability (ordering of multi-object transactions, no real-time constraint) and strict serializability (both). Know the defaults of the systems you will meet: etcd reads are linearizable by default, ZooKeeper writes are but reads are not unless preceded by sync(), single-node Postgres is for single-object operations, Cassandra QUORUM is not, DynamoDB is only with ConsistentRead. Know where it is genuinely required (leader election, uniqueness constraints, locks, cross-channel timing such as 'file uploaded then message queued') and what it costs (a quorum or leader round trip, unavailability during partition). Retire CAP as a design tool - it is a theorem about one narrow model - and reason instead with 'linearizable or not' plus 'available under partition or not' plus the latency you pay even with no partition. Understand how Jepsen's checker (Knossos/Elle) tests a history for linearizability so you can read a Jepsen report and explain it to a customer.",
-      "minutes": 50,
-      "resource": {
-        "label": "Jepsen - Consistency Models: Linearizable",
-        "url": "https://jepsen.io/consistency/models/linearizable"
-      }
-    },
-    {
-      "name": "Ordering, total order broadcast, atomic commit and two-phase commit",
-      "learn": "Separate causal order from total order and show why Lamport timestamps alone cannot enforce a uniqueness constraint (you would have to hear from every node first). Define total order broadcast - reliable delivery plus identical order at every node - and know its equivalence to consensus and its real-world instances: ZooKeeper's ZAB and a single Kafka partition. Atomic commit across participants: 2PC prepare/commit, the coordinator's log write as the point of no return, in-doubt participants holding row locks forever after a coordinator crash (2PC is blocking), and why 2PC is not fault-tolerant consensus (one coordinator, no election). In PostgreSQL: PREPARE TRANSACTION 'gid', COMMIT PREPARED, ROLLBACK PREPARED, max_prepared_transactions defaults to 0, and pg_prepared_xacts to find orphaned in-doubt transactions that are blocking VACUUM. Know XA in the Java world and why most current systems replace 2PC with idempotent, log-based sagas (Topic 34).",
-      "minutes": 50,
-      "resource": {
-        "label": "PostgreSQL docs - PREPARE TRANSACTION",
-        "url": "https://www.postgresql.org/docs/current/sql-prepare-transaction.html"
-      }
-    },
-    {
-      "name": "Consensus: Raft mechanics, the Paxos family, safety versus liveness",
-      "learn": "Work through Raft at the level of the paper's Figure 2: terms as epochs; randomised election timeouts (150-300 ms in the paper); RequestVote's up-to-date check (compare last log term, then last log index); AppendEntries with prevLogIndex/prevLogTerm as the consistency check and how followers truncate conflicting suffixes; commitIndex advancing only when a majority stores an entry from the leader's current term (the Figure 8 subtlety); the Log Matching and Leader Completeness properties; why a leader never overwrites or deletes its own entries; membership change via joint consensus or single-server changes; snapshots and InstallSnapshot for log compaction. Know Paxos vocabulary (proposers, acceptors, ballots) and that Multi-Paxos with a stable leader is what Raft makes explicit. Quorum arithmetic for the customer: 2f+1 nodes tolerate f failures, so 3 tolerates 1, 5 tolerates 2, and 4 tolerates the same 1 as 3 while costing more; every cross-region write pays at least one WAN round trip to a majority.",
-      "minutes": 75,
-      "resource": {
-        "label": "Ongaro and Ousterhout - In Search of an Understandable Consensus Algorithm (Raft paper, PDF)",
-        "url": "https://raft.github.io/raft.pdf"
-      }
-    },
-    {
-      "name": "Coordination services in practice: leases, fencing tokens, ephemeral nodes",
-      "learn": "Know what ZooKeeper and etcd actually give you: linearizable writes, session or lease-scoped ephemeral keys (etcd Lease with TTL and KeepAlive; ZooKeeper session timeout and ephemeral znodes), watches, and a monotonic counter usable as a fencing token (ZooKeeper sequential znodes, etcd's revision / ModRevision). Understand the lease-expiry hole: a process paused by GC, VM live migration or SIGSTOP still believes it holds the lock after the lease expired; the correct fix is a fencing token that the protected resource checks and rejects if lower than the last one it saw - the lock alone is never sufficient. Know etcd's documented guarantees (linearizable reads by default, serializable reads when you opt in via --consistency=s, revision semantics) and why Redlock is contested. When a customer asks for a 'distributed lock', your first questions are 'what resource does it protect' and 'can that resource check a token'.",
-      "minutes": 40,
-      "resource": {
-        "label": "etcd docs - API guarantees (linearizability, serializability, revisions)",
-        "url": "https://etcd.io/docs/v3.5/learning/api_guarantees/"
-      }
-    },
-    {
-      "name": "Derived data: dual writes, outbox, log-based CDC (DDIA ch 11-12)",
-      "learn": "Diagnose the dual-write problem (write to Postgres, then publish to Kafka: either step can fail, and two writers can interleave differently in each system) and know the two fixes: a transactional outbox table drained by CDC, or log-based CDC straight from the database. For Postgres logical decoding know wal_level = logical, CREATE PUBLICATION, the logical replication slot, the pgoutput plugin, and that Debezium emits before/after images tagged with LSN and transaction id; know that an abandoned slot retains WAL until the disk fills. Distinguish CDC from event sourcing, use log compaction to hold keyed state, and describe rebuilding a search index, cache or warehouse table by replaying the log from offset zero. Make consumers idempotent on (source LSN or event id) and evolve schemas through the log, not around it.",
-      "minutes": 45,
-      "resource": {
-        "label": "Debezium docs - PostgreSQL connector (logical decoding, slots, publications, event envelope)",
-        "url": "https://debezium.io/documentation/reference/stable/connectors/postgresql.html"
-      }
-    },
-    {
-      "name": "Stream processing semantics: event time, watermarks, exactly-once (DDIA ch 11)",
-      "learn": "Separate event time from processing time and explain why a late-arriving mobile event changes an already-emitted hourly count. Know the window types (tumbling, hopping, sliding, session), watermarks as the operator's promise that no earlier events will arrive, and what to do with late data (drop, side output, retract). Cover the three join shapes (stream-stream, stream-table, table-table) and why stream-table joins are time-dependent. Fault tolerance via periodic checkpointing plus replay from the log, and the honest definition of exactly-once: at-least-once delivery plus idempotent or transactional sinks - Kafka's enable.idempotence, transactional.id and isolation.level = read_committed cover Kafka-to-Kafka, but an external sink still needs its own idempotency key.",
-      "minutes": 35,
-      "resource": {
-        "label": "Apache Flink docs - Concepts: Timely Stream Processing (event time, watermarks, lateness)",
-        "url": "https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/"
-      }
-    },
-    {
-      "name": "Maelstrom harness and Glomers 1-2: echo and unique IDs under partition",
-      "learn": "Install Maelstrom (a JDK, Graphviz and gnuplot) and run the echo workload. Learn the protocol cold: newline-delimited JSON on stdin/stdout, every message is {src, dest, body}, body carries type, msg_id and in_reply_to; the first message is init with node_id and node_ids; replies use type = request type + '_ok'; errors carry a numeric code (0 timeout, 11 temporarily-unavailable, 13 crash, 14 abort, 20 key-does-not-exist, 22 precondition-failed) and are either definite or indefinite; logs go to stderr because stdout is the wire. In the Go library: maelstrom.NewNode(), n.Handle(type, fn), n.Reply(msg, body), n.Send(dest, body), n.RPC(dest, body, callback), n.SyncRPC(ctx, dest, body), n.Run(), n.ID(), n.NodeIDs(). Challenge 1 is echo. Challenge 2 runs with --node-count 3 --rate 1000 --availability total --nemesis partition: generate IDs with no coordination (node id plus a local counter, or a timestamp-node-sequence layout) and be able to say why any scheme that talks to another node would fail the total-availability check. Read results.edn and store/latest until 'Everything looks good' means something to you.",
-      "minutes": 75,
-      "resource": {
-        "label": "Maelstrom docs - Protocol (message format, init, RPC, error codes)",
-        "url": "https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md"
-      }
-    },
-    {
-      "name": "Glomers 3a-3c: broadcast, gossip, and fault tolerance under partitions",
-      "learn": "3a (single node): handle broadcast, read and topology; store a set of ints behind a sync.Mutex; return read_ok with messages. 3b (multi-node): forward each newly-seen value to your neighbours from the topology message (or a topology you choose), deduplicate so you only forward on first sight, and avoid echoing back to the sender. 3c runs with --node-count 5 --time-limit 20 --rate 10 --nemesis partition: inter-node messages will be dropped, so keep a per-neighbour pending set and retry unacknowledged sends from a background goroutine (ticker plus n.RPC callback or n.SyncRPC with a context timeout) until acked; never block the request handler on the network, never spawn an unbounded goroutine per retry, and run go test -race or go build -race to catch the shared-map race you almost certainly have. Success criteria from the challenge text: values propagate to all nodes by the end of the test, and each node returns only its own local values.",
-      "minutes": 80,
-      "resource": {
-        "label": "Fly.io Gossip Glomers - Challenge 3c: Fault Tolerant Broadcast",
-        "url": "https://fly.io/dist-sys/3c/"
-      }
-    },
-    {
-      "name": "Glomers 3d-3e: efficient broadcast and reading Maelstrom's stats",
-      "learn": "Run with --node-count 25 --time-limit 20 --rate 100 --latency 100 and hit the stated limits: 3d requires messages-per-operation below 30, median latency below 400 ms and maximum below 600 ms; 3e requires below 20, below 1 s and below 2 s. Read results.edn properly: :net :servers :msgs-per-op counts only inter-server traffic, and :workload :stable-latencies gives quantiles {0, 0.5, 0.95, 0.99, 1} measured from broadcast acknowledgement to the value being present on every node. Do the arithmetic before coding: with 100 ms per hop a grid topology is several hops deep, so switch to a spanning tree or hub-and-spoke (one or two hops), and batch pending values per neighbour on a ticker (every 100-500 ms) so one message carries many values. Re-run with --nemesis partition after every optimisation, because the challenge text is explicit that you must not trade safety for the numbers.",
-      "minutes": 70,
-      "resource": {
-        "label": "Fly.io Gossip Glomers - Challenge 3d: Efficient Broadcast, Part I",
-        "url": "https://fly.io/dist-sys/3d/"
-      }
-    },
-    {
-      "name": "Glomers 4: grow-only counter on a sequentially consistent KV",
-      "learn": "Use maelstrom.NewSeqKV(n): seq-kv offers Read, Write and CompareAndSwap with sequential consistency, meaning operations are totally ordered and each client's order is respected, but a read may return a value that is old in real time. Two designs: (a) a single shared counter updated by a CAS loop - kv.ReadInt, then kv.CompareAndSwap(ctx, key, from, to, createIfNotExists) and retry on PreconditionFailed (code 22), handling KeyDoesNotExist (code 20) on first write; (b) a G-counter CRDT where each node only increments its own key (its node id) and read sums every node's key, which has no contention and survives partitions cleanly. Handle stale reads honestly: because reads are only sequentially consistent, perform a write (to a throwaway key with a unique value) before reading so your subsequent reads are ordered after it, or merge the store's value with your local knowledge. Run with --node-count 3 --rate 100 --time-limit 20 --nemesis partition; the final read must equal the sum of all acknowledged adds. Be able to explain why this design passes while an LWW register keyed on wall time would not.",
-      "minutes": 70,
-      "resource": {
-        "label": "Maelstrom docs - Services (lin-kv, seq-kv, lww-kv semantics and operations)",
-        "url": "https://github.com/jepsen-io/maelstrom/blob/main/doc/services.md"
-      }
-    },
-    {
-      "name": "The client-architect explanation: a 20-minute whiteboard script without notes",
-      "learn": "Assemble and rehearse the explanation the depth target demands. Replication: leader/follower, sync vs async, what lag means, and which of read-your-writes / monotonic reads / consistent prefix their product actually needs. Partitioning: key choice, hot spots, rebalancing, and the cost of secondary indexes. Consistency: linearizable versus eventual versus the in-between guarantees, each expressed as a user-visible anomaly rather than a term of art. Consensus: why 3 or 5 nodes, what a lease is, what happens during a partition, what a fencing token protects. Transactions across services: outbox or saga, never 2PC by default. Use the 'stop calling databases CP or AP' framing to head off the CAP conversation, carry a one-page decision table (use case, required guarantee, cost in latency and availability), record yourself, time each section, and cut every sentence you cannot back with an anomaly example.",
-      "minutes": 45,
-      "resource": {
-        "label": "Martin Kleppmann - Please stop calling databases CP or AP",
-        "url": "https://martin.kleppmann.com/2015/05/11/please-stop-calling-databases-cp-or-ap.html"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can draw PostgreSQL single-leader replication on a whiteboard and, for each synchronous_commit setting (off, local, remote_write, on, remote_apply), state exactly which failure loses acknowledged writes and how a client would observe it.",
-    "You can take a user story such as 'saved my profile, refreshed, saw the old one', name the missing guarantee (read-your-writes), and describe two implementations, one of them the LSN-tracking approach using pg_current_wal_lsn() and pg_last_wal_replay_lsn().",
-    "You can take five concurrent-transaction scenarios, predict which anomaly occurs under READ COMMITTED and under REPEATABLE READ in PostgreSQL, and prove it in two psql sessions, then show the SERIALIZABLE retry loop or explicit lock that removes it.",
-    "You can explain Raft leader election and log replication from memory, including why a candidate with a longer log but an older last-entry term loses the vote, and answer 'why five nodes and not four' with quorum arithmetic.",
-    "You can complete Gossip Glomers 1 through 4 with Maelstrom reporting 'Everything looks good', including 3d and 3e within the stated messages-per-operation and latency limits and still correct under --nemesis partition.",
-    "You can read a Jepsen analysis or a Maelstrom results.edn, identify the consistency model being checked, and state whether the anomaly found would affect a named customer use case.",
-    "You can deliver the 20-minute explanation of replication, partitioning, consistency and consensus to a non-specialist architect without notes, recorded, with every claim tied to a user-visible anomaly.",
-    "You can spot the dual-write problem in a customer's architecture diagram and redraw it with an outbox plus CDC path, naming wal_level = logical, the replication slot, and the slot-lag disk risk that comes with it."
-  ],
-  "failureModes": [
-    "An asynchronous Postgres replica was promoted after the primary died; the last thirty seconds of acknowledged writes were gone, and the old primary rebooted and kept accepting writes because nothing fenced it, leaving two divergent timelines that had to be merged by hand.",
-    "A Debezium connector was decommissioned but its logical replication slot was not dropped; the primary retained WAL for weeks until the disk filled at 03:00 and PostgreSQL stopped accepting writes.",
-    "A Cassandra cluster using last-writer-wins with client timestamps had one app server forty seconds behind on NTP; every update from that host was silently overwritten by older writes from the others and the team chased a 'random data loss' bug for three weeks.",
-    "A Kafka topic was bumped from 12 to 24 partitions to add throughput; the key-to-partition mapping changed under live consumers, per-key ordering broke, and the downstream aggregator emitted duplicate and out-of-order state that reached the customer's reports.",
-    "A 'distributed lock' built on Redis SET NX PX with a 30-second TTL and no fencing token; a JVM garbage-collection pause exceeded the TTL, two workers processed the same batch, and the storage layer happily accepted both.",
-    "A check-then-insert for booking a slot ran at Postgres's default READ COMMITTED; write skew let two customers book the same slot on a busy day, and the fix (a unique index plus a SERIALIZABLE retry loop) arrived only after the refund.",
-    "A three-node etcd cluster was split two-plus-one across two data centres; the two-node site lost power, the surviving node could not form a quorum, and the Kubernetes control plane was down even though every application node was healthy."
-  ],
-  "interviewQuestions": [
-    "A customer runs Postgres with one asynchronous streaming replica and asks for 'zero data loss on failover'. Walk me through exactly what you would change - synchronous_commit, synchronous_standby_names, quorum shape, fencing - what it costs in write latency and availability, and what you tell them when the replica is in another region.",
-    "Explain linearizability as if I were a solutions architect with no distributed-systems background, then name three places in a typical SaaS application that genuinely need it and three that do not, with the cost of getting it in each case.",
-    "Design a globally unique, roughly time-ordered ID generator across three regions that stay available during partitions. What do you give up relative to a database sequence, and what happens when one node's clock jumps backwards?",
-    "An orders service writes to Postgres and then publishes to Kafka; users report missing events roughly once a day. Diagnose the mechanism, redesign it with an outbox or CDC, and state the new operational risks you have introduced and how you would monitor them.",
-    "A five-node Raft cluster: the leader in term 7 has committed through index 100; node B was partitioned and holds uncommitted entries 101-105 from term 6. The partition heals. Walk through what happens to B's log, step by step, and why those entries can or cannot be discarded safely.",
-    "Given this history - A writes x = 1 and gets an ack; B's read of x starts after A's ack and returns 0; C's read returns 1 - is it linearizable? Sequentially consistent? Which real databases produce it, under which configuration, and how would you stop it?",
-    "Your Gossip Glomers broadcast passes cleanly without a nemesis but under --nemesis partition some values never reach every node. Give me the three most likely bugs in order of probability and how you would prove each one from Maelstrom's logs and results.edn."
-  ],
-  "proofOfWork": "A recorded 'consistency anomaly lab' checked into the portfolio repo next to the Glomers solutions: a docker-compose with a Postgres primary and one streaming replica plus a set of scripted demonstrations, each captured as a terminal recording with the exact commands and output. Demo one reproduces a stale read-after-write on the replica and then fixes it with the pg_current_wal_lsn / pg_last_wal_replay_lsn wait and separately with synchronous_commit = remote_apply, timing the latency cost of each. Demo two shows write skew on a slot-booking table at REPEATABLE READ in two psql sessions, then the SERIALIZABLE retry loop catching SQLSTATE 40001, and finally the unique-index alternative. Demo three kills the primary with synchronous_commit = off versus on, promotes the replica with pg_promote(), and counts the acknowledged rows that were lost in each case. Alongside it sits a Maelstrom results table for challenges 3d, 3e and 4 showing msgs-per-op and the stable-latency quantiles with and without --nemesis partition, and the recorded 20-minute architect explanation with its one-page decision table (use case, required guarantee, cost). A reviewer should be able to clone, run make lab, and reproduce every anomaly and every fix in under fifteen minutes."
+ "i": 39,
+ "topic": "Testing and contracts: pytest, property tests, OpenAPI contract tests",
+ "track": "E. Backend and Data",
+ "month": 5,
+ "hours": 6.0,
+ "why": "An FDE ships an API into a customer's environment and then leaves; the customer's integration team keeps building against it for years, and the only thing that protects them from your successor's refactor is a machine-checked contract that fails the build. Customer data is the adversary: unicode task names, empty lists, 10 MB payloads, and out-of-order state transitions arrive on day one of production, and property-based tests are the cheapest way to meet them in CI first. A published coverage number and a green contract job are also what a customer's procurement and security review actually ask for in the vendor questionnaire, so the test suite is part of the sales artefact, not just engineering hygiene.",
+ "prerequisites": [
+  "Production Python architecture (topic 25): the Kaupex Task Compiler's domain/repository split, Protocol-typed ports and the KaupexError hierarchy (InvalidTransition, NotFound, Conflict) that tests will assert on",
+  "FastAPI in production (topic 26): Depends, dependency_overrides, lifespan, settings via pydantic-settings, and the problem+json error handlers",
+  "PostgreSQL at depth (topic 29): SQLAlchemy 2.0 async engine and sessions, Alembic migrations, transactions and SAVEPOINT semantics",
+  "Docker running locally (topics 5-6) so testcontainers can start a Postgres container; understands ports, volumes and image tags",
+  "CI/CD (topic 18): can read and edit a GitHub Actions workflow with jobs, services, artifacts and required status checks",
+  "JSON Schema vocabulary as emitted by pydantic v2: type, required, properties, additionalProperties, enum, format, minLength/maxLength, anyOf"
+ ],
+ "subtopics": [
+  {
+   "name": "Test layers for a FastAPI + Postgres + Temporal service",
+   "learn": "Lay out tests/unit (pure domain, no IO, milliseconds), tests/integration (repositories against a real Postgres), tests/api (handlers through the ASGI app) and tests/contract (Schemathesis against the OpenAPI document), each behind a registered marker so `pytest -m unit` runs in under five seconds and the full suite runs in CI. Use the src layout with `--import-mode=importlib` so test files need no `__init__.py` and can share basenames, set `testpaths = [\"tests\"]`, and put shared fixtures in a root conftest.py with layer-specific conftest.py files below it. Decide what each layer is allowed to touch: unit tests may not import sqlalchemy or httpx; integration tests may not mock the database; API tests may override dependencies but not monkeypatch internals. Be able to argue why a bug should be caught at a given layer and why moving a test down a layer makes it faster and more precise.",
+   "minutes": 15,
+   "resource": {
+    "label": "pytest docs - Good Integration Practices (test layout, src layout, import modes)",
+    "url": "https://docs.pytest.org/en/stable/explanation/goodpractices.html"
+   }
+  },
+  {
+   "name": "pytest configuration as a hard gate",
+   "learn": "Configure `[tool.pytest.ini_options]` so the suite fails on anything ambiguous: `addopts = \"-ra --strict-markers --strict-config --import-mode=importlib\"`, `filterwarnings = [\"error\", ...]` with narrow `ignore::DeprecationWarning:third_party.*` exceptions, `xfail_strict = true` so an xfail that starts passing fails the build, `faulthandler_timeout = 60`, `minversion`, `required_plugins` and `markers = [...]` for every custom marker. Know the debugging flags cold: `-x`/`--maxfail=3`, `--lf`, `--ff`, `--sw` (stepwise), `--pdb`, `-k \"transition and not cancel\"`, `--durations=10 --durations-min=0.5`, `--co -q` to check collection, `-p no:randomly` to pin ordering. Know the exit codes: 0 all passed, 1 failures, 2 interrupted, 3 internal error, 4 usage error, 5 no tests collected; a `-k` expression matching nothing returns 5 and must not be treated as success by a wrapper script.",
+   "minutes": 20,
+   "resource": {
+    "label": "pytest docs - API Reference (ini options and command-line flags)",
+    "url": "https://docs.pytest.org/en/stable/reference/reference.html"
+   }
+  },
+  {
+   "name": "Fixtures: scope, teardown order, conftest layering, factories",
+   "learn": "Understand fixture scopes (function, class, module, package, session), that a higher-scoped fixture cannot request a lower-scoped one (ScopeMismatch), and that yield fixtures tear down in reverse dependency order, so a session-scoped Postgres container outlives the function-scoped session that borrows a connection from it. Use `request.addfinalizer` when teardown must run even if setup partially failed, `autouse=True` only for cross-cutting invariants (reset `app.dependency_overrides`, clear a Redis test DB), and fixture overriding in a nested conftest.py to swap a real adapter for a fake in one directory. Prefer factory fixtures (`make_task(**overrides)` returning a domain object with sane defaults) over dozens of near-identical fixtures; inspect what is active with `pytest --fixtures`, `--fixtures-per-test` and `--setup-show`. Know that `tmp_path`, `monkeypatch` and `caplog` are function-scoped and that `tmp_path_factory` is the session-scoped alternative.",
+   "minutes": 25,
+   "resource": {
+    "label": "pytest docs - How to use fixtures",
+    "url": "https://docs.pytest.org/en/stable/how-to/fixtures.html"
+   }
+  },
+  {
+   "name": "Parametrize as a state-transition matrix",
+   "learn": "Encode the Kaupex Task state machine as a table: `@pytest.mark.parametrize(\"state,event,expected\", CASES, ids=...)` where CASES covers every (state, event) pair and `expected` is either the next state or `InvalidTransition`, so the test file is the executable specification of allowed transitions. Use `pytest.param(..., marks=pytest.mark.xfail(strict=True, reason=\"...\"))` for known gaps instead of deleting rows, stack two parametrize decorators for a cartesian product, `indirect=True` to route a parameter through a fixture (build the task in the requested state against the real DB), and `pytest_generate_tests` when the matrix must be computed from the enum at collection time so a new state cannot be added without a test row. Readable ids (`ids=lambda c: f\"{c.state}-{c.event}\"`) make `-k \"queued-cancel\"` selection and CI failure output usable.",
+   "minutes": 15,
+   "resource": {
+    "label": "pytest docs - How to parametrize fixtures and test functions",
+    "url": "https://docs.pytest.org/en/stable/how-to/parametrize.html"
+   }
+  },
+  {
+   "name": "Test doubles at the boundary: monkeypatch, autospec, respx, in-memory fakes",
+   "learn": "Use `monkeypatch.setattr/setenv/delenv/setitem/chdir` for process-level state and `unittest.mock.patch(\"kaupex.adapters.llm.AsyncAnthropic\", autospec=True)` with `spec_set=True` so a renamed or misspelled method raises AttributeError instead of silently returning a Mock; use `AsyncMock` for coroutines and `assert_awaited_once_with`. Patch where the name is looked up (the importing module), not where it is defined. For HTTP boundaries prefer `respx.mock` routers (`respx.post(url).mock(return_value=httpx.Response(429, headers={\"retry-after\": \"1\"}))`, `assert_all_called=True`) so retry and backoff paths are exercised against realistic responses. For the persistence boundary prefer an in-memory fake that implements the same `TaskRepository` Protocol, run the same test module against both fake and real repository (parametrised fixture), and never mock a SQLAlchemy Session: the mock will pass while the query is wrong.",
+   "minutes": 20,
+   "resource": {
+    "label": "Python docs - unittest.mock (patch, autospec, spec_set, AsyncMock)",
+    "url": "https://docs.python.org/3/library/unittest.mock.html"
+   }
+  },
+  {
+   "name": "Async API tests through ASGITransport with dependency overrides",
+   "learn": "Configure pytest-asyncio with `asyncio_mode = \"auto\"` and `asyncio_default_fixture_loop_scope = \"session\"` so a session-scoped async engine and the test share one event loop; otherwise asyncpg raises 'attached to a different loop' on the second test. Build the client as `httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=\"http://test\")`; know that ASGITransport does not run lifespan, so wrap with `asgi_lifespan.LifespanManager(app)` when startup wiring (pool creation, Temporal client) matters. Override `get_session` and `get_current_user` via `app.dependency_overrides[...]` inside a fixture and call `app.dependency_overrides.clear()` in teardown; keep one test that uses a real signed JWT so the auth path is not permanently bypassed. Assert status code, full JSON body, `content-type: application/problem+json` on errors and the `X-Request-ID` header, and rely on server exceptions propagating into the test rather than being turned into a 500 you then miss.",
+   "minutes": 25,
+   "resource": {
+    "label": "FastAPI docs - Async Tests (httpx ASGITransport)",
+    "url": "https://fastapi.tiangolo.com/advanced/async-tests/"
+   }
+  },
+  {
+   "name": "Real Postgres in tests: testcontainers, migrations, rollback isolation, xdist",
+   "learn": "Start `PostgresContainer(\"postgres:16-alpine\")` once per session, take `get_connection_url()`, and run `alembic.command.upgrade(cfg, \"head\")` against it so every CI run also proves the migration chain applies from empty. Isolate tests with the SQLAlchemy 'join an external transaction' recipe: open a connection, `begin()`, bind the session, `begin_nested()` for a SAVEPOINT, roll back at teardown; fall back to `TRUNCATE ... RESTART IDENTITY CASCADE` for tests that must observe a real commit (advisory locks, `FOR UPDATE SKIP LOCKED` workers). For RLS-protected tables (topic 30) the test session must `SET LOCAL app.tenant_id` exactly as the app does or every query returns zero rows. Under pytest-xdist derive the database from `PYTEST_XDIST_WORKER` (`kaupex_test_gw0`) with `CREATE DATABASE ... TEMPLATE kaupex_test` so workers never share rows, and know the CI fallbacks when Docker is unavailable: a GitHub Actions `services:` container or `TESTCONTAINERS_RYUK_DISABLED=true` in restricted runners.",
+   "minutes": 25,
+   "resource": {
+    "label": "testcontainers-python docs - Postgres module",
+    "url": "https://testcontainers-python.readthedocs.io/en/latest/modules/postgres/README.html"
+   }
+  },
+  {
+   "name": "Property-based testing with Hypothesis: strategies, shrinking, properties worth writing",
+   "learn": "Write `@given(st.text(), st.integers(min_value=0))` tests and understand that Hypothesis searches then shrinks to a minimal counterexample, which is why a failure reads like `text=''` rather than a 300-character string. Build strategies for domain types with `st.builds(TaskCreate, name=st.text(min_size=1, max_size=120))`, `st.from_type(...)` for simple pydantic models (constrained fields need explicit strategies), `st.sampled_from(TaskState)`, `st.lists(..., unique_by=...)`, `st.one_of`, `.map/.filter/.flatmap`, `@st.composite`, `assume()` for cheap preconditions and `@example(...)` to pin past regressions. Know the property families and pick the right one: round-trip (`Task.model_validate_json(t.model_dump_json()) == t`), invariant (compiled task DAG is acyclic), idempotence (normalise twice equals once), oracle (naive implementation equals optimised), and metamorphic (adding a step never shortens the plan). Read health checks (`too_slow`, `filter_too_much`, `data_too_large`) as strategy bugs to fix, not warnings to suppress.",
+   "minutes": 25,
+   "resource": {
+    "label": "Hypothesis docs - Quick start guide",
+    "url": "https://hypothesis.readthedocs.io/en/latest/quickstart.html"
+   }
+  },
+  {
+   "name": "Deterministic Hypothesis in CI: settings profiles, example database, reproduce_failure",
+   "learn": "Register profiles in conftest.py: `settings.register_profile(\"ci\", max_examples=500, deadline=None, derandomize=True, print_blob=True)` and `\"dev\"` with `max_examples=50`, then `settings.load_profile(os.getenv(\"HYPOTHESIS_PROFILE\", \"dev\"))`; select with `--hypothesis-profile` and pin with `--hypothesis-seed`. Understand the `.hypothesis/examples` DirectoryBasedExampleDatabase (gitignored, cached between CI runs with actions/cache or replaced by `GitHubArtifactDatabase` so a failure found on main is replayed on every branch), and paste the `@reproduce_failure(version, blob)` line from a `print_blob=True` report into the test to pin a specific counterexample. Know that the 200 ms default `deadline` is flaky on loaded CI runners and why `deadline=None` is the honest fix, and that a Hypothesis `Flaky` error means the test failed then passed on replay: the code under test is nondeterministic (time, dict order, uncontrolled randomness), not the framework.",
+   "minutes": 15,
+   "resource": {
+    "label": "Hypothesis docs - API reference (settings, database, reproduce_failure)",
+    "url": "https://hypothesis.readthedocs.io/en/latest/reference/api.html"
+   }
+  },
+  {
+   "name": "Stateful testing of the Task lifecycle with RuleBasedStateMachine",
+   "learn": "Model the Task service as a `RuleBasedStateMachine`: `tasks = Bundle(\"tasks\")`, `@initialize()` to create a tenant, `@rule(target=tasks, payload=st.builds(...))` that calls create and returns the id, `@rule(task=tasks, event=st.sampled_from(Event))` that applies a transition and mirrors it in a plain-dict model, `consumes(tasks)` on delete, `@precondition(lambda self: self.model)` to gate rules, and `@invariant()` that after every step asserts each real task equals the model and every terminal task has `completed_at` set. Export with `TestTaskMachine = TaskMachine.TestCase` and `TestTaskMachine.settings = settings(max_examples=200, stateful_step_count=30)`. When it fails, Hypothesis prints the minimal `state.create(...)`, `state.transition(...)` sequence; paste it into a regression test. This is how you find the cancel-after-complete and double-retry bugs that a parametrised matrix cannot express because they depend on history.",
+   "minutes": 20,
+   "resource": {
+    "label": "Hypothesis docs - Stateful testing",
+    "url": "https://hypothesis.readthedocs.io/en/latest/stateful.html"
+   }
+  },
+  {
+   "name": "OpenAPI as the contract: making FastAPI's generated schema complete and strict",
+   "learn": "Every route must declare what it can actually return: `response_model=`, `status_code=201`, and `responses={404: {\"model\": Problem}, 409: {\"model\": Problem}, 422: {\"model\": Problem}}` with `content` keyed by `application/problem+json`, otherwise Schemathesis `status_code_conformance` and `content_type_conformance` fail on the first real error. Set stable operation ids with `generate_unique_id_function=lambda r: f\"{r.tags[0]}_{r.name}\"` (or `operation_id=`) because generated clients and OpenAPI links key on them. Make request models `ConfigDict(extra=\"forbid\")` so the schema emits `additionalProperties: false` and `negative_data_rejection` has teeth; push `Field(min_length, max_length, pattern, ge, le)` constraints into the schema so generated data hits real boundaries; document response headers under `responses[200][\"headers\"]`; hide `/healthz` and `/readyz` with `include_in_schema=False`; use `openapi_extra` for anything FastAPI cannot express, such as `links`.",
+   "minutes": 20,
+   "resource": {
+    "label": "FastAPI docs - Additional Responses in OpenAPI",
+    "url": "https://fastapi.tiangolo.com/advanced/additional-responses/"
+   }
+  },
+  {
+   "name": "Committed schema snapshot and breaking-change detection with oasdiff",
+   "learn": "Commit `openapi.json` and add a test `assert app.openapi() == json.loads(Path(\"openapi.json\").read_text())` with a `make openapi` target to regenerate, so any schema change appears as a reviewable diff in the PR rather than a surprise to the customer's client generator. In CI fetch the base with `git show origin/main:openapi.json > base.json` and run `oasdiff breaking base.json openapi.json --fail-on ERR`; know the classes it flags: removed path or method, new required request property, removed or renamed response property, type narrowing, enum value removed from a request or added to a response, `required` added to a response schema, and know which of those are ERR versus WARN and why an added optional response field is not breaking. Use `oasdiff changelog` output as the PR comment and the customer-facing release note. Define the policy: a breaking diff requires a `/v2` path or a major version bump plus a deprecation window, and the CI job enforces it rather than a reviewer's memory.",
+   "minutes": 20,
+   "resource": {
+    "label": "oasdiff - OpenAPI diff and breaking-change detection (GitHub)",
+    "url": "https://github.com/oasdiff/oasdiff"
+   }
+  },
+  {
+   "name": "Schemathesis CLI: phases, checks, and reading a failure",
+   "learn": "Run `schemathesis run http://127.0.0.1:8000/openapi.json --header \"Authorization: Bearer $TOKEN\" --max-examples 100 --seed 42 --max-failures 10 --wait-for-schema 30 --report junit` (or a file schema plus `--url`) and understand the four phases: examples (schema `example`/`examples` values), coverage (boundary values, `maxLength+1`, missing required fields, wrong types), fuzzing (Hypothesis-generated data) and stateful (OpenAPI links). Know each default check and what a failure means for Kaupex: `not_a_server_error` (unhandled exception), `status_code_conformance` (undocumented 403), `content_type_conformance`, `response_headers_conformance`, `response_schema_conformance` (nullable field not marked), `negative_data_rejection` (invalid body accepted), `positive_data_acceptance` (valid body rejected), `missing_required_header`, `unsupported_method`, `use_after_free`, `ensure_resource_availability`, `ignored_auth` (endpoint answers without a token). Tune with `--exclude-checks`, `--include-path-regex '^/v1/tasks'`, `--max-response-time 1.5`, `--phases`, and `schemathesis.toml` sections such as `[checks.negative_data_rejection] expected-statuses = [\"400\", \"422\"]`; reproduce a failure from the printed curl command and `--report-vcr-path`.",
+   "minutes": 20,
+   "resource": {
+    "label": "Schemathesis docs - Checks reference",
+    "url": "https://schemathesis.readthedocs.io/en/stable/reference/checks/"
+   }
+  },
+  {
+   "name": "Schemathesis inside pytest: from_asgi, parametrize, OpenAPI links, stateful",
+   "learn": "Load the schema straight from the app with `schema = schemathesis.openapi.from_asgi(\"/openapi.json\", app)`, or from a fixture via `schemathesis.pytest.from_fixture(\"api_schema\")` so the app under test carries the same `dependency_overrides` (test DB, fixed clock) as the rest of the suite; write `@schema.parametrize() def test_api(case): case.call_and_validate(headers=auth)` and scope with `schema.include(operation_id=...)` / `schema.exclude(path_regex=...)`. Add explicit `links` under `responses.201` via `openapi_extra` (`\"operationId\": \"tasks_get_task\", \"parameters\": {\"task_id\": \"$response.body#/id\"}`) so `APIWorkflow = schema.as_state_machine(); TestAPI = APIWorkflow.TestCase` chains create, get, transition and delete and `use_after_free` catches a GET 200 after DELETE. Retrofit conformance onto existing handwritten API tests with `schema[\"/v1/tasks/{task_id}\"][\"GET\"].validate_response(response)`. Mark all of this `@pytest.mark.contract` and run it as its own CI job because it is minutes, not seconds.",
+   "minutes": 20,
+   "resource": {
+    "label": "Schemathesis docs - Testing Python Apps (from_asgi, from_fixture)",
+    "url": "https://schemathesis.readthedocs.io/en/stable/guides/python-apps/"
+   }
+  },
+  {
+   "name": "Coverage that measures the truth: branch, greenlet concurrency, exclusions, fail_under",
+   "learn": "Configure `[tool.coverage.run]` with `source = [\"kaupex\"]`, `branch = true`, `parallel = true`, `relative_files = true` and `concurrency = [\"thread\", \"greenlet\"]`: SQLAlchemy's asyncio bridge runs DB calls inside greenlets and without the greenlet tracer the lines inside repositories report as never executed. In `[tool.coverage.report]` set `fail_under = 85`, `show_missing = true`, `skip_covered = true`, and `exclude_also` for `if TYPE_CHECKING:`, `raise NotImplementedError`, `@abstractmethod` and the `__main__` guard; `omit` generated migrations. Drive it through pytest-cov (`--cov=kaupex --cov-branch --cov-report=term-missing:skip-covered --cov-report=xml --cov-fail-under=85`) and use `--cov-context=test` to see which test covers which line when deciding what to delete. Know the difference between line and branch percentages, why an `except` clause with no test is a branch miss, and why the number is a floor for finding untested modules (`coverage report --sort=miss`) rather than a quality score.",
+   "minutes": 20,
+   "resource": {
+    "label": "coverage.py docs - Configuration reference",
+    "url": "https://coverage.readthedocs.io/en/latest/config.html"
+   }
+  },
+  {
+   "name": "Subprocess and worker coverage: parallel data files and combine",
+   "learn": "Code that runs in a child process is invisible to coverage by default: a Temporal worker started with `subprocess.Popen`, a CLI invoked in an integration test, or a `multiprocessing` pool. Enable measurement either with `patch = [\"subprocess\"]` in `[tool.coverage.run]` (coverage 7.10+) or the older `COVERAGE_PROCESS_START=pyproject.toml` environment variable plus the `.pth` hook, set `sigterm = true` so a worker killed by SIGTERM still flushes its `.coverage.<host>.<pid>.<random>` data file, and add `multiprocessing` to `concurrency` when pools are involved. After the run, `coverage combine` merges the data files, then `coverage report` and `coverage xml -o coverage.xml`; pytest-cov does the combine automatically for xdist workers but not for your own subprocesses. When unit and integration run in separate CI jobs, upload the `.coverage.*` files as artifacts and combine in a final job, which only works with `relative_files = true` because the checkout paths differ.",
+   "minutes": 15,
+   "resource": {
+    "label": "coverage.py docs - Measuring sub-processes",
+    "url": "https://coverage.readthedocs.io/en/latest/subprocess.html"
+   }
+  },
+  {
+   "name": "CI wiring: unit, integration and contract jobs that block merge",
+   "learn": "Split the workflow into a `unit` job (`pytest -m \"not integration and not contract\" -n auto`), an `integration` job with `services: postgres: image: postgres:16` plus `options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5` and `ports: [\"5432:5432\"]`, and a `contract` job that starts `uvicorn kaupex.main:app --port 8000 &` then runs `schemathesis run http://127.0.0.1:8000/openapi.json --wait-for-schema 30 --report junit --max-examples 50 --seed ${{ github.run_id }}` and uploads `schemathesis-report/` with actions/upload-artifact (or uses `schemathesis/action@v3`). Add the `oasdiff breaking` step, `--junitxml` for the test summary, `actions/cache` on `.hypothesis`, `timeout-minutes` on every job and `concurrency: group: ${{ github.workflow }}-${{ github.ref }}, cancel-in-progress: true`. Then make it a gate: branch protection with all three jobs as required status checks, so 'a failing contract breaks the build' is enforced by the repository, not by the reviewer noticing a red check.",
+   "minutes": 25,
+   "resource": {
+    "label": "GitHub Docs - Creating PostgreSQL service containers",
+    "url": "https://docs.github.com/en/actions/tutorials/use-containerized-services/create-postgresql-service-containers"
+   }
+  },
+  {
+   "name": "Publishing coverage: Codecov upload, patch gates, and the badge",
+   "learn": "Upload `coverage.xml` with `codecov/codecov-action@v5` (`files: coverage.xml`, `fail_ci_if_error: true`, `token: ${{ secrets.CODECOV_TOKEN }}`), then write a `codecov.yml` where `coverage.status.project.default.target: auto` with `threshold: 1%` stops regressions and `coverage.status.patch.default.target: 80%` is the gate that actually matters on a PR: new code must be tested even when the repo total is low. Embed the badge markdown from the Codecov settings page in the README so the number is public and updates itself. Know the SaaS-free alternative for a customer's air-gapped repo: `coverage json` and `jq .totals.percent_covered` produce a shields endpoint JSON (`{\"schemaVersion\": 1, \"label\": \"coverage\", \"message\": \"87%\", \"color\": \"green\"}`) committed to a gh-pages branch or gist and rendered via `img.shields.io/endpoint?url=...`, and publish `htmlcov/` as a build artifact so a reviewer can open the missed lines.",
+   "minutes": 15,
+   "resource": {
+    "label": "Codecov docs - Status badges",
+    "url": "https://docs.codecov.com/docs/status-badges"
+   }
+  },
+  {
+   "name": "Flaky tests: ordering, clocks, timeouts and quarantine policy",
+   "learn": "Install pytest-randomly so every run shuffles test order and reseeds `random`, Faker and NumPy; when a failure appears, reproduce with the printed `--randomly-seed=N` and disable with `-p no:randomly` only to bisect, never in CI. Add pytest-timeout (`timeout = 120` in ini, `--timeout-method=thread` when signals are unavailable) so a hung Temporal client fails the job in two minutes instead of six hours. Control time with time-machine (`time_machine.travel(...)`) rather than `sleep()`, and replace sleeps in async tests with a poll-until-deadline helper. Know the five root causes to check in order: shared mutable state across tests, clock, network, ordering, event loop or connection reused across loops. Define a quarantine policy: a `@pytest.mark.flaky` marker excluded from the required job, a ticket with owner and expiry, and `pytest-repeat --count=50` to prove a fix; never put pytest-rerunfailures on the required check because it converts a real race into green.",
+   "minutes": 15,
+   "resource": {
+    "label": "pytest-randomly - official repository (README)",
+    "url": "https://github.com/pytest-dev/pytest-randomly"
+   }
+  },
+  {
+   "name": "Mutation testing and assertion quality: why coverage lies",
+   "learn": "Configure `[tool.mutmut] paths_to_mutate = [\"src/kaupex/domain/\"]` and `tests_dir = [\"tests/unit/\"]`, run `mutmut run`, then `mutmut results` and `mutmut show <id>` (or `mutmut browse`) to read surviving mutants: a flipped `<` to `<=` or a removed `raise` that no test noticed. Every survivor is a line that is covered but not asserted, which is how a 92% covered module still ships a wrong transition guard. Fix survivors by strengthening assertions, not adding tests: `pytest.raises(InvalidTransition, match=r\"queued -> done\")` instead of bare `pytest.raises(Exception)`, exact `response.json() == {...}` instead of `\"id\" in response.json()`, `pytest.approx` with explicit tolerance, and `assert result` never on its own. Run mutation testing on the domain package only and on a schedule or on demand, not as a required gate, because a full run is minutes to hours.",
+   "minutes": 15,
+   "resource": {
+    "label": "mutmut docs - mutation testing for Python",
+    "url": "https://mutmut.readthedocs.io/en/latest/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can run `pytest -m unit` on the Kaupex Task Compiler in under five seconds and the full suite (unit, integration against a testcontainers Postgres, API, contract) in CI, with `--strict-markers --strict-config`, `filterwarnings = error` and `xfail_strict = true` enforced and every marker registered.",
+  "You can write a Hypothesis `RuleBasedStateMachine` for the Task lifecycle that, when a deliberately planted bug allows cancel after complete, prints a minimal three-step counterexample which you turn into a pinned regression test with `@reproduce_failure` or `@example`.",
+  "You can make a full `schemathesis run` against the Kaupex `/openapi.json` pass with all default checks enabled and at least one OpenAPI link exercised in the stateful phase, and explain from the failure output which handler or schema field was wrong for any check you had to fix along the way.",
+  "You can demonstrate that adding a required property to a request model or deleting a response field fails the `oasdiff breaking --fail-on ERR` job and the committed `openapi.json` snapshot test, while adding an optional response field passes both.",
+  "You can show branch coverage for the async repository layer moving from near zero to accurate by adding `concurrency = [\"thread\", \"greenlet\"]`, and explain why the pre-fix number was wrong rather than low.",
+  "You can configure a Postgres-backed test suite to run under `pytest -n auto` with one database per xdist worker derived from `PYTEST_XDIST_WORKER`, with zero cross-worker failures across ten consecutive runs.",
+  "You can set up branch protection so a PR cannot merge while any of unit, integration, contract or oasdiff jobs is red, and a Codecov patch status below 80% is visible on the PR with the badge in the README reflecting main.",
+  "You can run `mutmut` on `kaupex/domain`, pick three surviving mutants and kill each by tightening an assertion rather than adding a test, explaining what the original assertion failed to check."
+ ],
+ "failureModes": [
+  "A route returns 409 from the `Conflict` handler but only 200 and 422 are declared in `responses=`; the customer's generated TypeScript client treats 409 as an unknown error and retries the task creation in a loop, producing duplicate tasks until Schemathesis `status_code_conformance` is finally added to CI three months later.",
+  "Repository tests run against a mocked SQLAlchemy Session that returns whatever the test says; the real query has a missing `tenant_id` predicate, tests are green, and the first cross-tenant data exposure is found by the customer's security team during UAT.",
+  "Coverage is 91% and celebrated, but `concurrency` was never set so every line inside the greenlet-bridged async repository counts as executed only when the sync fallback path runs; after a refactor the badge stays green while the actual async code path has no test.",
+  "The API suite shares a module-scoped async engine with function-scoped tests under pytest-asyncio's default function loop; the second test fails with 'Future attached to a different loop', the team adds `pytest-rerunfailures`, and a genuine connection-pool leak hides behind retries for months.",
+  "`openapi.json` is regenerated on every deploy but never committed or diffed; a pydantic model rename changes `status` to `state` in the response, no test fails because the app and its own schema still agree, and the customer's integration breaks on Monday morning.",
+  "Hypothesis runs with the default 200 ms `deadline` on shared CI runners; property tests fail intermittently under load, someone adds `suppress_health_check` and `@settings(max_examples=5)` to make CI green, and the tests stop finding anything.",
+  "Integration tests `TRUNCATE` tables between runs but xdist workers share one database; tests pass locally with `-p no:xdist` and fail randomly in CI, so the team drops parallelism and the suite grows to a 40-minute serial run that nobody waits for before merging."
+ ],
+ "interviewQuestions": [
+  "A customer's integration team says our API 'changed under them' although every deploy passed CI. Walk me through what a contract-testing setup that would have caught it looks like, what specifically runs in CI, what counts as a breaking change, and how you would roll the change out instead.",
+  "Design the test strategy for a FastAPI service backed by Postgres with row-level security and Temporal workers. What runs at each layer, what is real versus faked, how do you isolate tests that must commit, and how do you keep the whole thing under ten minutes in CI with parallel workers?",
+  "You have 90% line coverage and a production bug in a state-transition guard that every test exercised. Explain why coverage did not catch it, what mutation testing would have shown, and how you would decide which assertions to strengthen.",
+  "Schemathesis reports `response_schema_conformance` failures on GET /v1/tasks/{id} for about 2% of generated cases and `ignored_auth` on one endpoint. Debug both: what are the likely causes in a pydantic/FastAPI app, how do you reproduce one case, and which fix belongs in the schema versus the handler?",
+  "Write a property-based test for the Kaupex task compiler that would find an ordering bug the parametrised unit tests cannot. What property do you state, what strategy generates the inputs, how do you keep it deterministic in CI, and what do you do when Hypothesis reports Flaky?",
+  "Our integration suite against Postgres is flaky under `pytest -n auto` but green serially. Give me your diagnosis procedure and the three most likely root causes in order, and the fix for each.",
+  "A customer's security questionnaire asks for our test coverage and how we prevent regressions in the API they consume. What do you send them, how is it produced, and what claim would you refuse to make from a coverage number alone?"
+ ],
+ "proofOfWork": "A pull request against the Kaupex Task Compiler repository that intentionally introduces one breaking API change (renaming `status` to `state` in the task response) and one behavioural regression (allowing `cancel` from `completed`), with the CI run attached showing exactly which gates caught which defect: the committed `openapi.json` snapshot test and `oasdiff breaking --fail-on ERR` fail on the rename, the Hypothesis `RuleBasedStateMachine` prints the minimal counterexample for the illegal transition, and the Schemathesis stateful phase reports `use_after_free` or a schema conformance failure with the reproducing curl command. The PR description contains a short table mapping each defect to the job that caught it, the time to first red check, and a one-paragraph note on why branch coverage stayed above the `fail_under` threshold for both defects, demonstrating in one artefact why contracts and properties are gates and coverage is only a floor."
 }

@@ -1,218 +1,227 @@
 {
-  "i": 27,
-  "topic": "Auth: OAuth2, OIDC, JWT, RBAC, multi-tenant claims",
-  "track": "E. Backend and Data",
-  "month": 4,
-  "hours": 8.0,
-  "why": "The first two questions a customer's security team asks before a pilot may touch real data are 'how do our people log in with our IdP' and 'prove tenant A can never see tenant B', and the FDE is the person who answers both on the call and then makes them true in code that week. You do not get to choose the IdP (it will be Entra ID, Okta, Ping or a SAML-only ADFS), so you need a model of OAuth2 and OIDC precise enough to wire any of them in a day, explain PKCE and cookie attributes to a reviewer without hand-waving, and diagnose an `iss` mismatch from a token pasted into a ticket. Authorization bugs are the ones that end contracts: a cross-tenant read is a breach notification and a renewal conversation, not a bug ticket.",
-  "prerequisites": [
-    "HTTP redirects, the `Authorization` header, cookies and TLS termination with `X-Forwarded-Proto`/`X-Forwarded-Host` from 'Networking' (topic 2): OIDC is a choreography of 302s, and the issuer URL changes the moment a proxy sits in front of the IdP.",
-    "FastAPI `Depends`, settings and lifespan from 'FastAPI in production' (topic 26): the verifier is a dependency and the JWKS client is lifespan state built exactly once.",
-    "Repository and domain layering from 'Production Python architecture' (topic 25): `tenant_id` becomes a mandatory argument on every repository method, sourced from the verified principal.",
-    "Docker Compose from 'Docker internals' (topic 5) to run Keycloak plus Postgres locally, and a working DefenderMate dashboard with at least one page and one API route to put behind login.",
-    "Cryptography at the level of 'private key signs, public key verifies', SHA-256, and base64url versus base64; you do not implement RSA here, you need to know why HS256 is wrong when the IdP is a third party.",
-    "Postgres transactions and `SET LOCAL` (row-level security is previewed here and deepened in 'PostgreSQL at depth', topic 29, and 'Data modelling for multi-tenant AI systems', topic 30)."
-  ],
-  "subtopics": [
-    {
-      "name": "Authorization code grant, parameter by parameter",
-      "learn": "Trace the front channel and the back channel separately: the browser is sent to `GET {authorization_endpoint}?response_type=code&client_id=&redirect_uri=&scope=openid%20profile&state=&nonce=&code_challenge=&code_challenge_method=S256`, comes back to `redirect_uri?code=&state=`, and only then does your server (never the browser) `POST {token_endpoint}` with `grant_type=authorization_code&code=&redirect_uri=&code_verifier=` plus client authentication (`client_secret_basic` header or `private_key_jwt`). Know the invariants the AS enforces and you rely on: the code is single-use and short-lived (the spec recommends at most 10 minutes; Keycloak's client login timeout defaults to one minute), `redirect_uri` must exactly string-match a registered value, and `state` must round-trip unchanged or the callback is treated as a CSRF attempt. Be able to say what each of the four roles (resource owner, client, authorization server, resource server) maps to in DefenderMate: the analyst, the BFF, Keycloak, the API.",
-      "minutes": 30,
-      "resource": {
-        "label": "RFC 6749 section 4.1 - Authorization Code Grant",
-        "url": "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1"
-      }
-    },
-    {
-      "name": "PKCE: what it computes and which attacks it stops",
-      "learn": "Generate a `code_verifier` of 43-128 characters from the unreserved set `[A-Za-z0-9-._~]`, derive `code_challenge = BASE64URL(SHA256(ASCII(code_verifier)))` with `code_challenge_method=S256` (never `plain`), send the challenge on the authorize request and the verifier on the token request; the AS stores the challenge with the code and refuses the exchange if the hash of the verifier does not match. Understand the two attacks it kills: authorization-code interception on public clients (a malicious mobile app registering the same custom URI scheme receives the code but not the verifier) and authorization-code injection on any client (attacker swaps their code into your session), which is why RFC 9700 and OAuth 2.1 require PKCE even for confidential clients that already hold a secret. Practise the 90-second version for a customer's security reviewer: 'we prove at exchange time that the same party that started the login is finishing it, using a one-time secret that never left our server'.",
-      "minutes": 25,
-      "resource": {
-        "label": "RFC 7636 - Proof Key for Code Exchange",
-        "url": "https://datatracker.ietf.org/doc/html/rfc7636"
-      }
-    },
-    {
-      "name": "The grant zoo and what OAuth 2.1 removed",
-      "learn": "Map every grant to a legitimate use and know which are dead: authorization code plus PKCE for anything with a human; `grant_type=client_credentials` for service-to-service with no user; device authorization (RFC 8628: `device_code`, `user_code`, poll with `grant_type=urn:ietf:params:oauth:grant-type:device_code`) for CLIs and kiosks; `grant_type=refresh_token` to extend sessions. Explain why implicit (`response_type=token`, token in the URL fragment, no client authentication, leaks through history and Referer) and resource-owner password (`grant_type=password`, teaches users to type IdP passwords into apps, breaks MFA and federation) were removed from OAuth 2.1, and that Keycloak's 'Direct access grants' checkbox is the password grant and must stay off on production clients. Be ready to push back when a customer's legacy integration insists on the password grant: offer client credentials or device flow instead.",
-      "minutes": 20,
-      "resource": {
-        "label": "oauth.net - OAuth 2.1",
-        "url": "https://oauth.net/2.1/"
-      }
-    },
-    {
-      "name": "OIDC on top of OAuth: ID token, nonce, discovery, sub",
-      "learn": "Adding `scope=openid` turns an OAuth delegation into an authentication event: the token response gains an `id_token` (a JWT whose `aud` is your client_id, asserting who authenticated and when via `auth_time`, `acr`, `amr`) while the `access_token` remains the credential for the API and may be opaque. Fetch `{issuer}/.well-known/openid-configuration` and read `authorization_endpoint`, `token_endpoint`, `jwks_uri`, `end_session_endpoint`, `userinfo_endpoint`, `code_challenge_methods_supported` and `id_token_signing_alg_values_supported`; for Keycloak the issuer is `https://<host>/realms/<realm>` and `iss` must match byte-for-byte, including scheme and no trailing slash. Generate a `nonce` per login, store it in the pre-login session, and reject an ID token whose `nonce` claim differs (replay defence). Key the local user row on (`iss`, `sub`) because `sub` is the only claim guaranteed stable and unique per issuer; `email` can change, be unverified (`email_verified=false`) or be reassigned, and `preferred_username` is display text.",
-      "minutes": 30,
-      "resource": {
-        "label": "OpenID Connect Core 1.0",
-        "url": "https://openid.net/specs/openid-connect-core-1_0.html"
-      }
-    },
-    {
-      "name": "JWT structure and the non-negotiable validation checklist",
-      "learn": "Read a JWS compact token as `BASE64URL(header).BASE64URL(payload).BASE64URL(signature)`; the header carries `alg`, `typ`, `kid`; the payload carries the registered claims `iss`, `sub`, `aud`, `exp`, `nbf`, `iat`, `jti`. Implement validation in this order and be able to justify each step: pin the allowed algorithms server-side (`algorithms=['RS256']` or ES256; never let the token's `alg` decide, which kills `alg=none` and the RS256-to-HS256 key-confusion attack where the public key is used as an HMAC secret), resolve the key by `kid` from a trusted JWKS (ignore `jku`, `x5u` and embedded `jwk` headers), verify the signature, then `iss` exact, `aud` contains your API's identifier, `exp` and `nbf` with a leeway of at most 30-60 seconds, and require `sub`, `exp`, `iat` to be present. Know that JWS is signed-not-encrypted (anyone can read the payload, so no secrets in claims), JWE is encrypted and rare for access tokens, and that base64url differs from base64 (`-_` not `+/`, no padding), which is why a naive `base64 -d` fails on tokens.",
-      "minutes": 30,
-      "resource": {
-        "label": "RFC 8725 - JSON Web Token Best Current Practices",
-        "url": "https://datatracker.ietf.org/doc/html/rfc8725"
-      }
-    },
-    {
-      "name": "JWKS fetching, kid-based caching and key rotation",
-      "learn": "The IdP publishes public keys at `jwks_uri` as `{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"...\",\"use\":\"sig\",\"alg\":\"RS256\",\"n\":\"...\",\"e\":\"AQAB\"}]}` (Keycloak: `/realms/<realm>/protocol/openid-connect/certs`); your verifier must cache keys by `kid`, refetch once on an unknown `kid` (rate-limited, no more than about once a minute) so scheduled rotation causes zero 401s, and keep serving cached keys if the IdP is unreachable rather than failing the read path closed. Use `jwt.PyJWKClient(jwks_uri, cache_keys=True, lifespan=300)` with `get_signing_key_from_jwt(token)` in Python, or `createRemoteJWKSet(new URL(jwks_uri), {cooldownDuration, cacheMaxAge})` with `jwtVerify` from `jose` in Node; construct the client once at startup (FastAPI lifespan, topic 26), never per request. Rehearse a rotation in Keycloak: Realm settings -> Keys -> add a new `rsa-generated` provider with a higher priority, watch the JWKS document list both keys, confirm new tokens carry the new `kid`, then remove the old provider only after the longest token lifetime has elapsed.",
-      "minutes": 20,
-      "resource": {
-        "label": "PyJWT usage docs - retrieving signing keys from a JWKS endpoint",
-        "url": "https://pyjwt.readthedocs.io/en/stable/usage.html"
-      }
-    },
-    {
-      "name": "Token lifetimes, refresh rotation, revocation and introspection",
-      "learn": "Set the access-token lifetime to 5-15 minutes and accept that a stateless JWT cannot be recalled before `exp`; everything longer-lived is a refresh token that is exchanged with `grant_type=refresh_token` and rotated on every use (Keycloak: Realm settings -> Tokens -> 'Revoke Refresh Token' ON with 'Refresh Token Max Reuse' 0), so a replayed refresh token is detected and the whole token family is revoked. Use RFC 7009 `POST {revocation_endpoint}` with `token` and `token_type_hint=refresh_token` on logout, and RFC 7662 `POST {introspection_endpoint}` (authenticated as the resource server) to get `{\"active\":true,\"scope\":...,\"exp\":...}` for the few operations where 'revoked 30 seconds ago' must be honoured (tenant deletion, API-key rotation) instead of stretching every token to a day. Know that `offline_access` produces offline tokens in Keycloak for background jobs with their own idle rules, and that SSO Session Idle/Max and Client Session Idle/Max cap what any refresh can extend.",
-      "minutes": 25,
-      "resource": {
-        "label": "RFC 7009 - OAuth 2.0 Token Revocation",
-        "url": "https://datatracker.ietf.org/doc/html/rfc7009"
-      }
-    },
-    {
-      "name": "Browser clients: the BFF pattern, cookie attributes and CSRF",
-      "learn": "Decide where tokens live before writing a line of frontend: a SPA holding tokens in `localStorage` hands them to any XSS payload, holding them in memory still exposes them to same-origin script, so the browser-based-apps BCP recommends the backend-for-frontend pattern: the server does the code exchange, stores access and refresh tokens server-side (Redis, topic 31) keyed by an opaque session id, and the browser holds only `Set-Cookie: __Host-sid=<random>; HttpOnly; Secure; SameSite=Lax; Path=/`. Know exactly what each attribute does: `HttpOnly` hides the cookie from `document.cookie`, `Secure` restricts it to TLS, the `__Host-` prefix forbids `Domain=` and forces `Path=/`, and `SameSite=Lax` blocks cross-site POST cookies but still sends on top-level GET navigations, so state-changing routes must also check `Origin` or `Sec-Fetch-Site`, or use a double-submit token. Remember the 4096-byte cookie cap: never put a Keycloak access token carrying roles and group paths into a cookie; store the token server-side and give the browser only the session id.",
-      "minutes": 30,
-      "resource": {
-        "label": "IETF draft - OAuth 2.0 for Browser-Based Applications",
-        "url": "https://datatracker.ietf.org/doc/html/draft-ietf-oauth-browser-based-apps"
-      }
-    },
-    {
-      "name": "Standing up Keycloak: realm, clients, scopes, roles, export and import",
-      "learn": "Run `docker run -p 8080:8080 -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=... quay.io/keycloak/keycloak:26.x start-dev`, create realm `defendermate`, a confidential OIDC client `defendermate-bff` (Client authentication ON, Standard flow ON, Direct access grants OFF, exact Valid redirect URIs, Web origins set, PKCE method S256 under Advanced) and a second client `defendermate-api` that exists so it can appear in `aud`. Distinguish realm roles from client roles (`realm_access.roles` vs `resource_access.<client>.roles` in the token), composite roles, groups with role mappings, and client scopes (default vs optional: `roles`, `profile`, `email`, `offline_access`). Make it reproducible: `kc.sh export --dir /opt/keycloak/data/export --realm defendermate --users realm_file`, commit the JSON, and start with `--import-realm` reading `/opt/keycloak/data/import/` in Compose so a fresh checkout logs in with no clicking. For production run `start` not `start-dev`: `KC_DB=postgres`, `KC_DB_URL`, `KC_HOSTNAME`, `KC_PROXY_HEADERS=xforwarded`, and `KC_HTTP_ENABLED=true` only behind a TLS-terminating proxy.",
-      "minutes": 35,
-      "resource": {
-        "label": "Keycloak - Getting started with Docker",
-        "url": "https://www.keycloak.org/getting-started/getting-started-docker"
-      }
-    },
-    {
-      "name": "Putting tenant and audience claims into the token",
-      "learn": "By default a Keycloak access token's `aud` is `account`, not your API, so add an 'Audience' protocol mapper (Included Client Audience = `defendermate-api`, Add to access token ON) or your `aud` check fails the day you enable it. Model the tenant one of four ways and be able to argue the trade-off: a `tenant_id` user attribute surfaced by a 'User Attribute' mapper (simplest; one tenant per user), groups as tenants via a 'Group Membership' mapper (`/tenants/acme`, full path ON), Keycloak Organizations (26+) exposing an `organization` claim through the `organization` client scope for many-to-many membership, or one realm per tenant (hardest isolation, N discovery URLs, N admin surfaces). For users in several tenants prefer a token bound to one tenant at a time (a tenant picker that re-authorizes) over a `tenants: [...]` array plus an `X-Tenant-Id` header; if you must use the header, the API intersects it with the claim and never trusts it alone. Keep tokens small: turn 'Full scope allowed' OFF on the client, map only the roles the API needs, and never map every group path, or a 50-group admin gets a 6 KB token.",
-      "minutes": 30,
-      "resource": {
-        "label": "Keycloak Server Administration Guide (protocol mappers, roles, groups, organizations)",
-        "url": "https://www.keycloak.org/docs/latest/server_admin/index.html"
-      }
-    },
-    {
-      "name": "Bearer token usage and the JWT access-token profile",
-      "learn": "Accept tokens only in `Authorization: Bearer <token>` (RFC 6750); never from a query string (leaks into access logs, Referer and browser history) and never from a cookie on a pure API. Return `401` with `WWW-Authenticate: Bearer realm=\"defendermate\", error=\"invalid_token\", error_description=\"...\"` for missing, malformed, expired or badly-signed tokens, and `403` with `error=\"insufficient_scope\", scope=\"alerts:write\"` when the token is valid but lacks scope; the distinction matters because well-behaved clients refresh and retry on 401 and must not retry on 403. Read RFC 9068 so you recognise a well-formed JWT access token: header `typ: at+jwt`, required `iss`, `exp`, `aud`, `sub`, `client_id`, `iat`, `jti`; checking `typ` is a cheap way to refuse an ID token presented to the API, the single most common frontend mistake.",
-      "minutes": 20,
-      "resource": {
-        "label": "RFC 6750 - OAuth 2.0 Bearer Token Usage",
-        "url": "https://datatracker.ietf.org/doc/html/rfc6750"
-      }
-    },
-    {
-      "name": "The FastAPI verifier dependency and the Principal object",
-      "learn": "Build one dependency and put nothing auth-related anywhere else: `HTTPBearer(auto_error=False)` extracts the header, `jwks.get_signing_key_from_jwt(token)` resolves the key, `jwt.decode(token, key.key, algorithms=['RS256'], audience='defendermate-api', issuer=settings.issuer, leeway=30, options={'require': ['exp', 'iat', 'sub']})` validates, and the claims are mapped into a frozen `Principal(sub, tenant_id, roles, scopes, sid)` dataclass. Catch `jwt.ExpiredSignatureError`, `jwt.InvalidAudienceError`, `jwt.InvalidIssuerError` and `jwt.PyJWKClientError` separately and turn each into a 401 with the matching `error_description`, so field debugging is one log line rather than a stack trace. Layer authorization as further dependencies (`require_role('tenant_admin')`, `require_scope('alerts:write')`) that take `Principal` via `Depends` and raise 403; pass `Principal` to handlers and repositories as a parameter, never through a global or a thread-local. Same shape in Node for the DefenderMate API: `jose.jwtVerify(token, remoteJwks, {issuer, audience, algorithms: ['RS256']})` in a middleware that attaches `req.principal`.",
-      "minutes": 40,
-      "resource": {
-        "label": "FastAPI tutorial - Security",
-        "url": "https://fastapi.tiangolo.com/tutorial/security/"
-      }
-    },
-    {
-      "name": "RBAC design: roles in the token, permissions in the API",
-      "learn": "Keep the IdP's vocabulary coarse (`tenant_admin`, `analyst`, `viewer`, `integration`) and map roles to fine permissions (`alerts:read`, `alerts:reclassify`, `hubspot:write`, `tenant:manage`) inside the API in one table or module, so adding a permission is a deploy, not an IdP change plus a token reissue. Separate the three questions a request must answer: authentication (who: `sub`), delegation (what the client was allowed to ask for: `scope`) and authorization (what this user may do here: roles -> permissions), and check scope and permission both when the caller is a third-party client. Make every role tenant-relative: `tenant_admin` means admin of the tenant in the token, never of all tenants; a platform-operator role for your own staff must be a distinct realm role the API handles explicitly and audits loudly. Deny by default, centralise decisions in `require(perm)` so there is no `if 'admin' in roles` scattered through handlers, and know where RBAC stops working: per-object sharing and delegation ('let this contractor see only alerts from source X'), which is ABAC or relationship-based (Zanzibar-style OpenFGA/SpiceDB) territory.",
-      "minutes": 30,
-      "resource": {
-        "label": "OWASP Authorization Cheat Sheet",
-        "url": "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html"
-      }
-    },
-    {
-      "name": "Tenant enforcement in the API and the data layer (BOLA)",
-      "learn": "Broken object-level authorization is the number one API risk because it is the default outcome of writing `SELECT * FROM alerts WHERE id = :id`: every repository method takes `tenant_id` as a mandatory first argument sourced from `Principal`, every query carries `AND tenant_id = :tenant_id`, and any tenant identifier in the URL or body is compared against the token and rejected on mismatch. Decide and document 404 vs 403 on mismatch: 404 hides existence and defeats ID enumeration, 403 is more debuggable; pick one per API and test it. Add Postgres row-level security as the second lock: `ALTER TABLE alerts ENABLE ROW LEVEL SECURITY; ALTER TABLE alerts FORCE ROW LEVEL SECURITY; CREATE POLICY tenant_isolation ON alerts USING (tenant_id = current_setting('app.tenant_id', true)::uuid);` with the API running `SET LOCAL app.tenant_id = :tenant_id` inside each transaction as a database role that is not the table owner (owners bypass RLS unless FORCE is set; superusers and `BYPASSRLS` roles always bypass). Carry `tenant_id` explicitly into background work (Temporal activity inputs, Kafka message keys) because there is no request principal there. Write the authorization-matrix test first: two tenants x every role x every route asserting the exact status code, plus URL-swap and header-spoof cases.",
-      "minutes": 35,
-      "resource": {
-        "label": "OWASP API Security Top 10 2023 - API1 Broken Object Level Authorization",
-        "url": "https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/"
-      }
-    },
-    {
-      "name": "Machine identities: client credentials, private_key_jwt, token exchange",
-      "learn": "Service-to-service calls use `grant_type=client_credentials` and the token's `sub` is the service account (Keycloak: `service-account-<client-id>`, after enabling 'Service accounts roles' on the client); prefer `private_key_jwt` client authentication (RFC 7523, `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer`, the client signs a short-lived JWT with its own key) or mTLS (RFC 8705) over a shared `client_secret` that ends up in a `.env` file. When a worker must act for a user after the user's token has expired, do not stash the user's access token in a queue: use RFC 8693 token exchange (`grant_type=urn:ietf:params:oauth:grant-type:token-exchange`, `subject_token`, `audience`, `requested_token_type`) at the boundary, or store only (`sub`, `tenant_id`) and run the job under the service identity with the tenant passed explicitly and the authorization decision re-evaluated at execution time. Give each integration its own client so revocation is per-integration, keep secrets in the secret manager (topics 15 and 62), and rotate by creating the new credential before deleting the old one.",
-      "minutes": 25,
-      "resource": {
-        "label": "RFC 8693 - OAuth 2.0 Token Exchange",
-        "url": "https://datatracker.ietf.org/doc/html/rfc8693"
-      }
-    },
-    {
-      "name": "Logout, sessions and back-channel invalidation",
-      "learn": "There are three sessions to end: the IdP's SSO session (Keycloak cookies `KEYCLOAK_IDENTITY` and `KEYCLOAK_SESSION`), your BFF session, and any outstanding tokens. RP-initiated logout redirects to `{end_session_endpoint}?id_token_hint=<id_token>&post_logout_redirect_uri=<uri>&client_id=<id>`, and Keycloak requires that URI to be listed under 'Valid post logout redirect URIs'. Register a 'Backchannel logout URL' on the client: when the IdP ends a session (admin kills it, or the user logs out of another app) Keycloak POSTs a logout token (a JWT whose `events` claim contains `http://schemas.openid.net/event/backchannel-logout`, plus `sid` and `sub`), which you verify like any JWT and use to delete every BFF session with that `sid`, so store the ID token's `sid` next to the session when you create it. Know that front-channel logout (iframes) breaks under third-party cookie blocking, that deleting your own cookie leaves the SSO session alive so the next visit silently re-logs the user in, and that already-issued access tokens keep working until `exp` unless the API consults a `sid` denylist or introspects.",
-      "minutes": 20,
-      "resource": {
-        "label": "OpenID Connect RP-Initiated Logout 1.0",
-        "url": "https://openid.net/specs/openid-connect-rpinitiated-1_0.html"
-      }
-    },
-    {
-      "name": "Threat model: what RFC 9700 requires and the attack behind each rule",
-      "learn": "Read the OAuth Security BCP as a checklist and map each item to a config line you can point at: exact-string `redirect_uri` matching (no wildcards, no prefix match, no `*` in Keycloak's Valid redirect URIs); PKCE on every code flow; `state` bound to the browser session; `iss` in the authorization response (RFC 9207) to stop mix-up attacks when a client trusts more than one AS; audience-restricted access tokens (`aud`, or the RFC 8707 `resource` parameter) so a token issued for the wiki cannot be replayed at DefenderMate; refresh tokens rotated or sender-constrained (DPoP, RFC 9449, or mTLS); no tokens in URLs; no open redirectors on your own domain that an attacker can chain into a registered `redirect_uri`. Add the JWT-layer items from your verifier: pinned `alg`, `kid` treated as an opaque lookup key (never interpolated into a path or SQL), `jku`/`x5u` ignored, `typ` checked. For each control be able to state the concrete attack it stops in one sentence, because that is exactly the question the customer's AppSec team asks.",
-      "minutes": 25,
-      "resource": {
-        "label": "RFC 9700 - Best Current Practice for OAuth 2.0 Security",
-        "url": "https://datatracker.ietf.org/doc/html/rfc9700"
-      }
-    },
-    {
-      "name": "Enterprise IdPs in the field: Entra ID, Okta, Google, and brokering",
-      "learn": "You will not choose the IdP; the customer has Entra ID, Okta, Ping or Google Workspace, and sometimes a SAML-only ADFS. Decide between trusting their issuer directly (their `iss`, their JWKS, their claim names in your verifier) and brokering through Keycloak as an identity provider (Keycloak federates to their OIDC or SAML IdP, maps attributes with Identity Provider Mappers, and your API trusts exactly one issuer regardless of customer). Learn the Entra specifics that break integrations: `tid` is their directory id (not your app tenant), `oid` is the stable user id while `sub` is pairwise per app, v1.0 and v2.0 tokens have different `iss` (`https://sts.windows.net/{tid}/` vs `https://login.microsoftonline.com/{tid}/v2.0`) and `aud` formats (`api://<app-id>` vs the client id), app roles arrive in `roles` only after assignment in the enterprise application, and a user in more than 200 groups gets an overage indicator (`_claim_names`/`_claim_sources`) instead of `groups`. Okta gotchas: the org authorization server issues access tokens you cannot validate locally (use a custom authorization server), and `groups` needs a claim filter. Provision users just-in-time on first login keyed on (`iss`, `sub`), never on email, and ask for SCIM or a nightly directory sync for deprovisioning.",
-      "minutes": 30,
-      "resource": {
-        "label": "Microsoft Entra - Access token claims reference",
-        "url": "https://learn.microsoft.com/en-us/entra/identity-platform/access-token-claims-reference"
-      }
-    },
-    {
-      "name": "Debugging auth in a customer environment",
-      "learn": "Start with `curl -s $ISSUER/.well-known/openid-configuration | jq .` to confirm the issuer the IdP believes it is, then decode without verifying (`python3 -c 'import jwt, sys; print(jwt.decode(sys.argv[1], options={\"verify_signature\": False}))' \"$TOKEN\"`) and compare `iss`, `aud`, `exp`, `typ` and `kid` against what the API expects; never paste a production token into a web decoder. Know the canonical messages and their fixes: `invalid_redirect_uri` (scheme, host, port, trailing slash, `localhost` vs `127.0.0.1` differing from the registered value); `invalid_grant` at the token endpoint (code reused, older than the client login timeout, `redirect_uri` differs from the authorize request, PKCE verifier mismatch, refresh token already rotated); 'Invalid audience' (missing Audience mapper); `iss` mismatch (Keycloak behind a proxy issuing `http://keycloak:8080/...` because `KC_HOSTNAME` and `KC_PROXY_HEADERS` are unset); 'token used before issued' or instant expiry (clock skew on the customer VM: check `chronyc tracking`, then add `leeway`); CORS failure on `/token` from a SPA (Web origins); `unauthorized_client` (grant type disabled on the client). Turn on Keycloak's login and admin event logging (Realm settings -> Events -> Save events) to read the server-side reason instead of guessing from the client's generic error.",
-      "minutes": 25,
-      "resource": {
-        "label": "Keycloak - All configuration options (KC_HOSTNAME, KC_PROXY_HEADERS, KC_DB)",
-        "url": "https://www.keycloak.org/server/all-config"
-      }
-    }
-  ],
-  "outcomes": [
-    "You can stand up Keycloak with Docker Compose, create the realm, the confidential BFF client and the audience-restricted API client, export the realm JSON, and have a fresh checkout log in end to end via `--import-realm` in under 15 minutes without opening the admin console.",
-    "You can draw the authorization code + PKCE + BFF sequence from memory with every parameter (`response_type`, `client_id`, `redirect_uri`, `scope`, `state`, `nonce`, `code_challenge`, `code_challenge_method`, `code`, `code_verifier`) and, for each, name the attack it defeats in one sentence.",
-    "You can write the FastAPI verifier dependency (pinned `RS256`, `iss`, `aud`, `exp` with leeway of at most 30 seconds, required claims, RFC 6750 `WWW-Authenticate` errors) and show a test suite in which `alg=none`, HS256 key confusion, wrong `aud`, wrong `iss`, expired, future `nbf`, tampered payload and an ID token presented as an access token are each rejected with the expected `error` value.",
-    "You can pass an authorization-matrix test (2 tenants x 3 roles x every route) with zero cross-tenant reads, including URL tenant swaps and `X-Tenant-Id` header spoofing, then delete the application-level `WHERE tenant_id` filter and show Postgres RLS still returns zero foreign rows.",
-    "You can explain to a non-engineer security reviewer in under three minutes why the browser holds only an `HttpOnly; Secure; SameSite` session cookie, why PKCE is on for a confidential client, and what is and is not revocable before `exp`, and have them repeat it back correctly.",
-    "You can rotate Keycloak's realm signing key under load and show a flat 401 line in Grafana because the verifier refetches JWKS on an unknown `kid`, then state the safe ordering (publish new key, wait the longest token lifetime, remove old key).",
-    "You can take an Entra ID or Okta token a customer pastes into a ticket and, within a minute, name why the API rejects it (v1 vs v2 `iss`, `api://` vs client-id `aud`, unassigned app roles, groups overage, opaque org-server token) and the exact setting that fixes it.",
-    "You can implement refresh-token rotation and back-channel logout so that replaying a used refresh token revokes the family and an admin-initiated Keycloak logout kills the BFF session on the next request, and demonstrate both with curl."
-  ],
-  "failureModes": [
-    "Keycloak behind the customer's ALB mints tokens with `iss` = `http://keycloak:8080/realms/prod` because `KC_HOSTNAME` and `KC_PROXY_HEADERS` were never set; every token fails the API's issuer check after the go-live DNS cutover, and the on-call 'fix' is to remove `issuer=` from `jwt.decode`, which stays in production for a year.",
-    "The API validates signature and `exp` but not `aud` because Keycloak's default token says `aud: account` and nobody added the Audience mapper; a token minted for the customer's internal wiki client in the same realm is accepted by DefenderMate's API and a contractor with wiki access lists alert data.",
-    "`tenant_id` is read from an `X-Tenant-Id` header 'because the frontend already sends it' and the token claim is never compared; the customer's pentest changes the header and reads another tenant's HubSpot write history, which is a breach notification and a renewal conversation, not a bug.",
-    "The IdP rotates its signing key on the first Sunday of the quarter; the API fetched JWKS once at startup with no refetch on unknown `kid`, so every pod returns 401 at 03:00 until someone restarts the deployment, and the incident is misdiagnosed as an IdP outage for 40 minutes.",
-    "A Temporal workflow stores the analyst's access token in its input so an activity can call the API 40 minutes later; it is expired, so the realm's Access Token Lifespan is bumped to 24 hours to make the demo work, and every leaked token is now a day-long credential.",
-    "The local user table is keyed on email; the customer's Okta admin changes an employee's address during a domain migration, JIT provisioning creates a second account, the old one keeps `tenant_admin`, and the audit trail for a disputed reclassification is split across two identities nobody can reconcile.",
-    "Full group paths and every client role are mapped into the access token and the BFF stores the whole token in the session cookie; for the customer's IT director, who is in 60 groups, the cookie exceeds 4096 bytes, the browser drops it, and only that one person is stuck in a login loop, on demo day."
-  ],
-  "interviewQuestions": [
-    "A customer's security reviewer asks why your confidential backend uses PKCE when it already authenticates with a client secret. Explain the authorization-code injection attack, what `state` and `nonce` already cover, and what PKCE adds on top.",
-    "DefenderMate will be sold to 30 customers, each with their own IdP: Okta, Entra ID, Google Workspace and one on-prem ADFS that only speaks SAML. Design login and tenant-claim handling. Compare trusting 30 issuers directly with brokering through your own IdP on `sub` stability, key rotation, JIT provisioning, offboarding, and blast radius when one customer's IdP is compromised.",
-    "After a Keycloak upgrade, about 3 percent of API calls return 401 for ten minutes every six hours and then recover on their own. Walk me through the diagnosis: what you look at in the token, in the API logs and in the IdP, and what the fix is.",
-    "Your API is stateless and validates JWTs locally. The customer's compliance team requires that a terminated employee loses access within 60 seconds. What do you change, what does each change cost in latency and operational complexity, and where do you refuse to go?",
-    "A user belongs to three tenants. Design the claim shape and the API contract for choosing the active tenant so that no client can escalate into a tenant it is not a member of. Where does the check live, what do you return on mismatch (403 or 404) and why, and how does this survive into background jobs?",
-    "A frontend developer is sending the ID token to your API 'because it has the user's email in it' and it works in dev. Explain what is wrong, what breaks first in production, and the fix on both the Keycloak side and the client side.",
-    "A pentest report says 'JWT accepted with alg=HS256 signed with the server's public key'. Explain the vulnerability class, how a verifier ends up vulnerable, and the exact code and configuration that make it impossible; then name the other two JWT header fields you also refuse to honour."
-  ],
-  "proofOfWork": "A public `auth-kit` directory in the DefenderMate repository that a customer's security reviewer could read in fifteen minutes and a new engineer could run in five. It contains: (1) a `docker-compose.yml` bringing up Keycloak, Postgres, the API and the BFF with a committed `realm-export.json` that reproduces two tenants (acme, globex), three roles, the Audience mapper and the `tenant_id` mapper, imported automatically with `--import-realm`; (2) a `SECURITY-REVIEW.md` written for a non-vendor reviewer with a sequence diagram of authorization code + PKCE + BFF, token lifetimes, cookie attributes, logout behaviour, key-rotation handling and an explicit list of what is and is not revocable before `exp`, where every claim in the document links to the test that proves it; (3) an authorization-matrix suite (`pytest -m authz`) that mints real tokens from Keycloak for 2 tenants x 3 roles and asserts the status code of every route, plus negative tests for `alg=none`, HS256 key confusion, wrong `aud`, wrong `iss`, expired, future `nbf`, tampered payload, an ID token used as an access token, `X-Tenant-Id` spoofing and URL tenant swaps, and an RLS test that drops the application filter and proves zero foreign rows; (4) a recorded key-rotation drill in which realm keys are rotated while `k6` traffic runs, with the Grafana panel showing a flat 401 line and the verifier's JWKS refetch visible in logs; and (5) a five-minute recording in which you explain PKCE and the BFF cookie model to a non-engineer using only the diagram, followed by them repeating it back."
+ "i": 27,
+ "topic": "Production Python architecture: domain models, repositories, DI, packaging",
+ "track": "E. Backend and Data",
+ "month": 3,
+ "hours": 8.0,
+ "why": "An FDE writes code that the customer's own engineers will own six weeks after the engagement ends, so the real deliverable is not the feature but a codebase a stranger can extend in a day without calling you. The same service is deployed against different databases, secret stores and model providers per customer (Postgres here, Snowflake there; Anthropic direct here, Bedrock behind a gateway there), which is only cheap if persistence, config and LLM calls sit behind ports that the composition root wires up. Take-home graders at Palantir, Anthropic and Databricks read your module layout, your pyproject.toml and your tests before they run anything; a flat script with SQLAlchemy models as the domain model is the most common reason a strong candidate gets a 'no'.",
+ "prerequisites": [
+  "Python 3.11+ fluency: type hints and generics, dataclasses, context managers, decorators, generators, `__eq__`/`__hash__` semantics, how `import` executes module code",
+  "SQL and Postgres basics (a table, a transaction, `SELECT ... FOR UPDATE`) from 'AWS data: RDS Postgres, S3, ElastiCache, DynamoDB' (topic 14); the deep planner work in topic 29 is not required yet",
+  "pytest basics: writing a test file, fixtures, `-k`, `-x`, `--lf`; the property-testing and contract material in topic 35 builds on what you do here",
+  "Docker multi-stage images and non-root containers from 'Production images and supply chain' (topic 6), because the packaging subtopics end in a Dockerfile",
+  "Git branch hygiene from topic 4 so the restructure of the Kaupex Task Compiler lands as a reviewable series of small commits rather than one 3,000-line diff",
+  "Read access to the current Kaupex Task Compiler code and a written list of its three worst pain points (where a change today touches the most files)"
+ ],
+ "subtopics": [
+  {
+   "name": "Layers and the dependency rule, enforced by the build",
+   "learn": "Draw the four layers you will use for every service: domain (pure Python, no I/O), service layer (use cases that orchestrate domain objects through ports), adapters (SQLAlchemy, HTTP clients, LLM SDKs, filesystem), entrypoints (FastAPI routes, Temporal activities, CLI). The rule is that imports only point inward: domain imports nothing from the other three, service imports domain and port interfaces only, adapters implement ports, entrypoints wire everything. Encode the rule as an import-linter contract in pyproject.toml (`[tool.importlinter]` with `root_package = \"kaupex\"` and a `type = \"layers\"` contract listing `kaupex.entrypoints`, `kaupex.adapters`, `kaupex.service_layer`, `kaupex.domain` top to bottom) and run `lint-imports` in CI so a `from sqlalchemy import ...` inside `domain/` fails the build instead of a code review.",
+   "minutes": 30,
+   "resource": {
+    "label": "Import Linter documentation (layers and forbidden contracts)",
+    "url": "https://import-linter.readthedocs.io/en/stable/"
+   }
+  },
+  {
+   "name": "Entities and value objects with dataclasses",
+   "learn": "Model value objects as `@dataclass(frozen=True, slots=True)` so equality is by value, instances are hashable and usable as dict keys and set members, and accidental mutation raises `FrozenInstanceError`. Model entities with identity: keep `eq=False` or override `__eq__` to compare on the id field and set `__hash__` accordingly, because the default dataclass `__eq__` on all fields makes two snapshots of the same task unequal. Use `field(default_factory=list)` for mutable defaults, `kw_only=True` to make constructors readable in the service layer, and `__post_init__` to assert invariants (a `TaskSpec` with an empty step list is never constructible). Know the cost model: `slots=True` cuts per-instance memory roughly in half and blocks `__dict__` monkeypatching in tests, which is what you want in the domain.",
+   "minutes": 35,
+   "resource": {
+    "label": "Python docs - dataclasses",
+    "url": "https://docs.python.org/3/library/dataclasses.html"
+   }
+  },
+  {
+   "name": "Typed identifiers, domain exceptions and invariants",
+   "learn": "Give every identifier its own type with `typing.NewType(\"TaskId\", str)` so mypy rejects passing a `TenantId` where a `TaskId` belongs; the cost is zero at runtime. Build one exception hierarchy rooted at `class KaupexError(Exception)` with `DomainError`, `NotFound`, `Conflict`, `InvalidTransition` subclasses, raise them from the domain with `raise ... from exc` to preserve the chain, and attach diagnostic context with `exc.add_note(...)` (3.11+) rather than string-formatting it into the message. The entrypoint layer is the only place that translates them to HTTP 404/409/422 or a Temporal non-retryable failure. Never `except Exception` in domain or service code; catching at the edge with the full chain intact is what makes the customer's stack traces readable.",
+   "minutes": 25,
+   "resource": {
+    "label": "Python tutorial - user-defined exceptions and exception chaining",
+    "url": "https://docs.python.org/3/tutorial/errors.html#user-defined-exceptions"
+   }
+  },
+  {
+   "name": "Pydantic at the boundary, dataclasses in the core",
+   "learn": "Pydantic `BaseModel` belongs where untrusted or external-shaped data enters: request bodies, LLM structured outputs, config files, webhook payloads. Use `model_validate` for dicts, `model_validate_json` for raw bytes (faster, skips a Python dict), `model_dump(mode=\"json\")` for serialisation, and `ConfigDict(extra=\"forbid\", frozen=True)` so unknown fields from a customer integration fail loudly rather than silently. Write explicit `to_domain()` on the schema and `from_domain()` classmethods rather than passing pydantic models into the service layer: validation-on-construction on every internal object is a measurable CPU cost in a hot compile loop, and an API field rename should never force a domain change. Know `field_validator` vs `model_validator(mode=\"after\")` for cross-field rules that are about shape (boundary) versus rules that are about business meaning (domain `__post_init__`).",
+   "minutes": 30,
+   "resource": {
+    "label": "Pydantic docs - Models",
+    "url": "https://pydantic.dev/docs/validation/latest/concepts/models/"
+   }
+  },
+  {
+   "name": "Ports as Protocols versus ABCs",
+   "learn": "Define ports (repository, unit of work, LLM client, clock) as `typing.Protocol` classes so adapters conform structurally without inheriting anything, which is what lets you wrap a customer's existing client class untouched. Understand how mypy checks conformance: it is verified at assignment sites, so put `_: TaskRepository = SqlAlchemyTaskRepository(session)` in a test module to get a compile-time conformance check for every adapter. Use `@runtime_checkable` only for `isinstance` at the composition root, and know it checks method names, not signatures. Reach for `abc.ABC` with `@abstractmethod` instead when the port carries shared behaviour (a `seen` set that collects events, a template method) or when you want instantiation of an incomplete adapter to fail at construction rather than at first call.",
+   "minutes": 30,
+   "resource": {
+    "label": "mypy docs - Protocols and structural subtyping",
+    "url": "https://mypy.readthedocs.io/en/stable/protocols.html"
+   }
+  },
+  {
+   "name": "The Repository pattern and its fake",
+   "learn": "A repository exposes collection semantics (`add(task)`, `get(task_id)`, `list_for_tenant(tenant_id, limit, after)`) and hides the query language; the service layer never sees a `Session` or a `select()`. Write the in-memory `FakeTaskRepository` backed by a dict first and keep it in `tests/` or `kaupex/adapters/fakes.py`, because it is what lets 90 percent of your tests run without Postgres. Resist the drift into a generic `filter(**kwargs)` method that reintroduces query logic into callers; add named methods for real use cases and let read-heavy reporting bypass the repository entirely (the CQRS split is a later concern). Decide up front how the repository exposes locking (`get_for_update(task_id)` mapping to `SELECT ... FOR UPDATE`) and pagination (keyset by `(created_at, id)`, never `OFFSET`), because those are the two things customers ask for in week two.",
+   "minutes": 30,
+   "resource": {
+    "label": "Architecture Patterns with Python - Chapter 2: Repository Pattern",
+    "url": "https://www.cosmicpython.com/book/chapter_02_repository"
+   }
+  },
+  {
+   "name": "Persistence mapping: imperative mapping vs translator objects",
+   "learn": "Two viable ways to keep SQLAlchemy out of the domain. Imperative (classical) mapping with `registry.map_imperatively(Task, task_table)` attaches ORM instrumentation to your plain dataclass so the domain file has zero SQLAlchemy imports; the cost is that mapped attributes gain lazy-loading behaviour and `__eq__` on dataclasses interacts with the identity map. The alternative is declarative `TaskRow(Base)` models plus explicit `to_domain()`/`from_domain()` translators in the adapter, which is more code but has no magic and survives a customer's existing schema conventions. Either way learn the `Session` lifecycle: `sessionmaker(expire_on_commit=False)` so returned objects are usable after commit, the identity map (one Python object per primary key per session), and why a lazy-loaded relationship in a loop is an N+1 you fix with `selectinload` in the repository, not in the service.",
+   "minutes": 35,
+   "resource": {
+    "label": "SQLAlchemy 2.0 ORM - Mapping styles (declarative and imperative)",
+    "url": "https://docs.sqlalchemy.org/en/20/orm/mapping_styles.html"
+   }
+  },
+  {
+   "name": "Unit of Work: one transaction per use case",
+   "learn": "The Unit of Work is a context manager that owns the session and exposes repositories: `with uow: uow.tasks.add(task); uow.commit()`. Implement `__enter__` to open a session from an injected `session_factory`, `__exit__` to `rollback()` unconditionally (a no-op after a successful commit, the safety net after an exception), and make `commit()` explicit so partial work is never persisted by accident. Build `FakeUnitOfWork` with a `committed` boolean so service-layer tests assert `assert uow.committed` instead of inspecting a database. Rule for FDE work: exactly one `with uow` per service function, never nested, and never held open across a network call to an LLM or the customer's API, because a 20-second model call inside an open transaction is how you create `idle in transaction` connection exhaustion in Postgres.",
+   "minutes": 30,
+   "resource": {
+    "label": "Architecture Patterns with Python - Chapter 6: Unit of Work Pattern",
+    "url": "https://www.cosmicpython.com/book/chapter_06_uow"
+   }
+  },
+  {
+   "name": "Service layer and the high-gear/low-gear testing decision",
+   "learn": "Service functions take primitives or DTOs plus a unit of work (`compile_task(task_id: str, uow: AbstractUnitOfWork, llm: LLMClient) -> CompileResult`), load aggregates through repositories, call domain methods, commit, and return plain data; they never contain `if` statements about business rules, only orchestration. Write the majority of tests against this layer with fakes: it is fast, it survives domain refactors, and it tests the same path every entrypoint will call. Keep a small number of domain unit tests for genuinely tricky rules and delete domain tests that merely duplicate a service test. Every new entrypoint (FastAPI route in topic 26, Temporal activity in topic 34, CLI here) becomes a ten-line adapter over the same service function, which is the property that makes 'add a batch mode' a one-day task for the customer's engineer.",
+   "minutes": 30,
+   "resource": {
+    "label": "Architecture Patterns with Python - Chapter 4: Service Layer",
+    "url": "https://www.cosmicpython.com/book/chapter_04_service_layer"
+   }
+  },
+  {
+   "name": "Aggregates, consistency boundaries and optimistic concurrency",
+   "learn": "An aggregate is the one object a use case loads, mutates and saves in a transaction; for the Task Compiler that is a `Task` with its steps, not each step individually. Choose the boundary by asking which invariants must be true at commit time (no two steps with the same ordinal, total steps under the plan limit); anything not in that set can be eventually consistent. Protect the aggregate with a `version_number` column: the repository's UPDATE includes `WHERE id = :id AND version_number = :expected` and raises `Conflict` when rowcount is 0, so two workers compiling the same task cannot silently produce a lost update. Know when to use `SELECT ... FOR UPDATE` (short critical sections, high contention) instead, and write the test that spawns two threads against a real Postgres and asserts exactly one wins.",
+   "minutes": 30,
+   "resource": {
+    "label": "Architecture Patterns with Python - Chapter 7: Aggregates and Consistency Boundaries",
+    "url": "https://www.cosmicpython.com/book/chapter_07_aggregate"
+   }
+  },
+  {
+   "name": "Dependency injection with a composition root, no framework",
+   "learn": "All wiring lives in one `bootstrap.py`: it builds the session factory from settings, constructs adapters (`AnthropicLLMClient(api_key=settings.anthropic_key.get_secret_value())`, `SqlAlchemyUnitOfWork(session_factory)`), and returns a bus or a dict of service callables with dependencies bound via `functools.partial` or closures. Constructor injection everywhere: a service or adapter receives its collaborators as `__init__` arguments and never reaches for a module-level global or `os.environ`. Inject the things that make tests nondeterministic or slow: `clock: Callable[[], datetime]`, `id_factory: Callable[[], TaskId]`, the LLM client, the HTTP session. Understand why module-level singletons (`client = anthropic.Anthropic()` at import) are a production bug and not just a test smell: they read secrets at import time, cannot be per-tenant, and are shared across forked workers. FastAPI's `Depends` (topic 26) is a thin wrapper over exactly this composition root.",
+   "minutes": 35,
+   "resource": {
+    "label": "Architecture Patterns with Python - Chapter 13: Dependency Injection and Bootstrapping",
+    "url": "https://www.cosmicpython.com/book/chapter_13_dependency_injection"
+   }
+  },
+  {
+   "name": "Settings: typed, validated once, secrets never in logs",
+   "learn": "One `Settings(BaseSettings)` class with `model_config = SettingsConfigDict(env_prefix=\"KAUPEX_\", env_file=\".env\", env_nested_delimiter=\"__\", extra=\"forbid\")`, typed fields (`database_url: PostgresDsn`, `anthropic_api_key: SecretStr`, `llm_timeout_s: float = 30`), constructed exactly once in the composition root and passed down. Validation at startup means a missing or malformed variable fails the process in the first second with a field name in the error, instead of failing the first customer request at 3 a.m. `SecretStr` prints as `**********` in `repr` and logs, so an accidental `logger.info(settings)` does not leak a key. Never read `os.environ` below the composition root; a grep for `os.environ` and `os.getenv` outside `config.py` and `bootstrap.py` should return nothing, and that grep belongs in CI.",
+   "minutes": 20,
+   "resource": {
+    "label": "Pydantic docs - Settings management (pydantic-settings)",
+    "url": "https://pydantic.dev/docs/validation/latest/concepts/pydantic_settings/"
+   }
+  },
+  {
+   "name": "Package layout, imports and the circular-import trap",
+   "learn": "Use the src layout (`src/kaupex/...`) so tests import the installed package, not the working directory, which catches missing files in the wheel and stray relative imports. Absolute imports only; a `TYPE_CHECKING` guard for imports used purely in annotations; and if two modules genuinely need each other you have a layering error, not an import problem. Keep `__init__.py` files nearly empty (re-exports with `__all__` at most) because heavy `__init__` work runs on every import including `mypy` and test collection. Add `src/kaupex/__main__.py` so `python -m kaupex` works even without the console script installed, and measure import cost with `python -X importtime -c 'import kaupex' 2>&1 | sort -t'|' -k2 -n | tail` when a Lambda or CLI cold start gets slow.",
+   "minutes": 25,
+   "resource": {
+    "label": "Python Packaging User Guide - src layout vs flat layout",
+    "url": "https://packaging.python.org/en/latest/discussions/src-layout-vs-flat-layout/"
+   }
+  },
+  {
+   "name": "pyproject.toml, uv and a reproducible environment",
+   "learn": "One `pyproject.toml` with a PEP 621 `[project]` table (`name`, `version`, `requires-python = \">=3.11\"`, `dependencies` with lower bounds only), `[dependency-groups]` (PEP 735) for `dev` and `test` extras, `[build-system]` with `hatchling` or `setuptools`, and `[tool.*]` tables for ruff, mypy and pytest so there is exactly one config file to hand a customer. Use uv for the workflow: `uv lock` produces a cross-platform `uv.lock` that you commit, `uv sync --frozen` fails rather than silently re-resolving when the lock is stale, `uv run pytest` runs inside the project environment, `uv add --group dev ruff` edits pyproject and lock together, and `uv build` produces the wheel. Know the difference between a library (loose pins, no lockfile shipped) and an application (lockfile is the contract), and that the Kaupex Task Compiler is an application.",
+   "minutes": 35,
+   "resource": {
+    "label": "uv docs - Working on projects",
+    "url": "https://docs.astral.sh/uv/concepts/projects/"
+   }
+  },
+  {
+   "name": "Console scripts and entry-point plugins",
+   "learn": "Declare the CLI in `[project.scripts]` as `kaupex = \"kaupex.entrypoints.cli:main\"` so installing the wheel puts a `kaupex` executable on PATH with no shell wrapper. Expose extension points the customer can fill without forking you: `[project.entry-points.\"kaupex.compilers\"]` in your pyproject, and in your customer's separate package a `my_compiler = \"acme_kaupex.steps:AcmeStep\"` line; discover them at bootstrap with `importlib.metadata.entry_points(group=\"kaupex.compilers\")` and load with `.load()`. Read your own version at runtime with `importlib.metadata.version(\"kaupex\")` and put it in the `/health` payload and every log line so a customer bug report tells you which build they run. Understand that entry points are resolved from installed distribution metadata, so a plugin that is on `sys.path` but not installed is invisible.",
+   "minutes": 20,
+   "resource": {
+    "label": "Python Packaging User Guide - Entry points specification",
+    "url": "https://packaging.python.org/en/latest/specifications/entry-points/"
+   }
+  },
+  {
+   "name": "Static gates: mypy strict where it pays, ruff everywhere",
+   "learn": "Configure mypy in pyproject with `strict = true` for `kaupex.domain` and `kaupex.service_layer` via `[[tool.mypy.overrides]]` `module = [\"kaupex.domain.*\", \"kaupex.service_layer.*\"]`, and relax to `disallow_untyped_defs = false` plus `ignore_missing_imports` for adapters wrapping untyped vendor SDKs; a blanket strict setting on day one produces 400 errors and gets disabled by the next engineer. Use `warn_unused_ignores` so stale `# type: ignore` comments are removed, and `plugins = [\"pydantic.mypy\"]` for correct model inference. Ruff replaces flake8, isort and black: `[tool.ruff.lint] select = [\"E\", \"F\", \"I\", \"B\", \"UP\", \"N\", \"SIM\"]`, `ruff check --fix` and `ruff format` in pre-commit, and `ruff check --output-format=github` in CI so violations annotate the PR. The whole gate must run in under a minute or engineers bypass it.",
+   "minutes": 25,
+   "resource": {
+    "label": "mypy docs - The mypy configuration file (per-module overrides)",
+    "url": "https://mypy.readthedocs.io/en/stable/config_file.html"
+   }
+  },
+  {
+   "name": "Test architecture: unit, integration and end-to-end tiers",
+   "learn": "Three tiers with distinct speed budgets: `tests/unit/` uses fakes and finishes in under two seconds for the whole Task Compiler; `tests/integration/` hits a real Postgres (a `postgres_session` fixture with `scope=\"session\"` that creates the schema once and wraps each test in a rolled-back transaction) and is marked `@pytest.mark.integration`; `tests/e2e/` drives the CLI or HTTP entrypoint. Layer fixtures in `conftest.py`: `settings` builds a test `Settings`, `session_factory` depends on it, `uow` depends on that, and a `bootstrap` fixture returns the fully wired service with a `FakeLLMClient` that replays recorded responses. Register markers in `[tool.pytest.ini_options]` with `markers = [\"integration: needs postgres\"]` and `addopts = \"--strict-markers -m 'not integration'\"` so the default run is fast and CI adds `-m integration` in a job that has the database. Mock only at the boundary you do not own; if you find yourself patching your own service functions, the dependency should have been injected.",
+   "minutes": 35,
+   "resource": {
+    "label": "pytest docs - How to use fixtures (scopes, conftest, dependency chains)",
+    "url": "https://docs.pytest.org/en/stable/how-to/fixtures.html"
+   }
+  },
+  {
+   "name": "Logging as a cross-cutting concern with the right seams",
+   "learn": "Every module gets `logger = logging.getLogger(__name__)` and nothing else; configuration happens once in the entrypoint via `logging.config.dictConfig` with a JSON formatter in production and a human one locally. Correlation and tenant ids enter at the entrypoint (HTTP header, Temporal workflow id, CLI flag), are stored in a `contextvars.ContextVar`, and a `logging.Filter` copies them onto every `LogRecord`, so the domain and service layers never take a `request_id` parameter just to log it. Log domain events at INFO with structured fields (`extra={\"task_id\": ..., \"step\": ...}`) not f-strings, so the customer's log pipeline can index them; log at the adapter boundary for every external call with duration and outcome. Never log a full LLM prompt or response at INFO by default; put it behind a `KAUPEX_LOG_PROMPTS` setting that defaults to false because customer PII will be in there.",
+   "minutes": 20,
+   "resource": {
+    "label": "Python Logging HOWTO (basic and advanced tutorial, filters, contextual information)",
+    "url": "https://docs.python.org/3/howto/logging.html"
+   }
+  },
+  {
+   "name": "Shipping the package as a container with uv",
+   "learn": "Multi-stage Dockerfile: a builder stage from `ghcr.io/astral-sh/uv` copies `pyproject.toml` and `uv.lock` first and runs `uv sync --frozen --no-dev --no-install-project` so the dependency layer caches independently of your source, then copies `src/` and runs `uv sync --frozen --no-dev` to install the project itself. Set `UV_COMPILE_BYTECODE=1` and `UV_LINK_MODE=copy` in the builder, copy only `/app/.venv` into a slim `python:3.12-slim` runtime stage, run as a non-root user, and start with `ENTRYPOINT [\"/app/.venv/bin/kaupex\"]` or `python -m kaupex` so signals reach PID 1. Verify the result: `docker run --rm image kaupex --version` prints the same version as `importlib.metadata`, and `uv pip list` inside the container matches `uv.lock` exactly. This is the artifact the customer's platform team will deploy on the EKS cluster from topic 16.",
+   "minutes": 20,
+   "resource": {
+    "label": "uv docs - Using uv in Docker",
+    "url": "https://docs.astral.sh/uv/guides/integration/docker/"
+   }
+  },
+  {
+   "name": "The second-engineer test: ADRs, CONTRIBUTING and the extension recipe",
+   "learn": "Write one Architecture Decision Record per structural choice you made this week (why dataclasses not pydantic in the domain, why imperative mapping or why translators, why uv, why optimistic locking) in `docs/adr/NNNN-title.md` with Context, Decision, Consequences; five short ADRs beat one design doc because the customer's engineer reads the one that answers their question. Write a `CONTRIBUTING.md` whose centrepiece is a numbered recipe, 'How to add a new compiler step', naming the exact files to touch in order (domain rule, service function, port change if any, adapter, fake, unit test, integration test, ADR if it changes a decision) with a real example diff linked. Then run the test: hand the repo to someone who has never seen it (or to yourself after a week away, using only the docs) and time how long it takes to add a trivial step with passing tests. Under a day is the target from the plan; under two hours means the architecture is doing its job.",
+   "minutes": 20,
+   "resource": {
+    "label": "Architectural Decision Records (adr.github.io) - templates and guidance",
+    "url": "https://adr.github.io/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can draw the four layers of the restructured Kaupex Task Compiler from memory, and `lint-imports` in CI fails the build when you deliberately add `from sqlalchemy import select` to a file under `kaupex/domain/`.",
+  "You can run the full service-layer test suite for the Task Compiler in under two seconds with no database and no network, using `FakeTaskRepository`, `FakeUnitOfWork` and a `FakeLLMClient`, and you can show `pytest -m integration` running the same use cases against a real Postgres.",
+  "You can swap the LLM adapter (Anthropic direct to LiteLLM or Bedrock) or the persistence adapter (Postgres to SQLite for a demo) with a diff that touches only `bootstrap.py` and one new adapter module, and the unchanged test suite proves the domain and service layers did not move.",
+  "You can clone the repo on a clean machine, run `uv sync --frozen && uv run kaupex --help`, and get a working CLI in under a minute; `uv lock --check` passes and `docker build` produces an image whose `kaupex --version` matches `importlib.metadata.version`.",
+  "You can explain for each of dataclass, pydantic model and SQLAlchemy model which layer it lives in, what specific thing breaks if you move it (validation cost, ORM coupling, schema-change blast radius), and defend that in a design review without appealing to 'best practice'.",
+  "You can demonstrate the optimistic-concurrency test: two threads compile the same task against Postgres, exactly one commits, the other raises `Conflict`, and you can point to the `WHERE version_number = :expected` clause that made it so.",
+  "`mypy` passes with `strict = true` on `kaupex.domain` and `kaupex.service_layer`, `ruff check` and `ruff format --check` are clean, and the whole static gate runs in under a minute in pre-commit and CI.",
+  "A peer who has never seen the repo can follow `CONTRIBUTING.md` to add a new compiler step with unit and integration tests, and you have a timed record of them doing it in under a day."
+ ],
+ "failureModes": [
+  "Pydantic models are used as the domain model and the ORM model at once: an API field rename for one customer forces a migration and a domain change, `extra=\"forbid\"` starts rejecting rows with legacy columns, and profiling shows a third of compile-loop CPU in validators that re-check data already validated at the boundary.",
+  "A SQLAlchemy session is opened at module import or held open across a 20-second LLM call: Postgres fills with `idle in transaction` connections, `pg_stat_activity` shows the pool exhausted, autovacuum cannot clean the tables those transactions pin, and the first symptom the customer sees is `DetachedInstanceError` and timeouts three days later.",
+  "`client = anthropic.Anthropic()` at module scope reads `ANTHROPIC_API_KEY` at import time: tests cannot inject a fake, the second tenant onboarded reuses the first tenant's key, and when gunicorn preloads the app the forked workers share one HTTP connection pool and start failing with SSL errors under load.",
+  "A circular import that only manifests through the CLI entrypoint's import order ships to production because the test suite imported modules in a different order; the container crash-loops with `ImportError: cannot import name ... (most likely due to a circular import)` and nobody can reproduce it locally until they run `python -m kaupex`.",
+  "No lockfile is committed and the Dockerfile runs `pip install -r requirements.txt` with lower bounds only: the customer rebuilds the image six weeks later, pulls a new pydantic or SQLAlchemy minor, and the service fails at startup with changed validation semantics while the FDE who wrote it is on another engagement.",
+  "The repository accumulates forty ad hoc query methods, then a developer bypasses it with a raw `session.execute(select(...))` in the service layer 'just this once'; within a quarter every service test needs Postgres, the suite takes fifteen minutes, engineers stop running it locally, and regressions reach the customer.",
+  "Business rules live in the FastAPI route handler and are duplicated into a Temporal activity when the customer asks for batch mode; the two copies drift, the batch path skips a validation the API enforces, and a month of compiled tasks has to be re-run after the customer's audit finds the inconsistency."
+ ],
+ "interviewQuestions": [
+  "You inherit a 4,000-line Python service where the SQLAlchemy models are the domain model and business rules live in the route handlers; the customer needs a batch CLI over the same logic next sprint and will not accept a feature freeze. Walk me through the restructure in the order you would actually commit it, how you keep every commit shippable, and what evidence you show the customer that nothing regressed.",
+  "Explain Repository and Unit of Work as you would implement them in Python, then tell me when they are overkill. Where do you draw the line differently for a two-week FDE pilot versus a system you are handing to the customer's platform team, and what is the cheapest version that still lets you swap the database?",
+  "Pick Protocol or ABC for the port to an LLM provider that a customer might implement themselves, and defend it. How does mypy verify that their adapter conforms, where exactly does that check happen, and what happens at runtime if their class is missing a method?",
+  "Debug this: after your deploy, workers intermittently raise `DetachedInstanceError`, and the customer's DBA shows you 200 Postgres connections in `idle in transaction`. Which layer is the bug most likely in, what is your hypothesis about the code shape that causes it, and what change fixes it structurally rather than by raising `max_connections`?",
+  "Two Temporal workers can compile the same task concurrently. Design the persistence so that a lost update is impossible: optimistic versus pessimistic locking, where the version check lives in the layered architecture, how the conflict surfaces to the caller, and the exact test you would write to prove it.",
+  "A customer runs the same service in two environments with different secret stores (AWS Secrets Manager in one, HashiCorp Vault in the other) and different model providers. Show me how settings and the composition root make that a one-file change per environment, what you validate at process start, and what you deliberately defer to first use.",
+  "Walk me through how you package a Python service so a customer engineer can install, run and extend it without you: what is in pyproject.toml, what the lockfile is a contract for, how a console script and an entry-point plugin work, and how the Dockerfile is structured so a dependency change does not rebuild the source layer."
+ ],
+ "proofOfWork": "A recorded 'second-engineer drill' on the restructured Kaupex Task Compiler. Before recording, tag the repo and check in a CI pipeline that runs `lint-imports`, `mypy`, `ruff check`, `ruff format --check`, `uv lock --check`, the unit tier with a two-second wall-clock budget asserted via `--durations=0` in the log, and the integration tier against a Postgres service container. Then hand the repo to a peer who has never seen it (or, failing that, to yourself after a week away with the diff hidden) and record them adding a new compiler step, for example 'reject any step whose prompt exceeds the tenant's token budget', using only `CONTRIBUTING.md`: they must touch the domain rule, a service function, the fake, a unit test and an integration test, and CI must go green. Alongside the recording, publish the diffstat of a second PR that swaps the LLM adapter from Anthropic direct to LiteLLM, showing that only `bootstrap.py`, `config.py` and one new file under `adapters/` changed and that the test suite ran unchanged, plus the five ADRs that explain why the architecture is shaped the way it is. The timing of the drill, the diffstat and the ADRs together are the evidence that a stranger can extend the service in a day and that you can say why."
 }
