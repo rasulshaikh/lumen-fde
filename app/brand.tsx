@@ -1,11 +1,4 @@
 /**
- * The Lumen mark, inlined so it paints with the first frame instead of arriving as a
- * second request. app/icon.svg is the source of truth — it is what the favicon, the
- * Apple icon and the link-preview card are all rasterised from by
- * scripts/build-icons.mjs. If the path below changes, change it there too and re-run
- * that script, or the tab icon and the header will drift apart.
- */
-/**
  * The Ask Lumen mark — deliberately NOT the L, so the assistant reads as a distinct
  * thing rather than a second logo. A six-armed printer's asterisk: it belongs to the
  * type family the brand is built on, and it avoids the four-point "AI sparkle" (✦) this
@@ -33,7 +26,14 @@ export function AskMark({ size = 16, className }: { size?: number; className?: s
   );
 }
 
-export function LogoMark({ size = 34, className }: { size?: number; className?: string }) {
+/**
+ * The Lumen mark — an aperture, matching app/icon.svg exactly. Inlined so it paints with
+ * the first frame rather than arriving as a second request. app/icon.svg is the source of
+ * truth: the favicon, the Apple icon and the link-preview card are all rasterised from it
+ * by scripts/build-icons.mjs. If the path below changes, change it there too and re-run
+ * that script, or the tab icon and the header drift apart.
+ */
+export function LogoMark({ size = 30, className }: { size?: number; className?: string }) {
   return (
     <svg
       className={className}
@@ -44,8 +44,11 @@ export function LogoMark({ size = 34, className }: { size?: number; className?: 
       aria-label="Lumen"
       focusable="false"
     >
-      <rect width="32" height="32" rx="12" fill="var(--primary)" />
-      <path d="M6 8 H18 V10 Q14 10 14 13 V20 H24 V24 H10 V13 Q10 10 6 10 Z" fill="var(--surface)" />
+      <path
+        fill="var(--primary)"
+        fillRule="evenodd"
+        d="M8 4h16a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4Zm8 6 6 6-6 6-6-6 6-6Z"
+      />
     </svg>
   );
 }

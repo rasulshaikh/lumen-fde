@@ -9,7 +9,7 @@
  *
  * Produces:
  *   app/favicon.ico          16 + 32 + 48, real ICO container (kills the /favicon.ico 404)
- *   app/apple-icon.png       180x180, opaque — iOS ignores alpha and composites on black
+ *   app/apple-icon.png       180x180, opaque on the canvas colour — iOS discards alpha
  *   app/opengraph-image.png  1200x630 link-preview card
  *
  * Next's App Router picks all three up by filename and emits the <link>/<meta> tags.
@@ -22,10 +22,10 @@ import { dirname, join } from "node:path";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = join(ROOT, "app");
 
-const CREAM = "#f4efe9";
-const INK = "#1c1b22";
-const ACCENT = "#6a4c88";
-const STONE = "#5a5862";
+const CANVAS = "#010102";
+const INK = "#f7f8f8";
+const ACCENT = "#828fff";
+const STONE = "#8a8f98";
 
 const source = readFileSync(join(APP, "icon.svg"));
 
@@ -82,12 +82,12 @@ function ogCard(markPng) {
   const lines = ["Build proof,", "not just knowledge."];
   const sub = "916 hours · 119 topics · 13 months";
   return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">
-  <rect width="1200" height="630" fill="${CREAM}"/>
+  <rect width="1200" height="630" fill="${CANVAS}"/>
   <rect x="0" y="0" width="1200" height="10" fill="${ACCENT}"/>
   <image x="96" y="86" width="88" height="88" href="data:image/png;base64,${markPng.toString("base64")}"/>
   <text x="208" y="143" font-family="Helvetica,Arial,sans-serif" font-size="26" font-weight="700" letter-spacing="5" fill="${ACCENT}">LUMEN</text>
-  <text x="96" y="316" font-family="Manrope,Helvetica,Arial,sans-serif" font-size="72" font-weight="700" fill="${INK}">${escapeXml(lines[0])}</text>
-  <text x="96" y="398" font-family="Manrope,Helvetica,Arial,sans-serif" font-size="72" font-weight="700" fill="${INK}">${escapeXml(lines[1])}</text>
+  <text x="96" y="316" font-family="Helvetica,Arial,sans-serif" font-size="72" font-weight="700" fill="${INK}">${escapeXml(lines[0])}</text>
+  <text x="96" y="398" font-family="Helvetica,Arial,sans-serif" font-size="72" font-weight="700" fill="${INK}">${escapeXml(lines[1])}</text>
   <rect x="96" y="446" width="120" height="4" fill="${ACCENT}"/>
   <text x="96" y="512" font-family="Helvetica,Arial,sans-serif" font-size="30" fill="${STONE}">${escapeXml(sub)}</text>
 </svg>`);
@@ -97,7 +97,7 @@ const [i16, i32, i48, apple, ogMark] = await Promise.all([
   render(16),
   render(32),
   render(48),
-  render(180, { background: CREAM }),
+  render(180, { background: CANVAS }),
   render(180),
 ]);
 
