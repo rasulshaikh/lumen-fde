@@ -16,8 +16,8 @@ export function LogoMark({ size = 34, className }: { size?: number; className?: 
       aria-label="Lumen"
       focusable="false"
     >
-      <rect width="32" height="32" rx="9" fill="var(--primary)" />
-      <path d="M6 8 H18 V10 Q14 10 14 13 V20 H24 V24 H10 V13 Q10 10 6 10 Z" fill="var(--bg)" />
+      <rect width="32" height="32" rx="12" fill="var(--primary)" />
+      <path d="M6 8 H18 V10 Q14 10 14 13 V20 H24 V24 H10 V13 Q10 10 6 10 Z" fill="var(--surface)" />
     </svg>
   );
 }

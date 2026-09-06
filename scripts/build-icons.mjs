@@ -22,10 +22,10 @@ import { dirname, join } from "node:path";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = join(ROOT, "app");
 
-const CREAM = "#fbfbfa";
-const INK = "#221f1c";
-const TERRACOTTA = "#bc3b00";
-const STONE = "#6f6863";
+const CREAM = "#f4efe9";
+const INK = "#1c1b22";
+const ACCENT = "#6a4c88";
+const STONE = "#5a5862";
 
 const source = readFileSync(join(APP, "icon.svg"));
 
@@ -70,7 +70,9 @@ function ico(images) {
 const escapeXml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /**
- * 1200x630 link preview. Georgia stands in for Petrona, exactly as the CSS stack does.
+ * 1200x630 link preview. Manrope is a webfont and is not installed locally, so the
+ * rasteriser falls back to Helvetica here — a near neighbour, and only this static card
+ * is affected. The app itself loads the real Manrope.
  *
  * The headline is split across two lines by hand rather than set on one: at a size
  * large enough to carry the card, "Build proof, not just knowledge." runs past 1200px
@@ -81,12 +83,12 @@ function ogCard(markPng) {
   const sub = "916 hours · 119 topics · 13 months";
   return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">
   <rect width="1200" height="630" fill="${CREAM}"/>
-  <rect x="0" y="0" width="1200" height="10" fill="${TERRACOTTA}"/>
+  <rect x="0" y="0" width="1200" height="10" fill="${ACCENT}"/>
   <image x="96" y="86" width="88" height="88" href="data:image/png;base64,${markPng.toString("base64")}"/>
-  <text x="208" y="143" font-family="Helvetica,Arial,sans-serif" font-size="26" font-weight="700" letter-spacing="5" fill="${TERRACOTTA}">LUMEN</text>
-  <text x="96" y="316" font-family="Georgia,serif" font-size="72" font-weight="700" fill="${INK}">${escapeXml(lines[0])}</text>
-  <text x="96" y="398" font-family="Georgia,serif" font-size="72" font-weight="700" fill="${INK}">${escapeXml(lines[1])}</text>
-  <rect x="96" y="446" width="120" height="4" fill="${TERRACOTTA}"/>
+  <text x="208" y="143" font-family="Helvetica,Arial,sans-serif" font-size="26" font-weight="700" letter-spacing="5" fill="${ACCENT}">LUMEN</text>
+  <text x="96" y="316" font-family="Manrope,Helvetica,Arial,sans-serif" font-size="72" font-weight="700" fill="${INK}">${escapeXml(lines[0])}</text>
+  <text x="96" y="398" font-family="Manrope,Helvetica,Arial,sans-serif" font-size="72" font-weight="700" fill="${INK}">${escapeXml(lines[1])}</text>
+  <rect x="96" y="446" width="120" height="4" fill="${ACCENT}"/>
   <text x="96" y="512" font-family="Helvetica,Arial,sans-serif" font-size="30" fill="${STONE}">${escapeXml(sub)}</text>
 </svg>`);
 }
