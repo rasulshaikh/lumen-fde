@@ -1,0 +1,228 @@
+{
+ "i": 26,
+ "topic": "Supporting a deployment you cannot log into: preflight checks, support bundles, remote diagnosis",
+ "track": "D. Reliability and Observability",
+ "month": 3,
+ "hours": 6,
+ "why": "The engagements that pay an FDE the most are the ones where the software runs inside a bank, a hospital or a defence contractor: on-prem, BYOC or fully air-gapped, where you have no SSH, no kubectl, no screen share, and a change-control board between you and the next piece of evidence. In those accounts your entire diagnostic capability is whatever you shipped in the installer months earlier - the preflight that refused to install on an undersized node, the collector that grabbed the right log, the redactor that made it legal for that log to leave the building. An FDE who can read a support bundle cold and name the root cause turns a two-week escalation into a same-day answer; one who cannot is reduced to asking the customer's admin to paste screenshots, which is how pilots die.",
+ "prerequisites": [
+  "Topic 7 and Topic 8 (Kubernetes core and production ops): you can read Deployment/StatefulSet status, Events, Pod conditions, PVC binding and RBAC, because a support bundle is mostly those objects serialised to disk.",
+  "Topic 9 (GitOps: Helm charts and ArgoCD): you ship DefenderMate as a chart, so you can add hooks, templated values and extra manifests to it.",
+  "Topic 22 (Observability): structured JSON logs carrying trace_id, tenant_id and a build SHA - collectors are only as good as the logs they pick up.",
+  "Topic 24 (Incident response and postmortems): severity, IC role, timeline discipline. This topic is the version of that where you cannot see the system.",
+  "Topic 32 (Data modelling for multi-tenant AI systems): what counts as PII in DefenderMate's alert payloads and LLM prompts, since that decides what may be collected at all.",
+  "A cluster you can break and the tooling installed: kind or k3s, the DefenderMate chart, and the Troubleshoot kubectl plugins (krew install preflight support-bundle) plus sbctl, tar, jq and ripgrep locally."
+ ],
+ "subtopics": [
+  {
+   "name": "The access ladder: what 'cannot log into' actually means",
+   "learn": "Classify every engagement by exactly what you can obtain, worst case, at 02:00: (a) break-glass SSH or kubectl, (b) a supervised, time-boxed screen share, (c) the customer runs commands you dictate and pastes output, (d) a support bundle only, (e) an air-gapped site where the bundle leaves on removable media after a human inspects it, (f) a facility where nothing leaves and only the analyzer verdicts may be read aloud. Know the deal shapes that force each: self-hosted enterprise, BYOC in the customer's VPC, air gap with a mirrored registry and an offline licence, FedRAMP/ITAR/hospital networks. Write the access level into the SOW and the runbook rather than assuming a call will be possible, and internalise the rule that governs everything else in this topic: the diagnostic capability you did not ship in the installer is capability you do not have.",
+   "minutes": 15,
+   "resource": {
+    "label": "Replicated - Air gap installation with Embedded Cluster",
+    "url": "https://docs.replicated.com/enterprise/installing-embedded-air-gap"
+   }
+  },
+  {
+   "name": "Environment requirements as a testable contract, not a wiki page",
+   "learn": "Before writing a check, enumerate what DefenderMate needs from a cluster you will never see and write each line so it can become an assertion: Kubernetes version range, distribution and CNI caveats, CPU/memory per node and in total, a StorageClass with the required accessModes and allowVolumeExpansion, an IngressClass and a certificate source, outbound destinations with host/port/protocol, an image registry or the air-gap bundle, a Postgres major version plus required extensions, cgroup v2, and working NTP. The discipline: if you cannot express a requirement as a check with a pass/fail message and a fix, it is not a requirement, it is a hope. Version the document with the chart (docs/requirements.md), get the customer's platform team to sign it during the site survey (Topic 73), and keep a two-column table mapping every requirement line to the analyzer that enforces it - an empty cell on either side is a bug.",
+   "minutes": 15,
+   "resource": {
+    "label": "Replicated - Installation requirements (worked example of a requirements contract)",
+    "url": "https://docs.replicated.com/enterprise/installing-general-requirements"
+   }
+  },
+  {
+   "name": "Preflight anatomy: spec, outcomes, strict, and the exit-code contract",
+   "learn": "A preflight is `apiVersion: troubleshoot.sh/v1beta2, kind: Preflight` with `spec.collectors` and `spec.analyzers`; each analyzer emits `outcomes` of `pass`/`warn`/`fail`, each with `when`, `title`, `message` and `uri`. Run it with `kubectl preflight ./preflight.yaml`, or straight from a URL or an OCI/Helm-templated file, and script it with `--interactive=false` plus `--format=json`. Branch on the exit codes exactly: 0 all passed, 1 catch-all error usually unrelated to a specific check, 2 invalid input or an invalid spec, 3 at least one FAIL, 4 no FAIL but at least one WARN. `strict: true` marks an analyzer that must not fail; `exclude: true` (templatable from Helm values) skips checks for components the customer did not enable. Treat exit 2 as your bug, exit 3 as a blocked install, exit 4 as a warning the customer may override in writing.",
+   "minutes": 25,
+   "resource": {
+    "label": "Troubleshoot - Preflight exit codes",
+    "url": "https://troubleshoot.sh/docs/preflight/exit-codes/"
+   }
+  },
+  {
+   "name": "Cluster analyzers that catch the install failures you actually see",
+   "learn": "Write the eight checks that prevent most first-week escalations: `clusterVersion` with a minimum and a recommended range, `distribution` (accept EKS/GKE/OpenShift/k3s, reject Docker Desktop or minikube for production), `nodeResources` with `filters` on allocatable CPU/memory plus `count()`/`sum()` expressions so 'three nodes with 8 GB each' is enforceable, `storageClass` for the exact class name and provisioner, `ingressClass` and `ingress` for the routing path, `crd` to detect a conflicting cert-manager or Prometheus Operator CRD already owned by another team, `imagePullSecrets` for registry credentials, and `clusterPodStatuses`/`deploymentStatus` for the upgrade case where the previous release is already unhealthy. Each failure message must name the fix in the customer admin's vocabulary and carry a `uri` to your docs, because nobody is going to be on a call to explain it.",
+   "minutes": 20,
+   "resource": {
+    "label": "Replicated - Define preflight checks",
+    "url": "https://docs.replicated.com/vendor/preflight-defining"
+   }
+  },
+  {
+   "name": "Version skew and API deprecation: the upgrade that breaks in six months",
+   "learn": "Preflights are not only about install day. Pin `kubeVersion` in Chart.yaml so Helm itself refuses an unsupported cluster, run `helm template --validate` or `helm install --dry-run=server` so the API server validates against the real schema, and check the deprecation guide for the removals that will bite the versions your customers actually run (batch/v1beta1 CronJob, policy/v1beta1 PodDisruptionBudget, autoscaling/v2beta2 HPA, the PSP removal in 1.25). Know the Kubernetes version-skew policy so you can say which control-plane/kubelet combinations you support, and add an analyzer that warns when the cluster is within one minor of a version your chart has not been tested on. The failure this prevents: a customer upgrades their cluster on their schedule, your chart silently stops rendering, and the first symptom is a failed ArgoCD sync at midnight in a timezone you do not work in.",
+   "minutes": 15,
+   "resource": {
+    "label": "Kubernetes - Deprecated API migration guide",
+    "url": "https://kubernetes.io/docs/reference/using-api/deprecation-guide/"
+   }
+  },
+  {
+   "name": "Host preflights for VM, bare-metal and embedded installs",
+   "learn": "When you ship an appliance or an embedded cluster rather than a chart, the failures move below Kubernetes, so run host collectors/analyzers on every node before anything is installed: `cpu` and `memory` for sizing, `blockDevices` and `diskUsage` for the specific mount points (/var/lib/containerd, /var/lib/etcd, the PV path) with both percent and absolute thresholds, `filesystemPerformance` to benchmark sequential write latency because etcd on a slow SAN is the classic 'your product is slow' ticket, `time` for NTP sync and drift, `tcpPortStatus`/`udpPortStatus` for the ports the cluster needs open between nodes, `ipv4Interfaces` and `subnetAvailable` so your pod/service CIDRs do not collide with the customer's corporate range, `kernelModules` and `hostOS` for the distro and kernel features, and `hostServices` for a firewalld or SELinux state that will block you later. Ship these as a single YAML the customer runs per node before the installer, and read the collected results back in the same bundle format.",
+   "minutes": 20,
+   "resource": {
+    "label": "Troubleshoot - All host collectors and analyzers",
+    "url": "https://troubleshoot.sh/docs/host-collect-analyze/all/"
+   }
+  },
+  {
+   "name": "Egress, proxies, TLS interception and registry reachability",
+   "learn": "Enterprise networks break outbound calls in four distinctive ways, and each needs its own check. Reachability: an `http` collector from inside the cluster to every destination DefenderMate calls (the LLM provider, your licence endpoint, the customer's SIEM webhook) with the status code analyzed, plus `registryImages` to prove every image in the chart is pullable before install. Proxying: HTTP_PROXY/HTTPS_PROXY/NO_PROXY must be templated into every Deployment and the NO_PROXY list must include the in-cluster service CIDR, or your own service-to-service calls get routed to the corporate proxy. Interception: a middlebox re-signs TLS, so `openssl s_client -connect host:443 -servername host -showcerts` shows a corporate issuer, and you must collect the CA bundle and mount it via SSL_CERT_FILE / NODE_EXTRA_CA_CERTS / REQUESTS_CA_BUNDLE. Expiry and DNS: check certificate notAfter and split-horizon DNS resolution from a pod, not from the admin's laptop.",
+   "minutes": 20,
+   "resource": {
+    "label": "OpenSSL - openssl-s_client (inspecting the served chain and issuer)",
+    "url": "https://docs.openssl.org/3.0/man1/openssl-s_client/"
+   }
+  },
+  {
+   "name": "Wiring the preflight into the install and upgrade path so it cannot be skipped",
+   "learn": "A preflight nobody runs is documentation. Bind it to the lifecycle: ship the spec as a ConfigMap in the chart and run it from a `helm.sh/hook: pre-install,pre-upgrade` Job with `hook-delete-policy: before-hook-creation,hook-succeeded` and a `hook-weight` that puts it first, so a non-zero exit aborts the release; the ArgoCD equivalent is a `PreSync` hook resource. Give the hook Job its own least-privilege ServiceAccount with read-only RBAC on the resources the collectors touch, and set `activeDeadlineSeconds` plus `backoffLimit: 0` so a hung check does not wedge the release. Provide a documented escape hatch (`--set preflight.enabled=false`) so an emergency upgrade is possible, log loudly when it is used, and record in the runbook that a skipped preflight is a support-contract exception, not a default.",
+   "minutes": 20,
+   "resource": {
+    "label": "Helm - Chart hooks (pre-install, pre-upgrade, weights, delete policies)",
+    "url": "https://helm.sh/docs/topics/charts_hooks/"
+   }
+  },
+  {
+   "name": "Support bundle anatomy: spec, defaults, multiple specs and in-cluster discovery",
+   "learn": "`kind: SupportBundle` has the same collectors/analyzers/redactors shape as a preflight and runs entirely client-side: `kubectl support-bundle ./spec.yaml` produces support-bundle-<timestamp>.tar.gz whose top level holds `analysis.json`, `cluster-info/`, `cluster-resources/` and one directory per named collector. In-cluster bundles always add `clusterInfo` and `clusterResources` even when `collectors:` is empty (opt out with `exclude: true`). Since v0.42 you can pass several specs at once - a URL, a local file and a Secret - and since v0.47 `--load-cluster-specs` discovers any Secret or ConfigMap labelled `troubleshoot.sh/kind: support-bundle` whose data key is `support-bundle-spec` or `redactor-spec` (`-l/--selector` overrides the label). Ship your spec inside the chart so the customer's command is always the same one line, and version the spec with the release so you know which collectors a given bundle could possibly contain.",
+   "minutes": 25,
+   "resource": {
+    "label": "Troubleshoot - Discover cluster specs (--load-cluster-specs)",
+    "url": "https://troubleshoot.sh/docs/support-bundle/discover-cluster-specs/"
+   }
+  },
+  {
+   "name": "Choosing collectors from the questions you must be able to answer",
+   "learn": "Do not collect everything; write the question first and pick the one collector that answers it. `clusterResources` for object state, `logs` for behaviour, `configmap`/`secret` (keys and existence, values redacted) for wiring, `copy` for a file inside a container and `copy-from-host` for node-level artefacts, `data` to stamp your own metadata into the tarball, `dns` and `etcd` for control-plane symptoms, `http` for outbound reachability from where the app actually runs, `exec` to run a read-only diagnostic in a pod that already exists, `postgresql`/`redis` for the data tier, `registryImages` for pull failures, and `helm` for the release values that were actually applied. Treat `runPod` and `runDaemonSet` as privileged: they schedule new workloads in the customer's cluster, need justification in the collection manifest, and must reference an image already present in an air-gapped registry - a spec pinned to `alpine:3` produces an empty result exactly where you needed data.",
+   "minutes": 15,
+   "resource": {
+    "label": "Troubleshoot - All collectors",
+    "url": "https://troubleshoot.sh/docs/collect/all/"
+   }
+  },
+  {
+   "name": "Log collection that is still diagnostic three time zones away",
+   "learn": "The `logs` collector takes a label `selector`, a `namespace`, optional `containerNames`, and `limits: {maxAge: 720h, maxLines: 10000}`; it keeps the most recent lines, so a 10k cap on a chatty pod silently discards the panic that started the incident forty minutes earlier - size the limits against your actual log rate and cap noisy sidecars separately. Always collect previous-container logs for CrashLoopBackOff, because the interesting process is already dead. The collector cannot recover what the node already rotated, so the real fix is upstream: JSON logs with RFC 3339 UTC timestamps, level, `trace_id`, `tenant_id`, `build_sha` and a stable event name (Topic 22), so a bundle can be sorted into one timeline with jq. Add a `data` collector that stamps chart version, image digests, licence ID and collection time into the tarball, so you never have to ask 'which version is this?' as your first question.",
+   "minutes": 20,
+   "resource": {
+    "label": "Troubleshoot - Pod logs collector (selectors and limits)",
+    "url": "https://troubleshoot.sh/docs/collect/logs/"
+   }
+  },
+  {
+   "name": "Self-diagnostics you must build into the product itself",
+   "learn": "A bundle can only collect what the application exposes, so design for the interrogation you will never get to do live: a `/version` endpoint returning git SHA, chart version, image digest, licence ID and enabled feature flags; `/healthz` for liveness and a `/readyz` that reports each dependency (Postgres, Redis, the LLM provider, the SIEM webhook) with its last error and last success timestamp; an effective-config dump with secret values masked so you can diff what the customer is running against the golden values; and a stable error catalogue - `DM-1042 llm_provider_unreachable` - returned in API errors as RFC 9457 `application/problem+json` with `type`, `title`, `status`, `detail`, `instance` and a documentation URL. One pasted problem+json object from a customer's browser console should be enough to route the ticket, and every error code should map to a `textAnalyze` analyzer and a runbook entry.",
+   "minutes": 15,
+   "resource": {
+    "label": "RFC 9457 - Problem Details for HTTP APIs",
+    "url": "https://www.rfc-editor.org/rfc/rfc9457"
+   }
+  },
+  {
+   "name": "Redaction: what it does, how to verify it, and what it can never protect",
+   "learn": "`kind: Redactor` applies `fileSelector` (`file`/`files` globs) plus `removals` containing `values` (literal strings), `regex` (either a bare `redactor` pattern or a `selector` that anchors to the following line, with the named group `(?P<mask>...)` replaced by `***HIDDEN***`) and `yamlPath` (e.g. `abc.xyz.*`). Built-in redactors catch common credentials, but the gaps are what get you: base64 Secret data, JWTs and bearer tokens inside log lines, heap dumps and env dumps collected with `copy`, connection strings in Helm values, and - the big one for DefenderMate - customer PII inside alert payloads and LLM prompts (hostnames, usernames, email addresses, IPs, ticket text). Never put the sensitive value in the redactor spec itself, since specs live in plaintext ConfigMaps. Verify empirically: plant canary secrets in a test install, generate a bundle, `rg` the extracted tarball for every canary, and run that check in CI so a new collector cannot ship without a matching redactor.",
+   "minutes": 25,
+   "resource": {
+    "label": "Troubleshoot - Redactors (fileSelector, values, regex, yamlPath)",
+    "url": "https://troubleshoot.sh/docs/redact/redactors/"
+   }
+  },
+  {
+   "name": "The customer-approvable collection manifest",
+   "learn": "Turn the spec into a document a security team can approve once instead of debating per incident: for every collector, one row giving what is collected, why it is needed, whether it can contain PII under the NIST SP 800-122 categories (direct identifiers, linkable data, IP addresses, free text), which redactor covers it, where the bundle is stored, who may read it, how long it is retained and how deletion is proven. State the legal frame plainly - the bundle is a data transfer, so it belongs in the DPA and the subprocessor list - and offer the tiered fallback that closes most objections: full bundle, redacted bundle, or analyzers run locally with only `analysis.json` leaving the boundary. Add chain-of-custody mechanics: a ticket ID, a `sha256sum` recorded on both sides, and a named recipient. This manifest is what converts 'we do not send logs to vendors' into a signed exception.",
+   "minutes": 20,
+   "resource": {
+    "label": "NIST SP 800-122 - Guide to Protecting the Confidentiality of PII",
+    "url": "https://csrc.nist.gov/pubs/sp/800/122/final"
+   }
+  },
+  {
+   "name": "Getting the bundle out of the environment, and handling it once it arrives",
+   "learn": "Bundles from a busy cluster reach several gigabytes, which collides with a 25 MB mail limit and a review desk that inspects every file leaving an air gap. Practise the mechanics: trim with log limits and `exclude`, then `split -b 512M`, record `sha256sum` for every part, encrypt to your team's public keys with `age -R recipients.txt` (or gpg) so the file is safe on a USB stick and on the customer's upload portal, and document the exact reassembly command. On receipt, treat the tarball as untrusted input from a compromised host: extract into a disposable directory with `tar --no-same-owner --no-same-permissions -C sandbox/`, never into a shared analysis box; scan for unredacted credentials before it is attached to a ticket, and if you find one, the credential is burned and must be rotated by the customer that day. Set a retention job that deletes bundles on the schedule the manifest promised.",
+   "minutes": 15,
+   "resource": {
+    "label": "age - simple, modern file encryption (recipients, -R)",
+    "url": "https://github.com/FiloSottile/age"
+   }
+  },
+  {
+   "name": "Analyzer outcomes: writing a verdict a customer admin can act on",
+   "learn": "Each analyzer's `outcomes` array is evaluated in order and stops at the first entry whose `when` is truthy, so it reads like a switch statement: the tightest failure first, then warnings, then a final `pass` with no `when` as the default arm. `title` is one truncated line in the UI, `message` carries the detail (it supports templating of collected values so you can print the actual number), and `uri` is the Read More link that must point at a runbook section, not your marketing site. Write messages in the second person with the fix: 'Node ip-10-0-3-11 has 4 GiB allocatable; DefenderMate requires 8 GiB. Resize the node group or set classifier.replicas=1 for the pilot.' Use `checkName` to give the check a stable, greppable identity, `strict` for the ones that must block, and keep the failure/warning thresholds identical between the preflight and the support bundle so a check cannot pass at install and disagree at diagnosis.",
+   "minutes": 20,
+   "resource": {
+    "label": "Troubleshoot - Analyzer outcomes (pass/warn/fail, when, title, message, uri)",
+    "url": "https://troubleshoot.sh/docs/analyze/outcomes/"
+   }
+  },
+  {
+   "name": "textAnalyze: turning every past escalation into an automatic diagnosis",
+   "learn": "The `textAnalyze` analyzer runs a `regex` or `regexGroups` over a file the collectors produced - a log, a `copy`-ed config, the output of an `exec` - and emits outcomes from the match, with `regexGroups` binding named captures so you can compare a captured number in `when` (for example a pool size or a version). This is where support knowledge gets codified: every escalation you resolve becomes one signature ('pq: too many connections', 'x509: certificate signed by unknown authority', 'context deadline exceeded' against the LLM host, an OOMKilled reason in the events file), with a message naming the cause and the fix. Keep the regexes anchored and cheap, add `ignoreIfNoFiles` semantics deliberately so a missing file does not read as healthy, and build the habit that the closing task on every escalation ticket is the pull request adding its analyzer. The target state: `analysis.json` names the root cause before a human opens the tarball.",
+   "minutes": 20,
+   "resource": {
+    "label": "Troubleshoot - Regular expression (textAnalyze) analyzer",
+    "url": "https://troubleshoot.sh/docs/analyze/regex/"
+   }
+  },
+  {
+   "name": "Reading a bundle cold: triage order and sbctl",
+   "learn": "Fix a repeatable order so you do not wander: read `analysis.json` first, then the version/metadata stamp, then `cluster-resources/events` and pod statuses for the last hour, then the failing workload's current and previous logs, then its config and Secret key list, then the data tier and egress collectors, and only then the whole-cluster material. Build a timeline in one file with `jq -r` across the JSON logs plus event timestamps, normalising to UTC, and mark the first anomaly rather than the loudest one. Use `sbctl serve` / `sbctl shell` to mount the bundle behind a local API server so `kubectl get pods`, `kubectl describe` and `kubectl get events -A` work offline against the frozen cluster state - it turns unfamiliar file archaeology into the tooling you already have muscle memory for. Finish every diagnosis by naming the collector, redactor or preflight that should have made it a one-minute answer.",
+   "minutes": 30,
+   "resource": {
+    "label": "sbctl - serve a support bundle as a local Kubernetes API server",
+    "url": "https://github.com/replicatedhq/sbctl"
+   }
+  },
+  {
+   "name": "Remote diagnosis discipline and the question budget",
+   "learn": "With one bundle every 48 hours because of change control, hypothesis quality is the whole job. Work the Google SRE loop explicitly - triage and stabilise before you explain, examine the evidence you have, form hypotheses that predict something absent from the bundle, and only then spend a round trip - and write each hypothesis down with the exact file or command that would falsify it, so you never spend a request confirming what you already believe. When you do ask, send a copy-pasteable block: the single command, the expected runtime, the expected output, what to do if it errors, and what you will conclude from each outcome, written for a busy admin who is not on your team. Bundle several independent questions into one request. Recognise the three moments to stop asking and escalate to a supervised session or a break-glass account: suspected data corruption, an active security incident, and a hypothesis that needs interactive state.",
+   "minutes": 20,
+   "resource": {
+    "label": "Google SRE Book - Effective Troubleshooting",
+    "url": "https://sre.google/sre-book/effective-troubleshooting/"
+   }
+  },
+  {
+   "name": "Closing the loop: coverage metrics and phone-home telemetry when it is allowed",
+   "learn": "Run the support surface as a product with two numbers: the share of escalations diagnosed from the first bundle with no follow-up round trip, and the share of preflight-preventable incidents (an install-time condition that a check could have caught but did not). Every escalation closes with one of three artefacts - a new collector, a new analyzer, or a new preflight - and each is a diff against the chart, so coverage compounds. Where the customer permits outbound calls, a lightweight instance-telemetry channel reporting version, uptime, resource pressure and a coarse health status turns unknown-unknowns into a dashboard and lets you open the ticket before they do; where they do not, the equivalent is a scheduled local bundle whose `analysis.json` the customer's own monitoring alerts on. Publish the collection manifest, the coverage numbers and the diagnosis-time trend in the QBR - it is the cheapest trust you will ever buy in an on-prem account.",
+   "minutes": 15,
+   "resource": {
+    "label": "Replicated - Instance details (what vendor-side instance telemetry reports)",
+    "url": "https://docs.replicated.com/vendor/instance-insights-details"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can write a Preflight spec for DefenderMate that blocks installation on an undersized node, a missing or wrong StorageClass, an unreachable image registry and an unsupported Kubernetes version, and demonstrate exit code 3 on failure, 4 on warning and 0 on a healthy cluster.",
+  "You can ship that preflight as a Helm pre-install/pre-upgrade hook with least-privilege RBAC and prove that a failing check aborts `helm upgrade` rather than leaving a half-applied release.",
+  "You can write a SupportBundle spec with collectors, redactors and analyzers, distribute it in-cluster so the customer's command is `kubectl support-bundle --load-cluster-specs`, and produce a bundle from a broken install in under five minutes.",
+  "You can prove redaction empirically: plant canary credentials and PII in a test install, generate a bundle, and show a CI job that fails the build if any canary survives into the tarball.",
+  "You can diagnose at least three seeded faults (OOMKilled classifier, expired or MITM-intercepted TLS to the LLM provider, exhausted Postgres connections) from bundles alone with no cluster access, and for each one name the collector, redactor or preflight that should have caught it earlier.",
+  "You can serve a support bundle with sbctl and answer questions with ordinary `kubectl get/describe/events` against the frozen cluster state, offline.",
+  "You can produce a one-page collection manifest - per collector: what, why, PII class, redactor, storage, retention, recipients - that a customer security reviewer can sign, plus the reduced-scope fallback where only analysis.json leaves the boundary.",
+  "You can convert a resolved escalation into a merged textAnalyze analyzer whose message names the cause and the fix, and show `analysis.json` diagnosing a fresh bundle of the same fault without human reading."
+ ],
+ "failureModes": [
+  "The support-bundle spec uses `runPod` with `alpine:3`; in the customer's air-gapped cluster the image cannot be pulled, the collector writes an error file instead of data, and the one directory you needed is empty after a two-day change-control round trip.",
+  "The `logs` collector caps at `maxLines: 10000` and the classifier logs 400 lines a second, so the bundle contains the last four minutes and the panic that started the outage forty minutes earlier is gone forever, because the node rotated it too.",
+  "Redactors cover connection strings but not alert payloads, so the bundle carries customer hostnames, usernames and email addresses from LLM prompts into your ticketing system, and a support ticket becomes a notifiable data incident under the DPA.",
+  "The node-sizing check was written as a `warn` rather than a `fail` because someone wanted the pilot to install cleanly; the customer runs on 4 GiB nodes, the classifier starts OOMKilling under real alert volume three weeks later, and the preflight output has already scrolled out of anyone's terminal.",
+  "Preflights run only on install, never on upgrade; the customer moves their cluster to a newer Kubernetes minor on their own schedule, a removed API version stops the chart rendering, and the first signal is a failed ArgoCD sync at 01:00 in a region with no on-call.",
+  "The customer's admin runs the bundle with a ServiceAccount that cannot read Secrets or nodes; several collectors fail partially, the analyzers see no evidence of a problem, and `analysis.json` reports all-clear on a cluster that is actively broken.",
+  "Node clocks drift because NTP is blocked outbound and one component logs in local time with no offset; the reconstructed timeline puts the webhook after the database error, the wrong service is blamed, and two days of engineering go into a component that was healthy.",
+  "The 6 GB bundle bounces off the mail gateway, so the admin uploads it to a public file-sharing link with no expiry; it contains an unredacted Postgres URI, and the remediation is a customer-side credential rotation plus a security review of your entire support process."
+ ],
+ "interviewQuestions": [
+  "Design the preflight and support-bundle pair for shipping our product into a bank's air-gapped OpenShift cluster. What do you check before install, what do you collect after a failure, what do you deliberately refuse to collect, and how do you get the bundle out of the building?",
+  "A customer emails 'the classifier is down' and attaches a 4 GB support bundle. Walk me through your first fifteen minutes: what you open, in what order, and what you would say in the first customer reply.",
+  "Explain the preflight exit-code contract and how you would wire it into a Helm-based install so a FAIL blocks the release but a WARN does not. What is your policy for upgrades, and what is the escape hatch when the customer must upgrade during an outage?",
+  "How do you convince a CISO that a support bundle is safe to send? Describe the redaction mechanisms, how you verify them, what redaction fundamentally cannot protect against, and what you offer when the answer is still no.",
+  "Debug this: `analysis.json` says every check passed, but the customer's dashboard is empty and their users are complaining. Give me the three most likely reasons the bundle is lying to you and how you would distinguish them.",
+  "You cannot reproduce the issue, and change control means one more bundle in 48 hours. How do you spend that single request? Write me the message you send the customer's admin.",
+  "How do you decide what belongs in a support bundle in the first place, and how does that set change over the life of an account? What would you measure to know your support surface is actually improving?"
+ ],
+ "proofOfWork": "A public repo `blind-bundle-drill` that turns this topic into a repeatable exercise rather than a document. It contains a `make cluster` target standing up kind or k3s with the DefenderMate chart, a `make fault-N` fault injector seeding eight realistic breakages (undersized node, missing StorageClass, wrong image registry credentials, expired and MITM-intercepted TLS to the LLM provider, exhausted Postgres connections, a NetworkPolicy blocking the webhook path, clock skew, and a Secret key renamed between chart versions), and the shipped `preflight.yaml`, `support-bundle.yaml` and `redactors.yaml` under `charts/defendermate/templates/` with the in-cluster ConfigMap labelled `troubleshoot.sh/kind: support-bundle`. A partner (or a script) picks a fault, runs the bundle and hands you only the tarball; you diagnose with sbctl and no cluster access, timing each attempt, and record every run in `DRILL-LOG.md` with the fault, your diagnosis, elapsed time, and the collector/analyzer/preflight you added afterwards so the next run is faster - the log should show first-bundle diagnosis time falling across the eight faults. CI runs `kubectl preflight --interactive=false` against a deliberately undersized kind cluster and asserts exit code 3, generates a bundle from a healthy install and greps the extracted tarball for planted canary credentials and PII, failing the build on any hit. The repo ships two customer-facing artefacts: `COLLECTION-MANIFEST.md`, the one-page per-collector table (what, why, PII class, redactor, storage, retention, recipients) written for a security reviewer to sign, and `docs/requirements.md` with the two-column table mapping every stated environment requirement to the analyzer that enforces it, so an empty cell in either column is visibly a bug."
+}

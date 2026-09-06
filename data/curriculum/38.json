@@ -1,0 +1,228 @@
+{
+ "i": 38,
+ "topic": "Landing in a codebase you did not write: orientation, reproduction, isolation, minimal fix",
+ "track": "E. Backend and Data",
+ "month": 4,
+ "hours": 6.0,
+ "why": "An FDE's default state is standing in a repository nobody on your team wrote - the customer's fork of your product, their in-house integration, a vendored library three versions behind - with their engineer watching and a bug blocking go-live. What is being tested is not cleverness but a repeatable landing sequence: orient in ten minutes, turn the report into a failing test, bisect to the change that caused it, ship the smallest diff that turns it green, and say the root cause and blast radius out loud before anyone asks. Get this wrong and you either freeze for two days 'understanding the architecture', or you ship a 400-line while-I-was-in-there refactor into a system you do not understand and become the outage.",
+ "prerequisites": [
+  "Git beyond commit/push: bisect, reflog, worktree, rebase, reading a merge history (Topic 4, Git at depth) - this topic assumes you can already move around a history, and adds what to do with it",
+  "Shell fluency for the bisect harness: exit-status conventions, traps, timeouts, `set -Eeuo pipefail` (Topic 0, Shell mastery), because `git bisect run` is entirely a contract about exit codes",
+  "pytest at working level - fixtures, parametrize, monkeypatch, running one node id, reading a failure trace (Topic 39, Testing and contracts, goes deeper; here you only need to write and run a test)",
+  "Process-level troubleshooting on a single box: strace/lsof/ps, reading a stack from a live process (Topic 3, Performance and troubleshooting)",
+  "Docker and docker compose basics for standing up an unfamiliar repo's Postgres/Redis/Kafka dependencies (Topic 5, Docker internals)",
+  "Enough Python packaging and import mechanics to know where code is actually loaded from - virtualenvs, editable installs, site-packages, sys.path (Topic 27, Production Python architecture)"
+ ],
+ "subtopics": [
+  {
+   "name": "Orientation pass one: entrypoints and the shape of the repo",
+   "learn": "Spend the first three minutes finding how the thing starts, not how it is written: packaging metadata is ground truth - pyproject.toml [project.scripts] and [project.entry-points], package.json bin/scripts, Dockerfile ENTRYPOINT/CMD, the systemd unit's ExecStart, the Kubernetes Deployment command/args, Procfile, Makefile targets. From each entrypoint take exactly one hop inward: the ASGI/WSGI app object, the CLI's click/argparse group, the worker's queue subscription, the scheduled job. Find where the mass is with `git ls-files | awk -F/ '{print $1\"/\"$2}' | sort | uniq -c | sort -rn | head -20` and write the four-line 'what this service does and who calls it' paragraph before reading a single function body. If you cannot name the entrypoint in ten minutes you are in a monorepo and standing in the wrong subdirectory.",
+   "minutes": 20,
+   "resource": {
+    "label": "Python Packaging - Entry points specification",
+    "url": "https://packaging.python.org/en/latest/specifications/entry-points/"
+   }
+  },
+  {
+   "name": "Dependency, config and secret surface",
+   "learn": "Lockfiles (uv.lock, poetry.lock, requirements.txt with hashes, package-lock.json, go.sum) tell you the exact dependency set that is running; settings precedence (defaults < config file < environment < CLI flag) tells you why the same code behaves differently in the customer's prod. Build the env-var inventory by grepping `os.environ|os.getenv|process.env|Settings(` and diff it against .env.example, the ConfigMap and the Secret - then mark which of those vars are feature flags, because half of 'works on my machine' is a flag default. Note where secrets actually come from (Vault, SSM, a mounted file, an IRSA-assumed role) so you know up front which code paths you cannot execute locally and must stub.",
+   "minutes": 15,
+   "resource": {
+    "label": "The Twelve-Factor App - III. Config",
+    "url": "https://12factor.net/config"
+   }
+  },
+  {
+   "name": "Standing it up: a reproducible environment in one command",
+   "learn": "Get to a green-or-red build before you get clever: pin the toolchain the repo asks for (.python-version, .nvmrc, .tool-versions), install from the lockfile rather than resolving fresh (`uv sync --frozen`, `pip install -r requirements.txt -c constraints.txt`, `npm ci` and never `npm install`), then bring up backing services with `docker compose up -d` or testcontainers. Time-box this to twenty minutes; when the environment fights you, stop improvising and run exactly the steps in .github/workflows/*.yml, or run inside the CI container image, because the CI config is the only environment documentation guaranteed to be current. Write down every deviation you had to make to get it running - on customer engagements those deviations are frequently the bug itself.",
+   "minutes": 20,
+   "resource": {
+    "label": "pip docs - Repeatable installs",
+    "url": "https://pip.pypa.io/en/stable/topics/repeatable-installs/"
+   }
+  },
+  {
+   "name": "The test command and the smallest true signal",
+   "learn": "Find the invocation the maintainers actually use - tox.ini, noxfile.py, the Makefile `test` target, the CI workflow, `[tool.pytest.ini_options] addopts` - then shrink it to one test: `pytest path/test_mod.py::TestX::test_y -x -q --no-header`, `-k 'expr'`, `-m 'not slow'`, `--lf`/`--ff` off the cache, `--collect-only` to learn the suite's shape without paying to run it, `-p no:randomly` when an ordering plugin is installed. Know the equivalents you will meet on customer sites: `mvn -Dtest=Class#method test`, `gradle test --tests '*Foo*'`, `go test -run TestX ./pkg/...`, `npx jest -t 'name'`, `cargo test name -- --nocapture`. Everything downstream - bisect, minimization, the fix loop - runs at the speed of this command, so a 10-second red/green signal is worth twenty minutes of setup.",
+   "minutes": 20,
+   "resource": {
+    "label": "pytest docs - How to invoke pytest",
+    "url": "https://docs.pytest.org/en/stable/how-to/usage.html"
+   }
+  },
+  {
+   "name": "Where state lives: migrations, queues, caches, external calls",
+   "learn": "Inventory state before you change behaviour: schema and migration history (`alembic history`, `alembic current`, `manage.py showmigrations`, `flyway info`) tells you what shape the customer's database is actually in versus what the code assumes; then queues and topics, Redis keyspaces and their TTLs, S3/blob prefixes, on-disk caches, and any third-party call made at import time. Ask three questions per store: who writes it, is that write idempotent, and can it be regenerated from something else. This is the difference between a code change and a data incident - a patch that alters a serialization format, a cache key, or a migration that has already run in the customer's production is not 'just a fix', and the rollback plan is different for each.",
+   "minutes": 20,
+   "resource": {
+    "label": "Alembic docs - Tutorial (revisions, history, current, downgrade)",
+    "url": "https://alembic.sqlalchemy.org/en/latest/tutorial.html"
+   }
+  },
+  {
+   "name": "Reading by execution, not by browsing",
+   "learn": "Do not read the repo top to bottom; make it tell you which two percent of itself runs for your failure. `coverage run --branch -m pytest tests/test_x.py::test_y && coverage html` gives the exact executed lines and which branch was taken; on a live process `py-spy dump --pid <pid>` gives the current stack and `py-spy record` a flame graph without restarting anything, and `strace -f -e trace=openat,connect,execve` shows which files, hosts and binaries it genuinely touches. When nothing is installable on the customer host, a temporary log line at each layer boundary is the same technique with worse ergonomics. Reading order that works: entrypoint, the failing frame, then only the functions coverage proves executed between the two.",
+   "minutes": 15,
+   "resource": {
+    "label": "coverage.py docs - Command line usage",
+    "url": "https://coverage.readthedocs.io/en/latest/cmd.html"
+   }
+  },
+  {
+   "name": "Static navigation at scale: ripgrep, git grep, structural search",
+   "learn": "Move at typing speed: `rg -n -tpy 'def create_invoice'`, `rg -l` for the file list, `rg -C3` for context, `rg --hidden -g '!node_modules'`, and `git grep -n <pattern> <rev>` to search a past revision without checking it out. When the identifier is generic (`run`, `handle`, `process`) text search collapses - switch to structural search (ast-grep, comby) or the language server's find-references so you match `foo.run(` as a call rather than as a substring in a docstring. Build the index once (`ctags -R`, or just open the repo in an LSP-backed editor) so go-to-definition and find-references cost one keystroke; grep-only navigation is the single biggest reason a 15-minute bug consumes 45 minutes.",
+   "minutes": 15,
+   "resource": {
+    "label": "ripgrep - user guide and flags",
+    "url": "https://github.com/BurntSushi/ripgrep"
+   }
+  },
+  {
+   "name": "Git archaeology: pickaxe, log -L, blame -w -C",
+   "learn": "`git log -S'compute_total' --oneline` (pickaxe: commits where the number of occurrences of that string changed) and `git log -G'regex'` (commits whose diff text matches) find when a behaviour appeared; `git log -L :function_name:path/file.py` prints the entire history of one function; `--follow` survives renames; `--first-parent` on a merge-heavy repo shows the release train instead of every topic commit. `git blame -w -C -C -L 120,160 file.py` ignores whitespace and follows code moved between files, and `git blame <commit>~1 -- file` walks back past a reformat commit that otherwise attributes everything to one person on one day. Read the commit message and its linked PR before the diff: the reason a line exists is almost never visible in the line.",
+   "minutes": 25,
+   "resource": {
+    "label": "git-scm - git log (pickaxe -S/-G, -L, --follow, --first-parent)",
+    "url": "https://git-scm.com/docs/git-log"
+   }
+  },
+  {
+   "name": "Hotspots and ownership: churn, complexity, who to ask",
+   "learn": "Rank files by change frequency - `git log --format=format: --name-only --since=12.months | sed '/^$/d' | sort | uniq -c | sort -rn | head -20` - and intersect that with file size or complexity: high-churn, high-complexity files are simultaneously where the bug is and where your patch is most likely to collide with someone else's work. Tools like code-maat formalise this (churn, coupling between files that always change together, knowledge loss when the author has left). `git shortlog -sn -- path/`, CODEOWNERS and the last five reviewers of the hotspot name the one human whose 30-second answer replaces an hour of reading, and on a customer engagement identifying that person quickly is part of the skill, not a shortcut around it.",
+   "minutes": 10,
+   "resource": {
+    "label": "code-maat - mining VCS history for hotspots and change coupling",
+    "url": "https://github.com/adamtornhill/code-maat"
+   }
+  },
+  {
+   "name": "Reproduction: from a one-paragraph ticket to a deterministic failing test",
+   "learn": "Convert the report into an executable assertion at the tightest layer that still fails - prefer a unit test over an API test over a browser test, but start wherever it reproduces and then push it downward. Commit the exact inputs (request body, offending row, uploaded file) as a fixture next to the test, use `@pytest.mark.parametrize` to hold the known-bad and known-good cases together so the test documents the boundary, and assert the observable symptom rather than your current guess at the mechanism. Then run it three times, and once on a fresh clone, before you believe it: a reproduction you cannot re-run on demand is a story, not a bug, and everything after this step assumes a signal you can trust.",
+   "minutes": 25,
+   "resource": {
+    "label": "pytest docs - How to parametrize fixtures and test functions",
+    "url": "https://docs.pytest.org/en/stable/how-to/parametrize.html"
+   }
+  },
+  {
+   "name": "Killing nondeterminism before you trust the signal",
+   "learn": "Enumerate the usual sources and neutralise each: wall clock and timezone (freeze time, never assert against `datetime.now()`), randomness and hash ordering (seeded RNG, `PYTHONHASHSEED=0`, `pytest --randomly-seed=N`), SQL results without ORDER BY, set/dict iteration order, concurrency and retries, DNS and network, and state leaked from an earlier test (rerun the single test in a fresh process to prove isolation). Measure the flake rate before you do anything expensive: loop the reproducer twenty times (`pytest-repeat --count=20`, or a shell loop counting failures). Bisecting a test that fails one run in three will converge confidently on an innocent commit, and `git bisect` has no way to tell you that it did.",
+   "minutes": 20,
+   "resource": {
+    "label": "Google Testing Blog - Flaky Tests at Google and How We Mitigate Them",
+    "url": "https://testing.googleblog.com/2016/05/flaky-tests-at-google-and-how-we.html"
+   }
+  },
+  {
+   "name": "Characterization tests: a seatbelt for code with no tests",
+   "learn": "When the area you must change has no tests, first write tests that assert what the code does today, not what it should do: call the unit with representative inputs, serialize the entire output, and approve that snapshot (ApprovalTests, `pytest --snapshot-update`, or a hand-rolled golden file compared with `assert actual == expected`). Prefer whole-output golden files over hand-picked assertions for wide structures - they catch the field you would never have thought to check. This is what makes it safe to modify legacy code you do not understand, it converts 'I think this is equivalent' into a passing diff, and it is the artifact that persuades the customer's engineer that your change is contained.",
+   "minutes": 15,
+   "resource": {
+    "label": "ApprovalTests.Python - golden/approval testing library",
+    "url": "https://github.com/approvals/ApprovalTests.Python"
+   }
+  },
+  {
+   "name": "Shrinking the input: delta debugging and ddmin",
+   "learn": "Delta debugging is binary search over the input: split the failing input, keep the part that still fails, recurse until removing any single element makes the failure disappear (1-minimal). Do it by hand on a 5,000-line CSV or a 400-key JSON payload and it takes six iterations rather than five hours; automate it with the DebuggingBook DeltaDebugger, Hypothesis's built-in shrinking, or C-Reduce for source inputs. The minimized case is usually worth more than the patch: it fits in a ticket, in a regression test and in one sentence to the customer, and it frequently names the root cause on its own - a NUL byte, a 65,536-row boundary, a naive timestamp, a duplicated key.",
+   "minutes": 15,
+   "resource": {
+    "label": "The Debugging Book - Reducing Failure-Inducing Inputs (ddmin)",
+    "url": "https://www.debuggingbook.org/html/DeltaDebugger.html"
+   }
+  },
+  {
+   "name": "Shrinking the change: git bisect and bisect run",
+   "learn": "`git bisect start <bad> <good>` then automate with `git bisect run /tmp/repro.sh`, where the script exits 0 for good, 1-124 or 126-127 for bad, 125 for untestable so bisect skips instead of lying, and 128+ to abort the whole run. The rules that save a session: keep the script outside the working tree (checkouts will overwrite or delete it), reinstall dependencies inside the script because lockfiles move across the range, `git bisect skip` commits that do not build, and bisect with `--first-parent` when topic-branch commits were never green. When the culprit is an upstream bump rather than local code, bisect the dependency's own history in a separate clone or loop over its released versions. Finish with `git bisect log > bisect.log` then `git bisect reset` - that log is the evidence you hand the customer.",
+   "minutes": 30,
+   "resource": {
+    "label": "git-scm - git bisect (run, skip, exit code 125, log/replay)",
+    "url": "https://git-scm.com/docs/git-bisect"
+   }
+  },
+  {
+   "name": "Isolation inside one run: assertions, breakpoints, post-mortem, hangs",
+   "learn": "Once you have one reliable failing run, stop guessing and observe: `pytest --pdb` drops you at the failure with the frame intact (`--trace` starts at the top), and inside pdb use `w`/`u`/`d` to walk frames, `p`/`pp`/`display`, `l`, `b file:line, condition`, `until`, `retval` and `interact` for a full REPL bound to the frame. For crashes and hangs where interactive debugging is impossible, `faulthandler.dump_traceback_later(30)` or `faulthandler.enable()` prints stacks on timeout and fatal signals, and `py-spy dump --pid` retrieves the stack of a wedged process in the customer's production. Between observations, bisect the state space rather than the code: assert the invariant at the midpoint of the pipeline, then move that assertion earlier or later until you have the first place the value is already wrong.",
+   "minutes": 25,
+   "resource": {
+    "label": "Python docs - pdb, the Python debugger",
+    "url": "https://docs.python.org/3/library/pdb.html"
+   }
+  },
+  {
+   "name": "Root cause versus proximate cause, and 'why now?'",
+   "learn": "The failing line is where the program noticed, not where it went wrong; keep asking 'and why was that value or state reachable?' until you land on a decision a human made - a missing constraint, an unvalidated boundary, a default that changed, an assumption about input that stopped holding. Always answer 'why now' explicitly: code that was wrong for two years and broke this week means the trigger is data volume, a dependency bump, a config change or a clock, and the trigger is exactly what the customer will ask about first. Then separate the fix that removes this symptom from the fix that makes the class of bug impossible, and state which you are shipping and why - usually the narrow one today, the structural one as a ticket with an owner.",
+   "minutes": 20,
+   "resource": {
+    "label": "Google SRE Book - Effective Troubleshooting",
+    "url": "https://sre.google/sre-book/effective-troubleshooting/"
+   }
+  },
+  {
+   "name": "Blast radius: call sites, contracts, and data already written",
+   "learn": "Before you commit, inventory who depends on what you touched: language-server find-references (textDocument/references) across the workspace, plus `rg` for the dynamic dispatch an LSP cannot see - getattr, string-keyed registries, entry points, templates, raw SQL, feature-flag names, serialized class paths. Ask the contract question: is this a published API, a plugin interface, an on-the-wire format, or a column other services read. Then ask what already happened - rows written wrong, cached values, events emitted, invoices sent - because a correct fix with no backfill leaves the customer with a corrupted history and a second, worse incident. Write the blast radius as three bullets (what changes behaviour, what data needs repair, what redeploys in what order) before you open the PR.",
+   "minutes": 15,
+   "resource": {
+    "label": "Language Server Protocol 3.17 - Find References request",
+    "url": "https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#find-references-request-leftwards_arrow_with_hook"
+   }
+  },
+  {
+   "name": "The minimal fix, and the revert option you should consider first",
+   "learn": "Ship the smallest diff that turns the failing test green, written in the style of the code around it, with zero drive-by renames, reformatting or improvements - in a repo you have known for two hours, every extra line is a line you cannot defend in review and cannot exonerate when the next bug appears. Consider `git revert <sha>` before a forward fix: for a young regression traced to one clean commit, a revert is safer, faster to review, trivially explainable to a customer, and returns the problem to the person with the most context. When the correct fix is large or risky, ship the guard instead (validation, clamp, flag off) with the reproduction committed as the regression test, file the structural change, and say plainly that you did so rather than smuggling a refactor into a hotfix.",
+   "minutes": 20,
+   "resource": {
+    "label": "Google Engineering Practices - Small CLs",
+    "url": "https://google.github.io/eng-practices/review/developer/small-cls.html"
+   }
+  },
+  {
+   "name": "The narration: commit message, PR description, three-minute verbal",
+   "learn": "Write the commit subject as an imperative and specific claim ('reject NUL bytes in CSV import instead of truncating the row'), and the body as symptom, root cause, why now, the fix, the blast radius, and how it was verified - with the bisected sha and the minimized input pasted in. Then rehearse the spoken version to three minutes: what the customer saw, which commit caused it, why it started this week, the one-line fix and the test that pins it, what else touches this and what data needs repair, and what you deliberately did not fix. On an engagement this narration is the deliverable; the patch is assumed, and the reason a customer's team starts trusting you is that you can state precisely what you did not change.",
+   "minutes": 15,
+   "resource": {
+    "label": "Google Engineering Practices - Writing good CL descriptions",
+    "url": "https://google.github.io/eng-practices/review/developer/cl-descriptions.html"
+   }
+  },
+  {
+   "name": "Upstreaming versus carrying a patch on a customer engagement",
+   "learn": "When the bug lives in a third-party or customer-owned repo, decide deliberately instead of by default: upstream a PR (read CONTRIBUTING.md, handle the DCO sign-off or CLA, run their linters and full suite, keep the diff to the fix alone) and pin to the released version later; or carry the change as a patch file applied at build time, a vendored fork whose fix is one commit rebasable onto upstream tags, or a pinned fork URL in the lockfile - each with a named owner and an expiry date. Never silently edit files under site-packages or node_modules on a customer host: the next install erases it, the outage returns weeks later, and no commit anywhere explains what happened.",
+   "minutes": 15,
+   "resource": {
+    "label": "Open Source Guides - How to Contribute to Open Source",
+    "url": "https://opensource.guide/how-to-contribute/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can land in a repo you have never opened and, within 10 minutes, name its entrypoints, the exact test command, its config and state surface, and the three files most likely to contain the bug - checked against the six recorded sessions.",
+  "You can turn a one-paragraph bug report into a committed failing test that runs in under 10 seconds on a clean clone and fails for the reported reason rather than a proxy for it.",
+  "You can write a repro.sh with correct 0/1/125 exit semantics and drive `git bisect run` to a first-bad-commit across a 500-commit range containing dependency bumps and broken commits, ending with a bisect.log you can paste into the ticket.",
+  "You can minimize a failing input by hand with ddmin to a 1-minimal case in six iterations or fewer and state what that minimized case proves about the root cause.",
+  "You can put untested legacy code under characterization or approval tests before changing it, and show the golden file catching a field you would not have thought to assert on.",
+  "You can ship a fix whose diff is smaller than the regression test that pins it, in the surrounding code's style, and justify why a revert was or was not the better move.",
+  "You can state root cause, 'why now', and blast radius in under three minutes without notes, including which data written during the bug window needs repair and in what order components redeploy.",
+  "You can diff your patch against the maintainer's actual fix (Defects4J or the upstream commit) and name every semantic difference, not just the stylistic ones."
+ ],
+ "failureModes": [
+  "You spend day one reading the codebase 'to understand it properly', give the customer no signal for 48 hours, and the ticket escalates to your account lead before you have run a single test.",
+  "Your reproduction only fails locally because you skipped a migration the customer has already run; you bisect that, land a fix, declare victory, and the customer's actual failure is untouched while everyone now believes it is resolved.",
+  "`git bisect` is driven by a test that flakes one run in three, converges confidently on an innocent commit, that author burns a day disproving it, and the real culprit ships again in the next release.",
+  "The bisect script was committed inside the repo, so the first checkout of an older commit removed it; every subsequent step was marked bad and the 'first bad commit' is really the commit where the script stopped existing.",
+  "The minimal fix corrects the code path but nobody backfills the 40,000 rows written wrong during the six weeks the bug was live, so the customer's month-end report is still wrong and the second incident costs more trust than the first.",
+  "You fix it at 22:00 by editing the vendored library under site-packages on the customer's app server; the next deploy reinstalls the dependency, the bug returns three weeks later, and no commit anywhere records what you did.",
+  "A one-line fix arrives wrapped in a 300-line cleanup of the surrounding module; review stalls for a week, and when an unrelated bug appears the customer's team attributes it to your refactor because nobody can isolate which line changed behaviour.",
+  "You fix the proximate cause by clamping a negative value, the root cause (an unvalidated webhook field) resurfaces two months later through a different code path, and your earlier clamp is now hiding the signal that would have found it."
+ ],
+ "interviewQuestions": [
+  "It is day one on site. A Python service you have never seen returns 500s on about 2 percent of requests, starting 'sometime last week', and nobody who wrote it still works there. Walk me through your first 60 minutes minute by minute, and tell me what you say to their VP of Engineering at the end of it.",
+  "Explain `git bisect run` precisely: what each exit code means, why 125 exists, where the script must live and why, and how you bisect when the lockfile changes across the range or when the culprit turns out to be in an upstream package rather than this repo.",
+  "Design a landing protocol for a team of five FDEs so any of them becomes productive in an unfamiliar customer repo within 30 minutes. What is on the checklist, what is automated, what does it deliberately skip, and how would you measure whether it works?",
+  "A test reproduces the bug on your laptop and passes in the customer's CI. Give me the ordered list of things you check, and how you distinguish 'environment difference' from 'flaky test' from 'the bug is data-dependent and their fixtures are clean'.",
+  "You have a one-line fix and 40 minutes left in the session. How do you choose between shipping the fix, reverting the offending commit, and shipping a feature-flag guard? What changes your answer if the customer is inside a change freeze?",
+  "How do you establish blast radius in a codebase you have known for two hours? Name the specific tools, and name what each of them misses.",
+  "The bug is in a third-party open-source library the customer depends on. Walk through the options - upstream PR, carried patch file, vendored fork, workaround in your own code - and explain the trade-off to an engineering manager who wants it fixed today."
+ ],
+ "proofOfWork": "A public repo `codebase-landing-kata` that turns your protocol into something a stranger can rerun. It ships `landing-protocol.md` as an executable checklist plus `scripts/orient.sh`, one command that takes any clone and prints its entrypoints (pyproject scripts, Dockerfile CMD, systemd ExecStart, Kubernetes command/args), the test invocation extracted from the CI workflow, the env-var inventory grepped from source and diffed against .env.example, the current migration head, and the top-20 churn hotspots from `git log --name-only`; alongside `scripts/bisect-run.sh`, a template with correct 0/1/125 semantics, dependency reinstall per commit, a hard timeout, and a flake-rate pre-check that refuses to start bisecting a reproducer that fails under 95 percent of runs. A `sessions/` directory holds one folder per timed 45-minute run against a real unfamiliar repo, each containing the stopwatch splits (orient / reproduce / bisect / fix / narrate), the minimized input, bisect.log, the patch, the regression test, and a written comparison of your fix against the maintainer's actual fix naming every semantic difference. Close with RESULTS.md charting time-to-reproduce and time-to-fix across the six sessions, and a two-page write-up of the session that went worst: the wrong hypothesis you held longest, why the evidence let you hold it, and the single observation that would have killed it in five minutes."
+}

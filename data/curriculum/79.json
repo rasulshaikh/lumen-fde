@@ -1,0 +1,219 @@
+{
+ "i": 79,
+ "topic": "Async engagement communication: weekly status update, escalation and slip notes, decision memo",
+ "track": "J. FDE Craft and Communication",
+ "month": 8,
+ "hours": 5,
+ "why": "An FDE is usually the only vendor-side person the customer's sponsor hears from, and that sponsor decides renewal, expansion or cancellation from a few hundred words a week read on a phone between meetings - not from your code, your dashboards or the two people on their side who actually know what you built. The engagements that die rarely die of engineering; they die because a slip was discovered by the customer rather than announced by you, because an ask sat unanswered in a Slack thread for three weeks with no owner, or because a decision taken verbally in month one was relitigated in month three with no written record. Async writing is also the only leverage you have across time zones and customer sites: a weekly update that is genuinely skimmable, an escalation that lands without humiliating your counterpart, and a decision memo that closes a question in one round are what let one FDE hold three engagements without a standing call on each.",
+ "prerequisites": [
+  "A real multi-week engagement to report on with named milestones and dates - Dokeo, DefenderMate or Kaupex from the earlier tracks is enough, provided it has a plan someone could miss",
+  "A signed one-page problem statement and success metric from Topic 72 (Discovery), because a status update is progress against a stated outcome, not a list of activity",
+  "The engagement document pack from Topic 73 (site survey, PRD-lite, SOW, ADR log, runbooks) - the weekly update references those artifacts rather than restating them",
+  "Topic 24 (Incident response and postmortems): severity ladder, incident commander and communications-lead roles, and the blameless postmortem the exec incident note links to",
+  "Topic 21 (SRE fundamentals): SLIs, SLOs and error budgets, so the numbers you quote in an update mean something and match what the customer's dashboards say",
+  "Topic 74 (Demos and executive communication) as the synchronous counterpart - this topic is what you send when there is no meeting"
+ ],
+ "subtopics": [
+  {
+   "name": "The channel charter and a response-time policy you will actually meet",
+   "learn": "Write the charter in week one and paste it into the kickoff note: which channel carries which traffic (shared Slack Connect channel for anything under a day, email for anything an exec must forward, the engagement doc repo for anything that must survive the engagement, phone plus PagerDuty for Sev1 only), who is named on each, and the response times you commit to - Slack within four business hours, email within one business day, Sev1 acknowledgement within fifteen minutes, weekly update every Friday 16:00 customer-local. State both sides' working hours and time zones, name a deputy for every channel you own, and say explicitly what happens out of hours, because an unanswered thread is the most common origin of 'the vendor went dark'. The rule that keeps the charter honest: any decision, number or commitment that appeared on a call or in chat is restated in the weekly update or a memo within 24 hours - chat is not a record, and neither counsel nor a CFO reads scrollback.",
+   "minutes": 20,
+   "resource": {
+    "label": "GitLab Handbook - Communication (channels, response expectations, async norms)",
+    "url": "https://handbook.gitlab.com/handbook/communication/"
+   }
+  },
+  {
+   "name": "Reader model: five readers, five different first questions",
+   "learn": "Name your readers before you name your sections. The exec sponsor asks 'is this on track and what do you need from me' and can act only on a date, a risk or a decision; the customer's delivery or platform lead asks 'what lands on my team this week'; the operator asks 'what changes in my workflow'; security and procurement ask 'what did you change about data, access or scope'; your own account lead asks 'what should I be worried about before the customer tells me'. Write the primary update for the sponsor plus the delivery lead, and give the platform team its own 'asks this week' block they can act on without reading the rest. Anything that only interests you - refactors, tooling, effort spent - goes in an appendix or nowhere.",
+   "minutes": 15,
+   "resource": {
+    "label": "Google Technical Writing One - Know your audience",
+    "url": "https://developers.google.com/tech-writing/one/audience"
+   }
+  },
+  {
+   "name": "BLUF and the inverted pyramid: making the first 30 seconds sufficient",
+   "learn": "Put the verdict in the first 25 words and the ask in the first 60, then detail in decreasing importance, then an appendix nobody has to read - the exec sees the subject line and one phone screen, and everything after that is optional. Use a subject-line format that is itself the summary and is diffable week over week: '[Dokeo] Week 4 - AMBER, go-live 14 Nov at risk, need IAM role approved by Tue'. Kill the openings that destroy the top of the message: pleasantries, a chronology of your week, background the reader already has, and any sentence that begins 'As discussed'. Test it by deleting everything except the subject and the first three lines and asking whether the reader could still act correctly.",
+   "minutes": 20,
+   "resource": {
+    "label": "Nielsen Norman Group - Inverted Pyramid: Writing for Comprehension",
+    "url": "https://www.nngroup.com/articles/inverted-pyramid/"
+   }
+  },
+  {
+   "name": "Compression: fewer words, one ask per paragraph, easy to answer",
+   "learn": "Budget 200 words above the fold and enforce it. Delete effort narration ('spent significant time investigating'), adjectives, and every sentence whose deletion changes nothing; convert three or more parallel items into a table; replace 'we are continuing to work on the connector' with either a date or the blocker plus its owner. Make responding cheap: one question per message where possible, phrased as a binary or a numbered menu, with a deadline and a stated default, so the reader can reply with one word from a phone. Read the draft once purely as a cutting pass - a 320-word update that took you 25 minutes to compress beats a 900-word one that took ten.",
+   "minutes": 15,
+   "resource": {
+    "label": "plainlanguage.gov Federal Plain Language Guidelines - Be concise",
+    "url": "https://www.plainlanguage.gov/guidelines/concise/"
+   }
+  },
+  {
+   "name": "Scannable structure and rendering: headings, tables, phones, forwarding",
+   "learn": "Headings state conclusions, not categories - 'Go-live slips to 14 Nov' beats 'Schedule'; bold carries only the decision and the date; never nest more than two levels. Never let a screenshot be the only carrier of a fact: images strip on forward, break in some clients and are unreadable on a phone, so the table goes in the body and the screenshot is supporting. Test the send every time - view it on a phone, forward it to yourself, confirm no link needs your VPN or a Google account the customer's SSO cannot open, and keep attachments small by linking the doc repo instead. Write for non-native readers by default: short sentences, no idioms ('circle back', 'long pole', 'punt'), acronyms expanded on first use, dates as '14 Nov 2026' rather than 11/14.",
+   "minutes": 15,
+   "resource": {
+    "label": "Microsoft Writing Style Guide - Scannable content",
+    "url": "https://learn.microsoft.com/en-us/style-guide/scannable-content/"
+   }
+  },
+  {
+   "name": "The kickoff note: the message that sets every expectation you will be held to",
+   "learn": "Send it within 48 hours of kickoff, to everyone who will ever receive a weekly update, containing: the problem and success metric restated in the customer's words from discovery, scope in and out with the SOW clause referenced, named roles (who decides, who contributes, who is informed), the milestone dates with your confidence in each, the channel charter and response times, the top three risks, and the three things you need from them in week one with owner and date. Close with an explicit correction window - 'if any of this is wrong, reply by Friday' - which converts silence into a shared record you can point at in week six. This note is also the template contract: every weekly update afterwards uses the same section names in the same order.",
+   "minutes": 15,
+   "resource": {
+    "label": "Atlassian Team Playbook - Project Poster play",
+    "url": "https://www.atlassian.com/team-playbook/plays/project-poster"
+   }
+  },
+  {
+   "name": "The weekly update: seven fixed slots, same day, same shape",
+   "learn": "Lock the template and never reorder it: (1) headline - status colour, target date, one-sentence verdict; (2) what changed since last week, as deltas not activity; (3) next week, three bullets maximum; (4) decisions or actions needed from you, each with owner, deadline and default; (5) top three risks and issues with movement markers (new / worse / better / closed); (6) the success metric with last week's number beside this week's; (7) appendix and links. The stability is the product - a sponsor who can diff week 4 against week 3 in 30 seconds will read every one. Never skip a week: an absent update reads as bad news being concealed, so send the same template with 'no change' plus the reason, and number the updates so weeks 1 to 12 can be read as one chain in one thread or one doc.",
+   "minutes": 25,
+   "resource": {
+    "label": "PagerDuty Stakeholder Communications - Templates",
+    "url": "https://stakeholders.pagerduty.com/considerations/templates/"
+   }
+  },
+  {
+   "name": "Status colour and honest progress: thresholds, confidence, no percent-complete",
+   "learn": "Define the colour rules in writing in week one and apply them mechanically: GREEN means every committed date is unchanged and no blocker is unowned; AMBER means a date is at risk, or an ask has been open past its deadline, or a dependency has no owner; RED means a committed date will move or the outcome is unachievable as scoped. Colour describes the commitment, not your mood or effort, and a green that flips straight to red is the fastest way to lose a sponsor - amber exists precisely so the customer can spend a favour before it is too late. Report progress as scopes or milestones finished versus remaining and mark whether the remaining work is still uphill (unknowns to solve) or downhill (known execution); '70% complete' hides the fact that the missing 30% is the part nobody has figured out.",
+   "minutes": 20,
+   "resource": {
+    "label": "Shape Up (Basecamp) - Show Progress (hill charts, uphill/downhill work)",
+    "url": "https://basecamp.com/shapeup/3.4-chapter-13"
+   }
+  },
+  {
+   "name": "Asks: one human, one verb, one deadline, one default",
+   "learn": "Write every ask as 'Priya: approve the IAM role in ticket INF-4412 by Wed 12:00 CET; if not approved we deploy to staging with the read-only role and re-test Friday, moving the integration milestone by two days'. A team is not an owner, 'ASAP' is not a deadline, and an ask without a stated consequence is a request the reader can safely ignore. Keep a running asks table with the date first raised and days open, repeat it every week until closed, and treat an ask open past its second week as an escalation trigger rather than another bullet. When two people could plausibly own a decision, settle it with DACI (driver, approver, contributors, informed) in the kickoff note so 'who decides' is never the thing being negotiated inside the thread.",
+   "minutes": 15,
+   "resource": {
+    "label": "Atlassian Team Playbook - DACI decision-making framework",
+    "url": "https://www.atlassian.com/team-playbook/plays/daci"
+   }
+  },
+  {
+   "name": "RAID in async: risk, issue, assumption, dependency - scored and moving",
+   "learn": "Keep the four categories distinct because they need different actions: a risk may happen and needs probability x impact plus a mitigation with an owner; an issue is already happening and needs a decision now; an assumption is something you will proceed on unless contradicted, so writing it down transfers the burden of correction; a dependency is someone else's deliverable with a date and a name. Score risks on a 1-5 probability by 1-5 impact grid so the register can be ordered and so 'high risk' means something, and surface only the top three in the message with the full register linked. Show movement every week - new, worse, better, closed - because the reader tracks the delta, not the list. The single most valuable line an FDE ever writes is a risk that later materialises and was already logged with a mitigation and an owner: that is what turns a slip into a managed event.",
+   "minutes": 15,
+   "resource": {
+    "label": "HM Treasury Orange Book - Management of Risk: Principles and Concepts",
+    "url": "https://www.gov.uk/government/publications/orange-book"
+   }
+  },
+  {
+   "name": "The slip note: send it the day you know, with a defensible new date",
+   "learn": "The trigger to write is evidence, not the missed milestone: an ask blows its deadline, a spike returns a bad number, a dependency owner goes quiet, measured throughput falls short of the plan for two weeks running. Structure: what changed, the new date and your confidence in it, why in one causal non-defensive paragraph, what it costs the customer, what you already did to absorb it, the options, and what you need. Anchor the date with a method rather than a feeling - remaining scopes, the last two weeks' actual completion rate, and an explicit uplift for optimism bias rather than a best case - because the second slip on the same milestone costs far more trust than the size of the first. Say the uncomfortable sentence plainly and early in the note; burying it in paragraph five is what readers remember.",
+   "minutes": 25,
+   "resource": {
+    "label": "HM Treasury Green Book supplementary guidance - Optimism bias",
+    "url": "https://www.gov.uk/government/publications/green-book-supplementary-guidance-optimism-bias"
+   }
+  },
+  {
+   "name": "The replan menu: two or three costed options, one recommendation",
+   "learn": "Never send a new date alone; send the choice that produced it. Offer cut scope (name exactly which deliverables move to phase two and what the customer loses in the interim), move the date (with the downstream cost: their audit window, their launch, a payment milestone), lower the bar temporarily (a manual step for month one, backfilled later), or add people (state honestly what onboarding costs you in weeks before it helps). Give each option a cost, a risk and a reversibility, recommend one, and say why in a sentence. The framing to steal: the appetite is fixed and scope is the variable, so the conversation is about what to stop doing, not how to fit everything into a date that has already failed once.",
+   "minutes": 15,
+   "resource": {
+    "label": "Shape Up (Basecamp) - Decide When to Stop (fixed appetite, variable scope)",
+    "url": "https://basecamp.com/shapeup/3.5-chapter-14"
+   }
+  },
+  {
+   "name": "Escalation in writing without detonating the relationship",
+   "learn": "Agree the ladder at kickoff and then follow it visibly: day 3 nudge in channel, day 5 direct email to the owner copying your counterpart, day 8 email to the sponsor with the dated ask trail attached, Sev1 phone call plus a written summary within the hour. Always telegraph before you climb - 'if I do not have this by Thursday I will raise it with Dana on Friday' - and then do exactly what you said; a surprise escalation humiliates the person who was quietly unblocking it and buys you an information blackout for the rest of the engagement. Escalate the problem, not the person: fact, dated history, business consequence, the specific decision you need and by when, no adjectives, no 'as I have repeatedly said', and offer a way for the owner to close it before it lands on their boss's desk.",
+   "minutes": 20,
+   "resource": {
+    "label": "Atlassian - On-call escalation policies",
+    "url": "https://www.atlassian.com/incident-management/on-call/escalation-policies"
+   }
+  },
+  {
+   "name": "Stakeholder cadence during an incident, while you are still fixing",
+   "learn": "Split the channels: the incident channel is for the people fixing, the stakeholder update is for the people deciding, and one named liaison (you or a deputy) carries traffic between them so responders never write to executives. Commit to a fixed interval up front and hold it even when nothing has changed - 'Sev1, update every 30 minutes; 14:00: no change, next update 14:30' - because silence between updates is read as loss of control. Each update states impact in the customer's terms, scope (which tenants, which function, since when), what you are doing now, and the time of the next update; it never speculates about root cause, never blames their network or their change, and never gives an ETA you cannot defend. Distinguish confirmed from suspected in every sentence.",
+   "minutes": 15,
+   "resource": {
+    "label": "PagerDuty Stakeholder Communications - Communicating during investigation",
+    "url": "https://stakeholders.pagerduty.com/during/investigation/"
+   }
+  },
+  {
+   "name": "The exec incident note: one page the sponsor can forward unedited",
+   "learn": "Within 24 hours of resolution send a note written for people who were not on the bridge: one sentence of what happened in business language ('alert triage was unavailable for 47 minutes for EU-cluster tenants; no data was lost, 312 alerts queued and were fully processed by 15:10'), quantified impact, a five-line timeline, what you have already changed, what you will change with owners and dates, any action the customer must take, and a link to the blameless postmortem from Topic 24. Keep facts and open investigation visibly separate, and never characterise the event in legal or regulatory terms ('breach', 'violation') without their compliance function - Topic 70 covers why that sentence is not yours to write. Assume this note is the artifact their CTO forwards to a board, so it must survive being read with no context and no follow-up question.",
+   "minutes": 15,
+   "resource": {
+    "label": "Atlassian - Incident communication templates",
+    "url": "https://www.atlassian.com/incident-management/incident-communication/templates"
+   }
+  },
+  {
+   "name": "The decision memo: options table, reversibility, deadline, default",
+   "learn": "One page: the decision stated as a question, the decider and the deadline, five lines of context, two to four options in a table with cost, time, risk and reversibility, your recommendation and its reason, what you need from the reader, and what happens automatically if nobody answers by the deadline. Classify reversibility explicitly - two-way doors (a retry policy, a queue depth, a dashboard layout) get decided fast and delegated, one-way doors (tenancy model, data residency, PII flows, a vendor you cannot exit) get the memo and the meeting. File the outcome as an ADR in the doc repo (Topic 73) and restate it in the next weekly update, because a decision that lives only in a call gets relitigated in month three by a platform lead who was not there. When you lose the decision, record your objection once, in writing, then commit and stop re-fighting it in every subsequent thread.",
+   "minutes": 25,
+   "resource": {
+    "label": "Amazon 2016 Letter to Shareholders - one-way vs two-way doors, disagree and commit",
+    "url": "https://www.aboutamazon.com/news/company-news/2016-letter-to-shareholders"
+   }
+  },
+  {
+   "name": "Commitment language and calibrated confidence",
+   "learn": "Retire the words that carry no information: 'shortly', 'should be fine', 'mostly done', 'we are aligned', 'as soon as possible', 'minor issue'. Bind your probability words to numbers once, in the charter, and use them consistently thereafter - the estimative-probability convention (likely = roughly 70-85%, roughly even chance = 45-55%, unlikely = 15-30%) exists precisely because readers otherwise substitute their own scale, and a sponsor's 'likely' may be your 'almost certain'. Write '80% confident on 14 Nov; the 20% is their IAM approval' rather than 'we should be OK'. Separate three registers explicitly: commitments (will - you would sign it into the SOW), plans (intend to, subject to a named dependency) and hopes (do not send these), and only ever commit to something you control or that has a named owner with a date.",
+   "minutes": 10,
+   "resource": {
+    "label": "CIA Studies in Intelligence - Sherman Kent, Words of Estimative Probability",
+    "url": "https://www.cia.gov/resources/csi/studies-in-intelligence/archives/vol-8-no-4/words-of-estimative-probability/"
+   }
+  },
+  {
+   "name": "Everything you write is forwarded, screenshotted and discoverable",
+   "learn": "Write every message as if it will be pasted into a board deck, shown to a competitor, and produced in litigation as electronically stored information - which under discovery rules it can be. That means no blame of named individuals, no speculation about cause while an incident is open, no legal or regulatory characterisations, no jokes about their team, and no promises you have not costed. Keep customer PII, tokens, credentials, hostnames and raw log excerpts out of email and chat entirely: link to the ticket or document inside their tenant instead, and know the retention and membership of the shared channel you are typing into. The corollary works in your favour: a dated written trail of asks, risks and decisions is exactly what protects both you and your counterpart when the schedule is reviewed six months later.",
+   "minutes": 10,
+   "resource": {
+    "label": "Cornell LII - Federal Rules of Civil Procedure Rule 34 (discovery of electronically stored information)",
+    "url": "https://www.law.cornell.edu/rules/frcp/rule_34"
+   }
+  },
+  {
+   "name": "Sanitise, templatise and test the pack on real readers",
+   "learn": "Turn the four weeks into a reusable kit: Markdown templates with placeholders, a redaction pass that replaces customer names, hostnames, tenant ids and dollar figures with stable pseudonyms, and a pre-send checklist (one ask per paragraph, every ask has owner plus date plus default, colour matches the declared thresholds, under 200 words above the fold, zero hedge words, every number traceable to a dashboard or query). Then test comprehension rather than trusting your own taste: hand the update to three people who know nothing about the project, give them 30 seconds, and ask what the status is, what is needed from them, and by when. Any miss means you rewrite the first screen, not the appendix, and you re-run the test.",
+   "minutes": 10,
+   "resource": {
+    "label": "plainlanguage.gov Federal Plain Language Guidelines - Test your assumptions",
+    "url": "https://www.plainlanguage.gov/guidelines/test/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can write a weekly engagement update in under 20 minutes that three readers who have never seen the project can each answer 'what is the status, what is needed from me, by when' from in 30 seconds, verified by a timed blind-read test with the results recorded.",
+  "You can state your GREEN/AMBER/RED threshold rules in one sentence each, apply them to four consecutive weeks of a real project, and defend an amber that your own manager wanted reported as green.",
+  "You can send a slip note the day the evidence appears rather than the day the milestone is missed, with a new date justified by remaining scopes plus measured completion rate plus an explicit optimism-bias uplift, and two or three costed replan options with a recommendation.",
+  "You can escalate a three-week-old unanswered ask through an agreed ladder in writing - telegraphed first, dated ask trail attached, business consequence stated, no adjectives - and explain why your counterpart is not damaged by it.",
+  "You can produce a one-page decision memo with the question, decider, deadline, an options table including reversibility, a recommendation and a stated default if nobody answers, and file the outcome as an ADR that the next weekly update references.",
+  "You can run stakeholder communications during a Sev1 on a committed 30-minute cadence that separates confirmed from suspected, and send an exec incident note within 24 hours that the sponsor forwards without editing.",
+  "You can audit any piece of your own writing for buried leads, ownerless asks, dateless commitments, hedge words and untraceable numbers, and state the specific rewrite for each finding.",
+  "You can publish a channel charter with response-time commitments and show four weeks of evidence that you met them, including what you did on the week there was nothing to report."
+ ],
+ "failureModes": [
+  "Five weekly updates say green because the team is working hard, then the go-live date moves in week six; the sponsor hears it first from their own platform lead, and the renewal conversation becomes about whether you can be trusted rather than about a two-week slip.",
+  "The ask is buried in paragraph four as 'we'll need someone to approve the IAM role'; nobody owns it, three weeks pass, and when the slip is challenged the trail cannot be reconstructed because it lived in a Slack channel with 90-day retention.",
+  "The update goes out Friday 18:00 customer-local before a public holiday, as a Google Doc link their SSO cannot open and an inline screenshot that strips on forward; the 'you never told us' conversation then happens in the steering committee.",
+  "An escalation email goes to the sponsor's boss with no warning, over a ticket the counterpart was already unblocking; that person is embarrassed in front of their VP and stops volunteering information for the remaining ten weeks.",
+  "During a Sev1 the FDE speculates in the exec-visible channel that 'it looks like their firewall change caused this'; root cause turns out to be the vendor's own migration, and the retraction damages the account more than the 47-minute outage did.",
+  "The weekly update quotes a p95 latency from a Grafana panel whose filter excludes one tenant, so the number disagrees with the customer's own dashboard by 40%; after that single mismatch every figure in every future update is treated as marketing.",
+  "A decision taken verbally on a call - 'we'll use your existing Postgres rather than RDS' - is never written up or filed as an ADR; a new platform lead reverses it in month three, three weeks of integration work is rebuilt, and there is nothing to point at.",
+  "An incident note is sent with a screenshot containing a tenant id and an alert payload holding customer PII, and the sponsor forwards it to a partner organisation; a communications artifact becomes a reportable data incident of its own."
+ ],
+ "interviewQuestions": [
+  "Show me the weekly update you would send in week three of an engagement where the customer still has not granted the data access you asked for on day one. Read me the first two lines, and tell me what you deliberately left out.",
+  "You learn on Tuesday that a milestone three weeks out will slip by two weeks. Who do you tell, in what order, in what medium, and by when? Draft the first 60 words of the note and tell me how you arrived at the new date.",
+  "Design the communications plan for a twelve-week deployment into a regulated customer with an exec sponsor, a platform team that did not ask for you, and a security reviewer who has already vetoed two vendors: channels, cadence, artifacts, response-time commitments, escalation ladder, and what you do in week one.",
+  "You have asked the same person for the same firewall change four times over three weeks. Write the escalation. Who is on it, what does it say, what do you do the day before you send it, and how do you keep working with that person afterwards?",
+  "Define what your amber means precisely enough that someone else could apply it to your project without asking you. Then tell me about a time you reported amber when your own leadership wanted green, and what happened.",
+  "Here is a real status update [handed a bad one]. Tell me everything wrong with it, rank the problems by cost to the engagement, and rewrite the first 40 words.",
+  "It is 02:00 during a Sev1 and the customer's CTO joins the bridge asking for a root cause and an ETA. What do you say, what do you refuse to say and why, and what exactly is in the written update you send 30 minutes later?"
+ ],
+ "proofOfWork": "A public repo `engagement-comms-kit` that turns the sanitised four-week pack into something another FDE can pick up on day one: Markdown templates for the kickoff note, weekly update, slip-and-replan note, escalation email, exec incident note and decision memo, each with the section order fixed and placeholders for the customer-specific parts; a declared threshold card defining GREEN/AMBER/RED, the escalation ladder with day counts, and the estimative-probability table mapping words to percentage ranges. The gate is a `lint_update.py` run in GitHub Actions over every template and every sanitised example: it fails the build on more than 200 words above the first heading, on any line under 'Decisions needed' that does not match owner plus ISO date plus a stated default, on any hedge word from a maintained list ('shortly', 'ASAP', 'should be fine', 'mostly', 'aligned'), on any number without a linked source, and on any status colour that contradicts the threshold rules given the open-asks table. Include the evidence that it works: a results table from timed blind reads - three readers, 30 seconds each, three questions, scored per week for four weeks, with the week-1 misses and the exact first-screen rewrite that fixed them - plus an anonymised before/after pair of a real update showing 780 words cut to 240 with the ask moved from paragraph four to line two, and a one-page retro naming which of the four weeks' asks were closed on time and what the ask-age curve looked like."
+}

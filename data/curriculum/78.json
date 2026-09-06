@@ -1,0 +1,228 @@
+{
+ "i": 78,
+ "topic": "Releasing to a fleet of customer installs: support and skew policy, preflight gates, cohort rollout",
+ "track": "J. FDE Craft and Communication",
+ "month": 8,
+ "hours": 6,
+ "why": "An FDE does not ship to one production environment - they ship to twenty or forty customer-owned installs that are each pinned at a different version, on a different Kubernetes minor, behind a different change-approval board, and some of them are air-gapped so you cannot see them fail. Without a written support window, a skew policy and a preflight that hard-fails an unsupported jump, every upgrade is a bespoke rescue mission and the third-oldest install eventually becomes a version only you can operate, at 02:00, on a call with their CTO. The whole discipline reduces to two customer-facing promises you have to be able to keep: any install inside the support window can reach current on a documented path, and any upgrade can be rolled back with the customer's data intact.",
+ "prerequisites": [
+  "GitOps: Helm charts and ArgoCD (Topic 9) - chart structure, values layering, `helm template`, Application/ApplicationSet objects and sync policies; this topic is about what you wrap around them.",
+  "Kubernetes production ops (Topic 8): Deployment rolling-update mechanics, readiness and startup probes, `progressDeadlineSeconds`, Jobs, PVCs and StatefulSet update strategy - a rollout gate is worthless if the workload never reports healthy correctly.",
+  "PostgreSQL at depth (Topic 31): transactions, lock modes, `pg_locks`, index builds and `EXPLAIN` - the expand-contract migration and its lock behaviour are the hard half of this topic.",
+  "CI/CD and supply chain (Topic 19): tagged, reproducible, signed artifacts and a release pipeline; a support policy assumes an immutable versioned artifact per release line.",
+  "SRE fundamentals (Topic 21): SLOs and error budgets, plus Incident response (Topic 24) - cohort rollout is an error-budget decision and a failed upgrade is an incident with a customer in the room.",
+  "Engagement documents (Topic 73): runbooks, ADRs and the habit of writing a policy the customer's change board can read and sign."
+ ],
+ "subtopics": [
+  {
+   "name": "The release contract: SemVer 2.0.0, chart version vs appVersion, and what 'breaking' means to a fleet",
+   "learn": "Know SemVer precisely: MAJOR for incompatible API changes, MINOR for backwards-compatible additions, PATCH for backwards-compatible fixes; `1.4.0-rc.1` sorts *before* `1.4.0`; build metadata after `+` is ignored in precedence; `0.y.z` means you have promised nothing. In a Helm chart these are two different numbers - `version:` in Chart.yaml is the chart's own SemVer (required, and what `helm upgrade` resolves) while `appVersion:` is the application image tag (quoted, not required to be SemVer) - and conflating them is why a customer thinks a values-only chart fix is an application upgrade. Write down, for your product, the concrete list of what counts as breaking: a removed or renamed values key, a changed default that alters behaviour, a required new value with no default, a dropped API version, a migration that is not reverse-compatible, a raised minimum Kubernetes or Postgres version. Also set `kubeVersion:` in Chart.yaml (`>=1.28.0-0`) because Helm enforces it and it is the cheapest gate you own.",
+   "minutes": 20,
+   "resource": {
+    "label": "Semantic Versioning 2.0.0 specification",
+    "url": "https://semver.org/spec/v2.0.0.html"
+   }
+  },
+  {
+   "name": "Support window and EOL: how long a customer install stays supported",
+   "learn": "Steal a policy shape that has already survived a decade of enterprise argument. PostgreSQL: five years of support per major, minor releases on a fixed quarterly schedule, a published final-release date per major, and an explicit statement that running an EOL major is the user's risk. Translate that into your own RELEASES.md: how many minor lines you support at once (N-2 is the usual answer), how long each is supported in months and what date each currently-supported line goes EOL, what 'supported' actually buys (security fixes, data-corruption fixes, an upgrade path to current - not new features), and what happens when a customer goes out of window (best-effort, paid uplift, or upgrade-first-then-we-help). Publish the EOL table with dates, not relative language, because 'we support the last two versions' is unenforceable when a customer stops upgrading for a year.",
+   "minutes": 20,
+   "resource": {
+    "label": "PostgreSQL - Versioning policy (support lifetime, minor release cadence, EOL dates)",
+    "url": "https://www.postgresql.org/support/versioning/"
+   }
+  },
+  {
+   "name": "Patch and security backport policy: which lines get the fix",
+   "learn": "Kubernetes publishes exactly the artifact you need to copy: a monthly patch cadence, a cherry-pick deadline before each patch release, a support window per minor (roughly 12 months plus 2 months of maintenance mode), and a rule that security fixes land on the three most recent minors. Decide the same four things for your product and write them as a table: cadence (fixed date or on-demand), which severities are backported and how far (CVSS high and above to all supported lines, data corruption to all supported lines, everything else to current only), who approves an out-of-cadence emergency patch, and the maximum age of a supported line. Note the operational consequence: every extra supported line multiplies your build matrix, your preflight matrix and your migration test matrix - N-2 is a cost decision, not a technical one, and you should be able to state that cost.",
+   "minutes": 15,
+   "resource": {
+    "label": "Kubernetes - Patch Releases (cadence, cherry-pick deadlines, support window)",
+    "url": "https://kubernetes.io/releases/patch-releases/"
+   }
+  },
+  {
+   "name": "Component skew: which parts may differ, by how much, and the mandatory upgrade order",
+   "learn": "A customer install is never one version - it is a control plane, a set of agents or workers, a CLI the customer's operators run, a database schema, and possibly a browser extension or an on-prem connector, each upgraded at a different moment. Learn the kubeadm model as the reference implementation: upgrade one minor at a time, control plane first (api-server before controller-manager and scheduler), then node components, never the reverse, and never skip a minor; kubelet may lag the API server by a bounded number of minors, kubectl by one in either direction. Write the equivalent matrix for your components: which pairs are allowed to skew, in which direction, by how many versions, and what the required upgrade order is. The direction matters more than the number - if new server plus old agent is supported but old server plus new agent is not, then the rollout order is fixed and the rollback order is its exact reverse.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kubernetes - Upgrading kubeadm clusters (one-minor-at-a-time, component order)",
+    "url": "https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/"
+   }
+  },
+  {
+   "name": "Deprecation policy: notice periods, warning headers, and proving nobody still calls it",
+   "learn": "Copy the Kubernetes deprecation contract because customers already recognise it: a GA API element is supported for at least 12 months or 3 releases after deprecation (whichever is longer), beta for 9 months or 3 releases, alpha for none; a deprecated element keeps working for its whole window and only the *announcement* is instant. Implement the two mechanics that make deprecation safe on a fleet you cannot see: emit an HTTP `Warning: 299 - \"...\"` header (and a structured log line) on every call to a deprecated endpoint or flag, and expose a counter metric per deprecated element so the deprecation decision is made from usage data rather than hope. State the rule you will not break: a removal only ships in a MAJOR (or an announced MINOR line for beta features), never in a patch, and never before the counter has read zero across every install in the support window for a full billing period.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kubernetes - Deprecation Policy (notice windows, warnings, removal rules)",
+    "url": "https://kubernetes.io/docs/reference/using-api/deprecation-policy/"
+   }
+  },
+  {
+   "name": "Supported upgrade paths: stopovers, no-skip rules, and the version matrix",
+   "learn": "The customer question is always 'we are on 1.2.7, can we go straight to 1.6.0?' and the answer must be a path, not a shrug. Study `pg_upgrade` as the model of an explicit path tool: it states the oldest source version it accepts, refuses mismatched binaries, requires a cleanly shut-down old cluster, and - critically - has a `--check` mode that validates the whole jump and changes nothing. Build your own matrix: rows are the source version, columns are the target, cells are `direct`, `via X.Y` (a required stopover, usually a release that carried a data migration you cannot skip), or `unsupported - reinstall`. Name the terminal versions (a release with a known-broken migration that must be stepped over) and pin the reason next to each cell, because unexplained cells get ignored by whoever is on-site next. Generate the matrix from a machine-readable file so the preflight, the docs and the CI test matrix all read the same source of truth.",
+   "minutes": 20,
+   "resource": {
+    "label": "PostgreSQL - pg_upgrade (supported source versions, --check mode, path constraints)",
+    "url": "https://www.postgresql.org/docs/current/pgupgrade.html"
+   }
+  },
+  {
+   "name": "Preflight gates: collectors, analyzers, and pass/warn/fail outcomes",
+   "learn": "A preflight is a program that refuses to let an unsafe upgrade start, run from the customer's own terminal. With troubleshoot.sh you write a `Preflight` spec whose collectors gather cluster info, cluster resources, an HTTP egress probe, a `run` pod, or a live `postgres` connection, and whose analyzers turn that into outcomes: `clusterVersion` with `when: \"< 1.28.0\"` -> fail, `nodeResources` with a `filters` block on `cpuCapacity`/`memoryCapacity` -> fail below minimum and warn below recommended, `storageClass` present, `distribution` allowed, `secret`/`configMap` exists, `postgres` connected and above a minimum version. Every analyzer needs three outcomes - `fail`, `warn`, `pass` - each with a `message` a customer's platform engineer can act on and a `uri` to the exact runbook section. Run it as `kubectl preflight ./preflight.yaml --interactive=false --format=json` in their pipeline: a `fail` exits non-zero, and non-zero is what stops the upgrade.",
+   "minutes": 20,
+   "resource": {
+    "label": "Troubleshoot.sh - Analyzing data (analyzer types and pass/warn/fail outcomes)",
+    "url": "https://troubleshoot.sh/docs/analyze/"
+   }
+  },
+  {
+   "name": "Helm pre-upgrade hooks: hard-failing before a single manifest is applied",
+   "learn": "Annotate a Job with `helm.sh/hook: pre-upgrade`, order it against siblings with `helm.sh/hook-weight: \"-5\"` (ascending), and control its lifecycle with `helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded`. Understand the exact semantics you are buying: Helm always waits for a hook resource to reach its ready state, and if the pre-upgrade Job fails, the release is marked failed and the upgrade stops before any of your templates are applied - which is the entire point, because it means an unsupported version jump costs the customer nothing. Inside the Job, read the currently installed version out of the release (or a version ConfigMap you maintain), evaluate it against the upgrade-path matrix, and exit non-zero with a message naming the required stopover. Two traps: `hook-failed` in the delete policy destroys the pod and its logs, which is the difference between a five-minute diagnosis and an hour, and hooks are never rolled back, so a hook must be idempotent and must not mutate anything the rollback path depends on.",
+   "minutes": 20,
+   "resource": {
+    "label": "Helm docs - Chart Hooks (hook types, weights, delete policies, failure behaviour)",
+    "url": "https://helm.sh/docs/topics/charts_hooks/"
+   }
+  },
+  {
+   "name": "helm upgrade flags that decide the blast radius",
+   "learn": "Know exactly what each flag does before you type it on a customer's cluster: `--atomic` implies `--wait` and rolls the release back automatically if it does not become ready inside `--timeout` (default 5m0s); `--wait-for-jobs` additionally waits on Jobs, which matters when a post-upgrade migration is a Job; `--cleanup-on-fail` deletes resources created during a failed upgrade so the next attempt is not blocked; `--dry-run=server` renders and validates against the live API server (catching removed API versions and admission rejections) rather than just templating locally. Be very careful with `--force`, which deletes and recreates resources instead of patching - on a StatefulSet or a Service with a fixed IP that is an outage, not a fix. Understand Helm 3's three-way merge (old manifest, live state, new manifest), because it is why a customer's manual `kubectl edit` gets reverted on upgrade, and know that `--history-max` (default 10) silently prunes the revision you might have wanted to roll back to.",
+   "minutes": 20,
+   "resource": {
+    "label": "Helm docs - helm upgrade (flag reference: --atomic, --wait, --timeout, --dry-run, --force)",
+    "url": "https://helm.sh/docs/helm/helm_upgrade/"
+   }
+  },
+  {
+   "name": "Rollback semantics: what `helm rollback` restores and what it can never restore",
+   "learn": "`helm rollback <release> [REVISION]` re-applies the manifest stored for that revision (Helm keeps each revision as a gzipped Secret named `sh.helm.release.v1.<release>.v<n>`), fires `pre-rollback`/`post-rollback` hooks, and accepts `--wait`, `--timeout` and `--cleanup-on-fail`. Enumerate what it does not do, because this is where FDEs lose data: it does not reverse a database migration, does not restore a dropped column or a rewritten row, does not recreate a PVC that a `--force` upgrade deleted, does not roll back CRDs installed from the chart's `crds/` directory, and does not un-run a Job that already completed. Establish the rule that makes rollback real: the schema at revision N must be readable and writable by the application at revision N-1, and any change that violates that (the contract phase, a destructive backfill) is a one-way door that is announced in the release notes and gated behind a verified backup. Practise reading `helm history` and identifying which revision is actually safe to return to.",
+   "minutes": 20,
+   "resource": {
+    "label": "Helm docs - helm rollback",
+    "url": "https://helm.sh/docs/helm/helm_rollback/"
+   }
+  },
+  {
+   "name": "Expand-contract migrations: the five phases that survive a rollback",
+   "learn": "The rule underneath every safe fleet release: during a rolling upgrade, and during any rollback, two application versions run against one schema, so the schema must be compatible with both. The phases are (1) expand - add the new nullable column, new table or new index concurrently, changing nothing existing; (2) dual-write - the new code writes both old and new representations, or a trigger keeps them in sync; (3) backfill in bounded batches with a throttle and a resumable checkpoint, never one giant `UPDATE`; (4) migrate reads and verify with a comparison query that both representations agree; (5) contract - only in a later release, after every install in the support window is past the expand release, drop the old column. Study pgroll for a working implementation of the idea: it exposes one database view per schema version so old and new application versions each see the schema they expect, uses triggers to keep columns in sync during the migration, and gives you `start` / `complete` / `rollback` as explicit steps rather than a single irreversible script.",
+   "minutes": 30,
+   "resource": {
+    "label": "pgroll - zero-downtime, reversible Postgres schema migrations (expand/contract with versioned views)",
+    "url": "https://github.com/xataio/pgroll"
+   }
+  },
+  {
+   "name": "DDL lock behaviour: which ALTER quietly stops the customer's application",
+   "learn": "Know the lock levels before you write the migration. `ALTER TABLE` generally takes ACCESS EXCLUSIVE, which conflicts with everything including plain SELECTs, and - the part that surprises people - a blocked ACCESS EXCLUSIVE request queues *ahead* of subsequent readers, so one long-running transaction turns a millisecond DDL into a full application stall. Adding a column with a non-volatile default is metadata-only on modern Postgres, but `SET NOT NULL` scans the whole table; get the same guarantee cheaply with `ADD CONSTRAINT ... CHECK (col IS NOT NULL) NOT VALID` followed later by `VALIDATE CONSTRAINT`, which takes only SHARE UPDATE EXCLUSIVE. Build indexes with `CREATE INDEX CONCURRENTLY` (cannot run inside a transaction block, and leaves an INVALID index that must be dropped and rebuilt if it fails). Always set `lock_timeout` (a couple of seconds) plus a retry loop in the migration runner, so a migration that cannot get its lock fails fast instead of taking the customer's production down while it waits.",
+   "minutes": 20,
+   "resource": {
+    "label": "PostgreSQL docs - ALTER TABLE (lock levels, rewrite vs metadata-only, NOT VALID constraints)",
+    "url": "https://www.postgresql.org/docs/current/sql-altertable.html"
+   }
+  },
+  {
+   "name": "Migration mechanics for installs you cannot reach: versioned revisions and offline SQL",
+   "learn": "Migrations must be linear, versioned, forward-only by default and recorded in the database itself (Alembic's `alembic_version` table is the canonical shape). Learn `alembic upgrade head --sql` and `alembic upgrade <from>:<to> --sql` - offline mode emits the SQL script without connecting, which is exactly what an air-gapped customer's DBA demands before they will let anything run, and it is also how you hand a change-approval board a reviewable artifact. Know its constraints: offline mode cannot branch on runtime inspection of the database, so migrations that depend on `inspect()` or on data must be written as explicit `op.execute` SQL or moved into the application. Learn `alembic stamp` for adopting an install whose schema was created by hand, `alembic history --verbose` to prove which revision an install is at, and branch labels plus merge revisions for the case you will actually hit: a hotfix migration on `release-1.4` that must later merge cleanly into main without producing two heads.",
+   "minutes": 20,
+   "resource": {
+    "label": "Alembic - Generating SQL Scripts (offline mode)",
+    "url": "https://alembic.sqlalchemy.org/en/latest/offline.html"
+   }
+  },
+  {
+   "name": "CRD and API-object versioning in the shipped chart",
+   "learn": "If your product ships CRDs, they are a second, slower-moving API with its own skew rules. A CRD's `spec.versions[]` entries each have `served` and `storage`, exactly one may be `storage: true`, and `status.storedVersions` records every version objects were ever written as; you cannot remove a version from the CRD until every stored object has been rewritten (read and write each object, then prune `storedVersions`). Multi-version CRDs need `spec.conversion.strategy: Webhook` unless the versions are structurally identical (`None` just relabels the apiVersion). The Helm-specific trap: files in a chart's `crds/` directory are installed once and are never upgraded or deleted by `helm upgrade`, so a fleet running your chart will silently keep an old CRD schema while the new controller expects new fields - handle it with an explicit pre-upgrade Job that applies CRDs and verifies stored versions, and assert the CRD version in the preflight.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kubernetes - CustomResourceDefinition versioning (served/storage versions, conversion, storedVersions)",
+    "url": "https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definition-versioning/"
+   }
+  },
+  {
+   "name": "Feature flags: separating deploy from release across a fleet",
+   "learn": "The flag is what lets one artifact serve a fleet: you deploy the same version everywhere and turn behaviour on per install, per tenant or per cohort, which converts a risky release into a reversible config change that does not require a customer's change window. Distinguish the toggle categories - release toggles (short-lived, removed after rollout), ops toggles (kill switches for an expensive code path, long-lived and owned by on-call), permission toggles (per-customer entitlements, effectively permanent) - because they have different lifetimes and different removal rules. Enforce three practices: every flag defaults to the old behaviour so an install that never heard of it is unaffected, every release toggle ships with a removal ticket and a deadline, and flag state is visible in the support bundle, because 'it works on install A and not install B' is almost always a flag difference nobody recorded.",
+   "minutes": 15,
+   "resource": {
+    "label": "Martin Fowler - Feature Toggles (types, lifetimes, and toggle debt)",
+    "url": "https://martinfowler.com/articles/feature-toggles.html"
+   }
+  },
+  {
+   "name": "Cohort rollout: rings, ApplicationSets and per-install version pinning",
+   "learn": "Define rings before you need them: ring 0 is your own reference install, ring 1 is two or three design-partner customers who accepted early access in writing, ring 2 is the general fleet, ring 3 is the regulated or air-gapped installs that upgrade on their own change calendar. With Argo CD, an ApplicationSet generates one Application per install from a git file generator (one values file per customer, carrying its pinned `targetRevision` and its ring label), and `spec.strategy.type: RollingSync` with `steps` matched on those labels plus `maxUpdate` advances the fleet ring by ring rather than all at once. Set a soak time per ring with an explicit promotion criterion (no new error-budget burn, no new support tickets tagged to the release, migration completed on every install in the ring) and require a human to promote. The key property: pinning lives in git per install, so 'which version is customer X on' is answered by a file, not by asking someone.",
+   "minutes": 20,
+   "resource": {
+    "label": "Argo CD - ApplicationSet (generators and progressive rolling sync strategy)",
+    "url": "https://argo-cd.readthedocs.io/en/stable/operator-manual/applicationset/"
+   }
+  },
+  {
+   "name": "In-cluster canary and automated abort, inside a single install",
+   "learn": "Cohorts stage the fleet; a canary stages one install. With Argo Rollouts you replace the Deployment strategy with `canary.steps` of `setWeight` and `pause`, attach an `analysis` block referencing an AnalysisTemplate that queries the customer's Prometheus for your SLI (error ratio, p95 latency), and set `failureLimit` so a failing measurement automatically aborts and shifts traffic back to the stable ReplicaSet without a human. Understand the honest limits in a customer environment: analysis needs a metrics source you may not own, canaries only protect stateless request paths (they do nothing for a migration that already ran), and a manual `pause` step with a human promote is often the right answer on an install where you cannot get a reliable SLI. Decide per install whether the abort is automated or a documented one-command manual rollback, and put that in the runbook.",
+   "minutes": 15,
+   "resource": {
+    "label": "Argo Rollouts - Canary strategy (steps, analysis, automatic abort)",
+    "url": "https://argo-rollouts.readthedocs.io/en/stable/features/canary/"
+   }
+  },
+  {
+   "name": "Backporting a hotfix to the oldest supported line",
+   "learn": "Maintain a long-lived `release-X.Y` branch per supported minor and enforce the invariant that fixes land on main first, then travel backwards - a fix that exists only on an old branch is a fix that gets reverted by the customer's next upgrade. Use `git cherry-pick -x` so the commit message records the source SHA, expect and resolve the conflicts that come from refactors on main, and audit drift with `git log --left-right --cherry-pick --no-merges main...release-1.4`, which lists commits that are genuinely only on one side. Set an explicit backport bar (security, data corruption, and regressions introduced by us - nothing else) and require every backport to ship as its own patch release with its own changelog entry, its own preflight run and the full migration test against that line's oldest supported schema. The customer-facing habit: never hand-patch an install without opening the backport PR in the same hour, and record the patched version in the install's inventory.",
+   "minutes": 20,
+   "resource": {
+    "label": "git-cherry-pick documentation (including -x for recording the source commit)",
+    "url": "https://git-scm.com/docs/git-cherry-pick"
+   }
+  },
+  {
+   "name": "Fleet inventory: knowing what is actually installed before you decide anything",
+   "learn": "Every policy in this topic is unenforceable without an inventory, and the inventory has to survive customers who will not phone home. Emit standard resource attributes on every telemetry signal - `service.name`, `service.version`, `service.instance.id`, `deployment.environment.name` - and expose a `build_info`-style gauge whose value is 1 and whose labels carry app version, chart version, git commit and schema revision, so a single Prometheus query answers 'who is on what'. For air-gapped installs, the same values go into the support bundle the customer sends you, and a version ConfigMap in the release namespace makes the answer available to anyone with `kubectl`. Turn the inventory into a weekly artifact: version per install, days since last upgrade, distance from current, EOL date for that line, and whether the install has any deprecated-API counters above zero - that table is what tells you when a deprecation is safe to execute and which customer needs the upgrade conversation this quarter.",
+   "minutes": 15,
+   "resource": {
+    "label": "OpenTelemetry - Resource semantic conventions (service.version, service.instance.id, deployment.environment.name)",
+    "url": "https://opentelemetry.io/docs/specs/semconv/resource/"
+   }
+  },
+  {
+   "name": "Release notes and upgrade notes: the artifact the customer's change board reads",
+   "learn": "Write the changelog in the Keep a Changelog shape - an `Unreleased` section, one dated entry per version in ISO format, and the fixed categories Added / Changed / Deprecated / Removed / Fixed / Security - so nobody has to read commit logs. Then add the section that only fleet products need, `Upgrade notes`, containing: minimum source version and any required stopover, new minimum platform versions (Kubernetes, Postgres), new or renamed values keys with their defaults, whether a schema migration runs and roughly how long it takes on a large install, whether this release is rollback-safe and to which revision, any manual step, and the deprecation clock started or ended. Keep a short 'who is affected' line for each breaking item, because the customer's change board approves on risk, not on features. Mirror this exact structure in the release-policy repo so the notes, the upgrade-path matrix and the preflight cannot drift apart.",
+   "minutes": 15,
+   "resource": {
+    "label": "Keep a Changelog 1.1.0",
+    "url": "https://keepachangelog.com/en/1.1.0/"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take any install's current version and, from your own written policy, state in under a minute whether it is in the support window, what the supported upgrade path to current is (including required stopovers), and what the customer has to do if it is out of window.",
+  "You can write a RELEASES.md that a customer's change board accepts: SemVer definition of breaking for your product, dated EOL table, N-2 skew rules with the required component upgrade order, backport bar by severity, and a deprecation notice period.",
+  "You can write and run a preflight spec that hard-fails an unsupported version jump, a too-old Kubernetes or Postgres, and an under-resourced node pool, exits non-zero in the customer's pipeline, and prints a message plus runbook URI an engineer who has never met you can act on.",
+  "You can implement a Helm `pre-upgrade` hook Job that reads the installed version, evaluates it against a machine-readable upgrade-path matrix, and blocks the release before any manifest is applied - and you can show the failed-hook logs afterwards because you did not set `hook-failed` in the delete policy.",
+  "You can convert a rename-a-column change into a five-phase expand-contract migration, run it against a live table with `lock_timeout` set, and demonstrate the previous application version still reading and writing correctly at every phase.",
+  "You can roll a real upgrade back with `helm rollback` after a failed release and prove data integrity with a row-level comparison, and you can name in advance the exact point in the migration sequence after which rollback is no longer possible.",
+  "You can run a cohort rollout across installs pinned at different versions using per-install git pinning and ring-based promotion, and state the soak time and promotion criteria for each ring.",
+  "You can produce a fleet inventory table (version, chart, schema revision, days since upgrade, EOL date, deprecated-API usage) from telemetry or support bundles, and use it to decide whether a deprecated field can be removed this release."
+ ],
+ "failureModes": [
+  "A customer three minors behind runs the upgrade straight to current; the intermediate release's backfill never executed because the jump skipped it, the new column stays NULL for their historic rows, and it surfaces six weeks later as blank fields in their month-end report rather than as an error.",
+  "The pre-upgrade hook Job carries `helm.sh/hook-delete-policy: hook-failed`, so when the gate correctly blocks a bad upgrade the pod and its logs are deleted; the on-site engineer re-runs the upgrade three times looking for the reason and eventually disables the hook.",
+  "An upgrade is rolled back with `helm rollback` after a failed release, but the migration had already dropped the old column in its contract phase, so the previous application version crash-loops on `SELECT` and the only recovery is a point-in-time restore that loses two hours of the customer's writes.",
+  "Someone adds `--force` to `helm upgrade` to get past a stuck immutable field; Helm deletes and recreates the StatefulSet's resources, the PVCs are reprovisioned empty, and a database that was never in the backup rotation because 'it is just a cache' turns out to hold the customer's queue state.",
+  "`ALTER TABLE ... SET NOT NULL` runs during the customer's business hours behind a long-running analytics transaction; the ACCESS EXCLUSIVE request queues and every subsequent read blocks behind it, so a metadata change reads to the customer as a twenty-minute total outage caused by your release.",
+  "The chart's CRDs live in `crds/` and Helm never upgrades them, so after three releases the new controller is silently ignoring fields the customer configured; nobody notices until a support case shows a policy that is present in the YAML and absent in behaviour.",
+  "An engineer hand-patches an urgent fix directly onto the customer's install during an incident and never opens the backport PR; the next scheduled upgrade cleanly reverts the fix and reproduces the original incident, this time with no goodwill left.",
+  "Argo CD auto-sync is enabled uniformly across the fleet with no rings, so a chart change with a bad default reaches all forty installs within a sync interval and the rollback has to be executed forty times, in forty change windows, by hand."
+ ],
+ "interviewQuestions": [
+  "We have 40 customer-managed installs. Twelve are current, twenty are one minor behind, six are three minors behind and two are air-gapped and have not upgraded in a year. Design the support and skew policy you would publish, and tell me what you would do about the two air-gapped installs specifically.",
+  "Walk me through renaming a column that the application reads on every request, in a product shipped to customers who upgrade at different times and who may roll back. Give me the phases, which release each phase ships in, and the exact point after which rollback destroys data.",
+  "A customer runs your pre-upgrade preflight and it fails on a rule you added last month. They tell you it is a false positive and ask you to give them a flag to skip it. What do you do, and how do you decide whether they are right?",
+  "Design the gate that stops an unsupported version jump. Where does it run, what does it read to know the current version, what does it do when the customer's cluster has no network egress, and how do you make it impossible to bypass accidentally while still bypassable deliberately with an audit trail?",
+  "Debug: an upgrade reports success, all pods are Ready, and two hours later the customer reports that a feature configured in their values file has stopped taking effect. Where do you look, in what order, and what are the three most likely causes given what you know about Helm and CRDs?",
+  "You need to remove a deprecated API field. Tell me how you decide it is safe, what evidence you need from the fleet, how long the notice period is and why, and what you do about the one customer who is still calling it two weeks before removal.",
+  "A P1 security fix must reach every supported install this week, including two that are three minors behind and one that is air-gapped. Describe your release plan end to end: which branches get the fix, what you build, what you test, in what order the cohorts go, and what you tell each customer."
+ ],
+ "proofOfWork": "Build a public `fleet-skew-harness` repo that proves the policy rather than asserting it: a CI matrix that, for every supported pair in your version matrix, boots the old application version against the new schema and the new application version against the old schema and runs the same contract test suite against both, so an incompatible migration fails a pull request instead of a customer. Around it, run a KinD-based simulation of three installs pinned at different versions with an Argo CD ApplicationSet doing ring-based rolling sync, and record a scripted drill with timings and terminal output: install A takes a direct upgrade, install B is blocked by the pre-upgrade hook and shown the required stopover, install C completes the expand phase, is deliberately failed mid-rollout and rolled back, after which a row-level checksum comparison proves the data is intact. Include the machine-readable `versions.yaml` that generates the upgrade-path matrix, the preflight spec, the RELEASES.md rendered from it, and a short `postmortem.md` for the one thing that broke during the drill that you had not predicted - that last file is the part an interviewer will read, because it is evidence you ran the drill rather than described it."
+}

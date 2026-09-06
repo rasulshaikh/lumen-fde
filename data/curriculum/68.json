@@ -1,0 +1,228 @@
+{
+ "i": 68,
+ "topic": "Enterprise SSO and directory integration: SAML 2.0 SP setup, SCIM provisioning, group mapping",
+ "track": "I. Security and Compliance",
+ "month": 7,
+ "hours": 5.0,
+ "why": "Every enterprise deal reaches a point where the customer's identity team - not their product team - decides whether your software goes live, and the two things they ask for are 'log in with our IdP' and 'users appear and disappear automatically from Okta or Entra'. As the FDE you are the person on the call with their IdP admin, holding a base64 blob that says nothing more helpful than 'authentication failed', and you are expected to name the broken condition (audience, NameID format, clock skew, signature scope, RelayState) from the raw assertion rather than filing a ticket with your own auth vendor. Get SCIM wrong and the failure is worse than a broken login: terminated employees keep working sessions, which turns a delivery detail into a finding in the customer's next access review.",
+ "prerequisites": [
+  "Topic 29 (Auth: OAuth2, OIDC, JWT, RBAC, multi-tenant claims) - issuer/audience/expiry validation discipline, the Principal object, and why SAML is the same checklist expressed in XML",
+  "Topic 28 (FastAPI in production) - routers, dependencies, settings objects, and running behind a reverse proxy where X-Forwarded-Proto and X-Forwarded-Host decide what URL your app thinks it is serving",
+  "Topic 32 (Data modelling for multi-tenant AI systems) - per-tenant isolation, PII columns and an audit trail table, because SCIM writes the customer's employee directory into your database",
+  "XML literacy: namespaces and prefixes, DOM/XPath, base64 and raw DEFLATE, plus fluency with xmllint --format and openssl x509 -noout -text -fingerprint",
+  "X.509 and TLS basics from Topic 2 (Networking) - self-signed IdP signing certificates, fingerprints, expiry dates, and why a cert that is 'invalid' to a browser is perfectly fine as a SAML signing key",
+  "A free Okta Integrator org and a Microsoft Entra ID trial tenant, plus a public HTTPS URL (Cloudflare Tunnel or ngrok) so an IdP on the internet can POST to your laptop's ACS endpoint"
+ ],
+ "subtopics": [
+  {
+   "name": "Scoping the SSO and SCIM ask before you write code",
+   "learn": "Separate the two asks that customers say in one breath: federation answers 'who is at the keyboard right now' at login time (SAML or OIDC), provisioning answers 'who exists and what are they entitled to' continuously (SCIM). Get the kickoff answers in writing: which IdP and version (Okta, Entra ID, Ping, Google Workspace, on-prem ADFS), SAML or OIDC, SP-initiated or IdP-initiated or both, will they push groups or will your app own roles, what is the deprovisioning SLA in minutes, and is SCIM a hard requirement of the security review or a nice-to-have. Learn NIST SP 800-63C vocabulary (IdP, RP, assertion, front-channel vs back-channel presentation, federation assurance level) so you can talk to their identity architect in their own terms, and know that SSO/SCIM is almost always an enterprise-tier feature whose absence blocks the security questionnaire from Topic 70.",
+   "minutes": 10,
+   "resource": {
+    "label": "NIST SP 800-63C - Federation and Assertions",
+    "url": "https://pages.nist.gov/800-63-3/sp800-63c.html"
+   }
+  },
+  {
+   "name": "SAML 2.0 message anatomy: AuthnRequest, Response, Assertion",
+   "learn": "Be able to read raw SAML XML and name every element without a reference open. AuthnRequest: ID, IssueInstant, Destination, AssertionConsumerServiceURL or Index, ProtocolBinding, ForceAuthn, IsPassive, NameIDPolicy Format and AllowCreate, RequestedAuthnContext. Response: Issuer, InResponseTo, Destination, Status/StatusCode (urn:oasis:names:tc:SAML:2.0:status:Success, Requester, Responder, AuthnFailed, InvalidNameIDPolicy) plus StatusMessage. Assertion: Issuer, Subject/NameID, SubjectConfirmation Method=bearer with SubjectConfirmationData carrying Recipient, NotOnOrAfter and InResponseTo, Conditions with NotBefore/NotOnOrAfter and AudienceRestriction/Audience, AuthnStatement with SessionIndex, SessionNotOnOrAfter and AuthnContextClassRef, and AttributeStatement with Attribute/AttributeValue. Know that a Response can carry an EncryptedAssertion, in which case you decrypt with your SP private key before any of the above is visible.",
+   "minutes": 22,
+   "resource": {
+    "label": "OASIS - Assertions and Protocols for SAML V2.0 (saml-core)",
+    "url": "https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf"
+   }
+  },
+  {
+   "name": "Bindings and wire encoding: HTTP-Redirect, HTTP-POST, RelayState",
+   "learn": "HTTP-Redirect encodes the message as raw DEFLATE (no zlib header - decompress with wbits -15) then base64 then URL-encoding into ?SAMLRequest=, with SigAlg and Signature as separate query parameters signed over the exact octet string SAMLRequest=...&RelayState=...&SigAlg=... in that order, which is why re-serialising or reordering the query string breaks verification. HTTP-POST puts base64-encoded XML in a hidden SAMLRequest/SAMLResponse form field auto-submitted by JavaScript, with the signature inside the XML; this is what you will use for the ACS. RelayState is opaque, limited to 80 bytes, echoed back untouched, and is NOT integrity-protected on the POST binding - treat it as attacker-controlled input, store a random key in it and keep the real return URL server-side, or you have shipped an open redirect. Know that the Artifact binding exists (back-channel resolution via SOAP) and that you almost never need it.",
+   "minutes": 16,
+   "resource": {
+    "label": "OASIS - Bindings for SAML V2.0 (saml-bindings)",
+    "url": "https://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf"
+   }
+  },
+  {
+   "name": "Web Browser SSO profile: SP-initiated vs IdP-initiated",
+   "learn": "Trace the SP-initiated flow (user hits your app, you generate an AuthnRequest with a stored ID, redirect to the IdP SSO URL, IdP authenticates, POSTs a Response to your ACS with InResponseTo set) and contrast it with the IdP-initiated flow, where the user clicks the app tile in the Okta dashboard or Entra My Apps and you receive an unsolicited Response with no InResponseTo and no request state to bind to. Customers will demand the tile, so decide deliberately: if you accept unsolicited responses, keep every other check (Destination, Recipient, Audience, time window, replay cache), reject any Response that DOES carry an unknown InResponseTo, restrict RelayState to an allow-list of internal deep links, and always mint a brand-new session rather than upgrading an existing one - unsolicited acceptance is where login-CSRF and session-fixation bugs live. Handle the 'deep link then login' case by stashing the target path server-side keyed by the request ID.",
+   "minutes": 14,
+   "resource": {
+    "label": "OASIS - Profiles for SAML V2.0 (Web Browser SSO Profile)",
+    "url": "https://docs.oasis-open.org/security/saml/v2.0/saml-profiles-2.0-os.pdf"
+   }
+  },
+  {
+   "name": "Metadata exchange and signing-certificate rotation",
+   "learn": "SAML configuration is an exchange of two metadata documents, and the fastest way to kill a two-week email thread is to send a URL instead of screenshots. Your SP metadata: EntityDescriptor entityID (the exact string that must appear in Audience), SPSSODescriptor with AssertionConsumerService (index, isDefault, POST binding, URL), optional SingleLogoutService, NameIDFormat, WantAssertionsSigned, AuthnRequestsSigned, and KeyDescriptor use=signing / use=encryption with the X509Certificate. Their IdP metadata gives you entityID, SingleSignOnService URLs per binding and one or more signing KeyDescriptors. Consume IdP metadata by URL and refresh on a schedule where the IdP publishes one; pasted XML goes stale silently. During rotation the IdP publishes two signing certs, so validate against the current set of certs in metadata rather than one pinned fingerprint in a config file, alert 30 days before notAfter, and record the expiry in the handover runbook.",
+   "minutes": 14,
+   "resource": {
+    "label": "OASIS - Metadata for SAML V2.0 (saml-metadata)",
+    "url": "https://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf"
+   }
+  },
+  {
+   "name": "XML Signature: enveloped signatures, canonicalisation, digests",
+   "learn": "Read a ds:Signature block element by element: SignedInfo with CanonicalizationMethod (exclusive c14n), SignatureMethod (require rsa-sha256, reject rsa-sha1), a Reference whose URI=#_id points at the element being signed, Transforms (enveloped-signature then exc-c14n), DigestMethod sha256 and DigestValue over the canonicalised referenced element; SignatureValue over the canonicalised SignedInfo; KeyInfo/X509Data carrying the cert. Understand why canonicalisation exists - whitespace, attribute ordering and namespace declarations must be normalised - and therefore why pretty-printing, re-serialising or DOM-rewriting the XML before verification destroys the digest. Verify by hand with xmlsec1 --verify --pubkey-cert-pem idp.crt --id-attr:ID urn:oasis:names:tc:SAML:2.0:assertion:Assertion response.xml, and know that xmlsec is a native library (libxmlsec1-dev, libxml2) that will break your slim container image and your air-gapped install.",
+   "minutes": 15,
+   "resource": {
+    "label": "W3C - XML Signature Syntax and Processing Version 1.1",
+    "url": "https://www.w3.org/TR/xmldsig-core1/"
+   }
+  },
+  {
+   "name": "Signature scope and XML Signature Wrapping",
+   "learn": "Decide and enforce what must be signed: the Response, the Assertion, or both. A signature that verifies proves only that SOME element in the document was signed - not that the element your code read is the one that was signed. XML Signature Wrapping exploits exactly that gap: the attacker keeps the original signed assertion (moved into Extensions, a decoy Object, or as a child of a forged assertion), adds a forged assertion with a different NameID, and libraries that verify by searching the DOM then extract the first Assertion by XPath log the attacker in as anyone. Defences you must be able to state: require signed assertions (WantAssertionsSigned), resolve the Reference URI and consume that exact node, reject documents with more than one Assertion or more than one Signature, disable DTD and external entity resolution (XXE), reject unsigned Responses carrying unsigned assertions, and prefer libraries that hand back the validated node rather than a boolean.",
+   "minutes": 16,
+   "resource": {
+    "label": "OWASP Cheat Sheet Series - SAML Security",
+    "url": "https://cheatsheetseries.owasp.org/cheatsheets/SAML_Security_Cheat_Sheet.html"
+   }
+  },
+  {
+   "name": "The SP validation checklist you must implement and be able to recite",
+   "learn": "In order, on every assertion: Issuer equals the configured IdP entityID; signature validates against a certificate present in current IdP metadata; Status is Success; Destination equals your ACS URL; SubjectConfirmationData Recipient equals your ACS URL and its NotOnOrAfter is in the future; InResponseTo equals an AuthnRequest ID you issued and have not yet consumed (or is absent and unsolicited responses are explicitly enabled); Conditions NotBefore <= now <= NotOnOrAfter with a configurable skew of at most 2-3 minutes; AudienceRestriction/Audience equals your SP entityID byte for byte (a trailing slash is the single most common field bug); the assertion ID is not in the replay cache, which is Redis with a TTL longer than the assertion validity window because you run more than one replica. Every rejection logs a stable machine-readable reason code plus the measured clock delta, and never logs the raw assertion, which contains employee PII.",
+   "minutes": 20,
+   "resource": {
+    "label": "RFC 7522 Section 3 - SAML assertion format and processing requirements",
+    "url": "https://datatracker.ietf.org/doc/html/rfc7522#section-3"
+   }
+  },
+  {
+   "name": "NameID formats, attribute statements and JIT account linking",
+   "learn": "Know the formats and what each implies: emailAddress (mutable, reused after offboarding), persistent (opaque and stable per SP - what you want), transient (new every login, useless as a key), unspecified (whatever the IdP feels like), plus the Windows and X.509 variants ADFS emits. Key your user table on the IdP's immutable identifier (Okta user id, Entra objectId/oid) carried in the NameID or a dedicated attribute, keep email as a mutable profile field, and you survive the day the customer's HR system renames half the directory after an acquisition. Attribute names are not standardised: Entra and ADFS send claim URIs like http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress while Okta sends short names like email and firstName, so ship a per-connection attribute map in config rather than hardcoding. Multi-valued groups arrive as repeated AttributeValue elements. Decide your JIT rule explicitly: create on first login only for verified email domains, refresh profile attributes on every login, and never let JIT create an admin.",
+   "minutes": 15,
+   "resource": {
+    "label": "Okta Developer - Understanding SAML",
+    "url": "https://developer.okta.com/docs/concepts/saml/"
+   }
+  },
+  {
+   "name": "Building the SP: python3-saml wired into FastAPI",
+   "learn": "Configure settings.json and advanced_settings.json: sp.entityId, sp.assertionConsumerService.url and binding, sp.x509cert/privateKey, idp.entityId, idp.singleSignOnService, idp.x509cert, and the security block - wantAssertionsSigned, wantMessagesSigned, wantAssertionsEncrypted, rejectUnsolicitedResponsesWithInResponseTo, requestedAuthnContext, signatureAlgorithm (rsa-sha256), digestAlgorithm. Three routes: GET /sso/{tenant}/login builds the AuthnRequest with auth.login(return_to) and persists the request ID; POST /sso/{tenant}/acs calls auth.process_response(request_id=...) then auth.get_errors(), auth.get_last_error_reason(), auth.get_nameid(), auth.get_nameid_format(), auth.get_attributes(), auth.get_session_index(); GET /sso/{tenant}/metadata serves and validates your SP metadata. The FastAPI-specific trap: the toolkit expects a WSGI-shaped request dict, so build it from https/http_host/script_name/get_data/post_data and derive the scheme from a trusted X-Forwarded-Proto, otherwise the Destination and Recipient comparisons fail with http vs https behind the customer's load balancer.",
+   "minutes": 20,
+   "resource": {
+    "label": "GitHub - SAML-Toolkits/python3-saml (SP toolkit, settings reference)",
+    "url": "https://github.com/SAML-Toolkits/python3-saml"
+   }
+  },
+  {
+   "name": "Session issuance, Single Logout and the logout gap",
+   "learn": "A valid assertion is a one-time event, not a session: you mint your own session afterwards. Cookie rules: __Host- prefix, Secure, HttpOnly, short idle and absolute lifetimes, rotate the session identifier on login to kill fixation - and note the SameSite trap, because the ACS receives a cross-site POST from the IdP, so any cookie you need on that request (relay/request-id) must be SameSite=None; Secure while the session cookie itself stays Lax. Bound the session by SessionNotOnOrAfter or your own policy and use ForceAuthn for step-up on sensitive actions. Single Logout is the honest part of the conversation: SP-initiated and IdP-initiated LogoutRequest/LogoutResponse need NameID plus SessionIndex, must be signed, and break as soon as any one participant fails or has no back-channel, so most deployments settle for short sessions plus SCIM-driven deactivation. Say that plainly to the identity team instead of claiming SLO works.",
+   "minutes": 12,
+   "resource": {
+    "label": "OWASP Cheat Sheet Series - Session Management",
+    "url": "https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html"
+   }
+  },
+  {
+   "name": "Debugging a live SSO failure on the customer's screenshare",
+   "learn": "Capture the flow with SAML-tracer or devtools with preserve-log on, then decode: base64 -d < resp.txt | xmllint --format - for POST, and zlib.decompress(base64.b64decode(q), -15) for Redirect. Triage in order: was a Response produced at all (no Response means the IdP rejected it - go to Okta System Log or Entra sign-in logs), then StatusCode, then signature, then each condition in turn. Learn the symptom-to-cause map cold: audience mismatch means an entityID typo or trailing slash; Destination mismatch means the proxy terminated TLS and your app built an http URL; NotOnOrAfter already past means host clock drift (check chronyc tracking / timedatectl); missing InResponseTo means someone used the IdP tile; empty NameID means the IdP app profile has no NameID mapping for that user; signature failure after months of working means a rotated certificate. Rehearse it as a one-page decision tree, because the assertion contains PII and the admin often cannot email it to you.",
+   "minutes": 18,
+   "resource": {
+    "label": "GitHub - SimpleSAMLphp/SAML-tracer (browser extension for capturing SAML messages)",
+    "url": "https://github.com/SimpleSAMLphp/SAML-tracer"
+   }
+  },
+  {
+   "name": "SCIM 2.0 resource model: User, Group, id vs externalId, meta",
+   "learn": "Every payload carries a schemas array. Common attributes: id is server-assigned, immutable and opaque (never the customer's email); externalId is the client's key - the Okta or Entra object id - which you must store, index and use for correlation; meta carries resourceType, created, lastModified, version and location. The core User has userName (unique, usually the UPN or email), name.givenName/familyName/formatted, emails[] with type and primary, active, displayName, title, phoneNumbers, and the enterprise extension urn:ietf:params:scim:schemas:extension:enterprise:2.0:User with employeeNumber, department, costCenter and manager.value. Learn the attribute characteristics that decide your validation: mutability (readWrite, readOnly, immutable, writeOnly), returned (always, never, default, request), uniqueness, and caseExact - userName comparison is case-insensitive per spec, which your Postgres unique index is not unless you say so.",
+   "minutes": 16,
+   "resource": {
+    "label": "RFC 7643 Section 4.1 - SCIM User resource schema",
+    "url": "https://datatracker.ietf.org/doc/html/rfc7643#section-4.1"
+   }
+  },
+  {
+   "name": "The protocol surface: endpoints, methods, PUT vs PATCH, discovery",
+   "learn": "Implement /Users, /Groups and the discovery trio /ServiceProviderConfig, /ResourceTypes, /Schemas under a single base URL you hand the IdP (https://api.example.com/scim/v2). Serve and accept Content-Type: application/scim+json - some IdPs are strict about it. POST /Users returns 201 with a Location header and the full created resource; GET /Users/{id} returns 200 or 404; PUT replaces the entire resource, so attributes the IdP omits MUST be cleared, and implementing PUT as a partial merge is how you silently diverge from the directory; DELETE is a hard delete returning 204, which is why nearly every SP prefers PATCH active:false as the deactivation signal. ETag and If-Match are optional. Whatever you support you must advertise in ServiceProviderConfig - patch.supported, bulk, filter.supported with maxResults, changePassword, sort, etag, authenticationSchemes - because Okta and Entra read it and will only use what you claim.",
+   "minutes": 20,
+   "resource": {
+    "label": "RFC 7644 Section 3.2 - SCIM endpoints and HTTP methods",
+    "url": "https://datatracker.ietf.org/doc/html/rfc7644#section-3.2"
+   }
+  },
+  {
+   "name": "PATCH semantics and group membership deltas",
+   "learn": "The PatchOp body is {schemas: [urn:ietf:params:scim:api:messages:2.0:PatchOp], Operations: [{op, path, value}]}. Handle both dialects you will actually receive: the pathed form {op: replace, path: active, value: false} that Okta sends, and the path-less object form {op: replace, value: {active: false}} that Entra sends, and treat op case-insensitively. Group membership is where implementations fail: add is {op: add, path: members, value: [{value: <user id>}]}, remove is {op: remove, path: members[value eq \"abc\"]} - you must parse a filter expression embedded inside the path, which is the most-skipped requirement in SCIM. Make add of an existing member idempotent rather than a 409, tolerate remove of a member who is already gone, and be careful with {op: replace, path: members, value: [...]} which is a full replacement that can empty a group. Apply all operations in one transaction, in order, and return 200 with the updated resource.",
+   "minutes": 20,
+   "resource": {
+    "label": "RFC 7644 Section 3.5.2 - Modifying with PATCH",
+    "url": "https://datatracker.ietf.org/doc/html/rfc7644#section-3.5.2"
+   }
+  },
+  {
+   "name": "Filtering, pagination and sorting: the contract IdPs actually exercise",
+   "learn": "GET /Users?filter=userName eq \"bob@example.com\" (URL-encoded) is the call every IdP makes before every create, and if it 500s or returns the wrong envelope the IdP creates a duplicate user on every cycle. Support at minimum eq on userName, externalId, id and emails.value for Users and displayName for Groups; the grammar also defines co, sw, ew, pr, gt/ge/lt/le, and/or/not, parentheses and value paths like emails[type eq \"work\"]. Return a ListResponse with schemas, totalResults, startIndex (1-based, not 0), itemsPerPage and Resources - never a bare array. Pagination is startIndex plus count over a stable sort, so cap count, honour it, and use a deterministic ORDER BY or a full import loops forever or skips users. Support attributes and excludedAttributes to trim payloads. Parse filters into a typed AST and bind parameters - a filter string concatenated into SQL is an injection, and a filter that is not scoped to the caller's tenant is a directory leak.",
+   "minutes": 12,
+   "resource": {
+    "label": "RFC 7644 Section 3.4.2.2 - Filtering",
+    "url": "https://datatracker.ietf.org/doc/html/rfc7644#section-3.4.2.2"
+   }
+  },
+  {
+   "name": "Errors, idempotency and staying out of quarantine",
+   "learn": "The error body is {schemas: [urn:ietf:params:scim:api:messages:2.0:Error], status, scimType, detail} where status is a STRING, not a number, and scimType is one of invalidFilter, tooMany, uniqueness, mutability, invalidSyntax, invalidPath, noTarget, invalidValue, sensitive. The single most important response you will implement is 409 with scimType uniqueness on a duplicate userName, because that is the signal that makes Okta and Entra switch from create to update instead of retrying forever. Use 429 with Retry-After for rate limiting, distinguish 401 (bad token) from 403 (token valid, not allowed), and never return an HTML error page or a 302 to your login page - IdP connectors parse neither. Make every handler idempotent so retried operations converge, and understand the operational consequence: Entra escrows per-object failures with backoff and eventually quarantines the whole provisioning job, so a persistent 500 on one malformed record can freeze provisioning for the entire tenant.",
+   "minutes": 14,
+   "resource": {
+    "label": "RFC 7644 Section 3.12 - HTTP status and error response handling",
+    "url": "https://datatracker.ietf.org/doc/html/rfc7644#section-3.12"
+   }
+  },
+  {
+   "name": "Authenticating and tenant-scoping your SCIM endpoint",
+   "learn": "TLS only, and support what IdP admins can actually paste into a connector: a long-lived bearer token in the Authorization header, or OAuth2 client credentials where the customer insists. Issue the token per tenant, store only a hash, display it exactly once, support rotation with an overlap window, and give it its own scope so it can never be used against your product APIs. The token IS the tenant identity - derive tenant scoping from it and never from a tenant id in the path or body - because this endpoint is an unauthenticated-by-humans admin API: a leaked token enumerates an entire employee directory (names, emails, managers, departments) and can create a user you then log in as. Rate-limit per tenant, write every SCIM operation to the audit trail from Topic 32 with actor=scim, and alert on bursts of deactivations, which is what a compromised connector or a botched HR sync looks like.",
+   "minutes": 12,
+   "resource": {
+    "label": "RFC 7644 Section 2 - Authentication and authorization",
+    "url": "https://datatracker.ietf.org/doc/html/rfc7644#section-2"
+   }
+  },
+  {
+   "name": "Okta end to end: SAML app, SCIM connector, group push, lifecycle",
+   "learn": "In a free Integrator org: create a SAML 2.0 app integration (Single sign-on URL = your ACS, Audience URI = your SP entityID, Name ID format, application username, attribute statements, and a group attribute statement with a regex or starts-with filter so you do not ship 400 groups in every assertion), then download the IdP metadata. Enable provisioning with the SCIM connector: SCIM connector base URL, unique identifier field for users (userName), supported provisioning actions (Import New Users, Push New Users, Push Profile Updates, Push Groups), authentication mode (HTTP Header bearer), then run Test Connector Configuration, which calls /ServiceProviderConfig and a filtered GET /Users. Know the behaviours that surprise people: Okta only pushes assigned users, Group Push is a separate feature from group attribute statements, deactivation sends PATCH active:false (or DELETE if configured), profile mappings run in both directions, and the System Log is the ground truth showing every request and response body.",
+   "minutes": 16,
+   "resource": {
+    "label": "Okta Developer - SCIM concepts and provisioning behaviour",
+    "url": "https://developer.okta.com/docs/concepts/scim/"
+   }
+  },
+  {
+   "name": "Entra ID provisioning engine: cycles, mappings, escrows, quarantine",
+   "learn": "Entra runs an initial cycle (full scan of every in-scope user and group, hours on a large tenant) then incremental cycles roughly every 40 minutes driven by a watermark, so 'nothing happened yet' is usually a schedule, not a bug. Configure scoping filters and 'sync only assigned users and groups', and understand attribute mappings including matching precedence (userPrincipalName or mail to userName) which is what decides create-vs-update, plus expressions like Join(), Replace(), SwitchAttribute() and NotEmpty. Failures are escrowed per object with exponential backoff and the job is quarantined after repeated failure, which stops provisioning tenant-wide until an admin clears it; provisioning logs show per-object request and response. Restart provisioning resets the watermark and re-scans everything, which will hammer your API - rate-limit accordingly. Finally, test against both IdPs, because Entra's path-less PATCH and members-replace behaviour differ from Okta's before you tell a customer you 'support SCIM'.",
+   "minutes": 16,
+   "resource": {
+    "label": "Microsoft Learn - How application provisioning works in Microsoft Entra ID",
+    "url": "https://learn.microsoft.com/en-us/entra/identity/app-provisioning/how-provisioning-works"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take a raw SAMLResponse from either binding, decode it (base64 plus raw DEFLATE) and, within five minutes and without a reference open, name which of Issuer, signature, Status, Destination, Recipient, InResponseTo, NotBefore/NotOnOrAfter, Audience or replay caused the login to fail.",
+  "You can stand up a FastAPI SP that publishes valid SP metadata, completes an SP-initiated and an IdP-initiated login against a live Okta org, and enforces signed assertions, audience, recipient, skew-bounded time windows and a Redis-backed replay cache.",
+  "You can ship a SCIM 2.0 /Users and /Groups service that passes Okta's Test Connector Configuration and survives an Entra initial plus incremental cycle: create, profile update, group add and remove, and deactivate.",
+  "You can parse and apply a PATCH containing a path filter such as members[value eq \"abc\"] plus Entra's path-less value-object form, proven by fixture tests captured from both IdPs.",
+  "You can return spec-conformant errors - string status, scimType uniqueness on duplicate userName, 429 with Retry-After - and demonstrate the IdP switching from repeated create attempts to updates as a result.",
+  "You can produce a group-to-role mapping document and a runbook that the customer's identity team executes without you: metadata URLs, cert expiry dates, token rotation steps, the deactivation semantics you honour and the log locations for both sides.",
+  "You can state and measure the end-to-end revocation path - IdP deactivation to SCIM call to session invalidation - and report the actual elapsed time against the customer's offboarding SLA.",
+  "You can explain XML Signature Wrapping to a customer security reviewer, name the specific configuration in your SP that prevents it, and show a wrapped-assertion fixture being rejected in your test suite."
+ ],
+ "failureModes": [
+  "The SP entityID in the customer's IdP has a trailing slash and yours does not, so every login dies on AudienceRestriction while the IdP shows a generic 'authentication failed' - the customer escalates to your VP believing your product is broken, and the answer was visible in the assertion the whole time.",
+  "The app server's clock drifts four minutes because NTP is blocked outbound on the customer's subnet; assertions arrive already outside NotOnOrAfter, logins fail for some users and not others depending on which replica they land on, and the same IdP works fine for every other vendor that allows five minutes of skew.",
+  "The SP verifies the Response signature but does not require signed assertions and extracts the first Assertion by XPath; an XML Signature Wrapping payload authenticates as the customer's CISO, and the finding lands in their penetration test report with your company named.",
+  "Behind the customer's F5 the app builds http:// URLs because X-Forwarded-Proto is not trusted, so Destination and Recipient comparisons fail; it works through one listener and not the other, and three engineers spend a day blaming DNS.",
+  "IdP-initiated login is accepted and RelayState is used directly as the post-login redirect target, giving an attacker an open redirect off a trusted domain and a login-CSRF that silently swaps the victim's session for one they control.",
+  "PUT /Users/{id} is implemented as a partial merge, so a full Entra cycle that omits department and manager never clears them - the directory and your database diverge for months, and the customer's access review finds people mapped to roles their HR record no longer justifies.",
+  "GET /Users?filter=userName eq \"...\" returns a bare JSON array instead of a ListResponse, so Okta never matches existing users and creates a fresh duplicate account on every cycle until seat counts and the invoice explode.",
+  "Deprovisioning is wired only to DELETE while Entra sends PATCH active:false on unassignment, so terminated employees keep valid sessions and API tokens; nobody notices until an access review two quarters later turns it into a SOC 2 exception."
+ ],
+ "interviewQuestions": [
+  "Walk me through SP-initiated SAML from the user's first click to a session cookie, then list every check your ACS performs on the assertion and name the specific attack each one prevents.",
+  "A customer's login worked in staging and fails in production behind their load balancer. You have the base64 SAMLResponse on a screenshare and their IdP admin on the call. Talk me through your first ten minutes.",
+  "Design multi-tenant SSO and SCIM for a product with 200 enterprise customers: where per-connection config lives, how you route a user to the right IdP, how SCIM tokens are issued, scoped and rotated, and what the blast radius is when one token leaks.",
+  "Explain XML Signature Wrapping. Why is 'the signature verified' not sufficient, and how would you configure and then test a SAML library so this class of bug cannot ship?",
+  "Okta and Entra both claim SCIM 2.0 support, but your endpoint works with one and fails with the other. Name three concrete protocol differences you would expect and describe the test suite you would build to cover both.",
+  "The customer's security team requires that access is revoked within 15 minutes of an HR termination. Design the chain from HR system to your app, state precisely where SAML and SCIM cannot meet that guarantee, and propose compensating controls.",
+  "When would you push back on SAML and propose OIDC instead, and what do you do when the customer's identity team replies that they only federate over SAML?"
+ ],
+ "proofOfWork": "Publish an `enterprise-sso-lab` repo that proves the SP and SCIM service are correct without needing a live IdP. It contains a docker-compose stack running the FastAPI SP, the SCIM service and a local test IdP, plus a corpus of about a dozen golden SAMLResponse fixtures generated by a signing script: one valid baseline and one each for expired NotOnOrAfter, not-yet-valid NotBefore, wrong Audience, wrong Destination, missing and mismatched InResponseTo, unsigned assertion inside a signed Response, an XML Signature Wrapping variant, a replayed assertion ID, an assertion signed by a rotated-out certificate, and one with an empty NameID - each replayed in pytest with a frozen clock and asserted to fail with a specific reason code, and the baseline asserted to succeed. Alongside it, a SCIM conformance harness that replays captured Okta and Entra request bodies (both PATCH dialects, group add and remove with a path filter, members replacement, duplicate-create, filtered lookup, pagination) against the service and diffs the responses to expected fixtures, so a regression fails CI rather than a customer's provisioning job. Finish with an evidence pack: a redacted transcript of a real dual-IdP run showing create, update, group membership change and deactivate in both Okta and Entra with request and response bodies, a measured revocation timeline from IdP deactivation to session invalidation, the one-page SAML failure decision tree you use on screenshares, and the group-to-role mapping YAML with a short note on which role every unmapped group falls back to."
+}

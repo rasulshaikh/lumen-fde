@@ -1,0 +1,229 @@
+{
+ "i": 12,
+ "topic": "Restricted-network delivery: offline install bundle, registry mirroring, private CA trust",
+ "track": "B. Containers and Kubernetes",
+ "month": 3,
+ "hours": 8,
+ "why": "The customers who pay for forward-deployed engineers - defence, banks, hospitals, utilities, anyone with a classified or PCI enclave - are precisely the customers whose clusters cannot reach docker.io, whose TLS is intercepted by a corporate CA, and whose registry intake process takes two weeks. Every fast path you rely on at home (helm repo add, pip install, docker pull, a curl | bash installer, Let's Encrypt, a telemetry endpoint) is a hard failure there, and you usually discover which one you forgot while sitting in a windowless room with no way to fetch the missing byte. Getting this right is the difference between a one-day install and a three-week engagement that burns the customer's trust before the product has done anything, and it is one of the few skills that visibly separates an FDE from a strong platform engineer who has only ever deployed to their own cloud account.",
+ "prerequisites": [
+  "Container internals and the registry model: layers, manifests, tags vs digests, docker/ctr/crictl (Topic 5, Docker internals)",
+  "Building production images and supply-chain hygiene: multi-stage builds, non-root, SBOM generation, image signing (Topic 6)",
+  "Kubernetes core objects plus real debugging reflexes - kubectl describe, events, kubelet logs, Secrets and ServiceAccounts (Topics 7 and 8)",
+  "Helm chart anatomy: values, templates, subcharts, hooks, and ArgoCD sync basics (Topic 9, GitOps)",
+  "TLS chain of trust end to end: root vs intermediate, SNI, verification failures, and DNS resolution order (Topic 2, Networking)",
+  "Hardened bash - set -Eeuo pipefail, traps, retries, idempotency (Topic 0) - because install.sh is the shipped artifact and the customer will read it line by line",
+  "A Linux VM you can wreck (multipass, UTM, Lima or a throwaway EC2 instance) plus a local registry (registry:2 or Harbor) and nftables/iptables access to drop egress"
+ ],
+ "subtopics": [
+  {
+   "name": "Classify the restriction before you build anything",
+   "learn": "\"Restricted network\" covers four regimes with different bundles: full egress through an explicit proxy doing TLS interception; allowlist egress where only named FQDNs resolve and everything else is RST or blackholed; mirror-only, where there is no internet but an internal Harbor/Artifactory/Nexus somebody else populates; and a true air gap where bits arrive on removable media or through a one-way transfer with an approval queue. Before writing a line, get written answers to: which registries resolve from which nodes, is TLS intercepted and can we have the CA PEM, who owns the internal registry and what is the intake SLA, what OS/arch/kernel/container runtime the nodes run, whether DNS is restricted to an internal resolver, and the maximum single-file size and cadence of the media transfer. Put those in the site survey (Topic 73) and re-verify on site, because \"we have a mirror\" routinely means \"we have a Nexus nobody has push rights to for two weeks\".",
+   "minutes": 20,
+   "resource": {
+    "label": "Zarf - the air-gap delivery problem and package model (README)",
+    "url": "https://github.com/zarf-dev/zarf/blob/main/README.md"
+   }
+  },
+  {
+   "name": "OCI image layout, digests and content addressing",
+   "learn": "Learn what an image is on disk: an `oci-layout` marker file, `index.json` pointing at manifests (`application/vnd.oci.image.manifest.v1+json`), each manifest naming a config blob and layer blobs stored once under `blobs/sha256/<hex>`. `skopeo copy docker://ghcr.io/org/app:1.4.2 oci:./bundle/images:app:1.4.2` produces exactly that layout, whereas `docker save` produces the older Docker archive format that loses index-level multi-arch and annotations - use the OCI layout so the bundle is a registry you can inspect with standard tools. Because everything is content-addressed, blobs shared across ten images are stored once, which is why a whole-platform layout is routinely 40 percent of the naive sum of `docker pull` sizes. Internalise the rule that a tag is mutable and a digest is not: the bundle manifest records `image@sha256:...` for every component, the install pushes and pins by digest, and the customer's registry therefore cannot serve something different under the same tag.",
+   "minutes": 30,
+   "resource": {
+    "label": "OCI Image Format Specification - Image Layout",
+    "url": "https://github.com/opencontainers/image-spec/blob/main/image-layout.md"
+   }
+  },
+  {
+   "name": "Multi-arch image indexes and platform selection",
+   "learn": "An image index (`application/vnd.oci.image.index.v1+json`) lists per-platform manifests with `platform.os`, `platform.architecture` and `variant`; a plain `docker pull` on an Apple Silicon laptop silently selects `linux/arm64` while the customer's nodes are `linux/amd64`. Decide explicitly whether the bundle carries every architecture or exactly one, using `skopeo copy --all` or `--override-os linux --override-arch amd64`, and prove what you captured with `skopeo inspect --raw docker://ref | jq '.manifests[].platform'` or `crane manifest`. Know that buildx attestation manifests appear in the index as `unknown/unknown` entries and that some registries and older Harbor versions choke on them, so strip or carry them deliberately rather than by accident.",
+   "minutes": 15,
+   "resource": {
+    "label": "OCI Image Format Specification - Image Index",
+    "url": "https://github.com/opencontainers/image-spec/blob/main/image-index.md"
+   }
+  },
+  {
+   "name": "Relocating images with skopeo (and crane as the second opinion)",
+   "learn": "`skopeo copy --all --retry-times 5 docker://src oci:./bundle/images:name:tag` pulls without a docker daemon; `skopeo sync --src yaml --dest dir images.yaml ./bundle` drives a whole list from a file you can diff in review. Learn the flags that matter under pressure: `--authfile` / `--src-authfile` / `--dest-authfile` for per-side credentials, `--src-cert-dir` and `--dest-cert-dir` for a private CA, `--format oci|v2s2`, and `--preserve-digests`, which makes the copy fail loudly rather than silently re-encode a manifest and change its digest - a changed digest breaks every pinned reference and every signature downstream. `--dest-tls-verify=false` belongs in a lab and nowhere else. Keep `crane digest`, `crane manifest` and `crane copy` in your pocket as an independent implementation for verifying that what landed in the customer's registry is byte-identical to what left your build.",
+   "minutes": 30,
+   "resource": {
+    "label": "skopeo-copy(1) man page",
+    "url": "https://github.com/containers/skopeo/blob/main/docs/skopeo-copy.1.md"
+   }
+  },
+  {
+   "name": "Enumerating every image reference the install will pull",
+   "learn": "Start with `helm template rel ./chart -f prod-values.yaml | yq '.. | .image? // empty' | sort -u`, then treat that output as a hypothesis, not an inventory: it misses initContainers behind a condition, sidecars injected by a mutating webhook (Istio, Vault agent, a logging agent), images named inside CRs that an operator resolves at runtime, Helm hook Jobs, images that only appear when a feature flag is on, and defaults in subcharts you never templated. Also enumerate non-image pulls the app performs at runtime - model weights, tokenizer files, pip or npm packages fetched by an entrypoint, a `busybox` in a debug script, browser binaries. Get ground truth by running the install in a lab cluster whose containerd points at a logging pull-through proxy and diffing the proxy access log against your list; the log is truth, and the delta is exactly the set of images that would have failed at the customer.",
+   "minutes": 25,
+   "resource": {
+    "label": "Kubernetes docs - Images (names, tags, digests, pull policy)",
+    "url": "https://kubernetes.io/docs/concepts/containers/images/"
+   }
+  },
+  {
+   "name": "Vendoring the chart and its dependency tree",
+   "learn": "`helm dependency update` resolves `dependencies:` into `charts/*.tgz` and writes `Chart.lock` with the resolved versions and a digest of the repository index; commit both and ship `charts/` inside the bundle so the install never resolves a repo. Know the difference between `helm dependency build` (install exactly what the lock says - what CI and the bundle build should run) and `helm dependency update` (re-resolve, which is a deliberate change), plus `condition:`, `tags:`, `alias:` for two copies of one subchart, and `import-values` for values that flow upward. Publish the chart itself as an OCI artifact into the customer's registry (`helm push app-1.4.2.tgz oci://reg.customer.internal/charts`) so their GitOps controller (Topic 9) references a repository they own and can restore from, rather than a public URL that will be unreachable the day they need to roll back.",
+   "minutes": 20,
+   "resource": {
+    "label": "Helm docs - helm dependency update",
+    "url": "https://helm.sh/docs/helm/helm_dependency_update/"
+   }
+  },
+  {
+   "name": "Rewriting image references so nothing points at the public internet",
+   "learn": "`global.imageRegistry` only works when every subchart reads it; most third-party charts hardcode `image.repository: docker.io/library/redis`, so plan for escalating mechanisms: per-subchart values overrides, a Helm `--post-renderer` that runs kustomize with an `images:` transformer over the rendered output, a full kustomize overlay, or a cluster-wide mutating admission policy that rewrites `.spec.containers[*].image` prefixes for anything the chart cannot reach. Rewrite to digests, not tags (`repository: reg.customer.internal/platform/redis`, `tag: \"\"`, `digest: sha256:...`), so the pinning survives a mutable tag in their registry. Then make it enforceable: a conftest/OPA or simple `grep -v` gate in CI that fails the build if any rendered manifest references a registry host outside the customer's namespace - that assertion, not your diligence, is what catches the one forgotten sidecar.",
+   "minutes": 30,
+   "resource": {
+    "label": "Helm docs - Subcharts and Global Values",
+    "url": "https://helm.sh/docs/chart_template_guide/subcharts_and_globals/"
+   }
+  },
+  {
+   "name": "Pushing into the customer's registry: the distribution API and its politics",
+   "learn": "Know the wire protocol well enough to debug it with curl: `GET /v2/` for the version check and auth challenge, `POST /v2/<name>/blobs/uploads/` then a monolithic or chunked `PATCH`/`PUT` for blobs, `HEAD /v2/<name>/blobs/<digest>` to skip a blob that already exists (and cross-repo mount to avoid re-uploading), `PUT /v2/<name>/manifests/<ref>` last because a manifest referencing a missing blob is rejected. The token flow is a 401 with `WWW-Authenticate: Bearer realm=...,service=...,scope=repository:x:pull,push`, then a token fetch - so a 401 on push usually means scope, not password. Negotiate the non-technical half before install day: project/namespace to push into, a robot account with push scope, storage quota, whether tag immutability or a mandatory vulnerability-scan gate will reject your push, whether the registry accepts OCI index and artifact media types, and retention rules that might garbage-collect your images after 30 days.",
+   "minutes": 25,
+   "resource": {
+    "label": "OCI Distribution Specification",
+    "url": "https://github.com/opencontainers/distribution-spec/blob/main/spec.md"
+   }
+  },
+  {
+   "name": "containerd registry configuration: certs.d and hosts.toml",
+   "learn": "Modern containerd reads per-registry config from `config_path = \"/etc/containerd/certs.d\"` set under `[plugins.\"io.containerd.grpc.v1.cri\".registry]` in `/etc/containerd/config.toml`; each host gets `/etc/containerd/certs.d/<host>/hosts.toml` with `server = \"https://reg.customer.internal\"`, a `[host.\"https://reg.customer.internal/v2\"]` block with `capabilities = [\"pull\", \"resolve\"]`, `ca = \"/etc/ssl/certs/customer-ca.pem\"`, optional `client` mTLS pairs, `skip_verify` (never in production) and `override_path = true` when the mirror serves under a nested path. Critically, once `config_path` is set the legacy `[registry.mirrors]` entries in config.toml are ignored entirely, which is the single most common reason an edit \"does nothing\". Restart containerd, then verify through the path the kubelet actually uses - `crictl pull` and `ctr -n k8s.io images pull` - because a successful `docker pull` on the same node proves nothing about the CRI runtime's configuration.",
+   "minutes": 25,
+   "resource": {
+    "label": "containerd docs - Registry Configuration (hosts.toml)",
+    "url": "https://github.com/containerd/containerd/blob/main/docs/hosts.md"
+   }
+  },
+  {
+   "name": "K3s/RKE2 registries.yaml, rewrites, and preloading images onto nodes",
+   "learn": "`/etc/rancher/k3s/registries.yaml` takes `mirrors:` (endpoint lists plus `rewrite:` regex rules such as `\"^library/(.*)\": \"mirror/library/$1\"` for registries that require a project prefix) and `configs:` (per-host `auth:` and `tls: { ca_file, cert_file, key_file, insecure_skip_verify }`); k3s renders it into containerd's hosts.toml at startup, so it takes effect only after `systemctl restart k3s`, and only on nodes where the file exists - it must be in your node bootstrap, not applied by hand. Break the bootstrap chicken-and-egg by preloading tarballs: drop images in `/var/lib/rancher/k3s/agent/images/*.tar` or run `ctr -n k8s.io images import`, which is how the in-cluster registry's own image gets onto a node before any registry exists. Decide and document which images are preloaded versus pulled, because a node that joins the cluster three months after your visit will have neither unless the bootstrap does it.",
+   "minutes": 25,
+   "resource": {
+    "label": "K3s docs - Private Registry Configuration (registries.yaml)",
+    "url": "https://docs.k3s.io/installation/private-registry"
+   }
+  },
+  {
+   "name": "Pull secrets, pull policy and reading pull failures precisely",
+   "learn": "A `kubernetes.io/dockerconfigjson` Secret (`kubectl create secret docker-registry`) is namespaced: a chart that installs into three namespaces needs three copies, and a namespace created later by an operator will fail to pull unless you patch its default ServiceAccount's `imagePullSecrets` or use a cluster-wide mechanism. `imagePullPolicy: Always` on a node holding preloaded images and no reachable registry is a guaranteed outage after any reschedule, and a `:latest` tag implies `Always` by default - use `IfNotPresent` with digest pins. Learn to read the failure at the right layer: `ErrImagePull` with `x509` means trust, with `401` means credentials or scope, with `404`/`manifest unknown` means a wrong repository path or a rewrite rule, `exec format error` after a successful pull means architecture, and `ImagePullBackOff` is just the backoff wrapper - go to `kubectl describe pod` events first, then `journalctl -u kubelet` or `crictl pull` on the node for the underlying error string.",
+   "minutes": 20,
+   "resource": {
+    "label": "Kubernetes docs - Pull an Image from a Private Registry",
+    "url": "https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/"
+   }
+  },
+  {
+   "name": "System trust stores: where a private CA actually has to land",
+   "learn": "On Debian/Ubuntu the root PEM goes in `/usr/local/share/ca-certificates/customer-ca.crt` followed by `update-ca-certificates`, which regenerates `/etc/ssl/certs/ca-certificates.crt` and the symlink farm; on RHEL family it is `/etc/pki/ca-trust/source/anchors/customer-ca.pem` plus `update-ca-trust`, producing `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`. Containers do not inherit the host store: your image needs the `ca-certificates` package plus the PEM baked or mounted, distroless and scratch images need the bundle copied to `/etc/ssl/certs/ca-certificates.crt` explicitly, and Alpine needs `apk add ca-certificates` before `update-ca-certificates` does anything. Verify rather than assume with `openssl verify -CAfile /etc/ssl/certs/ca-certificates.crt server.pem` and `trust list | grep -i customer`, and check the chain has the intermediate - a bundle missing it works in a browser (which fetches via AIA) and fails in Go and Python, which do not.",
+   "minutes": 25,
+   "resource": {
+    "label": "update-ca-certificates(8) - Debian manual page",
+    "url": "https://manpages.debian.org/bookworm/ca-certificates/update-ca-certificates.8.en.html"
+   }
+  },
+  {
+   "name": "TLS-intercepting proxies: diagnosis, error signatures and proxy plumbing",
+   "learn": "Prove interception before arguing about it: `openssl s_client -connect reg.customer.internal:443 -servername reg.customer.internal -showcerts </dev/null | openssl x509 -noout -issuer -subject -dates` and read the issuer - a corporate \"SSL inspection\" CA in the chain means every client must trust it and no amount of vendor pinning will survive. Memorise the error signatures so you can localise in seconds: `x509: certificate signed by unknown authority` is Go (containerd, kubectl, helm, most CLIs), `SSL: CERTIFICATE_VERIFY_FAILED` is Python, `unable to get local issuer certificate` is curl/OpenSSL, `SELF_SIGNED_CERT_IN_CHAIN` or `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` is Node/npm, `tls: failed to verify certificate` is newer Go. Plumb the proxy deliberately: `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` are honoured by Go and curl but daemons need a systemd drop-in (`/etc/systemd/system/containerd.service.d/http-proxy.conf` plus `systemctl daemon-reload`), and `NO_PROXY` matching is host-suffix based with only partial CIDR support - so `.svc`, `.cluster.local`, the node and pod CIDRs, the registry host and `169.254.169.254` must be listed explicitly or in-cluster traffic gets shipped to a proxy that rejects it. Treat `insecure_skip_verify`, `--insecure` and `strict-ssl=false` as findings for the customer's next audit, not fixes.",
+   "minutes": 35,
+   "resource": {
+    "label": "openssl-s_client(1) - OpenSSL 3.0 manual",
+    "url": "https://www.openssl.org/docs/man3.0/man1/openssl-s_client.html"
+   }
+  },
+  {
+   "name": "Python offline: wheelhouse, hashes and certificate configuration",
+   "learn": "Build the wheelhouse on a machine matching the target: `pip download -r requirements.txt --only-binary=:all: --platform manylinux2014_x86_64 --python-version 3.11 --implementation cp --abi cp311 -d wheels/` (the `--platform` flags require `--only-binary=:all:` because cross-platform source builds are impossible), then install with `pip install --no-index --find-links=wheels/ -r requirements.txt`. Pin with `pip-compile --generate-hashes` and install with `--require-hashes` so the bundle's dependency set is verifiable by the customer's security team rather than trusted. For trust, know that requests/pip use `certifi`'s private bundle and ignore the OS store unless told: set `pip config set global.cert /etc/ssl/certs/ca-certificates.crt` or `PIP_CERT`, and `REQUESTS_CA_BUNDLE` / `SSL_CERT_FILE` for the application at runtime; `--trusted-host` disables verification and is a last resort. Hunt down packages that fetch at first use - tiktoken encodings, HuggingFace weights, nltk corpora, playwright browsers, spaCy models - and bake their caches (`HF_HOME`, `TIKTOKEN_CACHE_DIR`, `XDG_CACHE_HOME`) into the bundle or image.",
+   "minutes": 25,
+   "resource": {
+    "label": "pip docs - HTTPS Certificates",
+    "url": "https://pip.pypa.io/en/stable/topics/https-certificates/"
+   }
+  },
+  {
+   "name": "Node, npm and Go: trust configuration and offline installs",
+   "learn": "npm: `npm config set cafile /etc/ssl/certs/customer-ca.pem` replaces the bundled CA list rather than adding to it, so `NODE_EXTRA_CA_CERTS=/etc/ssl/certs/customer-ca.pem` is usually the correct knob for both npm and the running Node process; set `registry=` to the customer's Nexus/Artifactory group, and never `strict-ssl=false`. Ship dependencies offline with a pre-populated cache (`npm ci --cache ./npm-cache` on a connected box, then `npm ci --offline --cache ./npm-cache` inside the enclave) or vendored `npm pack` tarballs plus a `.npmrc` pointing at a local file path; `npm ci` requires `package-lock.json` and fails on drift, which is exactly the behaviour a bundle needs. Go-built tooling - helm, kubectl, containerd, argocd, terraform providers - uses `crypto/x509.SystemCertPool`, honouring `SSL_CERT_FILE` and `SSL_CERT_DIR` on Linux, which is why they all emit the same `x509: certificate signed by unknown authority` and why fixing the OS trust store fixes all of them at once.",
+   "minutes": 25,
+   "resource": {
+    "label": "npm docs - config (cafile, strict-ssl, registry, cache)",
+    "url": "https://docs.npmjs.com/cli/v10/using-npm/config"
+   }
+  },
+  {
+   "name": "git across the gap: bundles, TLS config and the GitOps source of truth",
+   "learn": "Configure trust per host rather than globally where you can: `git config --global http.https://git.customer.internal/.sslCAInfo /etc/ssl/certs/customer-ca.pem`, or `GIT_SSL_CAINFO` in the environment, plus `http.proxy` when the proxy is explicit; `http.sslVerify=false` is a finding, not a fix, and on RHEL the curl backend can behave differently from your laptop's. Move repositories across a true air gap with `git bundle create repo.bundle --all`, verify on the far side with `git bundle verify` and clone straight from the file, then keep day-2 transfers small with incremental bundles (`git bundle create delta.bundle v1.4.2..HEAD`) that apply onto a known base commit. Decide up front what the customer's GitOps controller points at - an internal git server fed by bundles, or a repo they own that you push to during visits - because ArgoCD with an unreachable upstream degrades into a cluster nobody can safely change.",
+   "minutes": 20,
+   "resource": {
+    "label": "git-bundle documentation",
+    "url": "https://git-scm.com/docs/git-bundle"
+   }
+  },
+  {
+   "name": "Bundle layout, determinism and transport",
+   "learn": "Lay the tarball out so a stranger can audit it: `manifest.json` (bundle version, build timestamp, git SHA, every image ref with its digest, chart version, tool versions), `images/` as an OCI layout, `charts/`, `wheels/`, `npm/`, `bin/`, `install.sh`, `CHECKSUMS.sha256`. Make the build reproducible - `tar --sort=name --mtime=@${SOURCE_DATE_EPOCH} --owner=0 --group=0 --numeric-owner --format=posix` with a fixed compression level - so two builds of the same commit yield the same sha256 and the customer's security team can independently confirm what you shipped matches your public release. Plan transport as a real constraint: an 8 GB bundle crossing a one-way transfer with a 4 GB per-file limit means `split -b 3G` plus a documented reassembly and checksum step at both ends, because the classic failure is a silently truncated copy that only surfaces halfway through the install.",
+   "minutes": 20,
+   "resource": {
+    "label": "Reproducible Builds - Archive metadata (deterministic tar)",
+    "url": "https://reproducible-builds.org/docs/archives/"
+   }
+  },
+  {
+   "name": "Signing and verifying with no internet",
+   "learn": "Sign both the bundle and the images so verification never needs a callout: `cosign sign-blob --key cosign.key --output-signature bundle.tar.zst.sig bundle.tar.zst` verified with `cosign verify-blob --key cosign.pub`, and `cosign sign --key cosign.key <image@digest>` for what lands in the customer's registry. Keyless/Fulcio signing does not work in an air gap because it needs an OIDC provider and a Rekor log, so ship a static public key (and document its fingerprint out of band) or carry an offline verification bundle deliberately. Signatures live as separate registry tags of the form `sha256-<digest>.sig`, so a plain `skopeo copy` of `:tag` leaves them behind and the customer's Kyverno or sigstore policy controller then rejects every pod at admission - use `cosign copy` (or copy the `.sig`/`.att` tags explicitly) when relocating. Carry the SBOM (syft) and an offline vulnerability database (`grype db import`, or trivy's offline DB bundle) so their scan gate can run inside the enclave instead of blocking your install.",
+   "minutes": 25,
+   "resource": {
+    "label": "cosign save - moving images and signatures offline",
+    "url": "https://github.com/sigstore/cosign/blob/main/doc/cosign_save.md"
+   }
+  },
+  {
+   "name": "install.sh as the product: preflight, idempotence, resumability, rollback",
+   "learn": "The script is what the customer's engineer reads over your shoulder and attaches to a change ticket, so write it accordingly: `set -Eeuo pipefail`, a `--dry-run` that prints every push and every helm command without executing, and secrets read from a file or prompt rather than argv. Preflight must fail fast with actionable text: registry reachable and writable (do a one-blob test push, not a ping), kubectl context and version skew, storage class present, CA present in the node trust store, disk space for the image import, node architecture matching the bundle, and no conflicting release or CRD version already installed. The body pushes images by digest, pushes the chart, then `helm upgrade --install --atomic --timeout 15m --wait` so a failed rollout rolls back instead of leaving half a platform, followed by postflight checks (all Deployments available, a real smoke request through the ingress). Make it resumable and idempotent: skip blobs that `HEAD /v2/.../blobs/<digest>` reports present, checkpoint progress to a state file so a 40-minute push interrupted by a dropped VPN continues, and make a re-run against a healthy install a no-op that exits 0.",
+   "minutes": 30,
+   "resource": {
+    "label": "Helm docs - helm install (--atomic, --wait, --timeout)",
+    "url": "https://helm.sh/docs/helm/helm_install/"
+   }
+  },
+  {
+   "name": "The blocked-egress rehearsal, and planning day two before you leave",
+   "learn": "Rehearse on a fresh VM with egress actually dropped rather than assumed: an nftables output chain that permits only the internal registry and resolver (`nft add rule inet filter output ip daddr != { 10.0.0.0/8, 127.0.0.0/8 } counter drop`), DNS pointed at an internal resolver only, then run the install from a clean checkout and record it end to end. Prove the claim with evidence the customer's security team accepts: `tcpdump -n 'not net 10.0.0.0/8'` and the nftables drop counters across the whole run should show zero outbound attempts; every hit is a hidden dependency - a telemetry endpoint, an OCSP/CRL fetch, an operator's default catalog, a `raw.githubusercontent.com` URL in a Helm hook. Then plan day two before you fly home: delta bundles carrying only changed blobs, a rehearsed `helm rollback` path, expiry dates for the CA and registry robot credentials written into the runbook, registry garbage collection so their disk does not fill, and an explicit support/version-skew policy (Topic 78) for how far behind their install may drift between transfers.",
+   "minutes": 30,
+   "resource": {
+    "label": "nft(8) manual page (netfilter.org)",
+    "url": "https://www.netfilter.org/projects/nftables/manpage.html"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can install the full platform on a fresh VM with all egress dropped, from one tarball, and produce packet-capture and nftables counter evidence that zero outbound connections were attempted during the run.",
+  "You can relocate every image a chart pulls into an OCI layout and then into a private registry by digest, and prove with skopeo inspect and crane digest that no digest changed in transit.",
+  "You can configure containerd certs.d/hosts.toml and k3s registries.yaml for mirroring, path rewriting and a private CA, and demonstrate the kubelet pulling successfully via crictl on a node with no internet.",
+  "You can make containerd, helm, kubectl, curl, pip, npm and git all trust a private CA behind a TLS-intercepting proxy, and explain from memory where each toolchain reads its trust material and which environment variable overrides it.",
+  "You can enumerate every image an install pulls, cross-check helm template output against a pull-through proxy access log, and name the five classes of reference that templating alone misses.",
+  "You can produce byte-identical bundles from two builds of the same commit, sign the tarball and the images, and hand a customer a verification procedure that runs entirely inside their enclave.",
+  "You can diagnose an ImagePullBackOff in an enclave down to the exact layer - DNS, TCP, x509, 401 scope, 404 path rewrite, or architecture mismatch - in under ten minutes using describe, crictl, journalctl and openssl s_client.",
+  "You can write an install.sh that is dry-runnable, idempotent, resumable after a dropped connection, atomic on failure, and readable enough that the customer's platform engineer approves it in a change review."
+ ],
+ "failureModes": [
+  "The bundle is built on an Apple Silicon laptop without --all or --override-arch, so every image is linux/arm64; pods on the customer's amd64 nodes crash with 'exec format error' and there is no path to rebuild from inside the enclave.",
+  "helm template missed an image injected by a mutating webhook and one Helm hook Job, so 95 percent of the install succeeds and then a single Job sits in ImagePullBackOff reaching for docker.io at 02:00 the night before go-live.",
+  "Images were relocated by copying tags only, leaving the sha256-<digest>.sig signature tags behind in the source registry; the customer's policy controller denies every pod at admission and the install looks like an RBAC problem for three hours.",
+  "The private CA was added to the host trust store and every host-level curl works, but the application container is distroless with a stale certifi bundle, so only the app's outbound HTTPS calls fail and the team spends a day chasing a phantom network issue.",
+  "registries.yaml was edited by hand on the control-plane node during the visit and never added to the node bootstrap; two months later autoscaling adds a worker that cannot pull anything, and nobody on site knows why that node is special.",
+  "imagePullPolicy stayed Always with a :latest tag while images were preloaded from tarballs, so the first node reboot after the bundle was deleted from disk turns a working cluster into a cluster that cannot start a single pod.",
+  "NO_PROXY omitted .svc, .cluster.local and the pod CIDR, so in-cluster and kubelet traffic was routed to the corporate proxy which rejected it, producing intermittent DNS and API-server timeouts that were escalated as a Kubernetes bug.",
+  "Someone unblocked the install with --insecure-skip-tls-verify and strict-ssl=false 'temporarily'; the settings shipped into the runbook, the customer's audit found them six months later, and the deployment was frozen pending remediation."
+ ],
+ "interviewQuestions": [
+  "A customer has no egress, an internal Harbor nobody has push rights to yet, and a corporate CA that intercepts TLS. Design the delivery end to end: what your build pipeline emits, how bits cross the boundary, how images and charts get relocated, what has to change on the nodes, and how you prove to their security team that nothing phoned home.",
+  "Explain tags versus digests in a relocation, and why skopeo copy --preserve-digests matters. What specifically breaks if a digest changes during relocation, and what happens to cosign signatures when you copy an image between registries?",
+  "Debug live: pods are in ImagePullBackOff after a relocation to the customer's registry. Walk me through your layers of investigation and the exact command at each layer, and tell me which error string distinguishes a trust problem from a credentials-scope problem from a path-rewrite problem.",
+  "A chart has fourteen subcharts and only six honour global.imageRegistry. Give me three mechanisms to force every image reference to the customer's registry, ranked by how much you would want to explain them to their platform team, and say how you would prevent a regression in CI.",
+  "Everything works on the host - curl, docker pull, helm - but the Python service inside the pod cannot reach the customer's internal API over HTTPS. Walk me through the diagnosis and the fix, and explain why the host tests were misleading.",
+  "How do you ship a security patch into an air gap where transfers happen every four weeks and need approval? Describe the delta bundle, the upgrade and rollback procedure, and what support and version-skew policy you would commit to in writing.",
+  "The customer's security officer asks you to prove that your install performed no outbound network access. What evidence do you produce, how do you gather it, and what would you do if the capture showed a single unexpected connection two minutes into the run?"
+ ],
+ "proofOfWork": "A public `airgap-lab` repo that reproduces a hostile customer network on a laptop and lets anyone re-run your proof: a `make enclave` target that builds a two-node k3s VM pair (multipass or Lima) with an nftables output policy dropping everything except an internal CIDR, an internal Harbor and a git server on that CIDR, a self-signed corporate root CA plus a TLS-intercepting forward proxy in front of the only permitted egress path, and DNS restricted to the internal resolver. On top of it, a `make prove` target that installs the airgap-bundle release from the row's deliverable end to end and emits an evidence directory: the nftables drop counters and a tcpdump capture showing zero external attempts, `crictl pull` and `cosign verify` transcripts, a digest-comparison table between the bundle manifest and what Harbor actually stores, and the sha256 of two independent bundle builds from the same commit to demonstrate reproducibility. Include three deliberately broken branches - `broken/arch-mismatch`, `broken/missing-sidecar-image`, `broken/signatures-left-behind` - each with a recorded five-minute diagnosis walkthrough naming the exact command that localised the fault, plus a two-page RESTRICTED-NETWORK-RUNBOOK.md written for the customer's platform team covering CA and robot-credential expiry dates, the delta-bundle upgrade and rollback procedure, and registry garbage collection."
+}

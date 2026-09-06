@@ -1,0 +1,228 @@
+{
+ "i": 37,
+ "topic": "Entity resolution and record linkage: blocking, fuzzy and probabilistic matching, survivorship",
+ "track": "E. Backend and Data",
+ "month": 4,
+ "hours": 6.0,
+ "why": "Every customer with more than one system has the same customer, patient, supplier or account represented three different ways, and the first week of almost any deployment ends with someone saying 'these two files should join but there is no shared key'. An FDE is the person who has to turn that into a defensible pipeline in days, not a research project: a candidate set that fits in the customer's compute budget, a score you can explain pair by pair to their data steward, a threshold you can defend with a precision/recall curve instead of a vibe, and golden records with IDs that survive next month's rerun. Get it wrong in the merge direction and you have combined two real companies' invoices or two patients' medication lists in their production system - the kind of error that is expensive, visible and hard to unwind.",
+ "prerequisites": [
+  "SQL beyond SELECT: CTEs, self-joins, window functions, GROUP BY with HAVING, and reading EXPLAIN to see when a join goes quadratic (Topic 31, PostgreSQL at depth)",
+  "Python 3.11+ with pandas or DuckDB for tabular work, plus virtualenv hygiene and pinned requirements - splink, recordlinkage, rapidfuzz and dedupe all drift across versions",
+  "PII handling instincts from Topic 32 (Data modelling for multi-tenant AI systems): what counts as personal data, why raw exports do not leave the customer's boundary, and how audit trails are structured",
+  "Basic probability: conditional probability, Bayes' rule, odds and log-odds, and why independence assumptions matter - the Fellegi-Sunter model is nothing but Bayes with an independence assumption",
+  "Precision, recall, F-score and the shape of a precision/recall curve on an imbalanced problem, including why accuracy is meaningless when 99.999 percent of pairs are non-matches",
+  "Character encoding literacy: UTF-8 vs Latin-1 mojibake, what a code point is, and why 'Muller' and 'Müller' are three different byte strings depending on the export"
+ ],
+ "subtopics": [
+  {
+   "name": "Framing: dedupe vs link vs canonicalise, and the quadratic wall",
+   "learn": "Separate the three jobs the customer conflates: deduplication within one source, linkage across sources with no shared key, and canonicalisation into one golden record per entity. Do the arithmetic out loud before choosing a tool - three exports of 50k records is 150k rows, and an all-pairs comparison is 150000*149999/2 = 11.25 billion pairs; at a very optimistic one microsecond per comparison that is over three hours of pure CPU and a table you cannot store, so blocking is not an optimisation, it is the only reason the problem is tractable. Decide up front whether deterministic rules (exact match on a normalised tax ID or email) already resolve 80 percent of records so that fuzzy and probabilistic machinery only has to handle the tail, and write down the customer's cost asymmetry between a false merge and a false split, because every threshold decision later is downstream of that one sentence.",
+   "minutes": 15,
+   "resource": {
+    "label": "Splink topic guide - Record linkage: the problem and terminology",
+    "url": "https://moj-analytical-services.github.io/splink/topic_guides/theory/record_linkage.html"
+   }
+  },
+  {
+   "name": "Normalisation, sentinel values and profiling the dirt before comparing anything",
+   "learn": "Build an explicit normalisation layer that writes new columns and never overwrites the raw ones: Unicode NFKC (so full-width and ligature forms collapse), casefold() rather than lower() (ß folds to ss, Turkish dotted/dotless i), diacritic stripping via NFD plus removal of combining marks (or Postgres unaccent), collapse of runs of whitespace, removal of zero-width U+200B and non-breaking U+00A0, and punctuation policy per field. Then profile every field before trusting it: value counts, null rate, and the long tail of sentinels - 'N/A', 'unknown', 'test@test.com', '0000000000', '1 Main Street', 1900-01-01, the empty string that is not NULL - because a sentinel that appears 4,000 times becomes a 16-million-pair block and a spurious high-confidence match. Record the normalisation as versioned code with unit tests, since a change to it silently changes every match decision downstream.",
+   "minutes": 20,
+   "resource": {
+    "label": "Unicode Standard Annex #15 - Unicode Normalization Forms (NFC/NFD/NFKC/NFKD)",
+    "url": "https://unicode.org/reports/tr15/"
+   }
+  },
+  {
+   "name": "Strong identifiers: email, phone, domain, tax and company registration numbers",
+   "learn": "Normalise identifiers to a canonical form before comparison: email domains are case-insensitive and the local part is case-sensitive per RFC 5321 but is treated as insensitive by every real provider - so lowercase both, and treat gmail dot/plus-alias folding as a documented customer policy, not a silent default. Phones go to E.164 with libphonenumber and an explicit default region (a bare 10-digit US number and a UK number without +44 are not comparable), extensions split into their own column; web domains reduce to the registrable domain using the Public Suffix List so 'shop.acme.co.uk' and 'www.acme.co.uk' agree; tax IDs, DUNS, LEI and company registration numbers get checksum validation where one exists. Crucially, measure the cardinality of each identifier before treating it as a key: shared info@ mailboxes, one billing email on 40 subsidiary accounts and a switchboard number on every branch are exactly how a 'deterministic' rule creates a 3,000-record blob.",
+   "minutes": 18,
+   "resource": {
+    "label": "Google libphonenumber - parsing, formatting and validating phone numbers (E.164)",
+    "url": "https://github.com/google/libphonenumber"
+   }
+  },
+  {
+   "name": "Addresses and organisation names: parsing versus standardising",
+   "learn": "Understand the difference between parsing an address into components (libpostal parse_address gives house_number, road, unit, city, postcode across 200+ countries) and expanding it to comparable forms (expand_address turns 'St' into both 'street' and 'saint'); compare component-wise, because a raw string edit distance says 'Apt 4' and 'Apt 14' are nearly identical when they are two different households. Apply postal-authority abbreviation rules (USPS Publication 28 for US suffixes and secondary unit designators) and keep the unit/suite number as a high-weight field rather than noise. For organisations, strip or canonicalise legal forms using the ISO 20275 ELF list (Ltd, Limited, GmbH, S.à r.l., Inc, Pty), normalise '&' vs 'and', and hold the line that address similarity alone never merges two B2B entities - a coworking building, a registered-agent address or a franchise HQ will otherwise merge hundreds of unrelated companies.",
+   "minutes": 18,
+   "resource": {
+    "label": "libpostal - international address parsing and expansion",
+    "url": "https://github.com/openvenues/libpostal"
+   }
+  },
+  {
+   "name": "Phonetic keys: Soundex, Metaphone, Double Metaphone, NYSIIS",
+   "learn": "Use phonetic algorithms as blocking keys, not as similarity scores. In Postgres, CREATE EXTENSION fuzzystrmatch gives soundex(), difference(), metaphone(text, max_len), dmetaphone() and dmetaphone_alt(); know the limits - Soundex keeps the first letter, so Catherine and Katherine never collide, it is four characters and English-phonology-specific, and it produces enormous blocks on common surnames. Double Metaphone returns a primary and an alternate code, which is what you want for transliterated and non-Anglo names (compare primary-to-primary or primary-to-alternate), and NYSIIS or the Cologne phonetic are better for their respective languages. Always measure the block-size distribution a phonetic key produces before shipping it, and never use a phonetic code alone as a match rule: it has high recall and terrible precision.",
+   "minutes": 15,
+   "resource": {
+    "label": "PostgreSQL docs - fuzzystrmatch (soundex, metaphone, dmetaphone, levenshtein)",
+    "url": "https://www.postgresql.org/docs/current/fuzzystrmatch.html"
+   }
+  },
+  {
+   "name": "Choosing a comparator per field: edit distance, Jaro-Winkler, token and set similarity",
+   "learn": "Match the comparator to the failure mode of the field. Levenshtein and Damerau-Levenshtein (which adds transposition) model typos and are O(m*n), so bound them by length ratio and cap the length before running them inside a big block; Jaro-Winkler boosts a common prefix and is tuned for short person names, which makes it wrong for long strings and actively dangerous for IDs that differ in the first characters. Jaccard or Dice over token or character-trigram sets is order-insensitive and is what you want for company names ('Acme Corp Ltd' vs 'Ltd Acme Corporation'), while token_set style ratios handle extra tokens; non-string fields get their own comparators - absolute difference in days for dates, ratio bands for numbers, haversine distance for geo, set overlap for arrays. Write down the operating threshold per field (surname Jaro-Winkler >= 0.92, company trigram >= 0.7) and remember every threshold is defined on the normalised value, so it changes when normalisation changes.",
+   "minutes": 22,
+   "resource": {
+    "label": "RapidFuzz docs - Jaro and Jaro-Winkler similarity (definitions and API)",
+    "url": "https://rapidfuzz.github.io/RapidFuzz/Usage/distance/JaroWinkler.html"
+   }
+  },
+  {
+   "name": "Doing it in the customer's database: pg_trgm, indexes and what actually gets accelerated",
+   "learn": "Often the customer will not let you export the data, so the matcher runs in Postgres. CREATE EXTENSION pg_trgm gives similarity(a,b), the % operator governed by pg_trgm.similarity_threshold (set via set_limit()/SET pg_trgm.similarity_threshold), and word_similarity / strict_word_similarity with <% and %>; a GIN index with gin_trgm_ops accelerates % and LIKE '%x%' searches, while a GiST index with gist_trgm_ops additionally supports <-> distance ordering for k-NN 'top 5 nearest names' queries. Know what is not accelerated: similarity() in the SELECT list or in an unindexable expression still scans, and strings under three characters produce mostly padding trigrams and behave badly. Build functional indexes over the normalised expression (lower(unaccent(name))) and wrap unaccent in your own IMMUTABLE SQL function first, because the shipped unaccent is only STABLE and Postgres will refuse to index it.",
+   "minutes": 18,
+   "resource": {
+    "label": "PostgreSQL docs - pg_trgm (similarity, operators, GIN/GiST index support)",
+    "url": "https://www.postgresql.org/docs/current/pgtrgm.html"
+   }
+  },
+  {
+   "name": "Blocking rules: designing a candidate set you can defend",
+   "learn": "A blocking rule is an equality predicate that generates candidate pairs (l.postcode = r.postcode AND l.surname_dm = r.surname_dm); the design goal is a union of several narrow rules rather than one loose rule, with each subsequent rule deduplicated against the earlier ones so pairs are generated once. Evaluate a rule set with two numbers computed on your labelled set: pairs completeness (share of true matches that survive blocking - this is a hard ceiling on recall no model can recover) and reduction ratio (1 minus generated pairs over all pairs); aim for >99 percent completeness at a pair count your compute can score, typically 1e6 to 1e7 for this size of problem. Count before you run - Splink's count_comparisons_from_blocking_rule and a plain GROUP BY key HAVING count(*) > N tell you the damage in seconds - and never block on a field that is null or sentinel for a large share of rows without a second rule that covers those rows another way.",
+   "minutes": 25,
+   "resource": {
+    "label": "Splink topic guide - Blocking rules and computing pairwise comparisons",
+    "url": "https://moj-analytical-services.github.io/splink/topic_guides/blocking/blocking_rules.html"
+   }
+  },
+  {
+   "name": "Blocking at scale: skew, MinHash/LSH and sorted neighbourhood",
+   "learn": "Block size is quadratic in its own right: a 'Smith' plus 'London' block of 40,000 rows produces 800 million pairs by itself, so profile per-block sizes and either add a field to the key, cap and split oversized blocks, or exclude them and handle them with a different pass. When no exact key is safe, use fuzzy blocking: shingle the normalised name+address string, build MinHash signatures (128 permutations is a common default), and index with MinHashLSH(threshold=0.5, num_perm=128) where the b bands of r rows give an S-curve with a 50 percent-ish inflection at (1/b)^(1/r) - it is approximate, so measure the false negatives it introduces against your labelled set rather than assuming. The sorted-neighbourhood method is the cheap alternative: sort on a composite key and compare within a sliding window of w rows, repeated with two or three different sort keys so a bad first character does not exile a record permanently.",
+   "minutes": 18,
+   "resource": {
+    "label": "datasketch docs - MinHash LSH (bands, thresholds, insert/query)",
+    "url": "https://ekzhu.github.io/datasketch/lsh.html"
+   }
+  },
+  {
+   "name": "The Fellegi-Sunter model: m, u, match weights and the prior",
+   "learn": "For each field i, m_i is the probability that the field agrees given the pair is a true match (a measure of data quality and volatility) and u_i is the probability it agrees given the pair is not a match (a measure of coincidence - u for gender is about 0.5, for a full date of birth about 1/36500). The per-field match weight is log2(m_i/u_i), the total score is the prior log2(lambda/(1-lambda)) plus the sum of the field weights, and the posterior match probability is recovered from that Bayes factor; this is why a rare-name agreement can carry more evidence than three common-field agreements combined. Learn the assumption you are making - conditional independence of the fields given match status - and where it breaks in real data (city and postcode, first name and gender, email and surname), because correlated fields double-count evidence and inflate scores; the fix is to merge correlated fields into one comparison or to model the correlation explicitly. Be able to read a match-weight waterfall for one pair and narrate it to a customer field by field.",
+   "minutes": 25,
+   "resource": {
+    "label": "Splink topic guide - The Fellegi-Sunter model (m, u, match weights)",
+    "url": "https://moj-analytical-services.github.io/splink/topic_guides/theory/fellegi_sunter.html"
+   }
+  },
+  {
+   "name": "Estimating m and u without labels: random sampling, EM, deterministic seeds",
+   "learn": "u is estimated by sampling random record pairs - almost all of them are non-matches, so the observed agreement rate is u; sample enough pairs that rare-value fields get a stable estimate. m is estimated either by expectation-maximisation over a blocked subset (estimate_parameters_using_expectation_maximisation with a blocking rule) or directly from a subset with a trusted shared identifier (estimate_m_from_label_column); crucially, any field fixed by the EM session's blocking rule cannot have its parameters learned in that session, so you run two or three sessions with different blocking rules and compare. Set the prior explicitly (probability_two_random_records_match) from the customer's expected duplicate rate rather than accepting a default, and inspect the parameter-estimate comparison chart: an m of 1.0 means EM never saw a true match that disagreed on that field, which is a sign of a degenerate training block rather than a perfect field.",
+   "minutes": 20,
+   "resource": {
+    "label": "Splink topic guide - Training rationale: estimating model parameters",
+    "url": "https://moj-analytical-services.github.io/splink/topic_guides/training/training_rationale.html"
+   }
+  },
+  {
+   "name": "Comparison levels and term-frequency adjustments",
+   "learn": "A comparison is an ordered list of mutually exclusive levels evaluated first-match-wins: exact on raw, exact on normalised, Jaro-Winkler >= 0.92, trigram >= 0.7, else 'all other'. Get the null level right - when one side is missing, the pair must land in a zero-weight level that contributes no evidence, never in the 'disagree' level, otherwise sparse sources are systematically penalised and their true matches fall below threshold. Term-frequency adjustments correct the biggest structural weakness of the plain model: an exact agreement on 'John Smith' is far weaker evidence than agreement on 'Aurelio Zampieri', so enabling term-frequency adjustment on a column scales the weight by that value's observed frequency (with a cap so a once-seen value does not produce an absurd weight). Without it you must raise a single global threshold high enough to survive common names, which costs recall on every rare-value pair in the dataset.",
+   "minutes": 20,
+   "resource": {
+    "label": "Splink topic guide - Defining and customising comparisons and comparison levels",
+    "url": "https://moj-analytical-services.github.io/splink/topic_guides/comparisons/customising_comparisons.html"
+   }
+  },
+  {
+   "name": "Building the labelled evaluation set: sampling, definition, agreement",
+   "learn": "Write the match definition before labelling a single pair - is a closed account the same entity as its reopened successor, is a franchise the same as its parent, is a person who changed employer and email the same customer - because most labelling disagreements are definitional, not perceptual. Sample stratified by score band rather than uniformly (a uniform sample of all candidate pairs is 99.99 percent trivial non-matches and teaches you nothing): take fixed quotas from each decile of the score distribution, over-weighting the grey band where the threshold will sit, and use active-learning helpers (dedupe's uncertain_pairs / console_label loop) to surface maximally informative pairs. Have two people label independently, measure agreement with Cohen's kappa, adjudicate every disagreement and fold the resolution back into the written definition; store labeller, timestamp, decision and a free-text reason, and freeze a holdout slice you never tune against.",
+   "minutes": 20,
+   "resource": {
+    "label": "dedupe docs - training API (uncertain_pairs, mark_pairs, console labelling)",
+    "url": "https://docs.dedupe.io/en/latest/API-documentation.html"
+   }
+  },
+  {
+   "name": "Choosing and defending a threshold from the precision/recall curve",
+   "learn": "Score the labelled pairs, then use sklearn.metrics.precision_recall_curve and average_precision_score to plot precision and recall against the match score; report PR-AUC rather than ROC-AUC because the negative class dominates so heavily that ROC looks excellent for a useless model. If you sampled by band, reweight each labelled pair by the inverse of its sampling probability before computing population precision, or your reported precision is an artefact of the sample. Pick the operating point from the customer's cost asymmetry (in billing, one false merge that combines two companies' invoices may be worth 500 missed duplicates; in marketing dedupe the reverse), and prefer two thresholds - auto-accept above t_high, auto-reject below t_low, human review in between - then size the grey band in pairs per day before promising a review workflow. Deliver it as a sentence the customer can repeat: 'at 0.95 we catch 92 percent of true duplicates with about one wrong merge per 2,000 merges'.",
+   "minutes": 24,
+   "resource": {
+    "label": "scikit-learn API - precision_recall_curve",
+    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.metrics.precision_recall_curve.html"
+   }
+  },
+  {
+   "name": "Evaluating beyond one number: edge metrics and no-ground-truth checks",
+   "learn": "Distinguish edge-level evaluation (precision, recall, F1 and F2 over predicted pairs, where F2 is right when a missed match is worse than a review) from cluster-level evaluation (whether the resulting entities are correct, which pair metrics can hide). When there is no labelled ground truth - the normal situation in week one - use structural checks: the cluster-size distribution (a cluster of 900 customers is a bug, not an entity), the count of clusters containing two or more records from a source that is supposed to be internally unique, the share of records in singleton clusters, and a random sample of 30 clusters reviewed by the customer's own steward. Always report the number the business feels - input record count versus resolved entity count per source - and show the same metric recomputed at two or three thresholds so nobody thinks the number is a law of nature.",
+   "minutes": 18,
+   "resource": {
+    "label": "Splink topic guide - Edge metrics for evaluating linkage quality",
+    "url": "https://moj-analytical-services.github.io/splink/topic_guides/evaluation/edge_metrics.html"
+   }
+  },
+  {
+   "name": "From scored pairs to entities: connected components and the giant-cluster failure",
+   "learn": "Cut the scored pairs at the threshold, build a sparse adjacency matrix and take connected components (scipy.sparse.csgraph.connected_components on a CSR matrix returns n_components and a labels array in near-linear time, deterministically and independent of row order, which is what makes the output reproducible). Then internalise the transitive-closure trap: A-B at 0.97 and B-C at 0.97 merge A with C even if A-C scores 0.02, so one hub record with a sentinel phone number chains thousands of entities into a single blob. Mitigate by checking the component-size distribution every run with a hard alert above a size cap, by raising the threshold or removing hub records that appear in an implausible number of edges, and by using a cluster-aware algorithm (hierarchical agglomerative with average linkage, or Splink's cluster_pairwise_predictions_at_threshold plus cluster-quality metrics) when chaining is real rather than incidental.",
+   "minutes": 18,
+   "resource": {
+    "label": "SciPy API - scipy.sparse.csgraph.connected_components",
+    "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.csgraph.connected_components.html"
+   }
+  },
+  {
+   "name": "Survivorship rules, golden records and provenance",
+   "learn": "Survivorship is decided per attribute, not per record: source priority (billing system wins for legal name and tax ID, CRM wins for owner, support tool wins for last contact), recency by a trustworthy updated_at, completeness (longest non-null, most-populated record), frequency (modal value across the cluster), or 'prefer the verified flag'. Emit provenance alongside every surviving value - legal_name, legal_name_source_record_id, legal_name_rule, legal_name_confidence - so that when the customer disputes one field you can point at the exact source row and rule rather than re-deriving the whole pipeline. Keep multi-valued attributes as arrays (all known emails, all known addresses with a primary flag) instead of forcing a single winner, and make the golden-record build a pure function of (cluster membership, source rows, rule set version) so it can be recomputed and diffed.",
+   "minutes": 25,
+   "resource": {
+    "label": "RFC 9562 - UUID formats, including name-based UUIDv5 for deterministic IDs",
+    "url": "https://www.rfc-editor.org/rfc/rfc9562.html"
+   }
+  },
+  {
+   "name": "Stable entity IDs across reruns: crosswalks, merges, splits",
+   "learn": "Never derive the entity ID from the cluster's member set (a hash of members changes the ID the moment one record joins, breaking every downstream foreign key); instead keep an append-only crosswalk table of source_record_id to entity_id with valid_from/valid_to and a run_id, and assign IDs by rules: an unchanged cluster keeps its ID, a cluster that absorbs new records keeps the ID of its largest or oldest predecessor, two clusters merging emit a merge lineage row with a surviving and a retired ID, and a split issues new IDs for both sides with lineage pointing back. Publish retired IDs with their successor so downstream systems can follow the redirect rather than 404-ing; UUIDv5 over a stable natural key (RFC 9562) is only safe where such a key genuinely exists. Test this the way you would test a migration: run the pipeline twice on identical input and assert zero ID churn, then run it on input plus 1,000 new rows and assert churn is bounded and fully explained by the lineage table.",
+   "minutes": 18,
+   "resource": {
+    "label": "Zingg docs - entity resolution workflow, linking and cluster output",
+    "url": "https://docs.zingg.ai/zingg/"
+   }
+  },
+  {
+   "name": "The review queue: making the grey band an operable product",
+   "learn": "The grey band between t_low and t_high is a workflow, not a leftover. Ship a queue item that contains the two records side by side, the field-level evidence (which comparison level fired and its match weight, ideally as a waterfall), links back to both source systems, three actions (same / different / cannot tell) and a required reason on 'different'. Persist steward decisions in an override table applied after scoring - explicit always-merge and never-merge pairs - so a human decision survives every future model retrain, and feed the same decisions back as labels for the next training round. Instrument the queue: depth, arrival rate, decisions per day, median age, and the reversal rate of past decisions; if the daily arrival rate exceeds what the customer's team can clear, the thresholds are wrong and no amount of staffing fixes it.",
+   "minutes": 15,
+   "resource": {
+    "label": "Splink docs - Real time record linkage (scoring new records against an existing model)",
+    "url": "https://moj-analytical-services.github.io/splink/demos/examples/duckdb/real_time_record_linkage.html"
+   }
+  },
+  {
+   "name": "PII, hashed linkage and the compliance conversation",
+   "learn": "Do the linkage inside the customer's boundary by default; the moment names, dates of birth and addresses need to move, you are having a legal conversation, not an engineering one. Know why naive hashing is not anonymisation - SHA-256 of an email or of a DOB is trivially reversible by dictionary attack over a small domain - and what privacy-preserving record linkage actually offers: Bloom-filter (cryptographic long-term key) encodings of n-grams that support similarity comparison on encoded values, with a documented leak of frequency information and known attacks, implemented in projects such as anonlink. On the compliance side, linkage creates new personal data and inherits obligations: accuracy under GDPR Art. 5(1)(d), purpose limitation when the linked view is used for something the source consent did not cover, and retention/erasure - a merged golden record must support removing one contributing source record and rebuilding without it, which is only possible if you kept provenance.",
+   "minutes": 15,
+   "resource": {
+    "label": "anonlink (CSIRO Data61) - privacy-preserving record linkage toolkit",
+    "url": "https://github.com/data61/anonlink"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can take three dirty exports of the same ~50k customers and produce, in one command, a candidate pair set under 1e7 pairs with measured pairs completeness above 99 percent, and state the reduction ratio versus the 11.25 billion all-pairs baseline.",
+  "You can justify each field's comparator and threshold in one sentence apiece (why Jaro-Winkler on surname, why trigram Jaccard on company name, why a day-difference band on date of birth) and show what breaks when the wrong one is used.",
+  "You can explain a single pair's score field by field from a match-weight waterfall - prior, per-field log2(m/u), term-frequency adjustment - to a non-statistical customer stakeholder in under three minutes.",
+  "You can label 500 pairs against a written match definition with a second labeller, report Cohen's kappa, and produce a precision/recall curve with PR-AUC on the labelled set correctly reweighted for stratified sampling.",
+  "You can defend a chosen threshold in the customer's own units: expected wrong merges per thousand merges, expected missed duplicates, and the resulting daily review-queue volume, and show how all three move at two alternative thresholds.",
+  "You can emit golden records with per-attribute survivorship rules and provenance columns, and trace any field in any golden record back to the exact source row and rule that produced it.",
+  "You can run the pipeline twice on identical input and prove zero entity_id churn, then rerun with 1,000 new records and explain every ID change from the merge/split lineage table.",
+  "You can detect and fix a giant-cluster incident: find the hub record or sentinel value chaining the component, quantify how many entities were wrongly merged, and ship the guard (size cap alert, hub-degree filter or raised threshold) that prevents it recurring."
+ ],
+ "failureModes": [
+  "A blocking rule keys on postcode plus first initial; in the customer's data 38 percent of records have a null postcode, so those rows are never compared to anything and the match rate looks acceptable while an entire segment of the customer base is silently unresolved.",
+  "The placeholder phone number 000-000-0000 appears on 4,200 records; it survives normalisation, forms one enormous block, produces high-weight agreements, and transitive closure chains 4,200 unrelated customers into a single golden record that then receives one merged invoice.",
+  "The threshold was tuned on 500 pairs sampled from the grey band only, so the reported precision of 0.98 is a sample artefact; in production, where the score distribution is completely different, the real precision is 0.83 and the customer finds it before you do.",
+  "Entity IDs are generated as a hash of the sorted member record IDs; the monthly rerun adds 900 new records, 30 percent of entity IDs change, and every downstream dashboard, export and foreign key in the customer's BI layer breaks overnight.",
+  "Survivorship picks the most recently updated value for every field, but the support tool touches updated_at on every ticket view, so the 'most recent' legal name is whatever a support agent last typed rather than the billing system's authoritative value.",
+  "An upstream export starts prefixing phone numbers with a country code after a vendor upgrade; the phone comparison silently drops from agreeing to disagreeing, the match rate falls 20 percent, and because nothing errors the regression is only noticed weeks later in a revenue report.",
+  "The model treats city and postcode as independent fields, so a pair agreeing on both gets roughly double the evidence it deserves; a whole class of same-town different-person pairs crosses the threshold and merges two patients' medication histories.",
+  "Names, dates of birth and addresses are copied to a laptop or a cloud notebook to 'iterate faster' during the engagement; the linkage works, and the finding in the customer's next audit is that personal data left the approved boundary, which ends the project regardless of match quality."
+ ],
+ "interviewQuestions": [
+  "A customer hands you three exports of roughly 50k customer records each with no shared key and asks for one clean list by Friday. Walk me through your plan hour by hour, and tell me exactly which numbers you would show them on Friday to justify that the result is correct.",
+  "Explain the Fellegi-Sunter model to a data steward who has no statistics background: what m and u mean, why log2(m/u) is a weight you can add up, and what the conditional independence assumption is costing you in their data.",
+  "Design the blocking strategy for a dataset where 40 percent of records have a null date of birth, surnames are heavily skewed (10 percent are one of five values) and addresses are free text. What rules do you write, how do you measure that they are good enough, and what do you do about the oversized blocks?",
+  "How do you choose a match threshold, and how does that choice differ between a billing system, a healthcare patient index and a marketing suppression list? What would you put in a contract or SOW as the acceptance criterion?",
+  "Debug: the monthly rerun produces one cluster containing 6,000 records that were 6,000 separate entities last month. Nothing in the code changed. What do you check, in what order, and how do you unwind the damage in the customer's downstream systems?",
+  "The customer's steward says record 12345 and record 98765 are clearly the same company but your system did not merge them. Walk me through the diagnosis: how do you tell whether it was blocking, a comparator, the model parameters, the threshold or the clustering step, and what evidence distinguishes each case?",
+  "You must link a hospital's patient records with an insurer's member records, and neither side may see the other's raw identifiers. What are your options, what does privacy-preserving record linkage actually protect against, and what would you tell both legal teams about the residual risk?"
+ ],
+ "proofOfWork": "A public repo `entity-resolution-teardown` that turns the deliverable into an artefact a customer's data team can audit. It ships a synthetic-but-nasty generator that produces three exports of the same 50,000 entities with controlled, labelled corruption - typos and OCR-style substitutions, transposed given/surname order, nicknames, transliterated diacritics, address abbreviation variants, phone formats with and without country codes, 4,000 rows carrying sentinel values, and a documented true-match key that is held out from every model - so precision and recall are exactly computable rather than estimated. On top of it, a benchmark harness runs four pipelines over the same input: a naive all-pairs baseline (on a 5,000-row subsample, to time the quadratic wall honestly), pure deterministic rules, a SQL-only pg_trgm plus phonetic-blocking matcher that runs inside Postgres with no data export, and a Splink Fellegi-Sunter model; it emits one comparison table of pairs generated, pairs completeness, reduction ratio, precision, recall, F1 and F2, wall-clock and peak memory for each, plus overlaid precision/recall curves. Add a chaos suite that injects one failure per run - a new sentinel value, a country-code format change on one source, a null-rate jump in the blocking field - and asserts the monitoring catches it (match-rate alert, cluster-size cap, source-freshness check) before the golden records change; a reproducibility test asserting zero entity_id churn on identical input and bounded, lineage-explained churn on input plus new rows; and a two-page ENTITY-RESOLUTION-DECISIONS.md written for the customer, stating the match definition, per-field comparators and thresholds, the survivorship rule per attribute with its owner, the chosen operating point with its expected wrong-merge rate, and the runbook for unwinding a bad merge."
+}

@@ -1,0 +1,228 @@
+{
+ "i": 92,
+ "topic": "Timed algorithmic screens: core data structures, complexity out loud, easy-medium volume",
+ "track": "K. Interview Loop and Mocks",
+ "month": 6,
+ "hours": 16,
+ "why": "Every FDE loop worth running still opens with a 45-minute algorithmic screen, and it is a pure filter: nobody gets to the customer-simulation and system-design rounds you are actually strong at if a hash-map problem eliminates you in week one. The screen is also the only round that tests, under a clock and in front of a stranger, the reflex the job depends on - naming the shape of a problem and its cost before you touch the keyboard, which is the same reflex that stops you shipping an accidental quadratic into a customer's nightly job. Because FDEs are judged on working-with-a-human as much as on code, the bar here is not 'solved it' but 'named the pattern, stated time and space, landed a working easy-medium inside 20 minutes, and narrated one optimisation without going silent'.",
+ "prerequisites": [
+  "Python you can type without a reference open: comprehensions, slicing, tuple unpacking, dict/set idioms, collections.Counter/defaultdict/deque, and f-strings - the level assumed by topic 27 (Production Python architecture).",
+  "Basic complexity vocabulary: what O(n), O(n log n) and O(n^2) mean, and the ability to read a nested loop and say which one it is. This topic makes it fast and spoken, it does not teach it from zero.",
+  "pytest fluency from topic 39 (Testing and contracts) - parametrize and fixtures - because your self-check harness and fuzz oracle are pytest files, not print statements.",
+  "git from topic 04 at the level of committing per problem with a meaningful message, since the deliverable is a public repo whose commit timestamps are part of the evidence.",
+  "A working local editor setup with autocomplete and any LLM assistant switchable OFF in one keystroke, plus a visible countdown timer, because every drill in this topic is timed and unassisted.",
+  "Screen-and-audio recording that you can start in under 30 seconds (OBS or QuickTime) - the three mock screens are graded from tape, not memory."
+ ],
+ "subtopics": [
+  {
+   "name": "Scope the actual screen, then build the rubric and the pattern-tagged log",
+   "learn": "Before drilling, pin down what you are drilling for: an FDE algorithmic screen is typically 45 minutes, one or two problems at easy-to-medium difficulty, in a shared pad (CoderPad, HackerRank, or a plain file on a screen share) with no autocomplete, no internet and a human listening. That format means depth of algorithm knowledge is not the constraint - speed, spoken reasoning and not freezing are. Design the log schema now because the log is the deliverable: one row per problem with pattern tag, source, date, minutes to a working solution, the complexity you stated BEFORE coding versus the complexity of what you actually wrote, first-submit pass yes/no, bug class if not, and one sentence of insight. Then write the five-axis rubric you will grade every session against - pattern named before typing, complexity stated before typing, working solution under 20 minutes, longest silence under 15 seconds, one optimisation narrated - and grade two of your existing solutions with it to check it discriminates.",
+   "minutes": 45,
+   "resource": {
+    "label": "Tech Interview Handbook - Coding interview techniques",
+    "url": "https://www.techinterviewhandbook.org/coding-interview-techniques/"
+   }
+  },
+  {
+   "name": "Complexity out loud: the sentence you say before you type",
+   "learn": "Fix one template and use it every single time: 'This is a sliding window. Time O(n) because each index enters and leaves the window once. Space O(k) for the counter map, excluding the output.' Get the distinctions right so the sentence survives a follow-up: worst case versus average versus amortized (a dynamic-array append is amortized O(1) under geometric growth, but one individual append is O(n)); O versus Theta; why the log base is irrelevant; and how to cost a recursion as number-of-nodes times work-per-node, with the call stack counted separately as space. Space must include the output, the recursion depth and any memo table, so state it as 'O(n) auxiliary, plus O(n) for the output' rather than leaving it ambiguous. Drill by taking twenty solutions you have already written, saying the complexity from memory, then verifying by counting loops, branching factor and depth.",
+   "minutes": 45,
+   "resource": {
+    "label": "MIT OpenCourseWare - 6.006 Introduction to Algorithms (Spring 2020)",
+    "url": "https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-spring-2020/"
+   }
+  },
+  {
+   "name": "The Python container cost table and the constant factors that decide a timeout",
+   "learn": "Memorise the table cold: list index and append O(1) amortized, but insert(0), pop(0) and del from the middle are O(n); membership `x in list` is O(n) while `x in set` or a dict lookup is O(1) average (O(n) worst case under hash collisions); sort is O(n log n) Timsort and near-linear on data that is already partially ordered; slicing copies, so s[i:j] costs O(j-i); and repeated string concatenation in a loop is O(n^2) where ''.join(parts) is O(n). Know the constant factors that separate a pass from a timeout: collections.deque popleft is O(1) and list.pop(0) is the single most common source of an accidental quadratic; a set of tuples beats a list of tuples for visited; and heapq and sorted are C-level while your hand-rolled equivalents are not. When an interviewer asks 'will this pass', answer numerically - CPython does very roughly 10^7 simple operations per second, so O(n^2) at n = 10^5 is 10^10 operations and cannot finish.",
+   "minutes": 40,
+   "resource": {
+    "label": "Python Wiki - TimeComplexity (operation costs for list, deque, set, dict)",
+    "url": "https://wiki.python.org/moin/TimeComplexity"
+   }
+  },
+  {
+   "name": "Arrays: two pointers, sliding window, prefix sums, Kadane",
+   "learn": "Three templates typed without thinking. Opposite-end two pointers on sorted data: while l < r, compare the pair against the target and move the pointer that can help. Same-direction fast/slow, where slow is the write index for in-place removal, dedupe and partition. Variable-size sliding window: always extend right, shrink from the left while the invariant is violated, record the answer after the shrink - with the fixed-size variant that just drops the left element when r - l + 1 > k. Prefix sums make range-sum queries O(1) after O(n) preparation, and prefix[j] - prefix[i] plus a dict of previously seen prefix values solves 'count subarrays summing to k' in one pass, provided you seed the map with {0: 1} for the empty prefix. Add Kadane (running max ending here, reset when it goes negative) and difference arrays for range-update problems, and state the window invariant out loud before writing the loop.",
+   "minutes": 55,
+   "resource": {
+    "label": "Tech Interview Handbook - Array cheatsheet",
+    "url": "https://www.techinterviewhandbook.org/algorithms/array/"
+   }
+  },
+  {
+   "name": "Hash maps and sets: seen-maps, counting, grouping, and key design",
+   "learn": "Four motions cover most of the easy-medium band: the seen-map (store value to index, look up the complement, one pass); frequency counting with collections.Counter, including most_common(k), Counter subtraction, and direct equality for anagram checks; grouping with defaultdict(list) keyed on a canonical form such as the sorted string, a 26-tuple of counts, or (r//3, c//3) for sudoku boxes; and set membership plus set algebra (&, |, -) replacing nested loops. Key design is where people quietly lose points: keys must be hashable and canonical, so lists become tuples and dicts become frozenset(d.items()), floats as keys are a bug waiting to happen, and mutating an object after using it as a key corrupts the table. Know that dict preserves insertion order from Python 3.7, that mutating a dict while iterating raises RuntimeError so you snapshot list(d) first, and that d.get(k, default), setdefault and Counter remove the KeyError branch entirely.",
+   "minutes": 50,
+   "resource": {
+    "label": "Tech Interview Handbook - Hash table cheatsheet",
+    "url": "https://www.techinterviewhandbook.org/algorithms/hash-table/"
+   }
+  },
+  {
+   "name": "Strings: immutability, character tables, and the six standard shapes",
+   "learn": "Python strings are immutable, so any in-place algorithm converts to a list and joins at the end, and building output by += inside a loop is the quadratic trap from the cost table. Know str.split() on whitespace versus split(sep) on a literal, that strip/lstrip/rstrip take a character SET and not a suffix (removeprefix/removesuffix since 3.9 do what people assume strip does), ord/chr with a 26-slot list as the constant-space frequency table, and that s[::-1] reverses in O(n). Drill six shapes until they are automatic: palindrome check with two pointers plus an isalnum filter and casefold, valid anagram, longest substring without repeating characters as a window with a last-seen index map, group anagrams by canonical key, run-length encode and decode, and manual tokenising with an index pointer for when split() is disallowed. Ask 'ASCII or unicode?' and 'case sensitive?' as clarifying questions - they are free credibility and they change the table size.",
+   "minutes": 45,
+   "resource": {
+    "label": "Python docs - Text Sequence Type (str methods)",
+    "url": "https://docs.python.org/3/library/stdtypes.html#text-sequence-type-str"
+   }
+  },
+  {
+   "name": "Sorting, greedy and the interval family",
+   "learn": "Use sorted(key=...) with tuple keys for multi-level ordering, negate a numeric field to mix ascending and descending in one key, and remember Python removed cmp - functools.cmp_to_key is the escape hatch when the ordering is not expressible as a key. Timsort is stable, which is exactly what makes 'sort by secondary, then sort by primary' work. The interval family is one motion with different sort keys: sort by start and sweep, merging while the current start <= the last end; sort by END for maximum non-overlapping selection (activity selection); use a min-heap of end times or two separately sorted start/end arrays for minimum meeting rooms; and use a sweep line of +1/-1 events for maximum concurrency. Greedy always needs a spoken exchange argument - say why the locally best choice cannot be beaten - and keep the counterexample reflex ready: coin change with arbitrary denominations is where greedy fails and DP begins.",
+   "minutes": 55,
+   "resource": {
+    "label": "Python docs - Sorting HOWTO (key functions, stability, cmp_to_key)",
+    "url": "https://docs.python.org/3/howto/sorting.html"
+   }
+  },
+  {
+   "name": "Binary search, bisect, and binary search on the answer",
+   "learn": "Adopt one half-open template and never improvise: lo, hi = 0, len(a); while lo < hi: mid = (lo + hi) // 2; then either lo = mid + 1 or hi = mid - the loop always shrinks, always terminates, and lo ends as the insertion point. Derive bisect_left versus bisect_right from it and use them for first occurrence, last occurrence, count in a range, and 'smallest element >= x'; know bisect's key= argument (3.10+) so you do not build a parallel array of keys. Then the variant that carries most medium screens: binary search over the ANSWER space on a monotone predicate - minimum ship capacity in D days, minimum eating speed, split-array-largest-sum - where you write feasible(x) as a boolean, argue it is monotone, and search the value range instead of indices. Add rotated-sorted-array search, and be able to name the off-by-one bug taxonomy: an inclusive hi with lo = mid is an infinite loop, and hi = mid - 1 with a while lo <= hi loop is a different, also valid, template you must not mix with the first.",
+   "minutes": 55,
+   "resource": {
+    "label": "Python docs - bisect (array bisection algorithm)",
+    "url": "https://docs.python.org/3/library/bisect.html"
+   }
+  },
+  {
+   "name": "Heaps: top-k, k-way merge, running median, lazy deletion",
+   "learn": "heapq is a min-heap over a plain list: heappush and heappop are O(log n), heapify is O(n), and heap[0] is an O(1) peek. For a max-heap push -x, or push a tuple (-priority, counter, item) where counter is a monotonically increasing integer so comparison never falls through to an uncomparable payload - that tiebreak is the single most common heap bug in interviews. Four patterns: top-k with a size-k heap of the opposite polarity in O(n log k) (and heapq.nlargest when k approaches n), k-way merge with heapq.merge or a heap of (value, list_index, elem_index), interval scheduling with a heap of end times, and the two-heap running median with a rebalance step. Learn lazy deletion because heapq has no decrease-key or remove: push the updated entry and skip stale entries on pop by checking a validity dict - which is exactly how Dijkstra is written in Python.",
+   "minutes": 50,
+   "resource": {
+    "label": "Python docs - heapq (heap queue algorithm)",
+    "url": "https://docs.python.org/3/library/heapq.html"
+   }
+  },
+  {
+   "name": "Stacks, queues, deque and the monotonic stack",
+   "learn": "A list is your stack (append/pop O(1) at the end); collections.deque is your queue (append/popleft O(1) at both ends) and also your sliding-window maximum, where you pop from the back while the incoming value is larger and pop from the front when the front index leaves the window. The monotonic stack answers the whole 'next greater element / previous smaller / stock span / daily temperatures / largest rectangle in histogram' family in O(n): push indices, pop while the top violates the ordering, and resolve the popped element's answer at the moment it is popped - the same seven lines with a different comparison. Also drill balanced brackets with a pairing dict, basic expression evaluation with a stack plus a running sign, and converting a recursive traversal into an explicit stack, which you need when the input depth exceeds Python's default recursion limit of 1000.",
+   "minutes": 45,
+   "resource": {
+    "label": "Python docs - collections.deque",
+    "url": "https://docs.python.org/3/library/collections.html#collections.deque"
+   }
+  },
+  {
+   "name": "Linked lists: dummy head, reversal, fast/slow, merge",
+   "learn": "Every linked-list question is one of four motions, and they compose. Dummy head removes the special case for operations that can change the head (insert, delete, remove-nth). Iterative reversal is prev/cur with the save-next-then-repoint order (nxt = cur.next; cur.next = prev; prev = cur; cur = nxt). Fast/slow finds the middle and detects a cycle by Floyd's algorithm - then reset one pointer to head and advance both one step at a time to find the cycle entry. Merge uses a tail pointer on a dummy. Type reverse-list, detect-and-remove-cycle, remove-nth-from-end with a fixed n-gap between two pointers, merge-two-sorted-lists, and palindrome-list (split at middle, reverse the second half, compare) from memory. Trace the three-node case out loud on the shared pad - interviewers accept that as evidence, and it catches the null dereference on the final node that fails most first submissions.",
+   "minutes": 40,
+   "resource": {
+    "label": "VisuAlgo - Linked List, Stack, Queue, Deque visualisation",
+    "url": "https://visualgo.net/en/list"
+   }
+  },
+  {
+   "name": "Trees: recursive and iterative traversals, BST invariants, LCA",
+   "learn": "Write preorder, inorder and postorder recursively in three lines each, then produce the iterative forms on demand: inorder with an explicit stack pushing the left spine, preorder with a stack pushing right-then-left, and level order with a deque plus a per-level size snapshot so you can emit one list per level. The BST invariant is not 'greater than the left child' but 'every node in the left subtree < node < every node in the right subtree' - so validate by passing (low, high) bounds down the recursion, never by comparing to immediate children, and remember that an inorder walk of a BST is sorted, which is the whole answer to kth-smallest. Drill height and diameter (return height, update a nonlocal best), balanced check, LCA in a BST (descend while both targets are on the same side) versus LCA in a general binary tree (return non-null from both subtrees), root-to-leaf path sums with backtracking on a shared path list, and serialize/deserialize with a null sentinel.",
+   "minutes": 60,
+   "resource": {
+    "label": "Princeton algs4 - Binary Search Trees",
+    "url": "https://algs4.cs.princeton.edu/32bst/"
+   }
+  },
+  {
+   "name": "Graphs: representation, BFS, DFS, and the grid variants",
+   "learn": "Build the adjacency list from an edge list in one line with defaultdict(list), and say out loud whether the graph is directed, whether edges can repeat, and whether nodes are integers or strings before you choose the structure. BFS with a deque gives the shortest path in an unweighted graph - mark visited at ENQUEUE time, never at dequeue, or duplicates flood the queue and the complexity degrades; carry distance either in the visited dict or as (node, dist) tuples. DFS is either recursion or an explicit stack. The grid family is most of what a 45-minute screen actually asks: number of islands, flood fill, rotting oranges as a multi-source BFS seeded with every source at distance 0, and word search as backtracking that unmarks the cell on the way out. State complexity as O(V + E) with the justification 'each vertex is enqueued once and each edge is examined once', or O(R*C) for a grid, and keep [(1,0),(-1,0),(0,1),(0,-1)] as a memorised constant.",
+   "minutes": 60,
+   "resource": {
+    "label": "Princeton algs4 - Undirected Graphs (adjacency lists, BFS, DFS)",
+    "url": "https://algs4.cs.princeton.edu/41graph/"
+   }
+  },
+  {
+   "name": "Topological sort and cycle detection on a DAG",
+   "learn": "Kahn's algorithm: compute in-degrees, seed a deque with every zero-in-degree node, pop and decrement neighbours, appending each node that reaches in-degree zero - and if the number of emitted nodes is less than V, the graph has a cycle. That count check IS the cycle detector and is the entire answer to course-schedule. The DFS alternative uses three states (unvisited / in-progress / done): reaching an in-progress node is a back edge and therefore a cycle, and appending nodes on the way out then reversing yields a valid order. Know that undirected cycle detection is a different check (a visited neighbour that is not the parent) and that union-find is usually cleaner there. Say the customer-facing analogue out loud, because this is the one algorithm on this list you will genuinely run on the job: ordering migration steps, dbt models or deployment stages, where the useful part is not the order but a cycle error message that names the offending nodes.",
+   "minutes": 40,
+   "resource": {
+    "label": "Princeton algs4 - Directed Graphs (topological sort, cycle detection)",
+    "url": "https://algs4.cs.princeton.edu/42digraph/"
+   }
+  },
+  {
+   "name": "Union-Find (disjoint set union) in ten lines",
+   "learn": "Type it from memory: parent list initialised to self (or a dict when ids are strings), find with path compression (parent[x] = find(parent[x])), union by size or rank, and a components counter decremented on each successful union. State the cost as 'effectively constant, O(alpha(n)) amortized with both optimisations' rather than claiming plain O(1). Reach for it whenever a problem is about merging groups and nothing is ever removed: number of provinces, redundant connection, accounts merge, friend circles, and Kruskal's MST. Know its limits so you do not oversell it - no deletion, no path or distance queries, and no 'were these connected as of time T' without extra machinery - and know that the dict-based version is what you want when the elements are emails or hostnames rather than 0..n-1, which is also the version that turns up in real customer data-dedupe work.",
+   "minutes": 35,
+   "resource": {
+    "label": "Princeton algs4 - Union-Find (quick-union, path compression, weighting)",
+    "url": "https://algs4.cs.princeton.edu/15uf/"
+   }
+  },
+  {
+   "name": "Recursion and backtracking: choose, explore, un-choose",
+   "learn": "One template - choose, recurse, un-choose - plus a results list, covers subsets (include/exclude, or the loop-from-start-index form), permutations (a used array, or in-place swapping), combinations (start index prevents revisiting), and constraint search such as n-queens, sudoku and word search with a pruning predicate checked before the recursive call. Duplicate handling is the recurring bug and has one fix: sort the input, then inside the loop skip when i > start and nums[i] == nums[i-1]. Append a COPY of the current path (path[:]) to results, not the live list, or every result mutates to empty. State complexity honestly - O(2^n * n) for subsets, O(n! * n) for permutations, with recursion depth n as the space - and know Python's default recursion limit of 1000, why sys.setrecursionlimit can segfault the interpreter rather than raise, and how to convert the recursion to an explicit stack when depth is the real constraint.",
+   "minutes": 50,
+   "resource": {
+    "label": "Jeff Erickson, Algorithms - Chapter 2: Backtracking (free textbook PDF)",
+    "url": "https://jeffe.cs.illinois.edu/teaching/algorithms/book/02-backtracking.pdf"
+   }
+  },
+  {
+   "name": "Dynamic programming: state, transition, base case, then space optimisation",
+   "learn": "Never say 'this is DP' without immediately saying the state as a sentence - 'dp[i] is the maximum total considering the first i houses' - followed by the transition and the base cases; that sentence is what the interviewer is grading, not the code. Decide deliberately between memoized recursion (functools.cache on a pure function with hashable arguments, easiest to derive from the brute force) and bottom-up tabulation (explicit loops, easier to space-optimise), and be able to convert one to the other. Drill the eight patterns that cover the easy-medium band: climbing stairs and house robber (1-D, two rolling variables), coin change (unbounded, min over choices, and the sentinel for unreachable), longest increasing subsequence in O(n^2) then the O(n log n) bisect version, 0/1 knapsack and subset-sum (2-D, then a 1-D rolling row iterated in reverse), edit distance and LCS (2-D with the three-way transition), unique paths, and word break over prefixes with a set of words. Always quote complexity as number-of-states times cost-per-transition, and know how to reconstruct the chosen items by storing parent pointers rather than only the optimal value.",
+   "minutes": 60,
+   "resource": {
+    "label": "Jeff Erickson, Algorithms - Chapter 3: Dynamic Programming (free textbook PDF)",
+    "url": "https://jeffe.cs.illinois.edu/teaching/algorithms/book/03-dynprog.pdf"
+   }
+  },
+  {
+   "name": "Edge cases, invariants, and self-testing without a judge",
+   "learn": "Before you claim you are done, run a fixed spoken checklist: empty input, single element, all elements equal, negatives and zero, duplicates, the maximum n in the constraints, and both ends of every loop and slice. Mention integer overflow even though Python has arbitrary precision - the interviewer may be thinking in Java or C++ and will credit you for it. Build a harness so you find your own bugs fast: one pytest file per logged problem using pytest.mark.parametrize with the given samples plus three edge cases, and, for anything you got wrong, a brute-force reference implementation plus a random-input fuzz loop that compares the two and prints the smallest failing input. That loop finds the case the samples missed in 30 seconds instead of 10 minutes of staring, and shrinking the counterexample by hand is far faster than scattering print statements. In the live screen, dry-run on the smallest example out loud and say what you expect each line to produce before you run anything.",
+   "minutes": 40,
+   "resource": {
+    "label": "pytest - How to parametrize fixtures and test functions",
+    "url": "https://docs.pytest.org/en/stable/how-to/parametrize.html"
+   }
+  },
+  {
+   "name": "The volume engine: 60 problems in tagged waves, spacing and a retry policy",
+   "learn": "Volume without a system produces recognition, not recall - you feel prepared because you have seen it, then freeze because you cannot regenerate it. Run three waves: wave 1 is 30 easies spread across all pattern tags at a hard 15-minute cap; wave 2 is 25 mediums at a 25-minute cap with the pattern and complexity spoken first; wave 3 is 5 cold re-solves of problems you previously failed, from a blank file, at least seven days later. Enforce three rules with no exceptions: at the cap you STOP, read the editorial, log the bug class and re-queue the problem for seven days out; a problem you looked up is never logged as solved; and any pattern tag with fewer than three log entries is a hole you fill next session. Track the two numbers that actually predict screen performance - median minutes-to-working-solution per pattern, and first-submit pass rate on mediums - and let the trend, not your mood, decide what you drill next.",
+   "minutes": 40,
+   "resource": {
+    "label": "NeetCode - free practice problem lists grouped by pattern",
+    "url": "https://neetcode.io/practice"
+   }
+  },
+  {
+   "name": "Three recorded 45-minute two-problem mock screens, then mine the tape",
+   "learn": "Run the real format, not a comfortable version of it: two problems, 45 minutes total, screen and audio recorded, a plain editor with autocomplete and any assistant switched off, and a human interviewer whenever you can get one. Per problem, follow a fixed protocol - restate the problem and walk one example, ask exactly two clarifying questions (input size, duplicates or empty allowed), name the pattern and state time and space, code while narrating, dry-run the example aloud, then say 'the O(n^2) works, here is the O(n) with a hash map' and either implement it or describe it precisely if the clock is gone. Grade every tape on the five rubric axes plus longest silence in seconds, minutes-to-working-solution per problem, and every moment you started typing before speaking. Do mock 2 only after fixing the single worst defect from mock 1, and mock 3 only after fixing the worst from mock 2 - three graded tapes with a measured delta are worth more than ten ungraded ones.",
+   "minutes": 55,
+   "resource": {
+    "label": "OBS Studio - Quick Start Guide (screen and audio recording setup)",
+    "url": "https://obsproject.com/kb/quick-start-guide"
+   }
+  }
+ ],
+ "outcomes": [
+  "You can name the pattern and state time and space complexity out loud before writing a line, evidenced across 60 logged problems, with your pre-coding complexity matching the shipped solution on at least 90 percent of entries.",
+  "You can land a working, self-tested easy-medium solution on an unseen problem in under 20 minutes, verified by log timestamps and by three recorded screens rather than by recollection.",
+  "You can type from memory, with no reference open, the half-open binary search, BFS on a grid with visited marked at enqueue, iterative inorder traversal, Kahn's topological sort, union-find with path compression, and a monotonic stack.",
+  "You can recite the Python container cost table and predict whether a candidate approach will time out at a given n by multiplying operations against roughly 10^7 per second, and name the cheaper container.",
+  "You can present a brute force, state its cost, then narrate the optimisation and what it trades, with no silence longer than 15 seconds - measured off the tapes, not estimated.",
+  "You can locate your own bug in under five minutes using a brute-force reference plus a random-input fuzz loop that reports the smallest failing case, instead of opening the editorial.",
+  "You can tag any of the 60 logged problems into your pattern taxonomy, and name the two patterns that account for most of your failures with log evidence and a re-solve showing the delta.",
+  "You can cost a recursive solution correctly as nodes times work-per-node, and separately account for recursion depth and output size in the space answer."
+ ],
+ "failureModes": [
+  "You write list.pop(0) inside a loop because it read fine on the 200-row sample; the customer's 2 million-row nightly export turns a four-minute job into six hours and misses the delivery SLA that your team wrote into the statement of work.",
+  "You go quiet for four minutes debugging an index error, the interviewer loses the thread entirely, and the write-up reads 'competent coder, unclear how they would work in front of a customer' - which is a no for an FDE role regardless of whether the code compiled.",
+  "You reach straight for the clever O(n) solution, tangle the hash-map bookkeeping, and hand in nothing at minute 45 when the brute force you skipped would have passed and left ten minutes to optimise.",
+  "You claim O(n) for a loop that contains `if x in some_list`, the interviewer asks you to walk the complexity again, and you cannot see it - the scorecard records that you do not reason about cost, which is the exact signal the round exists to test.",
+  "A recursive DFS you shipped over a customer's dependency graph works on the 300-node test fixture and dies with RecursionError on their 50,000-node production graph, at 02:00, in a job with no retry.",
+  "You mark BFS nodes visited at dequeue rather than enqueue; the queue fills with duplicates, memory blows up on a 2000x2000 grid, and the same bug in a customer's crawler quietly multiplies API calls until they hit a rate limit.",
+  "You group customer records with a hash map keyed on a raw string that was never normalised for case and trailing whitespace, so 'Acme Corp ' and 'acme corp' become two accounts and the dedupe report you presented is wrong in the meeting.",
+  "You memorised specific solutions rather than patterns, so a one-clause variation - duplicates now allowed, k may exceed n, the array is rotated - leaves you with nothing to say and no way to rederive it."
+ ],
+ "interviewQuestions": [
+  "Explain why appending to a Python list is O(1) but inserting at index 0 is O(n), what structure you use when you need both ends, and what amortized complexity means. When does the amortization argument stop being a fair thing to tell a customer?",
+  "Given an array of up to 10^5 integers and a target, decide whether two of them sum to it. Give me the brute force and its cost, then the optimisation, and tell me precisely what you traded to get it and when that trade would be the wrong one.",
+  "Write a topological sort. Now: the input is a customer's pipeline config and it contains a cycle. How does your code detect it, and what exactly does the error message say so their engineer can fix it without calling you?",
+  "Debug: this solution passes the provided samples and times out on the hidden tests. Walk me through how you find the accidental quadratic with no profiler, and what you would change first.",
+  "Your BFS over a 2000 x 2000 grid runs out of memory. Where is the memory going, what are three ways to cut it, and which one would you pick if this were running on a customer's 2 GB container?",
+  "When is a heap the right answer instead of just sorting, and vice versa? Give me the concrete n and k where you would switch, and tell me how you would get a max-heap and a stable tiebreak out of Python's heapq.",
+  "You are 25 minutes into a 45-minute screen. You have a working O(n^2) and you can see an O(n log n) but you are not sure you can land it. What do you do, and what exactly do you say to me?"
+ ],
+ "proofOfWork": "Beyond the tagged 60-problem log and the three recorded mocks, publish `patterns-from-memory` - a single reference module plus test suite that proves recall rather than recognition. It contains one file per pattern (two_pointers.py, sliding_window.py, binary_search.py, heap_topk.py, monotonic_stack.py, linked_list.py, tree_traversals.py, graph_bfs_dfs.py, toposort.py, union_find.py, backtracking.py, dp.py), each written from a blank file in a single timed sitting with the stopwatch time recorded in the module docstring alongside the invariant, the time and space complexity, and the one failure mode that template exists to prevent. Every file has a pytest suite with parametrized samples plus a brute-force reference and a Hypothesis-style random fuzz loop that shrinks to the smallest failing input, and the whole thing runs in GitHub Actions so a reviewer can see it green. Add a BENCHMARKS.md that reproduces two of the failure modes with real numbers on your own machine - list.pop(0) versus deque.popleft at n = 200k, and `in list` versus `in set` at n = 100k - because the point of the artifact is not that you can solve puzzles but that you can predict cost before a customer discovers it. Finish with a one-page COMPLEXITY-CARD.md, the sheet you would hand a customer's junior engineer during an engagement: the container cost table, the operations-per-second rule of thumb, and the six questions to ask before writing a loop over their data."
+}
