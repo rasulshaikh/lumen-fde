@@ -52,8 +52,20 @@ const wrap = (cmd: string) =>
 // as home so the client can abbreviate it to `~`.
 const WHERE = `printf '%s\\t%s' "$(cat ${CWD_FILE} 2>/dev/null || echo "$HOME")" "$HOME"`;
 
-function configured() {
-  return Boolean(process.env.VERCEL_OIDC_TOKEN || process.env.VERCEL_TOKEN);
+/**
+ * Deliberately no pre-flight "is it configured" check.
+ *
+ * The obvious guard is `if (!process.env.VERCEL_OIDC_TOKEN) return 503`, and it is
+ * wrong: the docs promise only that OIDC is handled automatically in production,
+ * not that it surfaces under that exact variable name, and the SDK also accepts
+ * team/project/token credentials. Guessing the credential mechanism would invent a
+ * failure mode the SDK does not have and 503 a working deployment. The SDK is the
+ * authority on whether it can authenticate; we just translate its failure.
+ */
+function authHint(message: string) {
+  return /oidc|token|unauthor|auth|credential/i.test(message)
+    ? " Locally this needs `vercel env pull` (the OIDC token expires every 12 hours). On Vercel it should be automatic, unless OIDC is disabled in project settings."
+    : "";
 }
 
 async function open() {
@@ -68,13 +80,6 @@ async function open() {
 }
 
 export async function POST(request: Request) {
-  if (!configured()) {
-    return Response.json(
-      { error: "Sandbox is not configured. Needs VERCEL_OIDC_TOKEN (automatic on Vercel) or VERCEL_TOKEN locally." },
-      { status: 503 }
-    );
-  }
-
   let body: { action?: string; cmd?: string };
   try {
     body = await request.json();
@@ -133,7 +138,8 @@ export async function POST(request: Request) {
         } catch { /* the prompt is cosmetic; a failure here must not fail the command */ }
         send({ s: "exit", code: done.exitCode, ms: done.durationMs ?? null, cwd, home });
       } catch (error) {
-        send({ s: "stderr", d: `lumen: ${String((error as Error).message || error)}\n` });
+        const message = String((error as Error).message || error);
+        send({ s: "stderr", d: `lumen: ${message}${authHint(message)}\n` });
         send({ s: "exit", code: 1, cwd: FALLBACK_HOME, home: FALLBACK_HOME });
       } finally {
         controller.close();
