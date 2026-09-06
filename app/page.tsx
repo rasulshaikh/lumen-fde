@@ -4,6 +4,7 @@ import { Fragment, useMemo, useState, useEffect } from "react";
 import workbook from "@/data/workbook.json";
 import library from "@/data/library-context.json";
 import repositories from "@/data/repository-context.json";
+import { LogoMark } from "./brand";
 
 type Row = (string | number | null)[];
 const planRows = workbook.Plan.slice(1) as Row[];
@@ -147,7 +148,7 @@ export default function Home() {
   };
 
   return <main className={askOpen ? "shell ask-open" : "shell"}>
-    <header className="topbar"><a className="brand brand-link" href="/" aria-label="Return to Lumen home"><div className="brand-mark">LU</div><div><div className="brand-name">Lumen</div><div className="brand-sub">Rasul · {months.length}-month operating view</div></div></a><div className="top-actions"><span className="sync-dot" /> Workbook snapshot · {library.length} books · {repositories.length} repos<button className="ask-trigger" onClick={() => { setAskTopic(null); setAskOpen(true); }}>✦ Ask Lumen</button><button className="ghost-button" onClick={share} aria-live="polite">{shared ? "✓ Link copied" : "↗ Share"}</button></div></header>
+    <header className="topbar"><a className="brand brand-link" href="/" aria-label="Return to Lumen home"><LogoMark className="brand-mark" /><div><div className="brand-name">Lumen</div><div className="brand-sub">Rasul · {months.length}-month operating view</div></div></a><div className="top-actions"><span className="sync-dot" /> Workbook snapshot · {library.length} books · {repositories.length} repos<button className="ask-trigger" onClick={() => { setAskTopic(null); setAskOpen(true); }}>✦ Ask Lumen</button><button className="ghost-button" onClick={share} aria-live="polite">{shared ? "✓ Link copied" : "↗ Share"}</button></div></header>
     <section className="hero"><div><p className="kicker">Preparation command center</p><h1>Build proof, not just knowledge.</h1><p className="hero-copy">Your {hours}-hour Senior FDE plan, reduced to the pace, practice, and proof that matter this week.</p></div><div className="hero-note"><span className="note-pin">●</span><div><strong>Current focus</strong><p>{focus ? `Month ${focus.month} · ${focus.track}` : "Plan complete"}</p></div></div></section>
     <nav className="tabs" aria-label="Workbook views">{TABS.map((item) => <button key={item} className={tab === item ? "tab active" : "tab"} onClick={() => setView(item)}>{item}</button>)}</nav><QuickQuiz />
     {tab === "Assessments" && <Assessments />}
