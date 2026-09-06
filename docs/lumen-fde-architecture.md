@@ -31,7 +31,10 @@ The system separates three concerns:
 
 - Normalized the Senior FDE workbook into `data/workbook.json`.
 - Preserved the source workbook as `data/source.xlsx`.
-- Modeled the five original workbook areas: Dashboard, Plan, Mocks, Roadmaps, and CompReality.
+- Modeled four of the five original workbook areas: Plan, Mocks, Roadmaps, and CompReality.
+  The fifth, Dashboard, was a frozen Excel summary sheet (600 hours, 9 months, 81 topics,
+  12 tracks) that nothing ever read and that drifted ~3x from the real plan. Dropped, since
+  every figure it held is derived live from Plan. `data/source.xlsx` still has the original.
 - Exposed product views: Overview, Plan, Mocks, Roadmaps, Library, Assessments, and Comp reality.
 - Added the first structured lesson context for Shell Mastery and Scripting.
 
