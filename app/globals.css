@@ -517,3 +517,43 @@ th{padding:0 12px 10px}
 .shell-foot{color:var(--muted);font-size:11px;margin:10px 0 0}
 @media(max-width:600px){.shell-out{height:clamp(240px,44vh,420px);font-size:12px}
   .panel-head:has(.shell-actions){flex-direction:column;align-items:flex-start;gap:10px}}
+
+/* --- Market tab: the job market benchmark -------------------------------------
+   Prefixed mkt- rather than market-, because .market-list/.market-tier/.market-name
+   already belong to the Target calibration digest on the Overview panel. That is a
+   different source with a different shape, and sharing the names would make either
+   one impossible to restyle without moving the other.
+
+   Every block here is a rendered sentence, so the whole tab is body copy on the
+   panel's own hairline rhythm: 14px lead line, 13px detail, --line between entries.
+   No new type sizes, no card inside a card. --------------------------------- */
+.mkt-summary{display:grid;gap:5px;padding:0 0 20px;border-bottom:1px solid var(--line)}
+.mkt-section{padding:24px 0 0}
+.mkt-section-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:4px}
+.mkt-section-head h3{margin:0}
+.mkt-entry{padding:14px 0;border-top:1px solid var(--line)}
+.mkt-head-line{margin:0;font-size:14px;line-height:1.5;color:var(--ink);max-width:92ch}
+.mkt-body-line{margin:4px 0 0;font-size:13px;line-height:1.55;color:var(--muted);max-width:92ch}
+.mkt-total{margin:14px 0 0;padding-top:14px;border-top:1px solid var(--line);
+  font-size:13px;line-height:1.55;color:var(--ink-2);max-width:92ch}
+.mkt-note{margin:0 0 10px;font-size:13px;line-height:1.55;color:var(--muted);max-width:66ch}
+.mkt-warn{color:var(--danger)}
+
+/* Row citations are chips, not links: a statement already names the row in prose, so
+   this is navigation, and it stays quiet until hovered. Same treatment as .book-row —
+   surface swap plus the stronger hairline, no lift and no shadow. */
+.mkt-rows{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.mkt-rowlink{display:inline-flex;align-items:baseline;gap:7px;text-align:left;
+  background:var(--surface-strong);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:3px 8px;color:var(--ink-2);font-family:'Geist Mono',ui-monospace,monospace;
+  font-size:11px;letter-spacing:.02em;transition:background-color 120ms ease,border-color 120ms ease,color 120ms ease}
+.mkt-rowlink:hover{background:var(--surface);border-color:var(--line-strong);color:var(--ink)}
+.mkt-rowlink:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.mkt-rowlink span{color:var(--muted)}
+
+.mkt-trend{display:grid;gap:8px;padding:14px 0 2px}
+.mkt-spark{display:block;width:100%;height:48px}
+.mkt-spark polyline{fill:none;stroke:var(--primary);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.mkt-spark-labels{display:flex;justify-content:space-between;gap:12px;
+  font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+@media(max-width:600px){.mkt-spark-labels{font-size:10px}}

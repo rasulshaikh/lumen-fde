@@ -7,6 +7,11 @@ import repositories from "@/data/repository-context.json";
 import { LogoMark, AskMark } from "./brand";
 import { RecallStrip } from "./recall";
 import { Terminal } from "./terminal";
+// Types only, so nothing from lib/market — which reads GITHUB_TOKEN and Buffer — is pulled
+// into the client bundle. Restating these shapes here instead would let the tab drift from
+// what the benchmark actually emits without the build noticing.
+import type { Benchmark, PlanRowRef } from "@/lib/market/benchmark";
+import type { TrendPoint } from "@/lib/market/store";
 
 type Row = (string | number | null)[];
 const planRows = workbook.Plan.slice(1) as Row[];
@@ -46,7 +51,7 @@ const FAQS = [
   "What will a senior FDE interview actually test that my plan does not cover?",
 ];
 
-const TABS = ["Overview", "Plan", "Curriculum", "Sandbox", "Mocks", "Roadmaps", "Library", "Assessments", "Comp reality"];
+const TABS = ["Overview", "Plan", "Curriculum", "Sandbox", "Mocks", "Roadmaps", "Library", "Assessments", "Comp reality", "Market"];
 type Subtopic = { name: string; learn: string; minutes: number; resource: { label: string; url: string } };
 type Syllabus = { i: number; topic: string; hours: number; why: string; prerequisites: string[]; subtopics: Subtopic[]; outcomes: string[]; failureModes: string[]; interviewQuestions: string[]; proofOfWork: string };
 function SyllabusView({ s, row }: { s: Syllabus; row?: Row }) {
@@ -62,6 +67,126 @@ function SyllabusView({ s, row }: { s: Syllabus; row?: Row }) {
     <div className="syllabus-grid"><section><h4>How it breaks in production</h4><ul>{s.failureModes.map((f, i) => <li key={i}>{f}</li>)}</ul></section><section><h4>Interview questions</h4><ol>{s.interviewQuestions.map((q, i) => <li key={i}>{q}</li>)}</ol></section></div>
     <section className="syllabus-proof"><h4>Proof of work</h4>{row && String(row[14] ?? "").trim() && <p className="syllabus-deliverable"><strong>Ship this:</strong> {String(row[14])}</p>}<p>{s.proofOfWork}</p></section>
   </div>;
+}
+
+// `/api/market` degrades to `{ benchmark: null, synced: false }` when the files or the token
+// are absent, so `benchmark: null` alone is not enough to explain the empty state: `synced`
+// separates "no scan has run yet" from "we cannot see whether one has".
+type MarketFeed = { benchmark: Benchmark | null; trend: TrendPoint[] | null; synced: boolean };
+
+// benchmark.ts composes a headline and its detail into one string joined by "\n", so the
+// plaintext weekly email can print it verbatim. Splitting on that newline is typography; no
+// word is chosen here. Everything else on this tab renders `statement` untouched, because the
+// email renders the same strings and a sentence must have exactly one place to be fixed.
+function Statement({ text }: { text: string }) {
+  return <>{text.split("\n").map((line, i) => <p className={i === 0 ? "mkt-head-line" : "mkt-body-line"} key={i}>{line}</p>)}</>;
+}
+
+/**
+ * The trend line: distinct core requisitions, one point per completed scan cycle, 180 max.
+ *
+ * Inline SVG, no charting dependency. A single polyline over at most 180 points needs no axes,
+ * no scales and no tooltips, and the smallest chart library in this space would outweigh
+ * everything this page currently ships to the client.
+ *
+ * Fewer than two points draws nothing rather than a flat line. There is no way to recover a
+ * board's state from before the first scan, so the honest rendering of day one is a sentence
+ * saying the line starts here — a flat segment would read as a week of measured stability.
+ */
+function Sparkline({ points }: { points: TrendPoint[] }) {
+  if (points.length < 2) return <p className="mkt-note">{points.length ? "One scan recorded. The line starts here — there is no way to backfill board state from before the first scan." : "No scan cycles recorded yet."}</p>;
+  const values = points.map((p) => p.core);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const x = (i: number) => (i / (points.length - 1)) * 240;
+  // A flat series has zero range, and dividing by it puts every y at NaN, which renders an
+  // empty polyline. Pin a flat series to the middle of the box instead.
+  const y = (v: number) => (max === min ? 24 : 44 - ((v - min) / (max - min)) * 40);
+  return <>
+    {/* preserveAspectRatio="none" stretches the box to the panel width, which would also
+        stretch the stroke; non-scaling-stroke is what keeps the line 1.5px at any width. */}
+    <svg className="mkt-spark" viewBox="0 0 240 48" preserveAspectRatio="none" role="img" aria-label={`Core requisitions across ${points.length} scans, ${min} to ${max}`}>
+      <polyline vectorEffect="non-scaling-stroke" points={points.map((p, i) => `${x(i).toFixed(2)},${y(p.core).toFixed(2)}`).join(" ")} />
+    </svg>
+    <div className="mkt-spark-labels"><span>{points[0].d} · {points[0].core}</span><span>{min}–{max} core reqs</span><span>{points[points.length - 1].d} · {points[points.length - 1].core}</span></div>
+  </>;
+}
+
+/**
+ * The Market tab.
+ *
+ * Every finding on this tab arrives pre-rendered in `statement`. Nothing here builds a sentence
+ * out of the numbers beside it: the Monday market email renders the identical strings, and two
+ * renderers phrasing the same finding independently is exactly how an email and a dashboard end
+ * up disagreeing about what the market said.
+ *
+ * The one thing deliberately not folded into the string is the status chip on each cited plan
+ * row. `statement` carries the committed baseline from workbook col 15; the client's
+ * `lumen-statuses` are newer, and merging them would mean re-composing the sentence here. The
+ * chip sits beside the sentence instead, same source of truth as the Plan tab.
+ */
+function Market({ statuses, openPlanRow }: { statuses: Record<string, string>; openPlanRow: (row: number) => void }) {
+  const [feed, setFeed] = useState<MarketFeed | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+
+  // Fetched on mount, which means once per visit to the tab rather than once per session. The
+  // scan cron rewrites benchmark.json daily, and a cached copy would render a stale computedAt
+  // as current — the one thing the timestamp exists to prevent.
+  useEffect(() => {
+    fetch("/api/market")
+      .then((res) => res.ok ? res.json() : Promise.reject(new Error(String(res.status))))
+      .then((data: MarketFeed) => { setFeed(data); setState("ready"); })
+      .catch(() => setState("error"));
+  }, []);
+
+  const rowLinks = (rows: PlanRowRef[]) => rows.length > 0 && <div className="mkt-rows">{rows.map((ref) => <button className="mkt-rowlink" key={ref.row} onClick={() => openPlanRow(ref.row)}>row {ref.row}<span>{String(statuses[`${ref.track}::${ref.topic}`] || ref.status).toLowerCase()}</span></button>)}</div>;
+
+  const panel = (meta: string, body: React.ReactNode) => <section className="panel full-panel">
+    <div className="panel-head"><div><p className="eyebrow">Job market benchmark</p><h2>What the market is asking for</h2></div><span className="panel-meta">{meta}</span></div>
+    {body}
+  </section>;
+
+  if (state === "loading") return panel("Reading the last scan…", <p className="mkt-note">Loading the benchmark.</p>);
+  if (state === "error") return panel("Unavailable", <p className="mkt-note">The benchmark could not be loaded. Everything on this tab is computed by the nightly scan, so refreshing is safe — nothing here is lost by failing to load.</p>);
+
+  const b = feed?.benchmark ?? null;
+  if (!b) return panel("No scan yet", <>
+    <p className="mkt-note">No scan has completed a full cycle, so there is nothing to benchmark against yet. The scan runs nightly, establishes a baseline on its first complete pass, and the coverage, gap and over-investment blocks appear from that run onwards.</p>
+    <p className="mkt-note">The trend line starts empty and fills in one point per cycle. There is no way to recover what the boards held before the first scan, so it is not backfilled.</p>
+    {feed?.synced === false && <p className="mkt-note mkt-warn">The benchmark store is unreachable, so this is “not known”, not “not scanned”. Check GITHUB_TOKEN.</p>}
+  </>);
+
+  // Always rendered, never relative. Stale data that looks current is the failure mode this
+  // tab is most exposed to, and "3 days ago" is a phrasing that hides how stale.
+  return panel(`Computed ${b.computedAt.slice(0, 16).replace("T", " ")} UTC · ${b.boardsOk} of ${b.boardsTotal} boards`, <>
+    <div className="mkt-summary">
+      <p className="mkt-head-line">{b.coreStatement}</p>
+      <p className="mkt-body-line">{b.adjacentStatement}</p>
+      {b.baselineStatement && <p className="mkt-body-line">{b.baselineStatement}</p>}
+      {b.movement.statement && <p className={b.movement.suppressed ? "mkt-body-line mkt-warn" : "mkt-head-line"}>{b.movement.statement}</p>}
+    </div>
+
+    <section className="mkt-section">
+      <div className="mkt-section-head"><h3>Trend</h3><span className="panel-meta">core requisitions per scan cycle</span></div>
+      <div className="mkt-trend"><Sparkline points={feed?.trend ?? []} /></div>
+    </section>
+
+    <section className="mkt-section">
+      <div className="mkt-section-head"><h3>Coverage</h3><span className="panel-meta">{b.coverage.length} skills · highest share of core reqs first</span></div>
+      {b.coverage.map((entry) => <article className="mkt-entry" key={entry.id}><Statement text={entry.statement} />{rowLinks(entry.rows)}</article>)}
+    </section>
+
+    <section className="mkt-section">
+      <div className="mkt-section-head"><h3>Gaps</h3><span className="panel-meta">{b.gaps.length} audited · no plan row covers these</span></div>
+      {b.gaps.map((gap) => <article className="mkt-entry" key={gap.id}><Statement text={gap.statement} />{rowLinks(gap.rows)}</article>)}
+    </section>
+
+    <section className="mkt-section">
+      <div className="mkt-section-head"><h3>Over-investment</h3><span className="panel-meta">scheduled hours against measured JD frequency</span></div>
+      {b.overInvested.map((track) => <article className="mkt-entry" key={track.rowRange}><Statement text={track.statement} /></article>)}
+      <p className="mkt-total">{b.overInvestedTotal.statement}</p>
+    </section>
+  </>);
 }
 
 export default function Home() {
@@ -202,6 +327,17 @@ export default function Home() {
   const nextRow = nextIndex >= 0 ? planRows[nextIndex] : null;
   const focus = nextRow ? { month: Number(nextRow[1]), track: String(nextRow[0]).replace(/^[A-Z]\. /, "") } : null;
   const setView = (name: string) => { setTab(name); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  // A plan row cited by the benchmark is 1-based against workbook.Plan, whose header sits at
+  // index 0 — so planRows[row - 1] is that topic. The filters are cleared first because a cited
+  // row is usually outside whatever filter the Plan tab was left on, and expanding a row the
+  // current filter hides looks exactly like a link that did nothing.
+  const openPlanRow = (row: number) => {
+    const index = row - 1;
+    if (index < 0 || index >= planRows.length) return;
+    setTrack("All tracks"); setMonth("All months"); setProgress("All progress"); setQuery("");
+    setExpanded(index);
+    setView("Plan");
+  };
   const askLumen = async (prompt = askText) => {
     if (!prompt.trim() || asking) return;
     const context = filtered.slice(0, 8).map((r) => `${r[0]} | ${r[2]} | ${r[3]} | resources: ${r[4]}, ${r[7]}, ${r[10]}`).join("\n");
@@ -216,6 +352,7 @@ export default function Home() {
     <nav className="tabs" aria-label="Workbook views">{TABS.map((item) => <button key={item} className={tab === item ? "tab active" : "tab"} onClick={() => setView(item)}>{item}</button>)}</nav><RecallStrip startedTopics={startedTopics} />
     {tab === "Assessments" && <Assessments />}
     {tab === "Sandbox" && <Terminal />}
+    {tab === "Market" && <Market statuses={statuses} openPlanRow={openPlanRow} />}
     {tab === "Overview" && <>
       <section className="metric-grid"><Metric label="Plan progress" value={`${pct(done, activeRows.length)}%`} detail={`${done} of ${activeRows.length} active${skipped ? ` · ${skipped} of ${planRows.length} skipped` : ""}`} tone="rose" /><Metric label="Hours remaining" value={`${Math.max(hours - doneHours, 0)}`} detail={`of ${hours} active hours${skippedHours ? ` · ${skippedHours}h skipped` : ""}`} tone="teal" /><div className="metric brass"><span className="metric-label">Weekly commitment</span><strong><input className="weekly-input" type="number" min={1} max={80} value={weeklyHours} aria-label="Hours you study each week" onChange={(e) => setWeekly(Number(e.target.value))} />h</strong><span className="metric-detail">{(hours / weeklyHours).toFixed(1)} weeks · {(hours / weeklyHours / 4.333).toFixed(1)} months</span></div><Metric label="Mocks" value={`${mockRows.reduce((n, r) => n + Number(r[6] || 0), 0)} / ${mockRows.reduce((n, r) => n + Number(r[1] || 0), 0)}`} detail="completed / target" tone="ink" /></section>
       <section className="content-grid"><div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Pace map</p><h2>Where the hours go</h2></div><span className="panel-meta">{hours}h · {tracks.length} tracks</span></div><div className="bar-chart">{monthHours.map((item) => <div className="bar-item" key={item.month}><div className="bar-value">{item.hours}h</div><div className="bar-track"><div className="bar-fill" style={{ height: `${Math.max(12, item.hours / maxMonthHours * 100)}%` }} /></div><div className="bar-label">M{item.month}</div></div>)}</div><div className="chart-foot"><span><i className="legend-dot rose" /> planned hours</span><span>Peak: Month {peakMonth.month} · {peakMonth.hours}h</span></div></div><div className="panel"><div className="panel-head"><div><p className="eyebrow">Next action</p><h2>Start here</h2></div><span className="priority">P1</span></div><div className="next-action"><div className="action-index">{nextRow ? String(nextIndex + 1).padStart(2, "0") : "—"}</div><div><h3>{nextRow ? String(nextRow[2]) : "Plan complete"}</h3><p>{nextRow ? (String(nextRow[3]).length > 118 ? `${String(nextRow[3]).slice(0, 118)}…` : String(nextRow[3])) : "Every topic is done or skipped."}</p>{nextRow && <Link href={String(nextRow[5])}>Open reading</Link>}</div></div><button className="primary-button" onClick={() => setView("Plan")}>Open the plan <span>→</span></button></div></section>

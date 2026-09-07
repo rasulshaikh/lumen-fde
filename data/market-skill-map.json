@@ -1,0 +1,1742 @@
+{
+ "_source": "Hand-authored from docs/research/2026-09-07-jd-skill-taxonomy-{ml,fde-craft,infrastructure}.md and the benchmark spec sections 4 and 6. No model writes this file at runtime; only the counting is automated. Row numbers are Plan-sheet rows: row N = workbook.json['Plan'][N] = curriculum.json topics key N-1. Every primaryRow, supportRow and nearestRow below was checked against that sheet.",
+ "_rules": [
+  "Skills are capability terms, never title terms. 'Applied AI' is deliberately absent: it is a job-title string that means customer-facing at Mistral and core research at Perplexity, and matching it would pull in Databricks and Perplexity postings that are not FDE work. Title classification belongs in lib/market/classify.ts, not here.",
+  "Matching is boolean per requisition - presence, not occurrence count.",
+  "A skill named only inside a mission statement or an EEO block must not count. Boilerplate stripping runs before matching (static per-company blocks plus the automatic 60%-of-a-company's-postings line rule), and the exclude[] lists here are the second line of defence for the phrases that survive it - benefits blocks ('healthcare coverage', 'travel stipend', 'onsite meals'), EEO blocks ('in compliance with applicable law'), and role-description filler ('scope of the role', 'prompt communication').",
+  "minDistinctForms > 1 is set for every skill whose single surface form is commonly boilerplate: a lone 'LLM', 'agent', 'cost', 'monitoring', 'compliance', 'documentation', 'healthcare', 'scope', 'stakeholder', 'docker' or 'machine learning' mention does not fire the skill.",
+  "Gaps carry statedFrequency verbatim from the audited taxonomy. The system never infers that a gap exists; it only reports a mapping a human already checked against all 2,236 subtopics.",
+  "proximity.window is in characters, measured either side of the hit."
+ ],
+ "skills": [
+  {
+   "id": "llm-fundamentals",
+   "label": "LLM and frontier-model fluency",
+   "include": [
+    "llm",
+    "llms",
+    "large language model",
+    "large language models",
+    "frontier model",
+    "frontier models",
+    "foundation model",
+    "foundation models",
+    "generative model",
+    "generative models",
+    "model behavior",
+    "model behaviour",
+    "genai",
+    "generative ai",
+    "frontier ai"
+   ],
+   "exclude": [
+    "reliable, interpretable, and steerable ai systems",
+    "llm.com",
+    "genai marketing"
+   ],
+   "proximity": {
+    "terms": [
+     "build",
+     "built",
+     "deploy",
+     "production",
+     "application",
+     "system",
+     "product",
+     "experience",
+     "capabilit",
+     "api"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 50,
+   "supportRows": [
+    66,
+    116
+   ],
+   "evidence": "Have built or deployed systems powered by LLMs or generative models and understand how model behaviour affects product experience"
+  },
+  {
+   "id": "evals",
+   "label": "Evals and evaluation frameworks",
+   "include": [
+    "eval",
+    "evals",
+    "evaluation framework",
+    "evaluation frameworks",
+    "evaluation harness",
+    "evaluation harnesses",
+    "evaluation methodolog",
+    "evaluation pipeline",
+    "llm-as-a-judge",
+    "llm as a judge",
+    "golden dataset",
+    "golden datasets",
+    "regression suite",
+    "regression suites",
+    "grader",
+    "graders",
+    "offline benchmark",
+    "offline benchmarks",
+    "eval suite",
+    "eval-driven"
+   ],
+   "exclude": [
+    "performance evaluation",
+    "self-evaluation",
+    "candidate evaluation",
+    "evaluation of candidates",
+    "annual evaluation",
+    "evaluation period",
+    "technical evaluations and demonstrations",
+    "evaluation of your application"
+   ],
+   "proximity": {
+    "terms": [
+     "model",
+     "llm",
+     "agent",
+     "prompt",
+     "quality",
+     "production",
+     "accuracy",
+     "benchmark",
+     "customer"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 59,
+   "supportRows": [
+    51,
+    63,
+    98,
+    104
+   ],
+   "evidence": "Help customers develop evaluation frameworks to measure Claude's performance for their specific use cases"
+  },
+  {
+   "id": "agents",
+   "label": "Agents and agentic systems",
+   "include": [
+    "agent",
+    "agents",
+    "agentic",
+    "agentic workflow",
+    "agentic workflows",
+    "agentic application",
+    "ai agent",
+    "ai agents",
+    "agent architecture",
+    "agent architectures",
+    "agent design",
+    "agent development",
+    "agent orchestration",
+    "autonomous agent",
+    "autonomous agents"
+   ],
+   "exclude": [
+    "user agent",
+    "user-agent",
+    "agent of record",
+    "free agent",
+    "travel agent",
+    "insurance agent",
+    "real estate agent",
+    "registered agent",
+    "agent of the company",
+    "recruiting agent",
+    "support agent headcount"
+   ],
+   "proximity": {
+    "terms": [
+     "llm",
+     "ai",
+     "model",
+     "tool",
+     "autonomous",
+     "workflow",
+     "production",
+     "deploy",
+     "reason",
+     "plan",
+     "memory"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 53,
+   "supportRows": [
+    57,
+    52,
+    58
+   ],
+   "evidence": "Design scalable agent architectures that combine LLMs, retrieval, memory, tools, structured knowledge, and enterprise data into reliable production workflows"
+  },
+  {
+   "id": "rag",
+   "label": "RAG and retrieval",
+   "include": [
+    "rag",
+    "retrieval",
+    "retrieval-augmented",
+    "retrieval augmented",
+    "rag pipeline",
+    "rag pipelines",
+    "retrieval pipeline",
+    "retrieval pipelines",
+    "retrieval system",
+    "retrieval systems",
+    "semantic search",
+    "knowledge retrieval",
+    "vector search"
+   ],
+   "exclude": [
+    "rag status",
+    "red amber green",
+    "rag rating",
+    "information retrieval of records",
+    "retrieval of your data upon request",
+    "records retrieval fee"
+   ],
+   "proximity": {
+    "terms": [
+     "llm",
+     "model",
+     "embedding",
+     "vector",
+     "knowledge",
+     "context",
+     "agent",
+     "document",
+     "corpus",
+     "enterprise data"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 54,
+   "supportRows": [
+    58,
+    33,
+    47
+   ],
+   "evidence": "You've built and deployed highly performant RAG and agentic applications"
+  },
+  {
+   "id": "tool-use",
+   "label": "Tool use and function calling",
+   "include": [
+    "tool use",
+    "tool-use",
+    "tool calling",
+    "tool-calling",
+    "function calling",
+    "function-calling",
+    "tool call",
+    "tool calls",
+    "tool invocation",
+    "tool execution",
+    "tool-using",
+    "tool and function calling"
+   ],
+   "exclude": [
+    "power tool use",
+    "tool use policy for the office",
+    "use of internal tools only"
+   ],
+   "proximity": {
+    "terms": [
+     "llm",
+     "model",
+     "agent",
+     "api",
+     "schema",
+     "structured output",
+     "json",
+     "action",
+     "execute"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 52,
+   "supportRows": [
+    57,
+    53,
+    66
+   ],
+   "evidence": "Improve performance through prompting, tool-use strategies, context construction, and model-facing experimentation."
+  },
+  {
+   "id": "mcp",
+   "label": "MCP servers and Model Context Protocol",
+   "include": [
+    "mcp",
+    "mcp server",
+    "mcp servers",
+    "model context protocol"
+   ],
+   "exclude": [
+    "microsoft certified professional",
+    "managed care plan",
+    "mcp certification",
+    "mcp-i eligibility",
+    "master control program"
+   ],
+   "proximity": {
+    "terms": [
+     "agent",
+     "tool",
+     "llm",
+     "claude",
+     "protocol",
+     "server",
+     "connector",
+     "anthropic",
+     "openai",
+     "integration",
+     "sdk"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 52,
+   "supportRows": [
+    57,
+    58,
+    31
+   ],
+   "evidence": "Deliver technical artifacts for customers like MCP servers, sub-agents, and agent skills that will be used in production workflows"
+  },
+  {
+   "id": "prompt-engineering",
+   "label": "Prompt and context engineering",
+   "include": [
+    "prompt",
+    "prompts",
+    "prompting",
+    "prompt engineering",
+    "prompt design",
+    "prompting technique",
+    "prompting techniques",
+    "context engineering",
+    "context construction",
+    "context window",
+    "system prompt"
+   ],
+   "exclude": [
+    "prompt communication",
+    "prompt response to customers",
+    "prompt payment",
+    "prompt attention",
+    "prompt and courteous",
+    "prompt follow-up",
+    "prompt delivery of benefits",
+    "prompt feedback from the recruiting team"
+   ],
+   "proximity": {
+    "terms": [
+     "llm",
+     "model",
+     "agent",
+     "context",
+     "token",
+     "eval",
+     "output",
+     "claude",
+     "gpt",
+     "engineering"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 51,
+   "supportRows": [
+    53,
+    50,
+    65
+   ],
+   "evidence": "Production experience with LLM-powered applications, including prompting, context engineering, agent architectures, evaluation frameworks, and deployment at scale"
+  },
+  {
+   "id": "observability",
+   "label": "LLM observability, tracing and telemetry",
+   "include": [
+    "observability",
+    "tracing",
+    "traces",
+    "trace",
+    "telemetry",
+    "monitoring",
+    "instrumentation",
+    "error analysis",
+    "logs, traces, and metrics",
+    "production signals",
+    "feedback system"
+   ],
+   "exclude": [
+    "monitoring the market",
+    "monitoring compliance training",
+    "monitoring progress of your application",
+    "monitoring employee performance",
+    "monitoring of candidates",
+    "credit monitoring benefit"
+   ],
+   "proximity": {
+    "terms": [
+     "production",
+     "system",
+     "llm",
+     "agent",
+     "latency",
+     "cost",
+     "metric",
+     "debug",
+     "reliability",
+     "eval",
+     "deploy"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 60,
+   "supportRows": [
+    23,
+    63
+   ],
+   "evidence": "build eval, observability, and feedback systems that measure whether AI experiences succeed in real enterprise workflows"
+  },
+  {
+   "id": "latency-cost",
+   "label": "Latency, cost and quality trade-offs",
+   "include": [
+    "latency",
+    "cost",
+    "serving cost",
+    "token cost",
+    "throughput",
+    "rate limit",
+    "rate limits",
+    "cost per",
+    "p95",
+    "p99",
+    "time to first token",
+    "unit economics"
+   ],
+   "exclude": [
+    "cost of living",
+    "cost center",
+    "at no cost to you",
+    "cost-effective culture",
+    "healthcare costs",
+    "cost of relocation",
+    "no cost to the employee",
+    "reduce hiring costs"
+   ],
+   "proximity": {
+    "terms": [
+     "model",
+     "llm",
+     "inference",
+     "serving",
+     "quality",
+     "token",
+     "performance",
+     "trade-off",
+     "tradeoff",
+     "scale",
+     "reliability",
+     "production"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 65,
+   "supportRows": [
+    48,
+    21,
+    62
+   ],
+   "evidence": "balancing serving cost, latency, and quality trade-offs"
+  },
+  {
+   "id": "guardrails",
+   "label": "Guardrails, injection defence and hallucination mitigation",
+   "include": [
+    "guardrail",
+    "guardrails",
+    "prompt injection",
+    "jailbreak",
+    "jailbreaks",
+    "red-team",
+    "red team",
+    "red-teaming",
+    "red teaming",
+    "hallucination",
+    "hallucinations",
+    "sandboxing",
+    "moderation",
+    "safe fallback",
+    "launch guardrails"
+   ],
+   "exclude": [
+    "financial guardrails",
+    "budget guardrails",
+    "guardrails for spending",
+    "content moderation team headcount"
+   ],
+   "proximity": {
+    "terms": [
+     "model",
+     "llm",
+     "agent",
+     "output",
+     "safety",
+     "safe",
+     "user",
+     "deploy",
+     "production",
+     "mitigat",
+     "adversarial"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 56,
+   "supportRows": [
+    67,
+    53,
+    61
+   ],
+   "evidence": "Design agent guardrails, fallback strategies, tracing, monitoring, and evaluation pipelines."
+  },
+  {
+   "id": "fine-tuning",
+   "label": "Fine-tuning and model adaptation",
+   "include": [
+    "fine-tuning",
+    "fine tuning",
+    "fine-tune",
+    "fine tune",
+    "post-training",
+    "rlhf",
+    "lora",
+    "peft",
+    "adaptation method",
+    "custom dataset",
+    "custom datasets",
+    "reinforcement learning from human feedback"
+   ],
+   "exclude": [
+    "fine-tune the process",
+    "fine tune the process",
+    "fine-tune our approach",
+    "fine-tune messaging",
+    "fine-tune the org",
+    "fine-tuning your resume"
+   ],
+   "proximity": {
+    "terms": [
+     "model",
+     "llm",
+     "weights",
+     "adapter",
+     "dataset",
+     "training",
+     "foundation",
+     "evaluat",
+     "quality"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 55,
+   "supportRows": [
+    117,
+    50
+   ],
+   "evidence": "Experience judging the quality of training data, selecting the right adaptation method for a given model, evaluating fine-tuning results"
+  },
+  {
+   "id": "embeddings",
+   "label": "Embeddings and vector databases",
+   "include": [
+    "embedding",
+    "embeddings",
+    "vector database",
+    "vector databases",
+    "vector db",
+    "vector store",
+    "pgvector",
+    "embedding model",
+    "semantic index"
+   ],
+   "exclude": [
+    "embedding yourself",
+    "embedding with customers",
+    "embedding into customer teams",
+    "embedding with the team",
+    "embedding in customer organizations"
+   ],
+   "proximity": {
+    "terms": [
+     "vector",
+     "retrieval",
+     "search",
+     "model",
+     "index",
+     "rag",
+     "similarity",
+     "knowledge",
+     "corpus"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 54,
+   "supportRows": [
+    58,
+    33,
+    118
+   ],
+   "evidence": "Experience building or deploying AI-powered applications using modern LLM APIs, agent frameworks, MCP, retrieval systems, or vector databases."
+  },
+  {
+   "id": "security-compliance",
+   "label": "AI security, compliance and governance",
+   "include": [
+    "soc 2",
+    "hipaa",
+    "gdpr",
+    "phi",
+    "protected health information",
+    "pci",
+    "pci-dss",
+    "data residency",
+    "data governance",
+    "auditability",
+    "audit logging",
+    "audit trail",
+    "compliance",
+    "zero data retention",
+    "eu ai act",
+    "fedramp",
+    "model governance",
+    "responsible ai",
+    "dora",
+    "nis2"
+   ],
+   "exclude": [
+    "in compliance with applicable law",
+    "compliance with federal, state",
+    "equal employment opportunity",
+    "compliance with our values",
+    "compliance training for all employees",
+    "fair chance ordinance"
+   ],
+   "proximity": {
+    "terms": [
+     "data",
+     "security",
+     "enterprise",
+     "customer",
+     "deploy",
+     "governance",
+     "regulat",
+     "privacy",
+     "control",
+     "review",
+     "requirement"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 71,
+   "supportRows": [
+    33,
+    58,
+    68,
+    13
+   ],
+   "evidence": "Build with appropriate safeguards for protected health information (PHI), HIPAA, privacy, security, authorization, governance, auditability, and other regulated-delivery requirements"
+  },
+  {
+   "id": "human-in-the-loop",
+   "label": "Human-in-the-loop review and approval gates",
+   "include": [
+    "human-in-the-loop",
+    "human in the loop",
+    "human review",
+    "human oversight",
+    "human evaluation",
+    "human judgment",
+    "approval gate",
+    "approval-gated",
+    "escalation path",
+    "review queue"
+   ],
+   "exclude": [
+    "human resources",
+    "human capital management",
+    "human rights policy"
+   ],
+   "proximity": {
+    "terms": [
+     "agent",
+     "model",
+     "llm",
+     "workflow",
+     "output",
+     "quality",
+     "action",
+     "production",
+     "risk",
+     "side effect"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 53,
+   "supportRows": [
+    59,
+    60,
+    37
+   ],
+   "evidence": "Advise customers on safe implementation patterns, including tool and function calling, structured outputs, retrieval, sandboxing, data handling, guardrails, telemetry, auditability, and approval-gated side effects"
+  },
+  {
+   "id": "llm-as-judge",
+   "label": "LLM-as-judge and automated graders",
+   "include": [
+    "llm-as-a-judge",
+    "llm as a judge",
+    "llm-as-judge",
+    "grader",
+    "graders",
+    "model-graded",
+    "autorater",
+    "judge model",
+    "ai judge"
+   ],
+   "exclude": [
+    "sound judgment",
+    "business judgment",
+    "good judgement",
+    "judge of character",
+    "judging the quality of training data"
+   ],
+   "proximity": {
+    "terms": [
+     "eval",
+     "model",
+     "llm",
+     "score",
+     "quality",
+     "rubric",
+     "benchmark",
+     "dataset",
+     "human"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 59,
+   "supportRows": [
+    51,
+    104
+   ],
+   "evidence": "Design rigorous evaluation frameworks using offline benchmarks, online A/B experiments, golden datasets, regression suites, LLM-as-a-Judge, and human evaluation."
+  },
+  {
+   "id": "model-routing",
+   "label": "Model routing, fallbacks and canaries",
+   "include": [
+    "model routing",
+    "routing",
+    "fallback",
+    "fallbacks",
+    "fallback strateg",
+    "cascade",
+    "model selection",
+    "canary",
+    "failover",
+    "model gateway"
+   ],
+   "exclude": [
+    "routing tickets",
+    "call routing",
+    "lead routing",
+    "routing candidates",
+    "routing requests to the right team",
+    "email routing"
+   ],
+   "proximity": {
+    "terms": [
+     "model",
+     "llm",
+     "provider",
+     "latency",
+     "cost",
+     "quality",
+     "reliability",
+     "frontier",
+     "inference",
+     "deploy"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 61,
+   "supportRows": [
+    65,
+    48,
+    66
+   ],
+   "evidence": "Continuously evaluate newly released frontier models and determine where they meaningfully improve quality, latency, reliability, or cost."
+  },
+  {
+   "id": "python",
+   "label": "Python as the AI application language",
+   "include": [
+    "python",
+    "fastapi",
+    "pytest",
+    "pandas"
+   ],
+   "exclude": [
+    "monty python"
+   ],
+   "minDistinctForms": 1,
+   "primaryRow": 28,
+   "supportRows": [
+    29,
+    100,
+    86,
+    113
+   ],
+   "evidence": "highly proficient in Python"
+  },
+  {
+   "id": "kubernetes",
+   "label": "Kubernetes, containers and infrastructure as code",
+   "include": [
+    "kubernetes",
+    "k8s",
+    "terraform",
+    "docker",
+    "container",
+    "containers",
+    "helm",
+    "infrastructure as code",
+    "infrastructure primitives"
+   ],
+   "exclude": [
+    "container ship",
+    "shipping container",
+    "containerized food"
+   ],
+   "proximity": {
+    "terms": [
+     "deploy",
+     "cloud",
+     "infrastructure",
+     "production",
+     "cluster",
+     "environment",
+     "customer",
+     "platform"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 8,
+   "supportRows": [
+    9,
+    10,
+    14,
+    18
+   ],
+   "evidence": "deployment models, including to cloud platforms (Azure, AWS) and the underlying infrastructure primitives (Kubernetes, Terraform)"
+  },
+  {
+   "id": "discovery",
+   "label": "Customer discovery and requirements elicitation",
+   "include": [
+    "technical discovery",
+    "discovery",
+    "requirements gathering",
+    "customer workflow",
+    "customer workflows",
+    "workflow mapping",
+    "pain point",
+    "pain points",
+    "business requirement",
+    "business requirements",
+    "technical scoping",
+    "frame ambiguous problems"
+   ],
+   "exclude": [
+    "drug discovery",
+    "legal discovery",
+    "e-discovery",
+    "ediscovery",
+    "discovery phase of litigation",
+    "discovery motion",
+    "discovery call with recruiting",
+    "self-discovery"
+   ],
+   "proximity": {
+    "terms": [
+     "customer",
+     "client",
+     "stakeholder",
+     "business",
+     "workflow",
+     "requirement",
+     "problem",
+     "engagement",
+     "technical",
+     "deliver"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 73,
+   "supportRows": [
+    74,
+    87,
+    84
+   ],
+   "evidence": "Lead delivery discovery. Map customer workflows and constraints in depth"
+  },
+  {
+   "id": "scoping",
+   "label": "Scoping, sequencing and delivery trade-offs",
+   "include": [
+    "scope",
+    "scoping",
+    "scope of work",
+    "project plan",
+    "sequence delivery",
+    "milestone",
+    "milestones",
+    "estimation",
+    "scope and change",
+    "scope, speed",
+    "manage scope"
+   ],
+   "exclude": [
+    "scope of the role",
+    "scope of this position",
+    "scope of employment",
+    "within the scope of applicable law",
+    "scope of your responsibilities as an employee",
+    "microscope"
+   ],
+   "proximity": {
+    "terms": [
+     "customer",
+     "delivery",
+     "project",
+     "deployment",
+     "engagement",
+     "timeline",
+     "milestone",
+     "requirement",
+     "trade-off",
+     "sequence"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 84,
+   "supportRows": [
+    74,
+    80,
+    49
+   ],
+   "evidence": "independently scope multi-quarter, highly complex initiatives to solve problems with no clear precedent"
+  },
+  {
+   "id": "sow-docs",
+   "label": "Engagement documentation: SOW, design docs, runbooks",
+   "include": [
+    "sow",
+    "statement of work",
+    "scopes of work",
+    "reference architecture",
+    "reference architectures",
+    "design doc",
+    "design docs",
+    "runbook",
+    "runbooks",
+    "technical documentation",
+    "documentation",
+    "adr",
+    "white-boarding",
+    "whiteboarding"
+   ],
+   "exclude": [
+    "documentation of your right to work",
+    "immigration documentation",
+    "documentation required for employment",
+    "i-9 documentation",
+    "medical documentation"
+   ],
+   "proximity": {
+    "terms": [
+     "customer",
+     "engagement",
+     "deliver",
+     "technical",
+     "architecture",
+     "deployment",
+     "handoff",
+     "project",
+     "production"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 74,
+   "supportRows": [
+    76,
+    27,
+    80
+   ],
+   "evidence": "Design and develop 'Scopes of Work' by breaking down customer challenges into a project plan"
+  },
+  {
+   "id": "demos-exec-comms",
+   "label": "Demos, POCs and executive communication",
+   "include": [
+    "demo",
+    "demos",
+    "demonstration",
+    "demonstrations",
+    "prototype",
+    "prototypes",
+    "proof of concept",
+    "poc",
+    "proof of value",
+    "pilot",
+    "executive briefing",
+    "executive presence",
+    "workshop",
+    "workshops",
+    "technical deep dive",
+    "technical deep dives"
+   ],
+   "exclude": [
+    "onsite interview demo of our office",
+    "workshop for new hires",
+    "internal workshop series",
+    "demo of our benefits platform",
+    "pilot program for parental leave"
+   ],
+   "proximity": {
+    "terms": [
+     "customer",
+     "client",
+     "executive",
+     "stakeholder",
+     "technical",
+     "production",
+     "evaluation",
+     "value",
+     "win",
+     "c-suite"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 75,
+   "supportRows": [
+    72,
+    87,
+    83
+   ],
+   "evidence": "Guide customers through technical evaluations, demonstrations, workshops, prototypes, and proofs of value"
+  },
+  {
+   "id": "domain-fluency",
+   "label": "Vertical and domain fluency",
+   "include": [
+    "financial services",
+    "healthcare",
+    "life sciences",
+    "pharmaceutical",
+    "insurance",
+    "fhir",
+    "hl7",
+    "epic",
+    "revenue cycle",
+    "payer workflow",
+    "supply chain",
+    "public sector",
+    "vertical",
+    "domain expertise",
+    "geoint",
+    "enterprise vertical"
+   ],
+   "exclude": [
+    "healthcare benefits",
+    "health insurance coverage",
+    "medical, dental",
+    "healthcare coverage for you and your family",
+    "insurance premiums",
+    "dental and vision",
+    "comprehensive healthcare"
+   ],
+   "proximity": {
+    "terms": [
+     "customer",
+     "industry",
+     "domain",
+     "workflow",
+     "vertical",
+     "experience",
+     "regulat",
+     "deploy",
+     "enterprise"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 78,
+   "supportRows": [
+    71,
+    38
+   ],
+   "evidence": "payer workflows, provider operations, EHR systems, or interoperability standards such as Epic, HL7, and FHIR"
+  },
+  {
+   "id": "air-gapped-delivery",
+   "label": "Air-gapped, on-prem and sovereign delivery",
+   "include": [
+    "air-gapped",
+    "air gapped",
+    "on-premise",
+    "on-premises",
+    "on-prem",
+    "classified environment",
+    "classified environments",
+    "sovereign",
+    "private cloud",
+    "self-hosted",
+    "disconnected environment",
+    "government cloud",
+    "private endpoint",
+    "vpc"
+   ],
+   "exclude": [
+    "on-premise parking",
+    "on-premise gym",
+    "sovereign wealth fund",
+    "on-site premises amenities"
+   ],
+   "proximity": {
+    "terms": [
+     "deploy",
+     "customer",
+     "environment",
+     "install",
+     "cloud",
+     "infrastructure",
+     "data",
+     "model",
+     "enterprise",
+     "regulat"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 13,
+   "supportRows": [
+    27,
+    62,
+    15
+   ],
+   "evidence": "Deep experience with regulated, sovereign, or on-premise AI deployment, including hallucination mitigation and auditability."
+  },
+  {
+   "id": "handover",
+   "label": "Production handover and ownership transfer",
+   "include": [
+    "handoff",
+    "handoffs",
+    "hand-off",
+    "handover",
+    "knowledge transfer",
+    "transition to production",
+    "production handoff",
+    "ownership transfer",
+    "clear handoffs",
+    "adoption and handoff"
+   ],
+   "exclude": [
+    "handoff between recruiting stages",
+    "onboarding handoff from your recruiter"
+   ],
+   "proximity": {
+    "terms": [
+     "customer",
+     "team",
+     "production",
+     "deploy",
+     "ownership",
+     "support",
+     "operate",
+     "adoption",
+     "engagement"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 74,
+   "supportRows": [
+    84,
+    22,
+    27
+   ],
+   "evidence": "implementation, evaluation, production deployment, adoption, and handoff"
+  },
+  {
+   "id": "async-comms",
+   "label": "Async engagement communication and escalation",
+   "include": [
+    "written communication",
+    "status update",
+    "status updates",
+    "escalate",
+    "escalation",
+    "stakeholder communication",
+    "engagement reporting",
+    "milestone review",
+    "milestone reviews",
+    "sprint ceremonies",
+    "clear context",
+    "spot risks early"
+   ],
+   "exclude": [
+    "escalate to human resources",
+    "escalate concerns to hr",
+    "escalating pay bands",
+    "escalation of harassment complaints"
+   ],
+   "proximity": {
+    "terms": [
+     "customer",
+     "stakeholder",
+     "team",
+     "engagement",
+     "risk",
+     "project",
+     "update",
+     "clarity",
+     "deliver"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 80,
+   "supportRows": [
+    76,
+    72,
+    87
+   ],
+   "evidence": "sprint ceremonies, milestone reviews, and engagement reporting"
+  },
+  {
+   "id": "stakeholder-management",
+   "label": "Stakeholder management from engineer to C-suite",
+   "include": [
+    "stakeholder",
+    "stakeholders",
+    "c-suite",
+    "cto",
+    "ciso",
+    "cio",
+    "technical champion",
+    "technical champions",
+    "organizational dynamics",
+    "low ego",
+    "diverse stakeholders",
+    "executive sponsor"
+   ],
+   "exclude": [
+    "stakeholder in our mission",
+    "all employees are stakeholders"
+   ],
+   "proximity": {
+    "terms": [
+     "customer",
+     "client",
+     "technical",
+     "business",
+     "executive",
+     "communicat",
+     "relationship",
+     "manage",
+     "navigate",
+     "trust"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 87,
+   "supportRows": [
+    73,
+    75,
+    80
+   ],
+   "evidence": "Develop trusted relationships and technical champions across CTOs, CIOs, CISOs"
+  },
+  {
+   "id": "customer-env-debugging",
+   "label": "Building and debugging inside the customer's environment",
+   "include": [
+    "customer environment",
+    "customer environments",
+    "customer systems",
+    "customer's environment",
+    "client systems",
+    "their infrastructure",
+    "on-site",
+    "onsite",
+    "white glove",
+    "white-glove",
+    "side-by-side",
+    "embed deeply",
+    "hands-on"
+   ],
+   "exclude": [
+    "onsite gym",
+    "on-site cafeteria",
+    "on-site parking",
+    "onsite meals",
+    "on-site fitness",
+    "onsite interview",
+    "on-site amenities",
+    "onsite childcare"
+   ],
+   "proximity": {
+    "terms": [
+     "customer",
+     "client",
+     "deploy",
+     "build",
+     "code",
+     "production",
+     "integrat",
+     "environment",
+     "support",
+     "engineer"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 27,
+   "supportRows": [
+    39,
+    3,
+    69
+   ],
+   "evidence": "coding side-by-side to drive projects to completion on their infrastructure"
+  },
+  {
+   "id": "travel",
+   "label": "Customer-site travel expectation",
+   "include": [
+    "travel",
+    "travel up to",
+    "willingness to travel",
+    "travel is required",
+    "travel to customers",
+    "customer sites",
+    "travel expected"
+   ],
+   "exclude": [
+    "travel reimbursement",
+    "travel stipend",
+    "travel insurance",
+    "paid travel for interviews",
+    "commuter benefits",
+    "travel expenses will be covered",
+    "business travel policy"
+   ],
+   "proximity": {
+    "terms": [
+     "customer",
+     "client",
+     "site",
+     "percent",
+     "required",
+     "expected",
+     "up to",
+     "%"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 81,
+   "supportRows": [
+    92,
+    91
+   ],
+   "evidence": "Travel up to 50% is required"
+  },
+  {
+   "id": "architecture-translation",
+   "label": "Translating business problems into technical architecture",
+   "include": [
+    "technical architecture",
+    "technical architectures",
+    "reference architecture",
+    "solution architecture",
+    "architectures that",
+    "architectural trade-off",
+    "system design",
+    "translate ambiguous",
+    "translate business",
+    "architecture, agent design"
+   ],
+   "exclude": [
+    "architect of our culture",
+    "information architecture of our website",
+    "enterprise architect headcount"
+   ],
+   "proximity": {
+    "terms": [
+     "business",
+     "customer",
+     "requirement",
+     "technical",
+     "design",
+     "enterprise",
+     "scale",
+     "security",
+     "deploy",
+     "model"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 47,
+   "supportRows": [
+    48,
+    85,
+    74
+   ],
+   "evidence": "Develop clear Applied AI Architectures spanning models, applications, data, integration, security, privacy, governance, evaluation, and deployment"
+  },
+  {
+   "id": "prototype-to-production",
+   "label": "Prototype to production",
+   "include": [
+    "production-ready",
+    "production ready",
+    "production-grade",
+    "prototype to production",
+    "from prototype",
+    "evolve successful prototypes",
+    "pilot to production",
+    "poc to production",
+    "production deployment",
+    "production readiness"
+   ],
+   "exclude": [
+    "production of marketing content",
+    "video production",
+    "music production"
+   ],
+   "proximity": {
+    "terms": [
+     "prototype",
+     "pilot",
+     "production",
+     "deploy",
+     "scale",
+     "customer",
+     "system",
+     "reliab",
+     "launch"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 57,
+   "supportRows": [
+    84,
+    29,
+    79
+   ],
+   "evidence": "Rapidly prototype new AI capabilities and evolve successful prototypes into production-ready systems"
+  },
+  {
+   "id": "classical-ml",
+   "label": "Classical ML alongside LLMs",
+   "include": [
+    "machine learning fundamentals",
+    "traditional machine learning",
+    "predictive model",
+    "predictive models",
+    "data science",
+    "supervised learning",
+    "classification model",
+    "statistical model",
+    "machine learning or data science",
+    "background in machine learning"
+   ],
+   "exclude": [
+    "machine learning engineer headcount",
+    "machine learning team you will join",
+    "our machine learning platform product"
+   ],
+   "proximity": {
+    "terms": [
+     "model",
+     "data",
+     "llm",
+     "predict",
+     "statistic",
+     "train",
+     "structured",
+     "enterprise",
+     "frontier"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 2,
+   "primaryRow": 101,
+   "supportRows": [
+    102,
+    104,
+    96
+   ],
+   "evidence": "combine frontier models with structured knowledge, retrieval, traditional machine learning, and enterprise software"
+  },
+  {
+   "id": "agent-memory",
+   "label": "Agent memory and context management",
+   "include": [
+    "agent memory",
+    "memory system",
+    "memory systems",
+    "long-term memory",
+    "short-term memory",
+    "conversation memory",
+    "context management",
+    "retrieval, memory",
+    "memory, and tool use"
+   ],
+   "exclude": [
+    "in memory of",
+    "memory of the company",
+    "muscle memory",
+    "gpu memory",
+    "memory leak"
+   ],
+   "proximity": {
+    "terms": [
+     "agent",
+     "llm",
+     "context",
+     "retrieval",
+     "tool",
+     "state",
+     "reason",
+     "knowledge"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 53,
+   "supportRows": [
+    57,
+    54,
+    34
+   ],
+   "evidence": "Engineer customer intelligence layers, retrieval pipelines, memory systems, and knowledge representations that allow agents to reason over large, heterogeneous enterprise data."
+  },
+  {
+   "id": "multi-agent",
+   "label": "Multi-agent topologies and orchestration",
+   "include": [
+    "multi-agent",
+    "multi agent",
+    "multiagent",
+    "sub-agent",
+    "sub-agents",
+    "subagent",
+    "agent orchestration",
+    "orchestrator-workers",
+    "coordinate reasoning"
+   ],
+   "exclude": [
+    "multi-agent insurance brokerage"
+   ],
+   "proximity": {
+    "terms": [
+     "agent",
+     "llm",
+     "coordinate",
+     "orchestrat",
+     "task",
+     "tool",
+     "plan",
+     "oversight",
+     "system"
+    ],
+    "window": 80
+   },
+   "minDistinctForms": 1,
+   "primaryRow": 53,
+   "supportRows": [
+    57,
+    37
+   ],
+   "evidence": "multi-agent systems that coordinate reasoning, planning, tool execution, and human oversight"
+  }
+ ],
+ "gaps": [
+  {
+   "id": "pattern-codification",
+   "label": "Codifying field patterns back into Product and Research",
+   "nearestRow": 80,
+   "whyNotCovered": "Plan coverage is per-artifact templating only: row 73's reusable discovery script, row 80's 'Sanitise, templatise and test the pack on real readers', row 74's docs-as-code templates, row 20's golden pipeline for every customer repo, row 66's two-API adapter as a reusable asset. Nothing teaches the pattern library, the accelerator, or the structured route from a field observation to a product or research input.",
+   "statedFrequency": "12 of 15 craft-corpus reqs (80%), 4 of 4 companies - the highest-frequency bullet in the corpus with the weakest plan match"
+  },
+  {
+   "id": "presales-account-leadership",
+   "label": "Pre-sales technical account leadership (use-case portfolio, proof of value, adoption plan, technical win)",
+   "nearestRow": 73,
+   "whyNotCovered": "Zero hits across 2,236 subtopics for use-case portfolio, proof of value, technical win, land and expand, consumption, adoption plan, technical account plan, expansion, renewal or account health. Row 73 teaches discovery and row 75 teaches demos; neither teaches the account-plan motion.",
+   "statedFrequency": "5 of 15 craft-corpus reqs (33%), but 5 of 5 Architect- and SE-titled reqs, which carry the top compensation bands in the corpus"
+  },
+  {
+   "id": "value-measurement",
+   "label": "Value measurement and ROI instrumentation",
+   "nearestRow": 84,
+   "whyNotCovered": "The cost side is deep (row 21's CFO page, row 65's customer-facing unit-economics number, row 75's unit-economics sheet). The benefit side has no home. Nearest coverage is one subtopic in row 84, 'From \"we want AI\" to a falsifiable outcome metric with a baseline', which stops at metric definition and never reaches pre- and post-deployment measurement or reporting to an executive sponsor.",
+   "statedFrequency": "9 of 15 craft-corpus reqs (60%)"
+  },
+  {
+   "id": "enablement-training",
+   "label": "Customer enablement, workshops and training delivery",
+   "nearestRow": 74,
+   "whyNotCovered": "Row 74's handover pack teaches proving the customer can operate what you built; nothing teaches teaching them to build. The only 'workshop' strings in the plan are incidental - row 56's injection payloads 'you can reproduce from memory in a customer workshop' and row 64's prompt edit 'made in a customer workshop'.",
+   "statedFrequency": "7 of 15 craft-corpus reqs (47%)"
+  },
+  {
+   "id": "named-agent-frameworks",
+   "label": "Named agent and orchestration frameworks (LangGraph, CrewAI, AutoGen, Agents SDK, DSPy)",
+   "nearestRow": 53,
+   "whyNotCovered": "Zero hits for LangGraph, CrewAI, AutoGen, Agents SDK or Claude Agent SDK; LangChain and LlamaIndex appear twice, incidentally, in rows 62 and 64. Rows 52, 53 and 57 teach the mechanics these frameworks wrap and row 57 builds a real agent, so this is a vocabulary and name-recognition gap, not a capability gap - it costs keyword screens, not interviews.",
+   "statedFrequency": "9 of 95 postings (9%) say 'agent frameworks'; 2 of 17 in the infrastructure corpus name the category explicitly"
+  },
+  {
+   "id": "voice-speech-agents",
+   "label": "Voice and speech agents (ASR, TTS, turn-taking, real-time audio latency budgets)",
+   "nearestRow": 35,
+   "whyNotCovered": "Zero hits for Whisper, ASR, text-to-speech, speech recognition or voice agent. Every 'voice' and 'speech' match in the plan is tone-of-voice prose or security-briefing text. Row 35 gives the SSE and WebSocket streaming transport half only; no audio pipeline, no turn-taking, no barge-in.",
+   "statedFrequency": "8 of 95 postings (8%), 3 companies (Sierra, Decagon, Scale) - concentrated in the CX-agent vendor segment, absent from OpenAI and Anthropic FDE postings"
+  },
+  {
+   "id": "managed-ai-platforms",
+   "label": "Managed cloud AI platforms as deployment targets (Bedrock, Vertex AI, Azure AI Foundry, SageMaker)",
+   "nearestRow": 19,
+   "whyNotCovered": "Zero hits for SageMaker, Vertex AI, Azure OpenAI or Azure AI Foundry. Bedrock appears in five rows but only incidentally - a bedrock-runtime VPC endpoint in row 15, Bedrock Guardrails as one moderation option in row 56, renamed models in row 60's cost attribution, an exception-mapping example in row 61, constrained decoding in row 66. No row teaches deploying a frontier model through a hyperscaler surface, which is how Claude is actually bought by regulated enterprises.",
+   "statedFrequency": "0 of 95 postings name the AI services; 5 of 17 in the infrastructure corpus name the clouds - a field-reality gap, not a keyword gap"
+  },
+  {
+   "id": "knowledge-graphs",
+   "label": "Knowledge graphs, GraphRAG and ontology modelling",
+   "nearestRow": 119,
+   "whyNotCovered": "Zero hits for knowledge graph, Neo4j, Cypher, GraphRAG or ontology anywhere in the 119 topics. Row 119 is graph machine learning - message passing, GCN and GAT derivations, GraphSAGE, 1-WL expressivity, R-GCN over a CRM schema - which is graph learning, not graph-backed retrieval. Row 38 is entity resolution, adjacent but not a KG build.",
+   "statedFrequency": "3 of 95 postings (3%), 1 company (Scale AI)"
+  },
+  {
+   "id": "partner-si-orchestration",
+   "label": "Partner, SI and prime-contractor orchestration",
+   "nearestRow": 91,
+   "whyNotCovered": "Zero hits for systems integrator, prime contractor, teaming agreement, reseller or marketplace; 'partner' appears only as a job title inside row 91's title taxonomy. Nothing teaches managing or negotiating teaming agreements with Tier 1 primes, or coordinating delivery through a partner.",
+   "statedFrequency": "3 of 15 craft-corpus reqs (20%), but structurally load-bearing above senior"
+  },
+  {
+   "id": "delivery-team-leadership",
+   "label": "Delivery-team leadership, mentoring and hiring",
+   "nearestRow": 88,
+   "whyNotCovered": "The plan has row 88's Story 9, 'Leadership without authority' - a rehearsed three-minute interview answer, not a craft topic. Nothing teaches coaching junior engagement managers, acting as the go-to resource on complex projects, or participating in hiring.",
+   "statedFrequency": "4 of 15 craft-corpus reqs (27%) - exactly the Senior-to-Lead boundary"
+  },
+  {
+   "id": "emea-ai-regulation",
+   "label": "EMEA and AI-specific regulatory frameworks (DORA, NIS2, ISO 42001, EU AI Act, ZDR)",
+   "nearestRow": 71,
+   "whyNotCovered": "EU AI Act appears exactly once across 2,236 subtopics, inside row 71's 'The LLM-specific compliance surface'. DORA: zero. NIS2: zero. ISO 42001: zero. Zero Data Retention as a contract construct: zero.",
+   "statedFrequency": "1 of 15 craft-corpus reqs (7%) - narrow, but that posting is the GBP 190-230k Anthropic Applied AI Security Architect and its entire premise is this vocabulary"
+  },
+  {
+   "id": "conversation-design",
+   "label": "Conversation and dialogue design for CX agents",
+   "nearestRow": 53,
+   "whyNotCovered": "Zero real hits for conversation design, dialogue design, chatbot design or deflection as a discipline. The four matches are false positives: negotiation deflection in rows 77 and 92, row 78's 'the artifact you build here is a timer plus an immutable audit trail, not a chatbot', and row 84's metric-trap note that deflection measured as no-follow-up-ticket scores abandoned, angry users as successes.",
+   "statedFrequency": "Concentrated in Sierra and Decagon; near-zero at OpenAI, Anthropic and Scale. Worth closing only if Sierra/Decagon/Parloa-class companies are on the target list"
+  },
+  {
+   "id": "public-sector-acquisition",
+   "label": "Public-sector acquisition and authorization (ATO, 3PAO, SSP, OTA, program of record)",
+   "nearestRow": 81,
+   "whyNotCovered": "FedRAMP appears three times - rows 27, 74 and 81 - but only as an access-constraint label, never as an authorization process. Zero hits for ATO, 3PAO, SSP, RFP, RFI, OTA, program of record or capture. The taxonomy calls this a correct omission rather than a defect: these roles are US-citizen-and-clearance gated, and row 81's 'Customer-site reality: access, security and the trips you cannot take' already teaches filtering them out.",
+   "statedFrequency": "4 of 15 craft-corpus reqs (27%), all clearance-gated"
+  },
+  {
+   "id": "synthetic-data-generation",
+   "label": "Synthetic data generation and eval-data manufacture at volume",
+   "nearestRow": 59,
+   "whyNotCovered": "Dataset construction is covered - row 55's chat template and loss masking, row 117's non-leaking held-out split, row 59's 200-case sampling frame with stratification and provenance - so training-data quality is not a gap. What is missing is generating synthetic training and eval data at volume; the only 'synthetic data' hit in the plan is row 89, about seeded screenshot data for portfolio images.",
+   "statedFrequency": "About 5 of 95 postings (5%), Scale only - the lowest-priority ML gap"
+  },
+  {
+   "id": "distillation-small-models",
+   "label": "Knowledge distillation and small-language-model optimisation",
+   "nearestRow": 62,
+   "whyNotCovered": "Two hits for distillation, small language model or model optimisation, both in row 99 and both incidental (label smoothing and KL). Quantisation is covered in row 62 and 'use a smaller model' is covered as economics in row 65's cascade routing, but student-teacher distillation is absent.",
+   "statedFrequency": "1 of 17 in the infrastructure corpus (6%), one Scale posting"
+  },
+  {
+   "id": "eval-observability-vendors",
+   "label": "Eval and observability SaaS breadth (LangSmith, Braintrust, Arize/Phoenix, Ragas, W&B Weave)",
+   "nearestRow": 60,
+   "whyNotCovered": "The plan standardises on promptfoo (rows 56 and 59), Langfuse (rows 51, 60, 64) and MLflow (row 64). LangSmith, Braintrust, Arize/Phoenix, Ragas and W&B Weave: zero hits. No JD names an eval vendor, so this is a conversational-fluency gap only.",
+   "statedFrequency": "0 of 17 in the infrastructure corpus - no posting names an eval vendor"
+  },
+  {
+   "id": "feature-stores",
+   "label": "Feature stores",
+   "nearestRow": 105,
+   "whyNotCovered": "Zero hits in the plan. Also zero in the JD corpus. Recorded for completeness of the audit; the taxonomy's own judgement is that it is not worth closing.",
+   "statedFrequency": "0 of 17 in the infrastructure corpus - not worth closing"
+  }
+ ],
+ "overInvested": [
+  {
+   "rowRange": "101-110",
+   "measuredJdFrequency": "1 of 95 postings (1%) - a single Scale public-sector line, 'deploying deep learning solutions'. Across the whole corpus: XGBoost 0, scikit-learn 0, LightGBM 0, SHAP 0, LIME 0, anomaly and fraud detection 0, time series 0, recommenders 0.",
+   "note": "Track N, Machine Learning Systems. Defensible as depth behind the answer - row 104's calibration, leakage and metric-choice material is what makes row 59's eval work credible - but it will not be recognised by a keyword screen and will not be asked about directly. Not defensible as scheduled hours in months 18-22 if loops start earlier."
+  },
+  {
+   "rowRange": "111-119",
+   "measuredJdFrequency": "0 of 95 postings. PyTorch 0, TensorFlow 0, computer vision 0, GPU 0, vLLM 0, TensorRT 0, Triton 0, quantisation 0.",
+   "note": "Track O, Deep Learning and Multimodal. Row 116 (build a small GPT) is what makes row 50's answers load-bearing, and row 117 is far deeper than the 2-of-17 fine-tuning ask, but the surface language matches nothing in this market. The rows that match 14 of 17 of the market - 59 evals, 53 agents, 54 RAG, 60 observability, 65 cost and latency - sit at months 13-15."
+  },
+  {
+   "rowRange": "94-100",
+   "measuredJdFrequency": "0 of 95 postings. No linear algebra, calculus, probability, Bayes, statistical inference, hypothesis testing, confidence interval, entropy or information theory vocabulary appears anywhere in the corpus.",
+   "note": "Track M, Mathematical Foundations. Rows 98 (A/B design and power) and 104 pair up behind the eval work, and row 100 pairs with row 28's Python, so the track is not wasted. But no posting in the corpus asks for any of it by name, and it is scheduled across months 2-11 against a zero-signal surface."
+  }
+ ]
+}
