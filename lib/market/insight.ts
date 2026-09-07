@@ -81,11 +81,28 @@ const BANDS = [25, 50, 75];
  * reach.ts on that module's own instruction: which tiers a headline is recomputed within is a
  * reporting decision, and tiering a requisition is not.
  *
- * `india-office` is deliberately outside it. A Bengaluru role is takeable, but it is takeable
- * after a domestic move, and folding it in would put "the market you can take today" and "the
- * market you could take this quarter" behind one number.
+ * `india-office` is deliberately outside it, because a Bengaluru role is takeable only after a
+ * domestic move and one number cannot mean both "today" and "this quarter".
  */
 const REACHABLE_TIERS: ReachTier[] = ["india-remote", "emea-apac-remote"];
+
+/**
+ * "Takeable without leaving India" — the above plus `india-office`.
+ *
+ * Both sets exist because collapsing to either one alone reports something false. Answering
+ * only with REACHABLE_TIERS is what made the first run claim data-platform was the sole segment
+ * with any reachable roles: Anthropic's Applied AI Architect in Bangalore and Observe AI's AI
+ * Agent Engineer in Bengaluru both scored zero, so a frontier-lab and an agent-engineer opening
+ * that a Pune-based candidate can genuinely take read as unreachable. Collapsing the other way
+ * would erase the distinction between a role needing no move at all and one needing a domestic
+ * one.
+ *
+ * So: headline counts report both, and everything whose purpose is to inform a MULTI-MONTH
+ * decision — segment ranking, per-segment reach — uses this wider set. Over a 23-month plan a
+ * domestic move is a choice, not a barrier, and treating it as one distorts the only question
+ * the segment ranking exists to answer.
+ */
+const IN_INDIA_TIERS: ReachTier[] = [...REACHABLE_TIERS, "india-office"];
 
 export type SegmentId = "deployment-strategist" | "agent-engineer" | "frontier-lab-applied" | "data-platform" | "inference-infra" | "other";
 
@@ -261,6 +278,10 @@ export type Reachability = {
   reachableCount: number;
   reachablePct: number;
   reachableCompanies: number;
+  /** The wider slice: takeable without leaving India, so a domestic move is allowed. */
+  inIndiaCount: number;
+  inIndiaPct: number;
+  inIndiaCompanies: number;
   /** Reqs tiered from the `location` string alone, because no scan-time `reach` was stored. */
   derivedCount: number;
   skills: ReachSkillEntry[];
@@ -345,6 +366,34 @@ function distinctCore(index: MarketIndex): ReachableReq[] {
 }
 
 const companiesOf = (reqs: ReqRecord[]) => new Set(reqs.map((r) => r.company)).size;
+
+/**
+ * The best tier anywhere in a requisition's clone group, keyed by `dedupeKey`.
+ *
+ * `distinctCore` keeps the oldest clone as the representative, which is right for counting and
+ * wrong for reach: a clone group is ONE role posted in several cities, and you apply to
+ * whichever city you can reach. Tiering the representative alone hid five real openings behind
+ * whichever location happened to be posted first — Anthropic's Applied AI Architect read as
+ * relocate-sponsor while a clone sat in Bangalore, Databricks' Forward Deployed Engineer the
+ * same while a clone was Remote - India, and Cresta's Senior FDE read as out-of-reach while a
+ * clone was remote in Australia.
+ *
+ * `REACH_TIERS` is declared best-reachable-first, so "best" is simply the earliest index. This
+ * only ever moves a requisition toward being reachable, and only on evidence that a takeable
+ * posting for that exact role exists.
+ */
+function bestTierByKey(index: MarketIndex, tierOf: (r: ReachableReq) => ReachTier): Map<string, ReachTier> {
+  const best = new Map<string, ReachTier>();
+  for (const id of Object.keys(index.reqs).sort()) {
+    const req = index.reqs[id] as ReachableReq | undefined;
+    if (!req || req.class !== "core" || req.missingSince !== null) continue;
+    const key = dedupeKey(req.company, req.title);
+    const tier = tierOf(req);
+    const held = best.get(key);
+    if (!held || REACH_TIERS.indexOf(tier) < REACH_TIERS.indexOf(held)) best.set(key, tier);
+  }
+  return best;
+}
 
 /**
  * Tier one requisition. Returns the tier and whether it was derived from `location` alone.
@@ -545,9 +594,11 @@ export function computeInsight(
   const totalCompanies = companiesOf(core);
   const tierOfReq = new Map<ReqRecord, ReachTier>();
   let derivedCount = 0;
+  // Tier from the whole clone group, not from the representative. See bestTierByKey.
+  const bestTier = bestTierByKey(index, (r) => tierOf(r).tier);
   for (const req of core) {
     const { tier, derived } = tierOf(req);
-    tierOfReq.set(req, tier);
+    tierOfReq.set(req, bestTier.get(dedupeKey(req.company, req.title)) ?? tier);
     if (derived) derivedCount += 1;
   }
   const inTier = (reqs: ReachableReq[], tier: ReachTier) => reqs.filter((r) => tierOfReq.get(r) === tier);
@@ -574,6 +625,13 @@ export function computeInsight(
   const reachableCount = reachable.length;
   const reachableCompanies = companiesOf(reachable);
 
+  // The wider slice: no international move, a domestic one allowed. Skill shares are recomputed
+  // over THIS rather than over the five no-move reqs, because a percentage of five is noise --
+  // one requisition moves it twenty points -- and the column exists to inform study decisions.
+  const inIndia = core.filter((r) => IN_INDIA_TIERS.includes(tierOfReq.get(r)!));
+  const inIndiaCount = inIndia.length;
+  const inIndiaCompanies = companiesOf(inIndia);
+
   /**
    * Every headline share, recomputed inside the reachable slice.
    *
@@ -584,8 +642,8 @@ export function computeInsight(
    * one is a study decision.
    */
   const skills: ReachSkillEntry[] = coverage.map((entry) => {
-    const hit = reachable.filter((r) => r.skills !== null && r.skills.includes(entry.id));
-    const reachablePct = pctOf(hit.length, reachableCount);
+    const hit = inIndia.filter((r) => r.skills !== null && r.skills.includes(entry.id));
+    const reachablePct = pctOf(hit.length, inIndiaCount);
     const companies = companiesOf(hit);
     return {
       id: entry.id,
@@ -593,13 +651,13 @@ export function computeInsight(
       marketPct: entry.pct,
       reachablePct,
       hits: hit.length,
-      reqs: reachableCount,
+      reqs: inIndiaCount,
       companies,
-      totalCompanies: reachableCompanies,
+      totalCompanies: inIndiaCompanies,
       deltaPoints: reachablePct - entry.pct,
       statement:
-        `${entry.label} - ${entry.pct}% of the whole core market, ${reachablePct}% of the market you can take:` +
-        ` ${pair(hit.length, reachableCount, companies, reachableCompanies)}.`,
+        `${entry.label} - ${entry.pct}% of the whole core market, ${reachablePct}% of the market you can take without leaving India:` +
+        ` ${pair(hit.length, inIndiaCount, companies, inIndiaCompanies)}.`,
     };
   });
   skills.sort((a, b) => b.reachablePct - a.reachablePct || b.hits - a.hits || (a.id < b.id ? -1 : 1));
@@ -611,14 +669,18 @@ export function computeInsight(
     reachableCount,
     reachablePct: pctOf(reachableCount, coreCount),
     reachableCompanies,
+    inIndiaCount,
+    inIndiaPct: pctOf(inIndiaCount, coreCount),
+    inIndiaCompanies,
     derivedCount,
     skills,
     statement:
-      `REACH - ${reachableCount} of ${coreCount} core requisitions are employable from Pune today (${pctOf(reachableCount, coreCount)}%),` +
+      `REACH - ${reachableCount} of ${coreCount} core requisitions need no move at all (${pctOf(reachableCount, coreCount)}%),` +
       ` across ${plural(reachableCompanies, "company", "companies")}: ${byTier.get("india-remote")!.count} remote from India,` +
       ` ${byTier.get("emea-apac-remote")!.count} remote within EMEA/APAC.` +
-      ` Then ${byTier.get("india-office")!.count} in an Indian office, ${byTier.get("relocate-sponsor")!.count} needing relocation and sponsorship,` +
-      ` ${byTier.get("out-of-reach")!.count} out of reach.` +
+      ` ${inIndiaCount} of ${coreCount} (${pctOf(inIndiaCount, coreCount)}%) are takeable without leaving India, across` +
+      ` ${plural(inIndiaCompanies, "company", "companies")}, adding ${byTier.get("india-office")!.count} in an Indian office.` +
+      ` Beyond that, ${byTier.get("relocate-sponsor")!.count} need relocation and sponsorship and ${byTier.get("out-of-reach")!.count} are out of reach.` +
       (derivedCount > 0
         ? `\n${derivedCount} of ${coreCount} were tiered from the location string alone. Visa and clearance language lives in the JD body and is` +
           ` extracted at scan time; where that is absent, the out-of-reach count is a floor and the relocate tier is its ceiling.`
@@ -657,7 +719,7 @@ export function computeInsight(
     segSkills.sort((a, b) => b.pct - a.pct || (a.id < b.id ? -1 : 1));
     const topSkills = segSkills.slice(0, 5);
 
-    const segReachable = reqs.filter((r) => REACHABLE_TIERS.includes(tierOfReq.get(r)!));
+    const segReachable = reqs.filter((r) => IN_INDIA_TIERS.includes(tierOfReq.get(r)!));
     const readinessPct = pctOf(segEvidenced, segTotal);
     const companies = [...new Set(reqs.map((r) => r.company))].sort();
     segments.push({

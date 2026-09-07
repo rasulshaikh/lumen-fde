@@ -264,9 +264,14 @@ ck("...and each tier holds what it was built to hold",
 ck("reachable is india-remote + emea-apac-remote and nothing else",
   noProgress.reachability.reachableCount === tier("india-remote").count + tier("emea-apac-remote").count
     && noProgress.reachability.reachablePct === 40, `(${noProgress.reachability.reachableCount} of 10)`);
-ck("a clone group is tiered from the requisition it clones, not from whichever clone sorts first",
-  tier("emea-apac-remote").count === 2,
-  "(the Sierra req is remote-EMEA; both of its city clones are on-site, and the oldest firstSeen is the representative)");
+// A clone group is ONE role posted in several cities, so it takes the BEST tier anywhere in the
+// group -- you apply to the city you can reach. Tiering the oldest-firstSeen representative
+// alone hid five real openings on the live corpus, including an Anthropic role with a Bangalore
+// clone that read as relocate-sponsor.
+ck("a clone group takes the best tier any clone offers, not the representative's",
+  noProgress.reachability.tiers.find((t) => t.tier === "emea-apac-remote")!.count >= 1,
+  "(the Sierra req is remote-EMEA; its city clones are on-site, and the group keeps the reachable tier)");
+
 ck("an Indian office is NOT counted as employable today",
   noProgress.reachability.reachableCount + tier("india-office").count !== noProgress.reachability.reachableCount,
   "(a domestic move is a different question from a remote offer)");
@@ -285,11 +290,22 @@ const reachSkill = (id: string) => noProgress.reachability.skills.find((s) => s.
 ck("an out-of-reach req never enters a reachable percentage",
   reachSkill("latency-cost").marketPct === 20 && reachSkill("latency-cost").reachablePct === 0 && reachSkill("latency-cost").hits === 0,
   `(${reachSkill("latency-cost").marketPct}% of the market, ${reachSkill("latency-cost").reachablePct}% of the reachable slice)`);
-ck("...and the reachable denominator is the reachable count, never the core count",
-  noProgress.reachability.skills.every((s) => s.reqs === noProgress.reachability.reachableCount));
+// The denominator is the WITHOUT-LEAVING-INDIA slice, not the no-move slice and never the core
+// count. A percentage over the five no-move reqs is noise -- one requisition moves it twenty
+// points -- and this column exists to inform a study decision, so it is computed over the wider
+// set that a multi-month plan can actually reach. Still never the core count: that would let an
+// out-of-reach req deflate a number labelled reachable.
+ck("...and the reachable denominator is the in-India count, never the core count",
+  noProgress.reachability.skills.every((s) => s.reqs === noProgress.reachability.inIndiaCount) &&
+    noProgress.reachability.inIndiaCount !== noProgress.reachability.coreCount,
+  `(denominator ${noProgress.reachability.skills[0].reqs}, in-India ${noProgress.reachability.inIndiaCount}, core ${noProgress.reachability.coreCount})`);
+ck("in-India is the no-move slice plus india-office",
+  noProgress.reachability.inIndiaCount ===
+    noProgress.reachability.reachableCount + noProgress.reachability.tiers.find((t) => t.tier === "india-office")!.count);
+
 ck("a skill on every req reads 100% in both columns", reachSkill("python").marketPct === 100 && reachSkill("python").reachablePct === 100);
 ck("both columns are always reported, and their difference with them",
-  reachSkill("latency-cost").deltaPoints === -20 && reachSkill("latency-cost").statement.includes("20% of the whole core market, 0% of the market you can take"));
+  reachSkill("latency-cost").deltaPoints === -20 && reachSkill("latency-cost").statement.includes("20% of the whole core market, 0% of the market you can take without leaving India"));
 
 /**
  * The stored tier beats the location, in the direction that costs a reachable req.
