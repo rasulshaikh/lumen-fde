@@ -16,9 +16,14 @@ only the visual-ML mappings went through a dedicated challenge stage.
 ## Visual-ML list (28 sites)
 - `2026-09-07-visual-ml-site-verification.json` — per-site verification and the full
   challenge verdicts.
-- `2026-09-07-visual-ml-lens-{pedagogy,risk,sequencing}.md` — three cross-validation
-  lenses. The risk lens is the most load-bearing: it establishes that every one of the
-  2,236 subtopics already carries exactly one resource, so nothing here is additive.
+- `2026-09-07-visual-ml-lens-{pedagogy,risk,sequencing}-pass{1,2}.md` — three
+  cross-validation lenses, each run TWICE independently. Keep both passes: they do not
+  fully agree, and the disagreement is informative. risk-pass1 argues for adding
+  nothing; pedagogy-pass2 argues adding helps if every item is demoted from where the
+  source list puts it; risk-pass2 is the only one that lands a concrete set (four items,
+  90 minutes). The risk lens is the most load-bearing either way — it establishes that
+  every one of the 2,236 subtopics already carries exactly one resource, so nothing here
+  is additive, and that several "exact matches" recommend installing the incumbent.
 
 ## Known defects in the runs that produced these
 - The challenge stage used ONE `refuted` boolean per site for a BUNDLE of matches, so
