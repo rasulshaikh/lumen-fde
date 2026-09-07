@@ -2,8 +2,8 @@
  "i": 6,
  "topic": "Production images and supply chain: multi-stage, non-root, SBOM, scanning, signing",
  "track": "B. Containers and Kubernetes",
- "month": 1,
- "hours": 6.0,
+ "month": 2.0,
+ "hours": 12.0,
  "why": "The container image is the unit an FDE actually hands to a customer, and it is the customer's security team, not yours, that decides whether it runs: their Wiz or Prisma scan, their admission controller, their procurement checklist asking for an SBOM. A PoC that took three weeks to build dies on go-live day when the image is 1.2 GB, runs as root, and shows 300 CVEs, and the FDE is the only person in the room who can fix it before the change window closes. Knowing how to make an image small, non-root, scannable, attested and signed is what lets you say 'yes, deploy it to prod' in a regulated bank or a FedRAMP boundary instead of 'let me get back to you'.",
  "prerequisites": [
   "Layers, union filesystems, namespaces and cgroups from 'Docker internals' (topic 5): you should already know why deleting a file in a later RUN does not shrink the image",

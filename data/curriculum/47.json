@@ -2,8 +2,8 @@
  "i": 47,
  "topic": "LLM-era system design: serving, caching, batching, rate limits, retries, latency budgets",
  "track": "F. Distributed Systems and System Design",
- "month": 7.0,
- "hours": 8,
+ "month": 12.0,
+ "hours": 13.5,
  "why": "An LLM call breaks every assumption the classic system design playbook is built on: latency is a function of output length rather than of work done, the dependency is a metered third party that returns 429 and 529 under load you do not control, cost is per request and visible on the customer's invoice, and the response is non-deterministic so a naive retry can double-charge and double-write. As the FDE you are the one who has to tell the customer's architect, before go-live, what p95 will be at their peak, what a request costs, and what the system does when the model provider is degraded for forty minutes. Getting the answer wrong is not an SLO miss, it is a checkout page that hangs on Black Friday and a bill nobody approved.",
  "prerequisites": [
   "The system design playbook from topic 42: back-of-envelope estimation, load balancing, cache key design and stampede protection, partitioning, queues, and the 45-minute delivery frame you will now run against an LLM-shaped prompt",

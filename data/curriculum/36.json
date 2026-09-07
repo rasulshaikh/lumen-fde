@@ -2,8 +2,8 @@
  "i": 36,
  "topic": "Temporal at depth: signals, queries, versioning, sagas, worker tuning",
  "track": "E. Backend and Data",
- "month": 5.0,
- "hours": 8,
+ "month": 9.0,
+ "hours": 14.0,
  "why": "Kaupex-style engagements live or die on long-running, side-effecting orchestration: an LLM compile step, a CRM write, a Postgres commit, a webhook back to the customer, each of which fails independently and none of which can be blindly re-run. Temporal is what lets you promise a customer 'nothing is lost and nothing is duplicated' after a node reboot, but only if you can change workflow code while thousands of their executions are mid-flight, unwind a half-finished business transaction without a human reconciling spreadsheets, and size workers so the backlog drains inside the SLO you signed. FDE loops at Temporal-heavy shops probe exactly these three things, because the FDE is the person who will be standing in the customer's cluster when a deploy strands 2,000 workflows.",
  "prerequisites": [
   "Temporal basics from 'Load testing and chaos' (topic 22): start a workflow, run a Python worker on the `kaupex` task queue, read `temporal workflow show`, and the timeout/retry/heartbeat behaviour you measured when killing a worker mid-activity",

@@ -138,14 +138,28 @@ def main(write):
         print("\n(dry run -- pass --write to apply)")
         return
 
+    import glob, pathlib as _p
     for i, r, old, new, parts, bld, _ in rows:
         if new != old:
             plan[1 + i][13] = new
-            if str(i) in topics:
-                topics[str(i)]["hours"] = new
     json.dump(wb, open("data/workbook.json", "w"), ensure_ascii=False, indent=2)
-    json.dump(cur, open("data/curriculum.json", "w"), ensure_ascii=False, indent=1)
-    print("\nwritten.")
+
+    # data/curriculum/NN.json is the SOURCE, data/curriculum.json is BUILT from it by
+    # scripts/build-curriculum.py. Writing only the bundle is how 119 files silently went
+    # stale: the next build regenerated the bundle from them and reverted every Hours value
+    # in this file's own output. build-curriculum.py has a hard drift check for exactly this
+    # and it never fired, because nothing had asked it to run. Write the source; rebuild after.
+    for f in sorted(glob.glob("data/curriculum/*.json")):
+        path = _p.Path(f)
+        d = json.loads(path.read_text())
+        i = d.get("i")
+        if i is None:
+            continue
+        want = float(plan[1 + i][13])
+        if float(d.get("hours", -1)) != want:
+            d["hours"] = want
+            path.write_text(json.dumps(d, ensure_ascii=False, indent=1))
+    print("\nwritten. Now run: python3 scripts/build-curriculum.py")
 
 
 if __name__ == "__main__":

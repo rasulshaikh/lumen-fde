@@ -101,15 +101,23 @@ def main() -> None:
     if write:
         wb["Plan"] = [header] + new_rows
         WORKBOOK.write_text(json.dumps(wb, ensure_ascii=False, indent=2))
-        # curriculum.json carries its own copy of month, keyed by plan index. Left
-        # unsynced it becomes the next stale number, so it moves with the workbook.
-        cur = json.loads(CURRICULUM.read_text())
-        for i, r in enumerate(new_rows):
-            t = cur["topics"].get(str(i))
-            if t:
-                t["month"] = int(r[MONTH_COL])
-        CURRICULUM.write_text(json.dumps(cur, ensure_ascii=False, indent=1))
-        print("\nwritten to data/workbook.json and data/curriculum.json")
+        # The per-topic files under data/curriculum/ are the SOURCE; data/curriculum.json
+        # is built from them. Writing only the bundle desyncs all 119 and the next build
+        # reverts this renumber wholesale — build-curriculum.py has a hard drift check for
+        # precisely this, so write the source and let the build regenerate the bundle.
+        moved_files = 0
+        for f in sorted((ROOT / "data" / "curriculum").glob("*.json")):
+            d = json.loads(f.read_text())
+            i = d.get("i")
+            if i is None:
+                continue
+            want = float(new_rows[i][MONTH_COL])
+            if float(d.get("month", -1)) != want:
+                d["month"] = want
+                f.write_text(json.dumps(d, ensure_ascii=False, indent=1))
+                moved_files += 1
+        print(f"\nwritten to data/workbook.json and {moved_files} files under data/curriculum/")
+        print("Now run: python3 scripts/build-curriculum.py")
     else:
         print("\n(dry run — pass --write to apply)")
 

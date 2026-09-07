@@ -2,8 +2,8 @@
  "i": 112,
  "topic": "PyTorch at depth: tensors, autograd, Dataset and DataLoader, the training loop, profiling",
  "track": "O. Deep Learning and Multimodal",
- "month": 13.0,
- "hours": 8,
+ "month": 22.0,
+ "hours": 13.5,
  "why": "Every deep-learning claim you make to a customer bottoms out in a PyTorch training loop that you must be able to defend line by line: this loss is over these logits, this gradient is this VJP, this number is a real p95 and not a launch-queue artefact. The bugs that lose deals are silent rather than loud - a broadcast that turns an (N,1) vs (N,) residual into an N-by-N loss, a `model.eval()` you forgot, a `total_loss += loss` that retains the graph until OOM at epoch two, a benchmark taken without `torch.cuda.synchronize()` - and none of them raise an exception; they produce a plausible curve and a wrong model. An FDE who can hand-derive a backward, prove it with `torch.autograd.gradcheck` in float64, and then read a `torch.profiler` table to say 'we are dataloader-bound, give me four workers and pinned memory' is the person the customer's ML team stops arguing with.",
  "prerequisites": [
   "Reverse-mode backpropagation on paper: the chain rule over a computational graph, and having already written a NumPy MLP with your own autograd (Topic 110, Neural network foundations)",
