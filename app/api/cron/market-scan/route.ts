@@ -5,7 +5,7 @@ import workbook from "@/data/workbook.json";
 import { classify, dedupeKey, type RoleClass } from "@/lib/market/classify";
 import { fetchBoard, fetchJd, type Posting, type Source } from "@/lib/market/fetch";
 import { htmlToText, matchSkills, stripBoilerplate } from "@/lib/market/skills";
-import { computeBenchmark, type Workbook } from "@/lib/market/benchmark";
+import { computeBenchmark, type Benchmark, type Workbook } from "@/lib/market/benchmark";
 import {
   BENCHMARK_PATH,
   INDEX_PATH,
@@ -173,6 +173,187 @@ function confirmedIds(index: MarketIndex, visited: Set<string>, seenThisRun: Set
   return confirmed;
 }
 
+/**
+ * Copied from daily-digest/route.ts rather than imported.
+ *
+ * A route module is an HTTP entry point, not a library: importing one from another drags a
+ * second `export async function GET` into this file's module graph for the sake of six lines,
+ * and Next has no guarantee about what it does with a route that another route imports. The
+ * honest fix is a shared lib module, which is a change to a file this task does not own. The
+ * two copies must stay identical — the reasoning below is why the shape is what it is.
+ *
+ * MiniMax-M3 does not reliably honour thinking:disabled, so reasoning has to be stripped.
+ * Two failure modes, both seen in a real delivered email:
+ *   - the reply is ENTIRELY a <think> block, so stripping leaves "" and the email arrived
+ *     blank. The old `|| "Lumen could not generate…"` fallback ran BEFORE cleaning against
+ *     a non-empty string, so it could never fire.
+ *   - the tag is never closed, so the pair regex misses and raw reasoning ships to the inbox.
+ */
+function clean(value: string) {
+  return value
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/i, "")
+    .replace(/\*/g, "")
+    .replace(/[—–]/g, " - ")
+    .trim();
+}
+
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+/** Every rendered statement is multi-line by construction; HTML would otherwise run them together. */
+const escLines = (s: string) => esc(s).replace(/\n/g, "<br />");
+
+/** Any run of digits, with an optional decimal tail — the token the post-check compares on. */
+const NUMBERS = /\d+(?:\.\d+)?/g;
+
+/**
+ * The one model paragraph: what to do about these numbers this week.
+ *
+ * Returns "" on every failure path — no key, non-200, timeout, empty after cleaning, or a
+ * number the model invented. The caller sends the deterministic body either way, because the
+ * substance of this email is 40 audited measurements and the paragraph is a framing line on
+ * top of them.
+ */
+async function weeklyFraming(facts: string): Promise<string> {
+  const key = process.env.MINIMAX_API_KEY;
+  if (!key) return "";
+
+  const prompt =
+    `Here is this week's measured Forward-Deployed Engineer job-market benchmark. In 60 words or fewer,` +
+    ` say what to DO about it this week - what to study, what to defer. Write no numbers at all: no digits,` +
+    ` no percentages, no counts, no years. The numbers are already printed above your paragraph and repeating` +
+    ` them is the one thing that makes this paragraph worse than nothing. Do not restate the data or pad.\n\n${facts}`;
+
+  let text = "";
+  try {
+    const r = await fetch("https://api.minimax.io/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "MiniMax-M3", thinking: { type: "disabled" }, temperature: 0.5, max_completion_tokens: 260, stream: false,
+        messages: [
+          { role: "system", content: "You are Quaere, a candid Senior FDE study guide. Plain language, exact technical meaning. No hidden reasoning, no asterisks, no em dashes. Never invent a measurement." },
+          { role: "user", content: prompt },
+        ],
+      }),
+      signal: AbortSignal.timeout(40_000),
+    });
+    if (r.ok) text = clean((await r.json())?.choices?.[0]?.message?.content || "");
+  } catch { /* the benchmark does not depend on this */ }
+  if (!text) return "";
+
+  /**
+   * The post-check the prompt cannot enforce on its own.
+   *
+   * The allowed set is derived from the prompt string itself rather than hand-listed, so it
+   * cannot drift out of step with whatever `facts` the caller decides to supply. A model that
+   * writes "coverage sits near sixty percent" is fine; one that writes "58%" beside a
+   * deterministic block saying 61% has invented a market measurement, and an invented number
+   * sitting among audited ones discredits the audited ones too. Drop the paragraph.
+   */
+  const supplied = new Set(prompt.match(NUMBERS) ?? []);
+  const invented = (text.match(NUMBERS) ?? []).filter((n) => !supplied.has(n));
+  if (invented.length) {
+    console.error("[cron/market-scan] framing invented numbers, dropping it", { invented: invented.slice(0, 5) });
+    return "";
+  }
+  return text;
+}
+
+/**
+ * The Monday email: the full benchmark, deterministic, plus at most one model paragraph.
+ *
+ * Every sentence here comes from `benchmark.*.statement`. Nothing is re-phrased locally, so
+ * the Market tab and this email say the identical thing and there is exactly one place to fix
+ * a wording or an arithmetic bug. Movement included: `boardsOk < DELTA_MIN_BOARDS` is already
+ * resolved inside `computeBenchmark`, which either suppresses the changes or explains why, so
+ * re-deciding it here would be a second copy of the threshold to keep in sync.
+ *
+ * Never throws. The scan's deliverable is the index and the benchmark, both already committed
+ * by the time this runs; a Resend outage on a Monday must cost the email and nothing else.
+ */
+async function sendWeekly(benchmark: Benchmark): Promise<{ sent: boolean; framing: boolean; error: string | null }> {
+  const resendKey = process.env.RESEND_API_KEY;
+  const from = process.env.RESEND_FROM_EMAIL;
+  // `||`, not `??`: an env var set to the empty string in the dashboard is absent in every way
+  // that matters, and `??` would hand Resend a "" recipient and take a 422.
+  const to = process.env.MARKET_TO_EMAIL || process.env.DIGEST_TO_EMAIL;
+  if (!resendKey || !from || !to) return { sent: false, framing: false, error: "Missing RESEND_API_KEY, RESEND_FROM_EMAIL or a recipient." };
+
+  const coverage = benchmark.coverage.map((c) => c.statement);
+  const gaps = benchmark.gaps.map((g) => g.statement);
+  const over = [...benchmark.overInvested.map((o) => o.statement), benchmark.overInvestedTotal.statement];
+  const movement = benchmark.movement.statement;
+  const newReqs = benchmark.newSinceLastRun.map((r) => r.statement);
+  const overflow = benchmark.newSinceLastRunOverflow;
+
+  // The model sees the headline and the shape, not the whole block: a 40-statement prompt buys
+  // no better a 60-word answer and every extra number widens the set the post-check permits.
+  const framing = await weeklyFraming([
+    benchmark.coreStatement,
+    `Top coverage: ${coverage.slice(0, 5).join(" | ")}`,
+    `Gaps with no plan row: ${benchmark.gaps.map((g) => g.label).join(", ") || "none"}`,
+    benchmark.overInvestedTotal.statement,
+    movement || "No skill moved enough to report this week.",
+  ].join("\n"));
+  if (!framing) console.error("[cron/market-scan] no framing from the model; sending the deterministic benchmark alone");
+
+  const section = (label: string, body: string[]) => (body.length ? [label, ...body, ""] : []);
+  const text = [
+    `MARKET BENCHMARK - ${benchmark.day}`,
+    benchmark.coreStatement,
+    benchmark.adjacentStatement,
+    ``,
+    ...(benchmark.baselineStatement ? [benchmark.baselineStatement, ``] : []),
+    ...(framing ? [framing, ``] : []),
+    ...section("COVERAGE", coverage),
+    ...section("GAPS", gaps),
+    ...section("OVER-INVESTED", over),
+    ...section("MOVEMENT", movement ? [movement] : []),
+    ...section("NEW CORE REQS", newReqs.length ? [...newReqs, ...(overflow ? [`+${overflow} more`] : [])] : []),
+    `Scanned ${benchmark.boardsOk} of ${benchmark.boardsTotal} boards. Computed ${benchmark.computedAt}.`,
+    `https://lumenfde.com`,
+  ].join("\n");
+
+  const block = (label: string, body: string[]) =>
+    body.length
+      ? `<tr><td style="padding:14px 0;border-top:1px solid #23252a"><div style="font:500 11px ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#8a8f98;margin-bottom:8px">${esc(label)}</div>${body
+          .map((s) => `<div style="color:#f7f8f8;font-size:14px;line-height:1.6;margin-bottom:10px">${escLines(s)}</div>`)
+          .join("")}</td></tr>`
+      : "";
+  const html = `<div style="background:#010102;padding:28px;font-family:ui-sans-serif,system-ui,sans-serif">
+<table style="max-width:620px;margin:auto;background:#0f1011;border:1px solid #23252a;border-radius:12px;padding:24px;border-collapse:separate">
+<tr><td style="padding-bottom:4px"><div style="font:500 11px ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#828fff">Lumen market benchmark</div>
+<div style="font-size:22px;font-weight:600;color:#f7f8f8;letter-spacing:-.02em;margin-top:6px">${esc(benchmark.coreStatement)}</div>
+<div style="color:#8a8f98;font-size:13px;margin-top:4px">${esc(benchmark.adjacentStatement)}</div></td></tr>
+${benchmark.baselineStatement ? block("Baseline", [benchmark.baselineStatement]) : ""}
+${framing ? block("What to do this week", [framing]) : ""}
+${block("Coverage", coverage)}
+${block("Gaps", gaps)}
+${block("Over-invested", over)}
+${block("Movement", movement ? [movement] : [])}
+${block("New core reqs", newReqs.length ? [...newReqs, ...(overflow ? [`+${overflow} more`] : [])] : [])}
+${block("Scan", [`${benchmark.boardsOk} of ${benchmark.boardsTotal} boards. Computed ${benchmark.computedAt}.`])}
+<tr><td style="padding-top:16px"><a href="https://lumenfde.com" style="color:#828fff;font-size:13px">Open the Market tab</a></td></tr>
+</table></div>`;
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to: [to], subject: `Lumen market · ${benchmark.day}`, text, html }),
+    });
+    if (!response.ok) {
+      const err = await response.text().catch(() => "");
+      console.error("[cron/market-scan] Resend rejected", { status: response.status, err: err.slice(0, 200) });
+      return { sent: false, framing: Boolean(framing), error: `Resend ${response.status}` };
+    }
+    return { sent: true, framing: Boolean(framing), error: null };
+  } catch (error) {
+    console.error("[cron/market-scan] weekly email failed", { error: String(error) });
+    return { sent: false, framing: Boolean(framing), error: String(error) };
+  }
+}
+
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) return new Response("Unauthorized", { status: 401 });
@@ -311,6 +492,30 @@ export async function GET(request: Request) {
         deleted: swept.deleted,
         evicted,
       };
+
+      /**
+       * The weekly email, Monday only, and last on purpose.
+       *
+       * Vercel Hobby caps at two crons, so this is folded in behind a day check rather than
+       * given its own entry — see spec section 6. It sits after all four writes and outside
+       * the branches that return 502, so the ordering is: the index is committed, then the
+       * benchmark and the trend, and only then does anything talk to Resend or MiniMax. That
+       * order is the whole point. The scan's deliverable is the benchmark; an email is a
+       * notification about it. Sending first and then failing to persist would mean an inbox
+       * asserting numbers the tab cannot show, and a Monday send that threw before the writes
+       * would lose a full cycle of scanning to a third party's outage.
+       */
+      if (now.getUTCDay() === 1) {
+        // `sendWeekly` catches its own network failures, so this catch only fires on a bug in
+        // the rendering. It is here anyway: an exception escaping to the outer handler would
+        // return 500 for a cycle whose four files are already committed, and Vercel retrying a
+        // "failed" cron would spend another 47 MB re-scanning a market that was already scanned.
+        const weekly = await sendWeekly(benchmark).catch((error) => {
+          console.error("[cron/market-scan] weekly email render failed", { error: String(error) });
+          return { sent: false, framing: false, error: String(error) };
+        });
+        summary = { ...summary, emailed: weekly.sent, emailFraming: weekly.framing, emailError: weekly.error };
+      }
     } else {
       const wroteIndex = await writeJson(INDEX_PATH, index, stored.sha);
       if (!wroteIndex.ok) {

@@ -347,7 +347,19 @@ ck("BOARD_COUNT matches the enabled board set", BOARD_COUNT === sourcesFile.boar
 ck("all three over-invested tracks resolve", b.overInvested.length === 3 && b.overInvested.every((t) => t.rowCount > 0));
 ck("over-investment is a share of active hours", b.overInvestedTotal.activeHours > 1000 && b.overInvestedTotal.pct >= 15 && b.overInvestedTotal.pct <= 30,
   `(${b.overInvestedTotal.hours}h of ${b.overInvestedTotal.activeHours}h = ${b.overInvestedTotal.pct}%)`);
-ck("gaps are reported verbatim, never inferred", b.gaps.length === skillMap.gaps.length && b.gaps.every((g) => g.statement.includes("No plan row covers this")));
+// The lead sentence has to follow planCoverage, not be hardcoded. It was hardcoded to
+// "No plan row covers this" and was false for six entries -- the plan teaches knowledge
+// distillation at row 99 subtopics[16] and cites LangGraph at row 53. A gap registry that
+// overstates itself argues for evicting real curriculum, so both branches are pinned.
+ck("gaps are reported verbatim, never inferred", b.gaps.length === skillMap.gaps.length && b.gaps.every((g) => g.statement.startsWith("GAP - ")));
+ck("a gap the plan does not cover says so",
+  b.gaps.filter((g) => g.statement.includes("No plan row covers this.")).length ===
+    skillMap.gaps.filter((g) => g.planCoverage !== "partial").length);
+ck("a partly covered gap never claims no row covers it",
+  b.gaps.every((g) => {
+    const src = skillMap.gaps.find((x) => x.id === g.id);
+    return src?.planCoverage !== "partial" || (g.statement.includes("Partly covered") && !g.statement.includes("No plan row covers this."));
+  }));
 ck("computeBenchmark is pure over its arguments", JSON.stringify(computeBenchmark(index, skillMap, workbook, NOW, previous)) === JSON.stringify(b));
 
 console.log(fails ? `\n${fails} FAILURES` : "\nall assertions passed");

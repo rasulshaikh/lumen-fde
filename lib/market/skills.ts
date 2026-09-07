@@ -29,7 +29,15 @@ export type SkillDef = {
   evidence: string;
 };
 
-export type SkillGap = { id: string; label: string; nearestRow: number | null; whyNotCovered: string; statedFrequency: string };
+export type SkillGap = {
+  id: string;
+  label: string;
+  nearestRow: number | null;
+  whyNotCovered: string;
+  statedFrequency: string;
+  /** "partial" when the plan does cover it in part. Six entries claimed "none" and were wrong. */
+  planCoverage?: string;
+};
 export type OverInvestedTrack = { rowRange: string; measuredJdFrequency: string; note: string };
 export type SkillMap = { skills: SkillDef[]; gaps: SkillGap[]; overInvested: OverInvestedTrack[] };
 

@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import workbook from "@/data/workbook.json";
 import library from "@/data/library-context.json";
 import bank from "@/data/recall-bank.json";
+import skillMap from "@/data/market-skill-map.json";
+import { computeBenchmark, type NewReqEntry, type Workbook } from "@/lib/market/benchmark";
+import { INDEX_PATH, readJson, type MarketIndex } from "@/lib/market/store";
 
 type Row = (string | number | null)[];
 type Bank = { meta: Record<string, { topic: string; track: string; outcomes: string[] }>; prompts: { i: number; k: string; kind: string; p: string }[] };
@@ -68,6 +71,65 @@ function digest(rows: Row[]) {
   };
 }
 
+/** GitHub read budget for the market index — see `newCoreReqs` for why it needs one at all. */
+const MARKET_READ_MS = 8_000;
+
+type NewCoreReqs = { entries: NewReqEntry[]; total: number; overflow: number };
+/** Every market failure lands here, and this renders as nothing at all. */
+const NO_MARKET: NewCoreReqs = { entries: [], total: 0, overflow: 0 };
+
+/**
+ * The digest's only market section, and the only part of this email that depends on anything
+ * outside the repo.
+ *
+ * The study brief is the product. A GitHub outage, a missing token, or a scan that has never
+ * run must cost the reader three lines, never the email — so every path below returns
+ * NO_MARKET rather than propagating. `readJson` already absorbs a missing GITHUB_TOKEN, a 404
+ * cold start and a transport error, but it has no deadline of its own: an unanswered socket
+ * would hang here until the platform killed the function, and the digest would simply never
+ * arrive. The race is what turns that class of failure back into a missing section.
+ *
+ * This function never rejects, which is what makes it safe to start before the model call and
+ * await after it. That overlap is deliberate: sequentially, the 40s model timeout and this one
+ * add up against the function ceiling, and the market read could push the Resend call past it.
+ * An in-flight promise nobody is awaiting yet is an unhandled rejection if it can reject, so
+ * the guarantee and the overlap stand or fall together.
+ *
+ * Recomputed from index.json rather than read from benchmark.json on purpose. benchmark.json
+ * carries the day the scan last succeeded; if this morning's scan did not run, its
+ * newSinceLastRun still lists yesterday's roles and the digest would announce them a second
+ * time. Recomputing against today reports nothing, which is the truth.
+ */
+async function newCoreReqs(): Promise<NewCoreReqs> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const stored = await Promise.race([
+      readJson<MarketIndex>(INDEX_PATH),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`market index read exceeded ${MARKET_READ_MS}ms`)), MARKET_READ_MS);
+      }),
+    ]);
+    if (!stored.data) return NO_MARKET;
+    // computeBenchmark is pure and already applies every rule this section needs: core only,
+    // deduped so 15 city clones are one line, suppressed on a baseline or partial scan, capped
+    // at NEW_ROLES_CAP with the remainder counted. The statements are rendered there so this
+    // email and the Market tab print the identical sentence from one place.
+    const benchmark = computeBenchmark(stored.data, skillMap, workbook as unknown as Workbook, new Date());
+    return {
+      entries: benchmark.newSinceLastRun,
+      total: benchmark.newSinceLastRunTotal,
+      overflow: benchmark.newSinceLastRunOverflow,
+    };
+  } catch (error) {
+    console.error("[cron/daily-digest] market section skipped", { error: String(error) });
+    return NO_MARKET;
+  } finally {
+    // The loser of the race is still pending, and its timer would otherwise hold the function
+    // open for the rest of the budget after the email has already gone out.
+    clearTimeout(timer);
+  }
+}
+
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) return new Response("Unauthorized", { status: 401 });
@@ -85,6 +147,10 @@ export async function GET(request: Request) {
     const topic = String(d.next[2]);
     const depth = String(d.next[3]);
     const deliverable = String(d.next[14]);
+
+    // Started, not awaited: it runs while the model is thinking. Safe only because
+    // newCoreReqs cannot reject.
+    const marketRead = newCoreReqs();
 
     // The model writes ONE framing paragraph. If it fails, the rest of the email stands.
     let framing = "";
@@ -107,12 +173,19 @@ export async function GET(request: Request) {
     }
     if (!framing) console.error("[cron/daily-digest] no framing from the model; sending the deterministic digest alone");
 
+    const market = await marketRead;
+    const marketLines = market.entries.map((r) => r.statement);
+    if (market.overflow > 0) marketLines.push(`+${market.overflow} more`);
+
     const pace = `${d.doneCount} of ${d.activeCount} topics done · ${d.doneH}h of ${d.totalH}h · ${d.remainingH}h left, about ${d.weeksLeft} weeks at 16h/week`;
     const text = [
       `TODAY — ${topic}`, `Month ${d.next[1]} · ${d.next[13]}h · ${d.track}`, ``,
       framing ? `${framing}\n` : ``,
       `WHAT IT ASKS OF YOU`, depth, ``,
       `SHIP THIS`, deliverable, ``,
+      // After SHIP THIS and before ANSWER THIS COLD, so the study content still leads. Most
+      // mornings there is nothing new and this is an empty string, which is the point.
+      market.entries.length ? `NEW CORE REQS — ${market.total}\n${marketLines.join("\n")}\n` : ``,
       d.question ? `ANSWER THIS COLD (before you open anything)\n${d.question}\n` : ``,
       `READ · ${d.next[4]}\n${d.next[5]}`, ``,
       `DO · ${d.next[10]}\n${d.next[11]}`, ``,
@@ -131,6 +204,7 @@ export async function GET(request: Request) {
 ${framing ? row("Why it matters", esc(framing)) : ""}
 ${row("What it asks of you", esc(depth))}
 ${row("Ship this", esc(deliverable))}
+${market.entries.length ? row(`New core reqs — ${market.total}`, `${market.entries.map((r) => `<a href="${esc(r.url)}" style="color:#828fff">${esc(r.statement)}</a>`).join("<br />")}${market.overflow > 0 ? `<br /><span style="color:#8a8f98">+${market.overflow} more</span>` : ""}`) : ""}
 ${d.question ? row("Answer this cold", esc(d.question)) : ""}
 ${row("Read", `<a href="${esc(String(d.next[5]))}" style="color:#828fff">${esc(String(d.next[4]))}</a>`)}
 ${row("Do", `<a href="${esc(String(d.next[11]))}" style="color:#828fff">${esc(String(d.next[10]))}</a>`)}
@@ -149,7 +223,7 @@ ${row("Pace", esc(pace))}
       console.error("[cron/daily-digest] Resend rejected", { status: emailResponse.status, err: err.slice(0, 200) });
       return NextResponse.json({ ok: false, error: "Email delivery failed." }, { status: 502 });
     }
-    return NextResponse.json({ ok: true, sentTo: to, topic, framing: Boolean(framing), chars: text.length });
+    return NextResponse.json({ ok: true, sentTo: to, topic, framing: Boolean(framing), newCoreReqs: market.total, chars: text.length });
   } catch (error) {
     console.error("[cron/daily-digest] failed", { error: String(error) });
     return NextResponse.json({ ok: false, error: "Digest generation failed." }, { status: 500 });

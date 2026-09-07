@@ -296,6 +296,16 @@ export function computeBenchmark(
   const gaps: GapEntry[] = skillMap.gaps.map((gap) => {
     const nearest = planRow(workbook, gap.nearestRow);
     const nearestText = nearest ? `Nearest: ${citeRow(nearest)}.` : "No nearest row identified.";
+    /**
+     * "No plan row covers this" used to be printed unconditionally, and it was false for six
+     * of the seventeen entries: an adversarial pass found the plan teaches knowledge
+     * distillation at row 99 subtopics[16], cites LangGraph and LangChain at row 53, and
+     * covers zero-data-retention at row 71 subtopics[14]. Four entries were deleted outright
+     * and three now declare planCoverage "partial", so the sentence has to follow the data.
+     * A benchmark that overstates its own gaps argues for evicting real curriculum.
+     */
+    const partial = gap.planCoverage === "partial";
+    const lead = partial ? "Partly covered — see below." : "No plan row covers this.";
     return {
       id: gap.id,
       label: gap.label,
@@ -303,7 +313,7 @@ export function computeBenchmark(
       rows: nearest ? [nearest] : [],
       statedFrequency: gap.statedFrequency,
       whyNotCovered: gap.whyNotCovered,
-      statement: `GAP - ${gap.label}. ${gap.statedFrequency}.\nNo plan row covers this. ${nearestText} ${gap.whyNotCovered} 0h scheduled.`,
+      statement: `GAP - ${gap.label}. ${gap.statedFrequency}.\n${lead} ${nearestText} ${gap.whyNotCovered}${partial ? "" : " 0h scheduled."}`,
     };
   });
 
