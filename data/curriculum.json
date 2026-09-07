@@ -3813,8 +3813,8 @@
      "learn": "Learn the definitions exactly, because everything else follows from them: p is a core point when |N_eps(p)| >= min_samples (sklearn counts p itself); q is directly density-reachable from a core point p when q lies in N_eps(p); a cluster is a maximal set closed under density-reachability and joined by density-connectivity; anything not reachable from any core point is noise and gets label -1. Understand what that buys and what it costs - clusters take any shape, k is not a parameter, and outliers get an explicit label - but a border point (non-core, yet inside the eps-ball of core points from two different clusters) goes to whichever cluster reaches it first, so the result depends on row order; this is why implementations legitimately differ on those points and why a border-point assignment must never carry business meaning. Know the cost model: roughly O(n log n) with a spatial index in low dimension, degrading towards O(n^2) as dimension rises and the index stops pruning, and note that a large eps blows up memory because sklearn materialises neighbourhoods - mitigate by passing a precomputed sparse radius-neighbours graph as metric='precomputed'. Note finally that DBSCAN has no predict method by design: scoring a new point requires a re-fit or a nearest-core-point rule that you write and document.",
      "minutes": 25,
      "resource": {
-      "label": "scikit-learn - sklearn.cluster.DBSCAN (eps, min_samples, core_sample_indices_, noise label -1)",
-      "url": "https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html"
+      "label": "Naftali Harris - Visualizing DBSCAN Clustering (step through core, border and noise points)",
+      "url": "https://www.naftaliharris.com/blog/visualizing-dbscan-clustering/"
      }
     },
     {
@@ -6154,8 +6154,8 @@
      "learn": "Return the post-softmax (B, h, T, T) weights from your attention module behind a flag (never in the hot path), pick a fixed probe string, and render a lower-triangular heatmap per head per layer with token labels on both axes. Learn to recognise the recurring patterns - a diagonal-adjacent band (previous-token head), a vertical stripe on position 0 (an attention sink, where a head parks probability mass when it has nothing to contribute, and a normal thing to see), a broad uniform triangle (a near-dead head), and the offset-diagonal match-and-copy pattern of an induction head. Learn the honest caveat and be able to say it to a customer: attention weights are not feature attribution, because the OV circuit determines how much any attended token actually changes the output, so a bright cell is evidence of routing, not of reasoning. Save the figures into the README as the deliverable requires, with the probe string and layer/head indices captioned.",
      "minutes": 30,
      "resource": {
-      "label": "Brendan Bycroft - LLM Visualization (interactive walkthrough of GPT tensor flow)",
-      "url": "https://bbycroft.net/llm"
+      "label": "BertViz - interactive attention head/layer grid for any HF model (model, head and neuron views)",
+      "url": "https://github.com/jessevig/bertviz"
      }
     },
     {
@@ -15007,8 +15007,8 @@
      "learn": "Be able to derive and draw scaled dot-product attention: project each token into query, key and value vectors; score every query against every key with a dot product; divide by sqrt(d_k) to keep the softmax out of saturation; softmax over the key axis to get weights that sum to 1; take the weighted sum of values. Understand multi-head attention as running h of these in parallel on d_model/h dimensions and concatenating, so different heads can track different relations. Know the causal mask concretely: positions j > i are set to -inf before the softmax so a decoder-only model can be trained on every position of a sequence in one pass. From this, derive two things you will use constantly: attention is O(n^2) in sequence length, and every output token attends to every prior token, which is why the whole prompt is re-read (from cache) at each step.",
      "minutes": 40,
      "resource": {
-      "label": "Vaswani et al., \"Attention Is All You Need\" (arXiv)",
-      "url": "https://arxiv.org/abs/1706.03762"
+      "label": "Transformer Explainer (Polo Club) - live GPT-2 124M: tokenization, Q/K/V, attention weights, next-token probabilities",
+      "url": "https://poloclub.github.io/transformer-explainer/"
      }
     },
     {

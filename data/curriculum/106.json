@@ -91,8 +91,8 @@
    "learn": "Learn the definitions exactly, because everything else follows from them: p is a core point when |N_eps(p)| >= min_samples (sklearn counts p itself); q is directly density-reachable from a core point p when q lies in N_eps(p); a cluster is a maximal set closed under density-reachability and joined by density-connectivity; anything not reachable from any core point is noise and gets label -1. Understand what that buys and what it costs - clusters take any shape, k is not a parameter, and outliers get an explicit label - but a border point (non-core, yet inside the eps-ball of core points from two different clusters) goes to whichever cluster reaches it first, so the result depends on row order; this is why implementations legitimately differ on those points and why a border-point assignment must never carry business meaning. Know the cost model: roughly O(n log n) with a spatial index in low dimension, degrading towards O(n^2) as dimension rises and the index stops pruning, and note that a large eps blows up memory because sklearn materialises neighbourhoods - mitigate by passing a precomputed sparse radius-neighbours graph as metric='precomputed'. Note finally that DBSCAN has no predict method by design: scoring a new point requires a re-fit or a nearest-core-point rule that you write and document.",
    "minutes": 25,
    "resource": {
-    "label": "scikit-learn - sklearn.cluster.DBSCAN (eps, min_samples, core_sample_indices_, noise label -1)",
-    "url": "https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html"
+    "label": "Naftali Harris - Visualizing DBSCAN Clustering (step through core, border and noise points)",
+    "url": "https://www.naftaliharris.com/blog/visualizing-dbscan-clustering/"
    }
   },
   {
