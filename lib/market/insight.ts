@@ -272,6 +272,9 @@ export type ReachSkillEntry = {
   statement: string;
 };
 
+/** One named requisition a Pune-based candidate can take. */
+export type ReachRole = { company: string; title: string; location: string; url: string; tier: ReachTier; tierLabel: string; statement: string };
+
 export type Reachability = {
   coreCount: number;
   tiers: ReachEntry[];
@@ -282,6 +285,14 @@ export type Reachability = {
   inIndiaCount: number;
   inIndiaPct: number;
   inIndiaCompanies: number;
+  /**
+   * The in-India requisitions, named.
+   *
+   * Counts and percentages were all this carried at first, and the tab could then only render
+   * shares -- but "Databricks - Staff Forward Deployed Engineer, Remote - India" is the thing
+   * a reader acts on, and a share of eleven is not. Ordered best-tier first, then company.
+   */
+  roles: ReachRole[];
   /** Reqs tiered from the `location` string alone, because no scan-time `reach` was stored. */
   derivedCount: number;
   skills: ReachSkillEntry[];
@@ -382,15 +393,21 @@ const companiesOf = (reqs: ReqRecord[]) => new Set(reqs.map((r) => r.company)).s
  * only ever moves a requisition toward being reachable, and only on evidence that a takeable
  * posting for that exact role exists.
  */
-function bestTierByKey(index: MarketIndex, tierOf: (r: ReachableReq) => ReachTier): Map<string, ReachTier> {
-  const best = new Map<string, ReachTier>();
+function bestTierByKey(index: MarketIndex, tierOf: (r: ReachableReq) => ReachTier): Map<string, { tier: ReachTier; location: string; url: string }> {
+  const best = new Map<string, { tier: ReachTier; location: string; url: string }>();
   for (const id of Object.keys(index.reqs).sort()) {
     const req = index.reqs[id] as ReachableReq | undefined;
     if (!req || req.class !== "core" || req.missingSince !== null) continue;
     const key = dedupeKey(req.company, req.title);
     const tier = tierOf(req);
     const held = best.get(key);
-    if (!held || REACH_TIERS.indexOf(tier) < REACH_TIERS.indexOf(held)) best.set(key, tier);
+    // The WINNING clone's location and url travel with its tier. Carrying the representative's
+    // instead printed "Anthropic - Applied AI Architect, Tokyo, Japan" under india-office: the
+    // Bangalore clone earned the tier and Tokyo was displayed beside it, which reads as a bug
+    // and sends the reader to the wrong posting.
+    if (!held || REACH_TIERS.indexOf(tier) < REACH_TIERS.indexOf(held.tier)) {
+      best.set(key, { tier, location: req.location || "", url: req.url });
+    }
   }
   return best;
 }
@@ -598,7 +615,7 @@ export function computeInsight(
   const bestTier = bestTierByKey(index, (r) => tierOf(r).tier);
   for (const req of core) {
     const { tier, derived } = tierOf(req);
-    tierOfReq.set(req, bestTier.get(dedupeKey(req.company, req.title)) ?? tier);
+    tierOfReq.set(req, bestTier.get(dedupeKey(req.company, req.title))?.tier ?? tier);
     if (derived) derivedCount += 1;
   }
   const inTier = (reqs: ReachableReq[], tier: ReachTier) => reqs.filter((r) => tierOfReq.get(r) === tier);
@@ -641,6 +658,28 @@ export function computeInsight(
    * a different number entirely among the roles that can be done from Pune, and only the second
    * one is a study decision.
    */
+  // Named, so the tab can print a company and a title instead of a share of eleven. Sorted by
+  // tier first (REACH_TIERS is best-reachable-first) so the roles needing no move at all lead.
+  const roles: ReachRole[] = inIndia
+    .map((r) => {
+      const tier = tierOfReq.get(r)!;
+      // From the clone that earned the tier, so the location shown never contradicts it.
+      const won = bestTier.get(dedupeKey(r.company, r.title));
+      return {
+        company: r.company,
+        title: r.title,
+        location: (won?.tier === tier ? won.location : r.location) || "",
+        url: (won?.tier === tier ? won.url : r.url) || r.url,
+        tier,
+        tierLabel: REACH_LABELS[tier],
+        statement: `${r.company} - ${r.title}${(won?.tier === tier ? won.location : r.location) ? `, ${won?.tier === tier ? won.location : r.location}` : ""}`,
+      };
+    })
+    .sort((a, b) =>
+      REACH_TIERS.indexOf(a.tier) - REACH_TIERS.indexOf(b.tier) ||
+      (a.company < b.company ? -1 : a.company > b.company ? 1 : 0) ||
+      (a.title < b.title ? -1 : 1));
+
   const skills: ReachSkillEntry[] = coverage.map((entry) => {
     const hit = inIndia.filter((r) => r.skills !== null && r.skills.includes(entry.id));
     const reachablePct = pctOf(hit.length, inIndiaCount);
@@ -672,6 +711,7 @@ export function computeInsight(
     inIndiaCount,
     inIndiaPct: pctOf(inIndiaCount, coreCount),
     inIndiaCompanies,
+    roles,
     derivedCount,
     skills,
     statement:

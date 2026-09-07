@@ -571,21 +571,20 @@ th{padding:0 12px 10px}
    under a section head that is itself the divider, so a second rule would box it. */
 .mkt-lead{display:grid;gap:5px;padding:12px 0 2px}
 
-/* The ranked marginal table. The gain is in the sentence and in the column: the
-   sentence is what the weekly email prints, the column is what makes twenty-seven
-   rows rankable without reading twenty-seven sentences. */
-.mkt-marginal{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:start}
+/* The readiness gain, in the ranked marginal table's last column: the column is what
+   makes twenty-seven rows rankable without reading twenty-seven sentences. */
 .mkt-gain{font-family:'Geist Mono',ui-monospace,monospace;font-size:13px;
   font-variant-numeric:tabular-nums;color:var(--accent-text);white-space:nowrap;padding-top:2px}
 
-/* The reachability distribution. Same bar treatment as .track-progress — the accent
-   carries proportion and nothing else on this page is coloured. */
-.mkt-tier{display:grid;gap:9px}
+/* Proportion, drawn. Same bar treatment as .track-progress — the accent carries
+   proportion and nothing else on this page is coloured. */
 .mkt-bar{display:block;height:4px;max-width:92ch;background:var(--surface-strong);
   border-radius:var(--r-pill);overflow:hidden}
 .mkt-bar span{display:block;height:100%;background:var(--primary);border-radius:var(--r-pill)}
 
-/* Whole market beside reachable market. Not a <table>: the global table rule sets
+/* The tab's one table shape, worn three times: coverage (.mkt-cov), the ranked
+   marginal rows (.mkt-marg) and the in-India split by segment (.mkt-reach), each
+   setting only its own column widths. Not a <table>: the global table rule sets
    min-width:950px for the Plan grid, which would force a horizontal scrollbar onto
    four short columns. Each row's title is its full statement, so the sentence the
    email prints is still one hover away from the number. */
@@ -598,10 +597,14 @@ th{padding:0 12px 10px}
   transition:background-color 120ms ease}
 .mkt-cols-head+.mkt-cols-row{border-top:0}
 .mkt-cols-row:hover{background:var(--surface-strong)}
-.mkt-cols-head span:not(:first-child),.mkt-cols-row b,.mkt-cols-row span:last-child{text-align:right}
+.mkt-cols-head span:not(:first-child),.mkt-cols-row b,.mkt-cols-row>span:last-child{text-align:right}
 .mkt-cols-row b{font-family:'Geist Mono',ui-monospace,monospace;font-size:12.5px;font-weight:500;
   font-variant-numeric:tabular-nums;color:var(--ink)}
-.mkt-cols-row span:last-child{font-family:'Geist Mono',ui-monospace,monospace;font-size:11.5px;
+/* Direct child only. As a descendant selector this matched .mkt-sub too -- a sub-line is
+   always the last child of its own cell -- and at (0,2,1) it beat .mkt-sub at (0,1,0). Every
+   secondary line in all three grids rendered flush-right in monospace: a topic title set
+   against the wrong edge, and a denominator pair shoved away from the skill it belongs to. */
+.mkt-cols-row>span:last-child{font-family:'Geist Mono',ui-monospace,monospace;font-size:11.5px;
   font-variant-numeric:tabular-nums;color:var(--muted)}
 
 /* A segment's reachability mix. Read-only, so a chip rather than the .mkt-rowlink
@@ -621,9 +624,97 @@ th{padding:0 12px 10px}
 .mkt-quaere p{margin:0;font-size:14px;line-height:1.6;color:var(--ink);max-width:74ch}
 .mkt-quaere .mkt-quaere-foot{margin:11px 0 0;font-size:12px;line-height:1.5;color:var(--muted)}
 
+/* --- Market tab: the three zones ----------------------------------------------
+   Decide, Reach, Market, in that order. A zone is a heading and a rule, nothing
+   more: the panel already carries the border and the ground, and a card per zone
+   would be a card inside a card. The rule is --line-strong rather than --line so
+   a zone boundary reads as heavier than the hairline between two entries inside
+   one. ------------------------------------------------------------------- */
+.mkt-zone{padding:30px 0 0;margin-top:30px;border-top:1px solid var(--line-strong)}
+/* The summary already closes with a rule, so the first zone does not open with a
+   second one 30px under it. */
+.mkt-summary+.mkt-zone{margin-top:0;padding-top:26px;border-top:0}
+.mkt-zone-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:6px}
+.mkt-zone-head h3{margin:0;font-size:17px;letter-spacing:-.025em}
+.mkt-zone-head .eyebrow{margin:0 0 5px}
+.mkt-zone .mkt-section:first-of-type{padding-top:16px}
+
+/* Deterministic events, above the readiness lead. Same 14px lead line as any
+   other head line — they are already the only thing in the zone above a rule. */
+.mkt-flags{display:grid;gap:6px;padding:12px 0 2px}
+
+/* The secondary line inside a .mkt-cols cell: a topic under its row link, a
+   denominator pair under a skill. 11px is the .mkt-sub of the whole tab, so a
+   grid cell and a chip agree about what "detail" looks like. */
+.mkt-cols-row .mkt-sub{display:block;margin-top:3px;font-size:11px;line-height:1.4;
+  color:var(--muted);text-align:left;font-family:inherit;font-variant-numeric:normal}
+
+/* The coverage table. Four columns over .mkt-cols, which is a grid rather than a
+   <table> because the global table rule sets min-width:950px for the Plan grid.
+   The last column holds a button, so it aligns left against the right-aligned
+   numbers the base rule assumes. */
+.mkt-cov .mkt-cols-head,.mkt-cov .mkt-cols-row{grid-template-columns:minmax(0,1fr) 128px 66px 156px;align-items:center}
+.mkt-cov .mkt-cols-head span:last-child,.mkt-cov .mkt-cols-row>:last-child{text-align:left;font-family:inherit;font-size:inherit}
+.mkt-meter{display:flex;align-items:center;gap:9px}
+.mkt-meter .mkt-bar{flex:1;min-width:36px;max-width:none}
+.mkt-meter b{min-width:32px}
+/* Reachable share against market share. Green when the slice you can work in
+   asks for the skill at least as often as the whole market does, red when it
+   asks for it less — the only colour on the tab that carries a judgement. */
+.mkt-yours.is-above{color:var(--teal)}
+.mkt-yours.is-below{color:var(--danger)}
+
+/* The ranked marginal table: plan row, what it clears, what it costs, what it
+   moves. Five columns would need a scrollbar; hours and month share one. */
+.mkt-marg .mkt-cols-head,.mkt-marg .mkt-cols-row{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr) 104px 52px}
+.mkt-marg .mkt-gain{color:var(--accent-text);font-size:12.5px}
+.mkt-marg .mkt-cols-row>span:nth-child(2){font-size:12px;color:var(--muted);line-height:1.45}
+
+/* Where the in-India requisitions sit. Three tier counts per segment. */
+.mkt-reach .mkt-cols-head,.mkt-reach .mkt-cols-row{grid-template-columns:minmax(0,1fr) 92px 92px 92px}
+
+/* A named requisition you could take from Pune today. The accent rule is the
+   same device as .mkt-quaere at a smaller weight: this is the one block on the
+   tab that is an opportunity rather than a measurement. */
+.mkt-roles{display:grid;gap:8px;padding:12px 0 4px}
+.mkt-role{display:grid;grid-template-columns:150px 1fr;gap:2px 14px;align-items:baseline;padding:10px 0;border-top:1px solid var(--line);text-decoration:none;color:var(--ink)}
+.mkt-role:hover{background:var(--surface-strong)}
+.mkt-role strong{font-size:13px}
+.mkt-role>span:not(.mkt-sub){font-size:13px;color:var(--ink-2)}
+.mkt-role .mkt-sub{grid-column:2;text-align:left;font-family:inherit}
+
+/* The five-tier distribution, one line per tier: name, proportion, count, share.
+   Same bar as .track-progress, which is the only place proportion is drawn. */
+.mkt-tiers{display:grid;gap:9px;padding:14px 0 4px}
+.mkt-tierline{display:grid;grid-template-columns:minmax(0,148px) minmax(0,1fr) 46px 46px;gap:12px;
+  align-items:center;font-size:12.5px;color:var(--ink-2)}
+.mkt-tierline .mkt-bar{max-width:none}
+.mkt-tierline b{font-family:'Geist Mono',ui-monospace,monospace;font-size:12px;font-weight:500;
+  font-variant-numeric:tabular-nums;color:var(--ink);text-align:right}
+.mkt-caveat{margin-top:10px;max-width:92ch}
+
+/* The sub-20% disclosure. Closed by default and counting what it hides, so the
+   skills that are not worth a row are still worth a number. */
+.mkt-more{margin-top:14px}
+.mkt-more summary{display:inline-block;padding:5px 10px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--surface-strong);color:var(--ink-2);font-size:12px;
+  cursor:pointer;transition:background-color 120ms ease,border-color 120ms ease,color 120ms ease}
+.mkt-more summary:hover{background:var(--surface);border-color:var(--line-strong);color:var(--ink)}
+.mkt-more summary:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.mkt-more[open] summary{margin-bottom:6px}
+.mkt-more-foot{margin:12px 0 0}
+
 @media(max-width:600px){
-  .mkt-marginal{grid-template-columns:1fr;gap:8px}
   .mkt-gain{padding-top:0}
   .mkt-cols-head,.mkt-cols-row{grid-template-columns:minmax(0,1fr) 60px 60px 42px;gap:8px;font-size:12px}
   .mkt-quaere{padding:16px}
+  .mkt-zone{padding-top:24px;margin-top:24px}
+  .mkt-cov .mkt-cols-head,.mkt-cov .mkt-cols-row{grid-template-columns:minmax(0,1fr) 74px 46px 92px;gap:8px}
+  .mkt-meter{gap:6px}
+  .mkt-meter .mkt-bar{display:none}
+  .mkt-marg .mkt-cols-head,.mkt-marg .mkt-cols-row{grid-template-columns:minmax(0,1fr) 76px 44px}
+  .mkt-marg .mkt-cols-head span:nth-child(2),.mkt-marg .mkt-cols-row>span:nth-child(2){display:none}
+  .mkt-reach .mkt-cols-head,.mkt-reach .mkt-cols-row{grid-template-columns:minmax(0,1fr) 44px 44px 44px}
+  .mkt-tierline{grid-template-columns:minmax(0,1fr) 40px 44px;gap:8px}
+  .mkt-tierline .mkt-bar{display:none}
 }
