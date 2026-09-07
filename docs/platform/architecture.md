@@ -673,7 +673,7 @@ python3 scripts/build-curriculum.py   # after ANY edit under data/curriculum/
   for pull requests. It does **not** run the test suites.
 - Vercel builds from `next.config.ts` (`reactStrictMode: true`) with the framework and crons
   from `vercel.json`. Render builds `mcp/` from `mcp/render.yaml`.
-- `scripts/` also holds `add-gap-rows.py`, `build-icons.mjs`, `canonicalise_curriculum_urls.py`,
+- `scripts/` also holds`build-icons.mjs`, `canonicalise_curriculum_urls.py`,
   `index-library.py`, `rebaseline-hours.py`, `renumber-months.py`, `verify_curriculum_urls.py`.
   `rebaseline-hours.py` and `renumber-months.py` are the two that must write the per-topic source
   files and then be followed by `build-curriculum.py` — see §4.2.

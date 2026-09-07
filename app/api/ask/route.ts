@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import library from "@/data/library-context.json";
 import sourceCatalog from "@/data/library-sources.json";
 import repositories from "@/data/repository-context.json";
-import lesson from "@/data/lesson-context.json";
 import curriculum from "@/data/curriculum.json";
 import workbook from "@/data/workbook.json";
 import { BENCHMARK_PATH, INSIGHT_PATH, readJson } from "@/lib/market/store";

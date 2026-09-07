@@ -337,6 +337,13 @@ function Market({ statuses, openPlanRow }: { statuses: Record<string, string>; o
         : <>
           <section className="mkt-section">
             <div className="mkt-section-head"><h3>Takeable from Pune</h3><span className="panel-meta">named where the scan names them</span></div>
+            {/* The arrival, above the roster it annotates. The roster below lists every in-India
+                requisition on every scan; this fires only on the scan where one first appears,
+                which is the difference between a list to browse and a reason to stop what you
+                are doing. Rendered as a statement line rather than another .mkt-role card
+                because a Flag carries no url — a card without a link is a card you cannot open,
+                and the same role's real card is a few lines below. */}
+            {indiaFlags.length > 0 && <div className="mkt-flags">{indiaFlags.map((flag) => <p className="mkt-head-line" key={`${flag.kind}::${flag.id}`}>{flag.statement}</p>)}</div>}
             {/* Every in-India requisition, named. This used to render only `new-india-remote`
                 flags, which are empty except on the scan where a role first appears — so the
                 zone whose whole point is "a named role beats a share" showed shares. */}

@@ -4,7 +4,7 @@ import library from "@/data/library-context.json";
 import bank from "@/data/recall-bank.json";
 import skillMap from "@/data/market-skill-map.json";
 import { computeBenchmark, type NewReqEntry, type Workbook } from "@/lib/market/benchmark";
-import { INDEX_PATH, readJson, type MarketIndex } from "@/lib/market/store";
+import { INDEX_PATH, readJson, readProgress, type MarketIndex } from "@/lib/market/store";
 
 type Row = (string | number | null)[];
 type Bank = { meta: Record<string, { topic: string; track: string; outcomes: string[] }>; prompts: { i: number; k: string; kind: string; p: string }[] };
@@ -29,20 +29,44 @@ function clean(value: string) {
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /**
+ * A plan row is complete only on these — the four spellings lib/market/insight.ts accepts, and
+ * for its reasons: the dashboard POST writes `done`, a human or an MCP client types one of the
+ * others, "in progress" is not evidence and "skipped" is a decision not to acquire the skill
+ * rather than a claim to have it. Copied rather than imported because that module does not
+ * export the set; the surfacing test pins the two in agreement.
+ */
+const DONE_STATUSES = new Set(["done", "complete", "completed", "finished"]);
+
+const norm = (value: unknown) => String(value ?? "").trim().toLowerCase();
+/** Progress statuses arrive underscored from the dashboard POST and spaced from a human. */
+const normStatus = (value: unknown) => norm(value).replace(/_/g, " ");
+
+/**
  * Everything below is derived from the plan, with no model involved.
  *
  * The digest used to be a single model paragraph, so when the model returned nothing the
  * email was empty — which is exactly what shipped. The substance is now deterministic and
  * the model only writes one optional framing line on top. A bad model day now costs a
  * paragraph, not the whole email.
+ *
+ * `progress` is the recorded study history, matched to a row by topic string exactly as
+ * app/page.tsx and lib/market/insight.ts match it — one matcher, or the email and the tab
+ * disagree about which row is next. It carries the same meaning it has there: null is "we do
+ * not know", never "nothing is done".
+ *
+ * Workbook column 15 is the committed BASELINE — 117 "Not started", 2 "Skipped", no other value
+ * ever written — so a digest that reads it alone picks plan row 0 every morning for the life of
+ * the plan, which is what this email did for months while only the recall question rotated.
+ * The column survives as the per-row fallback: it is where "Skipped" lives, and where an
+ * unreadable progress store lands, so a GitHub outage costs freshness and not the brief.
  */
-function digest(rows: Row[]) {
-  const status = (r: Row) => String(r[15] ?? "").trim().toLowerCase();
+function digest(rows: Row[], progress: Map<string, string> | null) {
+  const status = (r: Row) => progress?.get(norm(r[2])) ?? normStatus(r[15]);
   const active = rows.filter((r) => status(r) !== "skipped");
-  const done = active.filter((r) => status(r) === "done");
+  const done = active.filter((r) => DONE_STATUSES.has(status(r)));
   const totalH = active.reduce((n, r) => n + Number(r[13] || 0), 0);
   const doneH = done.reduce((n, r) => n + Number(r[13] || 0), 0);
-  const next = active.find((r) => status(r) !== "done");
+  const next = active.find((r) => !DONE_STATUSES.has(status(r)));
   const idx = next ? rows.indexOf(next) : -1;
 
   const b = bank as unknown as Bank;
@@ -73,6 +97,55 @@ function digest(rows: Row[]) {
 
 /** GitHub read budget for the market index — see `newCoreReqs` for why it needs one at all. */
 const MARKET_READ_MS = 8_000;
+
+/**
+ * The progress history's own budget, separate from the market's because the two reads are not
+ * alike: this one is a directory listing plus a fetch per event file, up to a hundred requests
+ * where the market makes a single GET, and it is the one read the digest cannot start early and
+ * await later — the topic it chooses goes into the model prompt.
+ */
+const PROGRESS_READ_MS = 8_000;
+
+/**
+ * The current status of every plan row a progress event names, keyed by topic string.
+ *
+ * `readProgress` already absorbs a missing GITHUB_TOKEN, a 404 cold start (an empty history,
+ * which is genuinely "nothing done" rather than unknown) and a transport error, and it is
+ * all-or-nothing on purpose — a partial set would drop a `done` event and silently rewind the
+ * plan. What it has no defence against is an unanswered socket: without the race below, a hung
+ * GitHub holds this function until the platform kills it and the brief never arrives at all.
+ *
+ * Null on every failure path, which `digest` reads as "fall back to the workbook baseline". A
+ * GitHub outage therefore degrades this email to the topic it would have picked yesterday
+ * rather than breaking it.
+ */
+async function progressStatuses(): Promise<Map<string, string> | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const progress = await Promise.race([
+      readProgress(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`progress read exceeded ${PROGRESS_READ_MS}ms`)), PROGRESS_READ_MS);
+      }),
+    ]);
+    if (!progress) return null;
+    const byTopic = new Map<string, string>();
+    // Newest first, as readProgress returns them, so the first event for a topic is that row's
+    // current status and everything after it is that row's older history.
+    for (const event of progress.events) {
+      const topic = norm(event?.topic);
+      if (topic && !byTopic.has(topic)) byTopic.set(topic, normStatus(event?.status));
+    }
+    return byTopic;
+  } catch (error) {
+    console.error("[cron/daily-digest] progress unreadable; falling back to the workbook baseline", { error: String(error) });
+    return null;
+  } finally {
+    // The loser of the race is still pending, and its timer would otherwise hold the function
+    // open for the rest of the budget after the email has already gone out.
+    clearTimeout(timer);
+  }
+}
 
 type NewCoreReqs = { entries: NewReqEntry[]; total: number; overflow: number };
 /** Every market failure lands here, and this renders as nothing at all. */
@@ -140,17 +213,19 @@ export async function GET(request: Request) {
   if (!resendKey || !from) return NextResponse.json({ ok: false, error: "Missing RESEND_API_KEY or RESEND_FROM_EMAIL." }, { status: 503 });
 
   try {
+    // Started here rather than after the digest is built: the progress read below must be
+    // awaited before the model prompt can name a topic, and starting the market read first
+    // means the two GitHub reads overlap instead of adding up. Not awaited yet — it keeps
+    // running while the model thinks. Safe only because newCoreReqs cannot reject.
+    const marketRead = newCoreReqs();
+
     const rows = workbook.Plan.slice(1) as Row[];
-    const d = digest(rows);
+    const d = digest(rows, await progressStatuses());
     if (!d.next) return NextResponse.json({ ok: true, skipped: "plan complete" });
 
     const topic = String(d.next[2]);
     const depth = String(d.next[3]);
     const deliverable = String(d.next[14]);
-
-    // Started, not awaited: it runs while the model is thinking. Safe only because
-    // newCoreReqs cannot reject.
-    const marketRead = newCoreReqs();
 
     // The model writes ONE framing paragraph. If it fails, the rest of the email stands.
     let framing = "";

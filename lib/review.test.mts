@@ -8,6 +8,7 @@
  * makes it converge. Re-run this before changing LADDER, DAILY_CAP, NEW_PER_DAY or
  * PER_TOPIC — the failure mode is invisible in unit tests.
  */
+import { readFile } from "node:fs/promises";
 import { grade, isDue, nextDue, eligible, retention, PER_TOPIC, type ReviewState } from "./review.ts";
 const d = (s: string) => new Date(`${s}T12:00:00Z`);
 let fails = 0;
@@ -21,6 +22,43 @@ ck("unseen is not a 'review'", !isDue(undefined, d("2026-01-01")));
 
 const seven = Array.from({length: 119*7}, (_, n) => ({ k:`k${n}`, i: Math.floor(n/7), kind:"recall" }));
 ck(`per-topic trim to ${PER_TOPIC}`, eligible(seven).length === 119*PER_TOPIC, `(${eligible(seven).length})`);
+
+/**
+ * The kind mix. `eligible` used to keep the first PER_TOPIC prompts in array order, and the
+ * bank lists a topic's recall prompts (7+ of them) before its drills — so every one of the
+ * 875 drills was cut and the drill branches in app/recall.tsx could never render. These pin
+ * the round robin that fixes it. A shape change in the bank that reintroduced the ordering
+ * dependency would show up here as "drills reachable at all" going to zero.
+ */
+const mixed = [
+  ...Array.from({length: 7}, (_, n) => ({ k:`r${n}`, i: 0, kind:"recall" })),
+  ...Array.from({length: 9}, (_, n) => ({ k:`d${n}`, i: 0, kind:"drill" })),
+  ...Array.from({length: 5}, (_, n) => ({ k:`r1-${n}`, i: 1, kind:"recall" })), // recall only
+  ...Array.from({length: 4}, (_, n) => ({ k:`d2-${n}`, i: 2, kind:"drill" })),  // drill only
+  { k:"r3-0", i: 3, kind:"recall" }, { k:"d3-0", i: 3, kind:"drill" },          // short topic
+];
+const mix = eligible(mixed);
+const kindsOf = (i: number) => mix.filter(p => p.i === i).map(p => p.kind);
+ck("drills reachable at all", mix.some(p => p.kind === "drill"), `(${mix.filter(p=>p.kind==="drill").length} drills)`);
+ck("topic with both kinds yields both", new Set(kindsOf(0)).size === 2, `(${kindsOf(0).join(",")})`);
+ck("recall-only topic still fills quota", kindsOf(1).length === PER_TOPIC, `(${kindsOf(1).length})`);
+ck("drill-only topic still fills quota", kindsOf(2).length === PER_TOPIC, `(${kindsOf(2).length})`);
+ck("topic shorter than quota keeps all it has", kindsOf(3).length === 2, `(${kindsOf(3).length})`);
+ck("total is perTopic x topics", mix.length === 3*PER_TOPIC + 2, `(${mix.length})`);
+ck("no prompt is scheduled twice", new Set(mix.map(p => p.k)).size === mix.length);
+ck("perTopic argument is honoured", eligible(mixed, 1).length === 4, `(${eligible(mixed, 1).length})`);
+ck("deterministic across calls", eligible(mixed).map(p=>p.k).join() === mix.map(p=>p.k).join());
+
+// Against the shipped bank, because the synthetic fixture above only proves the round robin
+// works on the shape I imagined. This is the number that was 0.
+const bank = JSON.parse(await readFile(new URL("../data/recall-bank.json", import.meta.url), "utf8")) as { prompts: {k:string;i:number;kind:string}[] };
+const scheduled = eligible(bank.prompts);
+const drills = scheduled.filter(p => p.kind === "drill").length;
+const topics = new Set(bank.prompts.map(p => p.i)).size;
+console.log(`\n  shipped bank: ${bank.prompts.length} prompts, ${topics} topics -> ${scheduled.length} scheduled (${drills} drills)`);
+ck("shipped bank schedules drills", drills > 0, `(${drills})`);
+ck("shipped bank schedules recall too", scheduled.some(p => p.kind === "recall"));
+ck("shipped bank total is perTopic x topics", scheduled.length === topics*PER_TOPIC, `(${scheduled.length})`);
 
 // 400-day sim on a realistic ramp
 let state: ReviewState = {}; const all: {k:string;i:number;kind:string}[] = [];

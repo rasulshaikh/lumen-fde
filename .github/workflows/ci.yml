@@ -16,3 +16,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+
+      # The four suites ran only when someone remembered to run them, which is how a scheduler
+      # defect reached main: `next build` type-checks but executes no assertion, so every
+      # behavioural claim in 1,387 lines of tests was unenforced. Each suite calls
+      # process.exit(fails ? 1 : 0), so a failure fails the job with no extra reporter.
+      - run: npm run test:market
+      - run: npm run test:surfacing
+      - run: npm run test:insight
+      - run: npm run test:review
+
+      # Documentation drift is a build failure, not a chore. docs/platform/*.md pin their
+      # numbers to anchors resolved from workbook.json and the source itself, so a plan
+      # rebaseline that leaves a doc claiming the old hours stops here rather than shipping.
+      - run: python3 scripts/verify-docs.py

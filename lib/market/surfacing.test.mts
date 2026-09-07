@@ -19,7 +19,7 @@
  * Monday gate reads the wall clock inside the handler, and a test for "Monday only" that
  * passes six days a week is not a test.
  */
-import { INDEX_PATH, type MarketIndex, type ReqClass, type ReqRecord } from "./store.ts";
+import { INDEX_PATH, PROGRESS_DIR, type MarketIndex, type ReqClass, type ReqRecord } from "./store.ts";
 import { dedupeKey } from "./classify.ts";
 import { BOARD_COUNT, NEW_ROLES_CAP } from "./benchmark.ts";
 
@@ -146,9 +146,40 @@ function index(newOnes: [string, string, ReqClass][]): MarketIndex {
   };
 }
 
-/** Drive the digest against one stored index and return the email it produced. */
-async function digest(stored: MarketIndex | "unreadable") {
+/** One recorded study event, exactly the three fields POST /api/progress writes per file. */
+type Event = { topic: string; status: string; date: string };
+
+/**
+ * The study history as GitHub serves it: a directory listing, then one markdown file per event.
+ * Both hops are stubbed because `readProgress` makes both, and a stub that answered only the
+ * listing would fail the whole read and be indistinguishable from the outage case below.
+ *
+ * "unreadable" is a 500 on the listing — GitHub down, which is NOT an empty history. `[]` is the
+ * empty history, and the two must produce different behaviour: the first falls back to the
+ * workbook baseline, the second is a truthful "nothing is done yet".
+ *
+ * Returns null for a URL that is not the progress history, so the caller can go on matching.
+ */
+function progressStub(progress: Event[] | "unreadable") {
+  // readProgress sorts filenames descending and treats that as newest-first, so the stamp in
+  // the name has to be the event's own date or "the newest event wins" cannot be tested.
+  const files = progress === "unreadable" ? [] : progress.map((e, i) => `${e.date}-${i}.md`);
+  return (url: string): Response | null => {
+    if (!url.includes(PROGRESS_DIR)) return null;
+    if (progress === "unreadable") return json({ message: "Server Error" }, 500);
+    const i = files.findIndex((name) => url.includes(name));
+    if (i === -1) return json(files.map((name) => ({ name, path: `${PROGRESS_DIR}/${name}` })));
+    const e = progress[i];
+    return json({ content: Buffer.from(`Topic: ${e.topic}\nStatus: ${e.status}\nDate: ${e.date}\n`).toString("base64") });
+  };
+}
+
+/** Drive the digest against one stored index and one study history, and return the email. */
+async function digest(stored: MarketIndex | "unreadable", progress: Event[] | "unreadable" = []) {
+  const study = progressStub(progress);
   install((url) => {
+    const recorded = study(url);
+    if (recorded) return recorded;
     if (url.startsWith("https://api.github.com/") && url.includes(INDEX_PATH)) {
       return stored === "unreadable" ? json({ message: "Server Error" }, 500) : ghFile(stored);
     }
@@ -251,6 +282,73 @@ const adjacentOnly = await digest(index([
 ]));
 ck("a day of only adjacent and leadership news renders no market section",
   !adjacentOnly.email.text.includes("NEW CORE REQS") && adjacentOnly.body.newCoreReqs === 0);
+
+// ---------------------------------------------------------------------------
+console.log("\n  digest — today's topic comes from recorded progress, not the baseline");
+// ---------------------------------------------------------------------------
+
+/**
+ * The bug this section exists to keep closed. `status()` read workbook column 15, which is the
+ * committed baseline: 117 "Not started", 2 "Skipped", nothing else ever written to it. No row
+ * could therefore become done, so `next` was plan row 0 every morning for the life of the plan
+ * and only the recall question rotated — within that one topic, for twenty-three months.
+ *
+ * These assertions read `body.topic`, which is the same string the route puts in the subject
+ * line, and the plain text, so a fix that changed the selection without changing what shipped
+ * would still fail here.
+ */
+const ROW0 = "Shell mastery and scripting";
+const ROW1 = "Linux internals: processes, systemd, permissions, filesystems, packaging";
+const ROW2 = "Networking: TCP/IP, DNS, TLS, HTTP/2, load balancers, firewalls";
+const asked = (email: Email) => email.text.split("ANSWER THIS COLD (before you open anything)\n")[1]?.split("\n")[0] ?? "";
+
+const fresh = await digest(index([]), []);
+ck("an empty history still yields plan row 0 — the baseline reading is unchanged", fresh.body.topic === ROW0, `("${String(fresh.body.topic)}")`);
+ck("...in the subject line and the body alike", fresh.email.subject === `Lumen · ${ROW0}` && fresh.email.text.startsWith(`TODAY — ${ROW0}`));
+ck("...and the pace counts nothing done", fresh.email.text.includes("0 of 117 topics done · 0h of 1588h"));
+ck("...while the recall question is one of row 0's", asked(fresh.email).length > 0);
+
+const advanced = await digest(index([]), [{ topic: ROW0, status: "done", date: "2026-09-10" }]);
+ck("a progress event marking row 0 done moves the digest off row 0", advanced.body.topic !== ROW0, `("${String(advanced.body.topic)}")`);
+ck("...onto the next incomplete row", advanced.body.topic === ROW1 && advanced.email.text.startsWith(`TODAY — ${ROW1}`));
+ck("...and the recall question follows the topic instead of rotating inside the old one", asked(advanced.email) !== asked(fresh.email) && asked(advanced.email).length > 0);
+ck("...and the pace credits the finished row's hours", advanced.email.text.includes("1 of 117 topics done · 14h of 1588h"));
+
+// The three other spellings a human or an MCP client types, and the underscored one the
+// dashboard POST writes. If this file and lib/market/insight.ts ever disagree about what counts
+// as complete, the tab and the email name different topics on the same morning.
+const spelled = await digest(index([]), [{ topic: ROW0, status: "Completed", date: "2026-09-10" }]);
+ck("\"Completed\" counts as done, as it does for readiness", spelled.body.topic === ROW1);
+const underway = await digest(index([]), [{ topic: ROW0, status: "in_progress", date: "2026-09-10" }]);
+ck("\"in_progress\" is not evidence and does not advance the plan", underway.body.topic === ROW0);
+
+// Newest event wins: a row reopened after being marked done is not done. The events are served
+// newest-first, so this pins that the FIRST one for a topic is the one read, not the last.
+const reopened = await digest(index([]), [
+  { topic: ROW0, status: "in_progress", date: "2026-09-11" },
+  { topic: ROW0, status: "done", date: "2026-09-10" },
+]);
+ck("a row reopened after a done event is current again", reopened.body.topic === ROW0);
+
+// "Skipped" is a decision not to acquire the skill, so the row is passed over rather than
+// queued — the same rule the baseline's own two skipped rows have always had.
+const skipped = await digest(index([]), [
+  { topic: ROW1, status: "skipped", date: "2026-09-11" },
+  { topic: ROW0, status: "done", date: "2026-09-10" },
+]);
+ck("a skipped row is stepped over, not offered", skipped.body.topic === ROW2);
+
+// A GitHub outage must cost freshness, never the email: the digest degrades to exactly the
+// topic the baseline alone would have picked.
+const outage = await digest(index([]), "unreadable");
+ck("an unreadable progress store still sends", outage.status === 200 && outage.body.ok === true && Boolean(outage.email));
+ck("...falling back to the workbook baseline rather than to nothing", outage.body.topic === ROW0 && outage.email.text.startsWith(`TODAY — ${ROW0}`));
+ck("...with the whole brief intact", outage.email.text.includes("SHIP THIS") && outage.email.text.includes("PACE") && outage.email.text.includes("READ · "));
+
+// Both stores down at once is the compound case: neither failure may reach the reader.
+const blackout = await digest("unreadable", "unreadable");
+ck("both GitHub reads failing still sends the brief", blackout.status === 200 && blackout.body.ok === true
+  && blackout.body.topic === ROW0 && !blackout.email.text.includes("NEW CORE REQS"));
 
 // ---------------------------------------------------------------------------
 console.log("\n  market scan — the weekly email is Monday-only");

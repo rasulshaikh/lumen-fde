@@ -66,15 +66,48 @@ export function isDue(card: Card | undefined, now: Date) {
   return !!card && card.due <= today(now);
 }
 
-/** Trim a topic's prompts to the few that actually enter the schedule. */
-export function eligible<T extends { i: number }>(prompts: T[], perTopic = PER_TOPIC) {
-  const seen = new Map<number, number>();
-  return prompts.filter((p) => {
-    const n = seen.get(p.i) ?? 0;
-    if (n >= perTopic) return false;
-    seen.set(p.i, n + 1);
-    return true;
-  });
+/**
+ * Trim a topic's prompts to the few that actually enter the schedule, round-robin across the
+ * kinds a topic has.
+ *
+ * Taking the first `perTopic` in array order silently deleted a whole kind: the bank lists a
+ * topic's recall prompts before its drills and no topic has fewer than 7 recall prompts, so
+ * all 875 drills — 51% of the bank — lost the cut and the drill branches in the recall UI
+ * were unreachable. The scheduler owns which cards you see, so it must not inherit that
+ * choice from the order a build script happened to concatenate its lists in; the round robin
+ * makes a reorder of that script a no-op here. A topic with a single kind still fills its
+ * quota from that kind.
+ */
+export function eligible<T extends { i: number; kind?: string }>(prompts: T[], perTopic = PER_TOPIC) {
+  // Insertion-ordered maps are what make this deterministic: topics come out in the order
+  // they first appear, and each kind's queue keeps the bank's own order.
+  const byTopic = new Map<number, Map<string, T[]>>();
+  for (const p of prompts) {
+    let kinds = byTopic.get(p.i);
+    if (!kinds) byTopic.set(p.i, (kinds = new Map()));
+    const kind = p.kind ?? "";
+    const queue = kinds.get(kind);
+    if (queue) queue.push(p);
+    else kinds.set(kind, [p]);
+  }
+
+  const picked: T[] = [];
+  for (const kinds of byTopic.values()) {
+    const queues = [...kinds.values()];
+    let taken = 0;
+    for (let round = 0; taken < perTopic; round++) {
+      const before = taken;
+      for (const q of queues) {
+        if (taken >= perTopic) break;
+        const p = q[round];
+        if (!p) continue;
+        picked.push(p);
+        taken += 1;
+      }
+      if (taken === before) break; // every queue exhausted: this topic has fewer than perTopic prompts
+    }
+  }
+  return picked;
 }
 
 /**
