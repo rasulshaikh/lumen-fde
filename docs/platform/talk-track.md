@@ -19,7 +19,7 @@ usefully — which rows it does *not* discharge.
 A single-user study platform for one 23-month <!-- verify:months=23 --> Senior FDE plan. Three
 processes: a Next.js app on Vercel with 10 tabs <!-- verify:tabs=10 --> and
 10 API routes <!-- verify:api_routes=10 -->; an MCP server on Render exposing
-14 tools <!-- verify:mcp_tools=14 --> so Claude Code reads the same plan the dashboard reads;
+18 tools <!-- verify:mcp_tools=18 --> so Claude Code reads the same plan the dashboard reads;
 and GitHub as the database, because every mutable artifact is a file in the repo. No database,
 no queue, no object store (`architecture.md` §1).
 
@@ -173,7 +173,7 @@ matching nothing.
 version numbers, and a checker that reports three false alarms gets muted inside a week.
 
 **Why it exists at all.** `docs/lumen-fde-architecture.md` said "13 tools" while `mcp/server.js`
-served 14 <!-- verify:mcp_tools=14 -->, and nothing caught it because nothing read the document.
+served 14 <!-- verify:mcp_tools=18 -->, and nothing caught it because nothing read the document.
 Live scan output is deliberately *not* anchorable — the 03:00 cron rewrites those numbers, so
 anchoring them would fail most mornings for no defect. Those are cited by report file and scan
 date instead, which is what §2.3 above does.
@@ -189,7 +189,7 @@ design docs, M17).
 
 ### 2.7 The MCP server is a narrow, audited tool surface
 
-14 tools <!-- verify:mcp_tools=14 -->, bearer auth, 30 requests per 60 s, a 128 KB body cap, and
+18 tools <!-- verify:mcp_tools=18 -->, bearer auth, 30 requests per 60 s, a 128 KB body cap, and
 an audit trail split deliberately: `get_audit_log` is in-memory and lossy, the durable trail is
 `reports/audit/*.json` written by the two tools that mutate anything (`architecture.md` §3.6).
 
@@ -402,7 +402,7 @@ Which rows this platform is evidence for. Row numbers and titles are 1-based `Pl
 | 40 | M10 | Testing and contracts: pytest, property tests | 4 test files, 3 <!-- verify:market_tests=3 --> of them under `lib/market/`; the 400-day scheduler simulation (§2.8) |
 | 44 | M10 | Designing Data-Intensive Applications | read-whole/write-whole with a sha; lost updates; `synced:false` ≠ empty (§2.5) |
 | 51 | M12 | Prompt engineering as code: versioning, regression sets | the digit post-check, written as characterization tests (§3.4) |
-| 52 | M13 | Tool use, structured outputs and MCP servers | `mcp/server.js` — 14 tools, bearer auth, narrow schemas, audit trail (§2.7) |
+| 52 | M13 | Tool use, structured outputs and MCP servers | `mcp/server.js` — 18 tools, bearer auth, narrow schemas, audit trail (§2.7) |
 | 56 | M13 | Guardrails, prompt injection, red-teaming | confining the model to interpretation; dropping any paragraph containing a digit (§2.2, §3.4) |
 | 59 | M14 | Evals as infrastructure: eval sets, CI gates | `benchmark.ts` and `insight.ts` as pure functions, exercised by tests instead of by a 47 MB live scan (§2.2) |
 | 63 | M15 | Drift, feedback loops, registries, rollout | week-over-week movement as the reason extraction must be deterministic; `trend.json`; the drift checks in build and docs (§2.2, §2.6) |

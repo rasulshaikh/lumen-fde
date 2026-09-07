@@ -21,7 +21,7 @@
  */
 import { INDEX_PATH, PROGRESS_DIR, type MarketIndex, type ReqClass, type ReqRecord } from "./store.ts";
 import { dedupeKey } from "./classify.ts";
-import { BOARD_COUNT, NEW_ROLES_CAP } from "./benchmark.ts";
+import { BOARD_COUNT, DELTA_MIN_BOARDS, NEW_ROLES_CAP } from "./benchmark.ts";
 
 let fails = 0;
 const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
@@ -349,6 +349,116 @@ ck("...with the whole brief intact", outage.email.text.includes("SHIP THIS") && 
 const blackout = await digest("unreadable", "unreadable");
 ck("both GitHub reads failing still sends the brief", blackout.status === 200 && blackout.body.ok === true
   && blackout.body.topic === ROW0 && !blackout.email.text.includes("NEW CORE REQS"));
+
+// ---------------------------------------------------------------------------
+console.log("\n  digest — a dead or short scan says so, above the study content");
+// ---------------------------------------------------------------------------
+
+/**
+ * The gap in docs/platform/runbook.md section 1: nothing in the system says the 03:00 scan has
+ * stopped. index.json stops being updated, every surface keeps rendering last week's numbers as
+ * current, and a week of dead scans is indistinguishable from a week of quiet market.
+ *
+ * The digest is the detector — it runs thirty minutes after the scan and already reads the file.
+ * These assertions are about the two lines it prints and, just as much, about the mornings it
+ * prints neither: an alert that renders on a healthy day is one the reader stops seeing.
+ *
+ * The clock is 06:00 on DAY throughout, and the healthy fixture's updatedAt is 03:00 the same
+ * morning, so "fresh" here is three hours old — what a working pipeline actually looks like.
+ */
+freeze(`${DAY}T06:00:00Z`);
+
+/** Everything the reader sees before the study content begins. */
+const preamble = (email: Email) => email.text.split("WHAT IT ASKS OF YOU")[0];
+
+const healthy = await digest(index([]));
+ck("a scan that ran this morning raises no stale line",
+  !healthy.email.text.includes("SCAN STALE") && !healthy.email.html.includes("Scan stale"));
+ck("...and no partial line either", !healthy.email.text.includes("PARTIAL SCAN") && !healthy.email.html.includes("Partial scan"));
+ck("...leaving nothing between the header and the brief — no empty scaffold on a healthy morning",
+  /^TODAY — .+\nMonth [^\n]+\n\s*$/.test(preamble(healthy.email)), `("${preamble(healthy.email).trim()}")`);
+
+// 26h is the threshold — one cycle plus slack — so a single missed run must stay silent.
+const lateByADay = index([]);
+lateByADay.updatedAt = `${YESTERDAY}T05:30:00.000Z`; // 24.5h old: last night's scan failed once
+const late = await digest(lateByADay);
+ck("one missed night is inside the slack and does not cry wolf", !late.email.text.includes("SCAN STALE"));
+
+// 30 hours: the scan last succeeded at 00:00 on the 13th and it is now 06:00 on the 14th.
+const stale = index([]);
+stale.updatedAt = `${YESTERDAY}T00:00:00.000Z`;
+const dead = await digest(stale);
+const staleLine = dead.email.text.split("\n").find((l) => l.startsWith("SCAN STALE")) ?? "";
+ck("a scan silent for 30 hours is reported", staleLine.length > 0, `("${staleLine}")`);
+ck("...with the age stated in hours", staleLine.includes("30 hours ago"), `("${staleLine}")`);
+ck("...and the last day it succeeded", staleLine.includes(`on ${YESTERDAY}`));
+ck("...above the study content, not under it",
+  dead.email.text.indexOf("SCAN STALE") < dead.email.text.indexOf("WHAT IT ASKS OF YOU"));
+ck("...in the HTML too, before the first study row",
+  dead.email.html.includes("Scan stale") && dead.email.html.indexOf("Scan stale") < dead.email.html.indexOf("What it asks of you"));
+ck("...while the brief itself still ships whole",
+  dead.status === 200 && dead.body.ok === true && dead.email.text.includes("SHIP THIS") && dead.email.text.includes("PACE"));
+ck("...and a stale scan alone does not claim a partial one", !dead.email.text.includes("PARTIAL SCAN"));
+
+// Days once hours stop being readable: a week of silence is the case the runbook describes.
+const week = index([]);
+week.updatedAt = "2026-09-07T03:00:00.000Z";
+const abandoned = await digest(week);
+ck("a week of silence is stated in days, not in hours",
+  abandoned.email.text.includes("7 days ago") && abandoned.email.text.includes("on 2026-09-07"));
+
+// A stored index nobody ever wrote a timestamp into must not ship arithmetic on NaN.
+const undated = index([]);
+undated.updatedAt = "";
+const nodate = await digest(undated);
+ck("an index with no timestamp reports no successful run, never \"NaN hours\"",
+  nodate.email.text.includes("no successful run on record") && !nodate.email.text.includes("NaN"));
+
+// ---------------------------------------------------------------------------
+
+/**
+ * The partial-scan line answers a question the reader would otherwise answer wrongly. Below
+ * DELTA_MIN_BOARDS the benchmark suppresses movement AND the new-core-reqs section, so the email
+ * goes quiet — and a quiet email reads as a quiet market rather than as a short scan.
+ */
+const short = index([]);
+short.boardsOk = 20;
+const partial = await digest(short);
+const partialLine = partial.email.text.split("\n").find((l) => l.startsWith("PARTIAL SCAN")) ?? "";
+ck("a scan that reached 20 boards says so", partialLine.length > 0, `("${partialLine}")`);
+ck("...naming the real count and the real threshold",
+  partialLine.includes(`20 of ${BOARD_COUNT} boards`) && partialLine.includes(`under the ${DELTA_MIN_BOARDS} needed`));
+ck("...and saying why the numbers stopped moving, so silence is not read as a quiet market",
+  partialLine.includes("not because the market went quiet"));
+ck("...without claiming the scan is also stale", !partial.email.text.includes("SCAN STALE"));
+ck("...and the brief still ships", partial.status === 200 && partial.email.text.includes("SHIP THIS"));
+
+// One board above the line is the boundary DELTA_MIN_BOARDS actually draws.
+const nearly = index([]);
+nearly.boardsOk = DELTA_MIN_BOARDS;
+ck("boardsOk exactly at the threshold is not partial", !(await digest(nearly)).email.text.includes("PARTIAL SCAN"));
+const enough = index([]);
+enough.boardsOk = 27;
+ck("a full 27-board scan raises nothing", !(await digest(enough)).email.text.includes("PARTIAL SCAN"));
+
+// Both at once: a scan that has been failing partially for days must report both facts.
+const both = index([]);
+both.boardsOk = 20;
+both.updatedAt = `${YESTERDAY}T00:00:00.000Z`;
+const bothAlerts = await digest(both);
+ck("a stale AND partial scan prints both lines",
+  bothAlerts.email.text.includes("SCAN STALE") && bothAlerts.email.text.includes("PARTIAL SCAN"));
+ck("...stale first, because it is the one that invalidates the numbers",
+  bothAlerts.email.text.indexOf("SCAN STALE") < bothAlerts.email.text.indexOf("PARTIAL SCAN"));
+
+// The alert may never cost the email. An unreadable store is not evidence the scan is broken —
+// GitHub may be down and the scan fine — so it buys silence, not a false alarm.
+const unread = await digest("unreadable");
+ck("an unreadable store still sends the digest",
+  unread.status === 200 && unread.body.ok === true && Boolean(unread.email) && unread.email.text.includes("SHIP THIS"));
+ck("...and raises neither alert, having nothing truthful to say about a file it could not read",
+  !unread.email.text.includes("SCAN STALE") && !unread.email.text.includes("PARTIAL SCAN")
+  && !unread.email.html.includes("Scan stale") && !unread.email.html.includes("Partial scan"));
 
 // ---------------------------------------------------------------------------
 console.log("\n  market scan — the weekly email is Monday-only");

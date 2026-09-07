@@ -16,7 +16,7 @@ cron, and the 890h → 1,588h / 13 → 23 month rebaseline, and which says "13 t
 A single-user study platform for one 23-month Senior FDE plan. Three things run:
 
 1. **A Next.js app on Vercel** — the dashboard (10 tabs), 10 API routes, and 2 cron endpoints.
-2. **An MCP server on Render** — 14 tools, so Claude Code can read the same plan the dashboard
+2. **An MCP server on Render** — 18 tools, so Claude Code can read the same plan the dashboard
    reads, and write progress back to it.
 3. **GitHub, as the database** — every mutable artifact (progress events, review schedule,
    market index, benchmark, insight, trend) is a file in this repo, read whole and written
@@ -50,7 +50,7 @@ redeploy, be diffable, and be readable by a second process on a different host.
 ┌───────┴────────────────────┴──────────┐   ┌─────────┴───────────────────────┐
 │  Vercel — Next.js (proxy.ts gate)     │   │  Render — mcp/server.js          │
 │                                       │   │  Node http, JSON-RPC at /mcp     │
-│  app/page.tsx    10 tabs              │   │  14 tools, MCP 2025-03-26        │
+│  app/page.tsx    10 tabs              │   │  18 tools, MCP 2025-03-26        │
 │  app/api/*       10 routes            │   │  /healthz · free tier, sleeps    │
 │  vercel.json     2 crons              │   └─────────┬───────────────────────┘
 │                                       │             │ POST /api/ask
@@ -172,13 +172,13 @@ sandbox at `/tmp/.lumen-cwd` and `$HOME` is read from the sandbox rather than as
 `app/terminal.tsx` is a line-based shell, not a PTY: `python3 x.py` and `pytest` work, `vim` and
 `top` do not.
 
-### 3.6 The MCP server — 14 tools
+### 3.6 The MCP server — 18 tools
 
 `mcp/server.js`, deployed from `mcp/render.yaml` (Render web service `lumen-mcp`, free plan,
 `rootDir: mcp`, health check `/healthz`). JSON-RPC over `POST /mcp`, protocol version
 `2025-03-26`, server version `1.1.0`.
 
-The 14 tools, exactly as the `tools` array declares them:
+The 18 tools, exactly as the `tools` array declares them:
 
 `get_plan` · `get_learning_context` · `get_syllabus` · `ask_lumen` · `list_ask_reports` ·
 `read_ask_report` · `save_study_note` · `record_progress` · `get_progress_history` ·

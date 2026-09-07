@@ -13,7 +13,7 @@ Three surfaces, and they are not interchangeable:
 | surface | reach for it when |
 |---|---|
 | the dashboard, 10 tabs <!-- verify:tabs=10 --> | you are reading, filtering, marking status, or looking at the market |
-| the MCP, 14 tools <!-- verify:mcp_tools=14 --> | Claude Code needs the plan in its context, or needs to write something durable |
+| the MCP, 18 tools <!-- verify:mcp_tools=18 --> | Claude Code needs the plan in its context, or needs to write something durable |
 | the 2 crons <!-- verify:crons=2 --> | they reach for you — 03:00 and 03:30 UTC, unattended |
 
 One number to hold before anything else: the plan is 119 rows <!-- verify:rows=119 -->, 117 of
@@ -22,7 +22,7 @@ them active <!-- verify:active_rows=117 --> and 2 skipped <!-- verify:skipped_ro
 
 ---
 
-## 1. The 14 MCP tools
+## 1. The 18 MCP tools
 
 `mcp/server.js`, served from Render so Claude Code can reach the same plan the dashboard reads.
 Transport, auth, rate limit and the Render deploy filter are architecture.md §3.6.

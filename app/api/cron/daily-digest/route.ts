@@ -3,7 +3,7 @@ import workbook from "@/data/workbook.json";
 import library from "@/data/library-context.json";
 import bank from "@/data/recall-bank.json";
 import skillMap from "@/data/market-skill-map.json";
-import { computeBenchmark, type NewReqEntry, type Workbook } from "@/lib/market/benchmark";
+import { BOARD_COUNT, DELTA_MIN_BOARDS, computeBenchmark, type NewReqEntry, type Workbook } from "@/lib/market/benchmark";
 import { INDEX_PATH, readJson, readProgress, type MarketIndex } from "@/lib/market/store";
 
 type Row = (string | number | null)[];
@@ -147,13 +147,92 @@ async function progressStatuses(): Promise<Map<string, string> | null> {
   }
 }
 
-type NewCoreReqs = { entries: NewReqEntry[]; total: number; overflow: number };
-/** Every market failure lands here, and this renders as nothing at all. */
-const NO_MARKET: NewCoreReqs = { entries: [], total: 0, overflow: 0 };
+/**
+ * How stale index.json may be before this email calls the scan broken.
+ *
+ * The scan runs at 03:00 and this digest at 03:30, so a healthy index is half an hour old by the
+ * time it is read here, and one missed night makes it 24.5h. 26h is that cycle plus slack: a
+ * single scan that failed, ran late, or was retried does not cry wolf, while two consecutive
+ * misses do. Tightening this below ~25h would fire on the first bad night, and an alert that
+ * fires on ordinary jitter is one the reader learns to skim past — which is the failure this
+ * whole section exists to prevent.
+ */
+const STALE_AFTER_MS = 26 * 60 * 60 * 1000;
 
 /**
- * The digest's only market section, and the only part of this email that depends on anything
- * outside the repo.
+ * Hours while the age is still near the threshold, where the difference between 26 and 30 is the
+ * entire judgement about whether one run or two were lost; days once it is long enough that
+ * "214 hours" is a number the reader has to divide before it means anything.
+ */
+function staleAge(ms: number) {
+  const hours = Math.floor(ms / 3_600_000);
+  return hours < 48 ? `${hours} hours` : `${Math.floor(hours / 24)} days`;
+}
+
+type Alert = { label: string; line: string };
+
+/**
+ * The pipeline alerts, in render order. Empty on a healthy morning, which is most mornings.
+ *
+ * ALERTS ON STALENESS, NOT ON ERROR. A cron that never fires cannot report its own failure, and
+ * that is exactly the silent case docs/platform/runbook.md section 1 describes: if the 03:00 scan
+ * starts failing tonight it keeps failing every night, index.json simply stops being updated, and
+ * every surface goes on rendering last week's numbers as though they were current. A week of dead
+ * scans and a week of quiet market look identical. Nothing else in the system says otherwise.
+ *
+ * This email is the detector because it already exists: it runs thirty minutes after the scan, it
+ * already reads index.json for the market section, and it already reaches a reader every morning.
+ * No new channel, no new service, and it degrades in the right direction — if the digest itself
+ * stops arriving, the absence of the email is the signal.
+ *
+ * Deterministic on purpose. The model writes one framing paragraph and nothing else in this email;
+ * an alert that a model could soften, reword, or omit on a bad day is not an alert.
+ */
+function scanAlerts(index: MarketIndex, now: Date): Alert[] {
+  const alerts: Alert[] = [];
+  const lastRun = Date.parse(index.updatedAt);
+  if (Number.isNaN(lastRun)) {
+    // A stored index whose updatedAt is empty or malformed. Guarded rather than assumed away
+    // because the arithmetic below would otherwise ship the reader a literal "NaN hours".
+    alerts.push({
+      label: "Scan stale",
+      line: "SCAN STALE - the market scan has no successful run on record. Every market number below is a placeholder, not a measurement.",
+    });
+  } else if (now.getTime() - lastRun > STALE_AFTER_MS) {
+    alerts.push({
+      label: "Scan stale",
+      line: `SCAN STALE - the market scan last succeeded ${staleAge(now.getTime() - lastRun)} ago, on ${index.updatedAt.slice(0, 10)}. Every market number in this email and on the dashboard is from that run.`,
+    });
+  }
+
+  // The same threshold computeBenchmark suppresses its deltas on, checked here against the stored
+  // count rather than inferred from the benchmark, so this line says why the movement went quiet
+  // even when there is no movement section to notice it in. Without it a short scan reads as a
+  // still market: the numbers stop moving and nothing distinguishes that from nothing happening.
+  if (index.boardsOk < DELTA_MIN_BOARDS) {
+    const boardsTotal = Math.max(BOARD_COUNT, Object.keys(index.boards).length);
+    alerts.push({
+      label: "Partial scan",
+      line: `PARTIAL SCAN - the last scan reached ${index.boardsOk} of ${boardsTotal} boards, under the ${DELTA_MIN_BOARDS} needed, so movement and new roles are suppressed. The numbers are holding still because the scan is short, not because the market went quiet.`,
+    });
+  }
+
+  return alerts;
+}
+
+type NewCoreReqs = { entries: NewReqEntry[]; total: number; overflow: number; alerts: Alert[] };
+/**
+ * Every market failure lands here, and this renders as nothing at all — including no alert. A
+ * file that could not be read is not evidence the scan is broken: GitHub may be down and the
+ * scan fine, and a stale-scan line on an outage morning is a false alarm that teaches the reader
+ * to distrust the real one. That failure belongs in the Vercel logs, and `newCoreReqs` puts it
+ * there. The staleness this alerts on is the one visible in a file it CAN read.
+ */
+const NO_MARKET: NewCoreReqs = { entries: [], total: 0, overflow: 0, alerts: [] };
+
+/**
+ * The digest's only market read: the new-core-reqs section, and the pipeline alerts derived from
+ * the same file. The only part of this email that depends on anything outside the repo.
  *
  * The study brief is the product. A GitHub outage, a missing token, or a scan that has never
  * run must cost the reader three lines, never the email — so every path below returns
@@ -183,15 +262,20 @@ async function newCoreReqs(): Promise<NewCoreReqs> {
       }),
     ]);
     if (!stored.data) return NO_MARKET;
+    const now = new Date();
     // computeBenchmark is pure and already applies every rule this section needs: core only,
     // deduped so 15 city clones are one line, suppressed on a baseline or partial scan, capped
     // at NEW_ROLES_CAP with the remainder counted. The statements are rendered there so this
     // email and the Market tab print the identical sentence from one place.
-    const benchmark = computeBenchmark(stored.data, skillMap, workbook as unknown as Workbook, new Date());
+    const benchmark = computeBenchmark(stored.data, skillMap, workbook as unknown as Workbook, now);
     return {
       entries: benchmark.newSinceLastRun,
       total: benchmark.newSinceLastRunTotal,
       overflow: benchmark.newSinceLastRunOverflow,
+      // Read off the same fetch rather than from a second one: the alerts describe the health of
+      // exactly the file this section renders, and a separate GET would double this function's
+      // exposure to the outage it is meant to report on.
+      alerts: scanAlerts(stored.data, now),
     };
   } catch (error) {
     console.error("[cron/daily-digest] market section skipped", { error: String(error) });
@@ -255,6 +339,12 @@ export async function GET(request: Request) {
     const pace = `${d.doneCount} of ${d.activeCount} topics done · ${d.doneH}h of ${d.totalH}h · ${d.remainingH}h left, about ${d.weeksLeft} weeks at 16h/week`;
     const text = [
       `TODAY — ${topic}`, `Month ${d.next[1]} · ${d.next[13]}h · ${d.track}`, ``,
+      // Above the framing and everything under it. A broken pipeline outranks today's recall
+      // question: the study brief is still true when the scan is dead, and the market numbers are
+      // not. Buried under SHIP THIS these would be read on the morning someone went looking for
+      // them, which is after the week of silence rather than on its first day. Empty on a healthy
+      // morning, which is most of them, and then this line contributes nothing.
+      market.alerts.length ? `${market.alerts.map((a) => a.line).join("\n\n")}\n` : ``,
       framing ? `${framing}\n` : ``,
       `WHAT IT ASKS OF YOU`, depth, ``,
       `SHIP THIS`, deliverable, ``,
@@ -276,6 +366,7 @@ export async function GET(request: Request) {
 <tr><td style="padding-bottom:4px"><div style="font:500 11px ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#828fff">Lumen brief</div>
 <div style="font-size:22px;font-weight:600;color:#f7f8f8;letter-spacing:-.02em;margin-top:6px">${esc(topic)}</div>
 <div style="color:#8a8f98;font-size:13px;margin-top:4px">Month ${d.next[1]} · ${d.next[13]}h · ${esc(d.track)}</div></td></tr>
+${market.alerts.map((a) => row(a.label, esc(a.line))).join("")}
 ${framing ? row("Why it matters", esc(framing)) : ""}
 ${row("What it asks of you", esc(depth))}
 ${row("Ship this", esc(deliverable))}

@@ -459,7 +459,7 @@ redeploying on plan edits, and the MCP server silently serves rows that were cur
 deploy.
 
 **Observable:** Claude Code quotes hours or months that the dashboard does not show. There is no
-error — the 14 MCP tools answer normally, from stale data. <!-- verify:mcp_tools=14 -->
+error — the 18 MCP tools answer normally, from stale data. <!-- verify:mcp_tools=18 -->
 
 **Confirm:** ask `get_plan` for a row you recently edited and compare against
 `data/workbook.json`. **Fix:** restore the `buildFilter` path and redeploy.
