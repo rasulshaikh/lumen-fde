@@ -476,14 +476,26 @@ export async function GET(request: Request) {
         return NextResponse.json({ ok: false, error: "Could not persist the market index." }, { status: 502 });
       }
 
-      const [wroteBenchmark, wroteTrend, wroteHistory] = await Promise.all([
-        writeJson(BENCHMARK_PATH, benchmark, benchmarkFile.sha),
-        writeJson(TREND_PATH, trend, trendFile.sha),
-        // The archive is write-only — nothing lists or reads that directory in a request path,
-        // so a null sha is correct (the path is new every day) and a rejected same-day rewrite
-        // is logged rather than failing a scan whose real output is already committed.
-        writeJson(historyPath(today), benchmark, null),
-      ]);
+      /**
+       * Sequential, NOT Promise.all. Each write is a commit on the same branch, so running
+       * the three concurrently makes them race the branch ref: GitHub accepts whichever
+       * arrives first and rejects the others with "is at <commit> but expected <commit>".
+       *
+       * That is not theoretical. The first real scan wrote index.json, trend.json and
+       * history/2026-09-07.json and lost benchmark.json to exactly this, with the two shas in
+       * the error resolving to the trend and history commits. The concurrent shape was
+       * inherited from app/api/review/route.ts, which writes a single file and therefore
+       * cannot race itself.
+       *
+       * Three round trips instead of one costs about a second on a scan that already spends
+       * a minute fetching boards.
+       */
+      const wroteBenchmark = await writeJson(BENCHMARK_PATH, benchmark, benchmarkFile.sha);
+      const wroteTrend = await writeJson(TREND_PATH, trend, trendFile.sha);
+      // The archive is write-only — nothing lists or reads that directory in a request path,
+      // so a null sha is correct (the path is new every day) and a rejected same-day rewrite
+      // is logged rather than failing a scan whose real output is already committed.
+      const wroteHistory = await writeJson(historyPath(today), benchmark, null);
       if (!wroteBenchmark.ok || !wroteTrend.ok) {
         console.error("[cron/market-scan] snapshot write failed", { benchmark: wroteBenchmark.error, trend: wroteTrend.error });
         return NextResponse.json({ ok: false, error: "Could not persist the benchmark." }, { status: 502 });
