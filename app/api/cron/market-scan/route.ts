@@ -244,16 +244,25 @@ async function weeklyFraming(facts: string): Promise<string> {
   /**
    * The post-check the prompt cannot enforce on its own.
    *
-   * The allowed set is derived from the prompt string itself rather than hand-listed, so it
-   * cannot drift out of step with whatever `facts` the caller decides to supply. A model that
-   * writes "coverage sits near sixty percent" is fine; one that writes "58%" beside a
-   * deterministic block saying 61% has invented a market measurement, and an invented number
-   * sitting among audited ones discredits the audited ones too. Drop the paragraph.
+   * A model that writes "coverage sits near sixty percent" is fine; one that writes "58%"
+   * beside a deterministic block saying 61% has invented a market measurement, and an invented
+   * number sitting among audited ones discredits the audited ones too. Drop the paragraph.
+   *
+   * There is no allow-set: the prompt says "Write no numbers at all: no digits, no percentages,
+   * no counts, no years", so ANY digit is a violation and the check enforces exactly the
+   * instruction the model was given.
+   *
+   * Two weaker versions were tried and both leaked, for the same underlying reason -- a
+   * whitelist built from text the model can see is a whitelist the model can quote from.
+   * Deriving it from the whole prompt whitelisted `60` forever, because the instruction itself
+   * says "In 60 words or fewer". Deriving it from `facts` still whitelisted `58`, because the
+   * coverage statements cite plan rows and hours (`row 58, "..." - 18h, month 4`) and a row
+   * number reads as a percentage once the model puts a % after it. Verified live: "Coverage
+   * sits at 58% this week" shipped under both. An empty allow-set cannot launder anything.
    */
-  const supplied = new Set(prompt.match(NUMBERS) ?? []);
-  const invented = (text.match(NUMBERS) ?? []).filter((n) => !supplied.has(n));
+  const invented = text.match(NUMBERS) ?? [];
   if (invented.length) {
-    console.error("[cron/market-scan] framing invented numbers, dropping it", { invented: invented.slice(0, 5) });
+    console.error("[cron/market-scan] framing contains numbers, dropping it", { invented: invented.slice(0, 5) });
     return "";
   }
   return text;
