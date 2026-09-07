@@ -1,3 +1,16 @@
+> **Superseded on 2026-09-07.** This snapshot describes the system as it stood on 5 September
+> 2026, before the Sandbox tab, the whole market subsystem (`lib/market/`, the nightly scan, the
+> Market tab) and the 890h → 1,588h / 13 → 23 month rebaseline. It says "13 tools" where
+> `mcp/server.js` now serves 14.
+>
+> The current documentation is [`docs/platform/`](platform/architecture.md):
+> `architecture.md` holds the facts, `operating.md` is the manual, `runbook.md` is the handover,
+> `talk-track.md` is the interview and study mapping. Those are checked by
+> `scripts/verify-docs.py`, which fails on drift. This file is not, which is why it drifted.
+>
+> Kept for history. Its rendered siblings (`.html`, `.pdf`, `.svg`, the mindmap PNG) are artifacts
+> of this superseded source.
+
 # Lumen FDE: end-to-end architecture
 
 **Snapshot:** 5 September 2026  
