@@ -11,6 +11,7 @@ import { Terminal } from "./terminal";
 // into the client bundle. Restating these shapes here instead would let the tab drift from
 // what the benchmark actually emits without the build noticing.
 import type { Benchmark, PlanRowRef } from "@/lib/market/benchmark";
+import type { Insight, MarginalEntry } from "@/lib/market/insight";
 import type { TrendPoint } from "@/lib/market/store";
 
 type Row = (string | number | null)[];
@@ -72,7 +73,14 @@ function SyllabusView({ s, row }: { s: Syllabus; row?: Row }) {
 // `/api/market` degrades to `{ benchmark: null, synced: false }` when the files or the token
 // are absent, so `benchmark: null` alone is not enough to explain the empty state: `synced`
 // separates "no scan has run yet" from "we cannot see whether one has".
-type MarketFeed = { benchmark: Benchmark | null; trend: TrendPoint[] | null; synced: boolean };
+//
+// `insight` is null on one state the other two never reach: a scan that ran before the insight
+// computation shipped wrote benchmark.json and no insight.json. So it is optional as well as
+// nullable, and every personal block below guards on it independently of `benchmark`.
+type MarketFeed = { benchmark: Benchmark | null; trend: TrendPoint[] | null; insight?: Insight | null; synced: boolean };
+
+/** Readiness moves and reachable-slice deltas are signed points; an unsigned "14" reads as a level. */
+const signed = (n: number) => `${n > 0 ? "+" : ""}${n}`;
 
 // benchmark.ts composes a headline and its detail into one string joined by "\n", so the
 // plaintext weekly email can print it verbatim. Splitting on that newline is typography; no
@@ -124,6 +132,13 @@ function Sparkline({ points }: { points: TrendPoint[] }) {
  * row. `statement` carries the committed baseline from workbook col 15; the client's
  * `lumen-statuses` are newer, and merging them would mean re-composing the sentence here. The
  * chip sits beside the sentence instead, same source of truth as the Plan tab.
+ *
+ * The tab has two halves and they never interleave. Above: the benchmark — impersonal,
+ * publishable, the same numbers for any reader. Below: the insight — what those numbers cost
+ * one candidate in Pune at month one. Last, and visually separated from both, Quaere's reading,
+ * which is the only prose on this tab a model wrote. That ordering is the design: a reader who
+ * stops at the numbers has seen every measurement, and nothing measured sits underneath an
+ * interpretation where it could be mistaken for one.
  */
 function Market({ statuses, openPlanRow }: { statuses: Record<string, string>; openPlanRow: (row: number) => void }) {
   const [feed, setFeed] = useState<MarketFeed | null>(null);
@@ -141,6 +156,21 @@ function Market({ statuses, openPlanRow }: { statuses: Record<string, string>; o
 
   const rowLinks = (rows: PlanRowRef[]) => rows.length > 0 && <div className="mkt-rows">{rows.map((ref) => <button className="mkt-rowlink" key={ref.row} onClick={() => openPlanRow(ref.row)}>row {ref.row}<span>{String(statuses[`${ref.track}::${ref.topic}`] || ref.status).toLowerCase()}</span></button>)}</div>;
 
+  /**
+   * A marginal entry names its plan row but not its track, and `statuses` is keyed
+   * `${track}::${topic}` — the Plan tab's key. Resolving the track from the workbook here rather
+   * than widening the computed type keeps every chip on this tab reading its status from one
+   * place; a marginal row falling back to the committed baseline while the coverage row above it
+   * shows the live status would be two answers to "is row 28 done" in one panel.
+   *
+   * `planRows` is `Plan.slice(1)`, so plan row N is `planRows[N - 1]` — the same off-by-one the
+   * benchmark resolves in the other direction with `workbook.Plan[N]`.
+   */
+  const marginalRef = (entry: MarginalEntry): PlanRowRef[] => {
+    const row = planRows[entry.row - 1];
+    return row ? [{ row: entry.row, track: String(row[0]), topic: entry.topic, month: entry.month, hours: entry.hours, status: entry.status }] : [];
+  };
+
   const panel = (meta: string, body: React.ReactNode) => <section className="panel full-panel">
     <div className="panel-head"><div><p className="eyebrow">Job market benchmark</p><h2>What the market is asking for</h2></div><span className="panel-meta">{meta}</span></div>
     {body}
@@ -150,6 +180,7 @@ function Market({ statuses, openPlanRow }: { statuses: Record<string, string>; o
   if (state === "error") return panel("Unavailable", <p className="mkt-note">The benchmark could not be loaded. Everything on this tab is computed by the nightly scan, so refreshing is safe — nothing here is lost by failing to load.</p>);
 
   const b = feed?.benchmark ?? null;
+  const insight = feed?.insight ?? null;
   if (!b) return panel("No scan yet", <>
     <p className="mkt-note">No scan has completed a full cycle, so there is nothing to benchmark against yet. The scan runs nightly, establishes a baseline on its first complete pass, and the coverage, gap and over-investment blocks appear from that run onwards.</p>
     <p className="mkt-note">The trend line starts empty and fills in one point per cycle. There is no way to recover what the boards held before the first scan, so it is not backfilled.</p>
@@ -186,6 +217,107 @@ function Market({ statuses, openPlanRow }: { statuses: Record<string, string>; o
       {b.overInvested.map((track) => <article className="mkt-entry" key={track.rowRange}><Statement text={track.statement} /></article>)}
       <p className="mkt-total">{b.overInvestedTotal.statement}</p>
     </section>
+
+    {/* Everything below is insight.json. It is written by the same cron, one file later, so the
+        benchmark above can be several cycles ahead of it — hence a group-level empty state
+        rather than four independent ones that would each say the same sentence. */}
+    {!insight && <section className="mkt-section">
+      <div className="mkt-section-head"><h3>Your reading</h3><span className="panel-meta">arrives with the next scan</span></div>
+      <p className="mkt-note">The benchmark above is what the market asks for. What it costs you — readiness against your own progress, which requisitions are reachable from Pune, which segment fits, and how fast any of it is moving — is computed by the same nightly scan into a second file, and that file has not been written yet.</p>
+      <p className="mkt-note">Nothing above is affected. The two are computed separately so a failure in the personal half cannot take the measured half down with it.</p>
+    </section>}
+
+    {insight && <>
+      {/* Flags first, and only when there are any. They are deterministic — no model touches
+          them — and each one is an event worth interrupting for: readiness moved, a band was
+          crossed, or a requisition appeared that could be taken from India today. */}
+      {insight.flags.length > 0 && <section className="mkt-section">
+        <div className="mkt-section-head"><h3>Flags</h3><span className="panel-meta">{insight.flags.length} since the last scan · computed, not written</span></div>
+        {insight.flags.map((flag) => <article className="mkt-entry" key={`${flag.kind}::${flag.id}`}><p className="mkt-head-line">{flag.statement}</p></article>)}
+      </section>}
+
+      <section className="mkt-section">
+        <div className="mkt-section-head"><h3>Readiness</h3><span className="panel-meta">weighted by market share, from progress events</span></div>
+        <div className="mkt-lead"><Statement text={insight.readiness.statement} /></div>
+        {/* The absolute number is stated above and the ranked table is the deliverable: at month
+            one readiness is ~0% and will stay low for months, so an unmoving headline is not a
+            decision aid and "which row moves it most" is. The gain repeats in the right-hand
+            column on purpose — the sentence exists so the tab and the weekly email say the same
+            thing, the column exists so twenty-seven rows can be ranked at a glance. */}
+        {insight.readiness.marginal.length === 0
+          ? <p className="mkt-note">No incomplete plan row carries a mapped skill, so there is no marginal move left to rank. Readiness moves from here only by the market changing what it asks for.</p>
+          : insight.readiness.marginal.map((entry) => <article className="mkt-entry mkt-marginal" key={entry.row}>
+            <div><Statement text={entry.statement} />{rowLinks(marginalRef(entry))}</div>
+            <span className="mkt-gain">{signed(entry.gainPoints)}</span>
+          </article>)}
+      </section>
+
+      <section className="mkt-section">
+        <div className="mkt-section-head"><h3>Reachability</h3><span className="panel-meta">five tiers over {insight.reachability.coreCount} core reqs</span></div>
+        <div className="mkt-lead"><Statement text={insight.reachability.statement} /></div>
+        {insight.reachability.coreCount === 0
+          ? <p className="mkt-note">No core requisition survived the scan, so there is no distribution to tier.</p>
+          : <>
+            {/* The bar is the percentage the sentence already states, drawn as a length. It is
+                aria-hidden because a screen reader that read it would be reading the number
+                twice, and it carries no value the sentence does not. */}
+            {insight.reachability.tiers.map((tier) => <article className="mkt-entry mkt-tier" key={tier.tier}>
+              <Statement text={tier.statement} />
+              <span className="mkt-bar" aria-hidden="true"><span style={{ width: `${tier.pct}%` }} /></span>
+            </article>)}
+
+            {/* Two denominators, side by side, because they are different facts: a skill can be
+                42% of a market that is mostly American on-site and a different number entirely
+                among the roles that can be worked from Pune, and only the second is a study
+                decision. This is the one block on the tab built from structural fields rather
+                than the rendered sentence — a column cannot be made out of a sentence — so each
+                row carries its full statement as a title, which is the same string the email
+                prints. */}
+            <div className="mkt-cols">
+              <div className="mkt-cols-head"><span>Skill</span><span>Whole market</span><span>Reachable</span><span>Δ</span></div>
+              {insight.reachability.skills.map((skill) => <div className="mkt-cols-row" key={skill.id} title={skill.statement}>
+                <span>{skill.label}</span>
+                <b>{skill.marketPct}%</b>
+                <b>{skill.reachablePct}%</b>
+                <span>{signed(skill.deltaPoints)}</span>
+              </div>)}
+            </div>
+          </>}
+      </section>
+
+      <section className="mkt-section">
+        <div className="mkt-section-head"><h3>Segments</h3><span className="panel-meta">ranked by reachable requisitions, then by fit</span></div>
+        {insight.segments.length === 0
+          ? <p className="mkt-note">No core requisition landed in a segment, so there is no fit list. Every segment is emitted at zero rather than dropped, so an empty list here means an empty corpus.</p>
+          : insight.segments.map((segment) => <article className="mkt-entry" key={segment.id}>
+            <Statement text={segment.statement} />
+            {/* The mix, which the sentence does not carry — it states the reachable count and
+                the top skills, not how the rest of the segment splits across the other tiers.
+                Empty tiers are dropped: a row of zeroes is not a distribution. */}
+            <div className="mkt-mix">{segment.reach.filter((tier) => tier.count > 0).map((tier) => <span className="mkt-chip" key={tier.tier} title={tier.label}><b>{tier.count}</b>{tier.tier}</span>)}</div>
+          </article>)}
+      </section>
+
+      <section className="mkt-section">
+        <div className="mkt-section-head"><h3>Velocity</h3><span className="panel-meta">{insight.velocity.available ? `${insight.velocity.spanDays} days · ${insight.velocity.from} to ${insight.velocity.to}` : "not yet measurable"}</span></div>
+        {/* One statement covers both cases. With a single trend point it says so and emits
+            nothing else — there is no way to recover board state from before the first scan, and
+            an interpolated slope would be indistinguishable from a measured one. */}
+        <div className="mkt-lead"><Statement text={insight.velocity.statement} /></div>
+        {insight.velocity.skills.map((skill) => <article className="mkt-entry" key={skill.id}><p className="mkt-body-line">{skill.statement}</p></article>)}
+      </section>
+
+      {/* Quaere's reading. Absent entirely when the paragraph is null — the cron drops it on any
+          failure and on any digit it contains, and an interpretation block that degrades to an
+          apology would be worse than no block. Visually distinct and last, never interleaved with
+          the numbers: everything above is measured, this alone is not, and the separation is the
+          only thing keeping a model's sentence from borrowing the authority of the audited ones. */}
+      {insight.quaere && <section className="mkt-quaere">
+        <p className="eyebrow">Quaere&rsquo;s reading — interpretation, not measurement</p>
+        <p>{insight.quaere}</p>
+        <p className="mkt-quaere-foot">Written by the nightly scan from the numbers above, then stored. It contains no figure of its own: any digit drops the paragraph.</p>
+      </section>}
+    </>}
   </>);
 }
 

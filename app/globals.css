@@ -557,3 +557,73 @@ th{padding:0 12px 10px}
 .mkt-spark-labels{display:flex;justify-content:space-between;gap:12px;
   font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
 @media(max-width:600px){.mkt-spark-labels{font-size:10px}}
+
+/* --- Market tab: the personal insight, below the benchmark ---------------------
+   Same rhythm as the blocks above it — 14px lead line, 13px detail, --line between
+   entries, no card inside a card. Everything new here is a layout affordance for a
+   sentence that already exists (a rank column, a proportion bar, a chip), never a
+   second type scale. The one exception is .mkt-quaere, which is deliberately the
+   only visually distinct block on the tab, because it is the only prose on it a
+   model wrote. ------------------------------------------------------------- */
+
+/* A section's own summary statement, above its entries. .mkt-summary already does
+   this at the top of the panel, but it closes with a rule; a mid-panel lead sits
+   under a section head that is itself the divider, so a second rule would box it. */
+.mkt-lead{display:grid;gap:5px;padding:12px 0 2px}
+
+/* The ranked marginal table. The gain is in the sentence and in the column: the
+   sentence is what the weekly email prints, the column is what makes twenty-seven
+   rows rankable without reading twenty-seven sentences. */
+.mkt-marginal{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:start}
+.mkt-gain{font-family:'Geist Mono',ui-monospace,monospace;font-size:13px;
+  font-variant-numeric:tabular-nums;color:var(--accent-text);white-space:nowrap;padding-top:2px}
+
+/* The reachability distribution. Same bar treatment as .track-progress — the accent
+   carries proportion and nothing else on this page is coloured. */
+.mkt-tier{display:grid;gap:9px}
+.mkt-bar{display:block;height:4px;max-width:92ch;background:var(--surface-strong);
+  border-radius:var(--r-pill);overflow:hidden}
+.mkt-bar span{display:block;height:100%;background:var(--primary);border-radius:var(--r-pill)}
+
+/* Whole market beside reachable market. Not a <table>: the global table rule sets
+   min-width:950px for the Plan grid, which would force a horizontal scrollbar onto
+   four short columns. Each row's title is its full statement, so the sentence the
+   email prints is still one hover away from the number. */
+.mkt-cols{margin-top:16px}
+.mkt-cols-head,.mkt-cols-row{display:grid;grid-template-columns:minmax(0,1fr) 96px 96px 52px;
+  gap:12px;align-items:baseline;padding:8px 10px;margin:0 -10px;border-radius:var(--r-sm)}
+.mkt-cols-head{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);border-bottom:1px solid var(--line);border-radius:0}
+.mkt-cols-row{border-top:1px solid var(--line);font-size:13px;line-height:1.45;color:var(--ink-2);
+  transition:background-color 120ms ease}
+.mkt-cols-head+.mkt-cols-row{border-top:0}
+.mkt-cols-row:hover{background:var(--surface-strong)}
+.mkt-cols-head span:not(:first-child),.mkt-cols-row b,.mkt-cols-row span:last-child{text-align:right}
+.mkt-cols-row b{font-family:'Geist Mono',ui-monospace,monospace;font-size:12.5px;font-weight:500;
+  font-variant-numeric:tabular-nums;color:var(--ink)}
+.mkt-cols-row span:last-child{font-family:'Geist Mono',ui-monospace,monospace;font-size:11.5px;
+  font-variant-numeric:tabular-nums;color:var(--muted)}
+
+/* A segment's reachability mix. Read-only, so a chip rather than the .mkt-rowlink
+   button — the same surface and hairline, without the hover that promises a click. */
+.mkt-mix{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}
+.mkt-chip{display:inline-flex;align-items:baseline;gap:6px;background:var(--surface-strong);
+  border:1px solid var(--line);border-radius:var(--r-sm);padding:3px 8px;color:var(--muted);
+  font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.02em}
+.mkt-chip b{color:var(--ink);font-weight:500;font-variant-numeric:tabular-nums}
+
+/* Quaere's reading. The accent rule and the tinted ground are the whole point: this
+   is the one block on the tab that is not a measurement, and a reader skimming must
+   be able to tell that before reading a word of it. */
+.mkt-quaere{margin-top:34px;padding:18px 20px;background:var(--primary-soft);
+  border:1px solid var(--line);border-left:2px solid var(--primary);border-radius:var(--r-md)}
+.mkt-quaere .eyebrow{margin:0 0 9px}
+.mkt-quaere p{margin:0;font-size:14px;line-height:1.6;color:var(--ink);max-width:74ch}
+.mkt-quaere .mkt-quaere-foot{margin:11px 0 0;font-size:12px;line-height:1.5;color:var(--muted)}
+
+@media(max-width:600px){
+  .mkt-marginal{grid-template-columns:1fr;gap:8px}
+  .mkt-gain{padding-top:0}
+  .mkt-cols-head,.mkt-cols-row{grid-template-columns:minmax(0,1fr) 60px 60px 42px;gap:8px;font-size:12px}
+  .mkt-quaere{padding:16px}
+}

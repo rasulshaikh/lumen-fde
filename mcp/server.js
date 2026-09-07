@@ -40,6 +40,82 @@ function slug(value, fallback) { return String(value).replace(/[^a-z0-9]+/gi, "-
 function audit(action, ok, detail = "") { auditEvents.unshift({ action, ok, detail: String(detail).slice(0, 180), at: new Date().toISOString() }); if (auditEvents.length > 500) auditEvents.pop(); }
 async function durableAudit(action, detail) { try { const stamp = new Date().toISOString().replace(/[:.]/g, "-"); const file = `reports/audit/${stamp}-${slug(action, "event")}.json`; await github(file, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: `audit: ${action}`, content: Buffer.from(JSON.stringify({ action, detail, at: new Date().toISOString() }, null, 2)).toString("base64"), branch: repoConfig().branch }) }); } catch (error) { audit("durable_audit", false, error.message); } }
 function cleanAnswer(value) { return String(value || "").replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/\*/g, "").replace(/[—–]/g, " - ").replace(/\n{3,}/g, "\n\n").trim(); }
+
+/**
+ * Everything below to the end of `marketContext` is a port of app/api/ask/route.ts, and the two
+ * copies must stay identical.
+ *
+ * Not imported, because it cannot be: that file is TypeScript inside the Next bundle on Vercel
+ * and this is a CommonJS process on Render, with no build step between them. The same
+ * reasoning, and the same duty to keep the copies in step, as the cron route's copy of the
+ * digest's `clean`.
+ *
+ * It has to exist at all because `askLumen` has two paths and only one of them is a proxy. With
+ * LUMEN_ASK_URL and LUMEN_INTERNAL_API_KEY set, the tool posts to /api/ask and inherits the
+ * market context for free. Without them it assembles its own context and calls MiniMax
+ * directly, and that path would answer a market question from nothing at all — which is worse
+ * than not answering it, because the model has no way to know the numbers are missing.
+ */
+const MARKET_CAP = 7000;
+const COVERAGE_LINES = 10;
+const MARGINAL_LINES = 5;
+/** Bounded for the same reason the route bounds it: `github()` passes no signal to fetch, and
+ *  the MiniMax call downstream already claims 25 s. A hung GitHub costs the market block only. */
+const MARKET_READ_MS = 4000;
+
+/** Read live from GitHub rather than from the checkout on disk. `readJson` would serve whatever
+ *  reports/market held at deploy time, so Claude Code and the dashboard would quote different
+ *  markets — and the whole point of this port is that the two answer identically. Every failure
+ *  path resolves null and the block is simply absent. */
+async function readMarketReport(file) {
+  const read = github(file).then((result) => JSON.parse(Buffer.from(result.content, "base64").toString("utf8"))).catch(() => null);
+  return Promise.race([read, new Promise((resolve) => setTimeout(resolve, MARKET_READ_MS, null))]);
+}
+
+/**
+ * The measured market as a digest, not as 180 KB of JSON.
+ *
+ * Coverage is laid down last so that it, and not the segment ranking or the reachability
+ * distribution, is what the budget trims. Statements are appended whole and never sliced: a
+ * blunt cut at MARKET_CAP can bisect a numeral, and "189 distinct requisitions" arriving as
+ * "18" puts a wrong measured number in front of the model, which is worse than one fewer skill.
+ */
+function marketContext(benchmark, insight) {
+  const lines = [];
+  if (benchmark) lines.push(`MEASURED MARKET BENCHMARK - scanned ${benchmark.day}, ${benchmark.boardsOk} of ${benchmark.boardsTotal} first-party job boards.`, benchmark.coreStatement, benchmark.adjacentStatement);
+  if (insight) {
+    lines.push("", insight.reachability.statement, insight.reachability.tiers.map((tier) => `${tier.tier} ${tier.count} (${tier.pct}%)`).join(" | "), "",
+      insight.readiness.statement, ...insight.readiness.marginal.slice(0, MARGINAL_LINES).map((entry) => entry.statement), "",
+      "SEGMENT FIT - ranked by how many requisitions in each segment are reachable today, readiness breaking ties:",
+      ...insight.segments.map((segment) => `${segment.rank}. ${segment.statement}`), "", insight.velocity.statement);
+  }
+  if (!lines.length) return "";
+  const kept = [];
+  if (benchmark) {
+    const header = (n) => `MOST-ASKED SKILLS - the ${n} most-asked of ${benchmark.coverage.length} mapped skills, by share of core requisitions:`;
+    // The header and its blank line are written after the fill, so they are reserved here at
+    // the longest the count can render rather than estimated.
+    let used = lines.reduce((n, line) => n + line.length + 1, 0) + header(COVERAGE_LINES).length + 2;
+    for (const entry of benchmark.coverage.slice(0, COVERAGE_LINES)) {
+      if (used + entry.statement.length + 1 > MARKET_CAP) break;
+      used += entry.statement.length + 1;
+      kept.push(entry.statement);
+    }
+    if (kept.length) lines.push("", header(kept.length), ...kept);
+  }
+  const text = lines.join("\n");
+  return text.length > MARKET_CAP ? `${text.slice(0, MARKET_CAP)}…` : text;
+}
+
+/** Stated only when there is a block to state it about; telling the model to quote a benchmark
+ *  that failed to load is an invitation to reconstruct one. Identical wording to the route. */
+const MARKET_RULE =
+  `\n\nThe MEASURED MARKET BENCHMARK block in the user message is measured, not estimated: a daily scan of first-party job boards` +
+  ` counted every requisition and every skill in it. You quote those numbers; you do not produce them. Never compute, adjust, average,` +
+  ` project, rescale or round a market number, and never state one that is not written in that block. If you are asked for a market number` +
+  ` the block does not contain, say plainly that you do not have it and say what the block does cover. Percentages there are already` +
+  ` rounded whole numbers over a stated denominator, so quote the denominator with them.`;
+
 async function askLumen(prompt, context = "") {
   if (process.env.LUMEN_ASK_URL && process.env.LUMEN_INTERNAL_API_KEY) {
     const response = await fetch(process.env.LUMEN_ASK_URL, { method: "POST", headers: { "Content-Type": "application/json", "x-lumen-internal-key": process.env.LUMEN_INTERNAL_API_KEY }, body: JSON.stringify({ prompt, context }), signal: AbortSignal.timeout(30_000) });
@@ -49,7 +125,11 @@ async function askLumen(prompt, context = "") {
   }
   if (!process.env.MINIMAX_API_KEY) throw new Error("MINIMAX_API_KEY is not configured on Render");
   const learning = { books: readJson("data/library-context.json"), repositories: readJson("data/repository-context.json"), lesson: readJson("data/lesson-context.json"), plan: readJson("data/workbook.json").Plan.slice(1).map((r) => ({ track: r[0], month: r[1], topic: r[2], hours: r[13] })) };
-  const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${process.env.MINIMAX_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, temperature: 0.4, max_completion_tokens: 1600, stream: false, messages: [{ role: "system", content: `You are Lumen, a Senior FDE learning guide. Explain in fifth-grade reading language while keeping technical meaning exact. Use short sentences, define jargon immediately, give one technical example, connect it to production and FDE interviews, and finish with one practical next step. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. Indexed context:\n${JSON.stringify(learning)}` }, { role: "user", content: `Active plan context:\n${context || "No active topic filter."}\n\nQuestion:\n${prompt}` }] }), signal: AbortSignal.timeout(25_000) });
+  // Two reads, one budget, and neither can fail the tool: both resolve null on every path and
+  // `marketContext` returns "" for a pair of nulls, leaving this prompt as it was before.
+  const [benchmark, insight] = await Promise.all([readMarketReport("reports/market/benchmark.json"), readMarketReport("reports/market/insight.json")]);
+  const market = marketContext(benchmark, insight);
+  const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${process.env.MINIMAX_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, temperature: 0.4, max_completion_tokens: 1600, stream: false, messages: [{ role: "system", content: `You are Lumen, a Senior FDE learning guide. Explain in fifth-grade reading language while keeping technical meaning exact. Use short sentences, define jargon immediately, give one technical example, connect it to production and FDE interviews, and finish with one practical next step. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. Indexed context:\n${JSON.stringify(learning)}${market ? MARKET_RULE : ""}` }, { role: "user", content: `Active plan context:\n${context || "No active topic filter."}${market ? `\n\n${market}` : ""}\n\nQuestion:\n${prompt}` }] }), signal: AbortSignal.timeout(25_000) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.base_resp?.status_msg || `MiniMax request failed with ${response.status}`);
   const answer = cleanAnswer(data.choices?.[0]?.message?.content);

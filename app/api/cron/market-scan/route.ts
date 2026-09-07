@@ -6,9 +6,12 @@ import { classify, dedupeKey, type RoleClass } from "@/lib/market/classify";
 import { fetchBoard, fetchJd, type Posting, type Source } from "@/lib/market/fetch";
 import { htmlToText, matchSkills, stripBoilerplate } from "@/lib/market/skills";
 import { computeBenchmark, type Benchmark, type Workbook } from "@/lib/market/benchmark";
+import { computeInsight } from "@/lib/market/insight";
+import { classifyReach } from "@/lib/market/reach";
 import {
   BENCHMARK_PATH,
   INDEX_PATH,
+  INSIGHT_PATH,
   TREND_PATH,
   appendTrend,
   capReqs,
@@ -16,6 +19,7 @@ import {
   historyPath,
   markSeen,
   readJson,
+  readProgress,
   sweepMissing,
   writeJson,
   type BoardStatus,
@@ -128,6 +132,16 @@ async function scanBoard(source: Source, index: MarketIndex): Promise<BoardOutco
         // fingerprint" rather than "this req has no skills". Assigning it through would wipe
         // every known Greenhouse req's fingerprint and deflate every percentage each run.
         skills: text ? matchSkills(stripBoilerplate(text, source.company, corpus, source), skillMap) : null,
+        // The same body, in the same pass, before it is discarded — but the UNSTRIPPED text.
+        // "We are unable to provide visa sponsorship", the ITAR paragraph and the clearance
+        // clause are boilerplate in the literal sense: they repeat across a company's postings
+        // and the 60%-frequency detector deletes them. Tiering the stripped text would move
+        // every Palantir and Anduril req out of `out-of-reach` and into the reachable slice.
+        //
+        // null carries the same meaning as it does for `skills` above — no body this run, keep
+        // the stored tier — which matters more here, because the location-only tier markSeen
+        // would otherwise overwrite it with is an upper bound on reachability, never a fact.
+        reach: text ? classifyReach(posting, text) : null,
       },
     });
   }
@@ -206,22 +220,19 @@ const escLines = (s: string) => esc(s).replace(/\n/g, "<br />");
 const NUMBERS = /\d+(?:\.\d+)?/g;
 
 /**
- * The one model paragraph: what to do about these numbers this week.
+ * One model paragraph, or nothing: the transport, the cleaning and the digit check.
+ *
+ * Shared by the two surfaces that ask for a paragraph, and shared for one reason — the
+ * post-check below is the entire safety property of both, and a second copy of it is a second
+ * thing that has to stay at an empty allow-set forever. The prompt, and what its absence
+ * costs, belong to the caller; everything from the socket to the digit check is one decision.
  *
  * Returns "" on every failure path — no key, non-200, timeout, empty after cleaning, or a
- * number the model invented. The caller sends the deterministic body either way, because the
- * substance of this email is 40 audited measurements and the paragraph is a framing line on
- * top of them.
+ * number the model invented.
  */
-async function weeklyFraming(facts: string): Promise<string> {
+async function modelParagraph(prompt: string, label: string): Promise<string> {
   const key = process.env.MINIMAX_API_KEY;
   if (!key) return "";
-
-  const prompt =
-    `Here is this week's measured Forward-Deployed Engineer job-market benchmark. In 60 words or fewer,` +
-    ` say what to DO about it this week - what to study, what to defer. Write no numbers at all: no digits,` +
-    ` no percentages, no counts, no years. The numbers are already printed above your paragraph and repeating` +
-    ` them is the one thing that makes this paragraph worse than nothing. Do not restate the data or pad.\n\n${facts}`;
 
   let text = "";
   try {
@@ -238,7 +249,7 @@ async function weeklyFraming(facts: string): Promise<string> {
       signal: AbortSignal.timeout(40_000),
     });
     if (r.ok) text = clean((await r.json())?.choices?.[0]?.message?.content || "");
-  } catch { /* the benchmark does not depend on this */ }
+  } catch { /* nothing measured depends on this paragraph */ }
   if (!text) return "";
 
   /**
@@ -262,10 +273,48 @@ async function weeklyFraming(facts: string): Promise<string> {
    */
   const invented = text.match(NUMBERS) ?? [];
   if (invented.length) {
-    console.error("[cron/market-scan] framing contains numbers, dropping it", { invented: invented.slice(0, 5) });
+    console.error(`[cron/market-scan] ${label} contains numbers, dropping it`, { invented: invented.slice(0, 5) });
     return "";
   }
   return text;
+}
+
+/**
+ * The one model paragraph in the weekly email: what to do about these numbers this week.
+ *
+ * The caller sends the deterministic body either way, because the substance of this email is
+ * 40 audited measurements and the paragraph is a framing line on top of them.
+ */
+function weeklyFraming(facts: string): Promise<string> {
+  return modelParagraph(
+    `Here is this week's measured Forward-Deployed Engineer job-market benchmark. In 60 words or fewer,` +
+      ` say what to DO about it this week - what to study, what to defer. Write no numbers at all: no digits,` +
+      ` no percentages, no counts, no years. The numbers are already printed above your paragraph and repeating` +
+      ` them is the one thing that makes this paragraph worse than nothing. Do not restate the data or pad.\n\n${facts}`,
+    "framing",
+  );
+}
+
+/**
+ * Quaere's reading of the insight, stored in insight.json so the Market tab stays model-free
+ * at request time. Design section "Quaere", surface b.
+ *
+ * The prompt asks for interpretation and forbids every digit, which is the whole separation the
+ * design rests on: Quaere may read every number and may write none. The tab renders this under
+ * a heading that says so, below the measurements and never interleaved with them, so a reader
+ * can always tell which sentences were computed. If it comes back empty the block is simply
+ * absent — the paragraph is the only thing a model failure is allowed to cost.
+ */
+function quaereReading(facts: string): Promise<string> {
+  return modelParagraph(
+    `Here is what this week's measured Forward-Deployed Engineer market means for one candidate in Pune,` +
+      ` at month one of a twenty-month plan. In 80 words or fewer, write the reading that sits beneath these` +
+      ` numbers on his dashboard: which slice of this market to aim at, and what the ranking is really saying.` +
+      ` Interpretation only. Write no numbers at all: no digits, no percentages, no counts, no years. The numbers` +
+      ` are already printed above your paragraph and repeating them is the one thing that makes this paragraph` +
+      ` worse than nothing. Do not restate the data or pad.\n\n${facts}`,
+    "reading",
+  );
 }
 
 /**
@@ -455,9 +504,21 @@ export async function GET(request: Request) {
       const swept = sweepMissing(index, confirmedIds(index, visited, seenThisRun), today);
       const evicted = capReqs(index);
 
-      // benchmark.json is read only for its sha — the contents API rejects an update without
-      // one, and the file is rewritten whole on every cycle regardless of what it held.
-      const [benchmarkFile, trendFile] = await Promise.all([readJson<unknown>(BENCHMARK_PATH), readJson<TrendPoint[]>(TREND_PATH)]);
+      // benchmark.json and insight.json are read only for their shas — the contents API rejects
+      // an update without one, and both files are rewritten whole on every cycle regardless of
+      // what they held. Concurrent here is safe and concurrent below is not: these are GETs and
+      // there is no branch ref for them to race.
+      //
+      // The progress history is the one input that is allowed to be missing. `readProgress`
+      // returns null on an unreadable directory and computeInsight then computes every other
+      // number with an empty progress set, so a study log that has not been written yet — or a
+      // GitHub hiccup on one of its files — costs the readiness figure and not the scan.
+      const [benchmarkFile, trendFile, insightFile, progress] = await Promise.all([
+        readJson<unknown>(BENCHMARK_PATH),
+        readJson<TrendPoint[]>(TREND_PATH),
+        readJson<unknown>(INSIGHT_PATH),
+        readProgress(),
+      ]);
       const points = trendFile.data ?? [];
       // The last point that is not today's. A same-day re-run would otherwise compare the
       // benchmark against itself and report every skill as having moved zero points, silently
@@ -466,6 +527,11 @@ export async function GET(request: Request) {
 
       const benchmark = computeBenchmark(index, skillMap, workbook as unknown as Workbook, now, previous);
       const trend = appendTrend(points, { d: today, core: benchmark.coreCount, companies: benchmark.companyCount, s: benchmark.skillShares });
+
+      // Computed against the APPENDED trend, not the stored one: velocity reads the last point
+      // as "now", and passing `points` would measure the week ending yesterday and then print
+      // it beside today's benchmark.
+      const insight = computeInsight(index, benchmark, progress, workbook as unknown as Workbook, trend, now);
 
       // index.json first and alone: it is the only file that cannot be recomputed. benchmark
       // and trend are both pure functions of it, so a failure after this point costs a day of
@@ -478,8 +544,8 @@ export async function GET(request: Request) {
 
       /**
        * Sequential, NOT Promise.all. Each write is a commit on the same branch, so running
-       * the three concurrently makes them race the branch ref: GitHub accepts whichever
-       * arrives first and rejects the others with "is at <commit> but expected <commit>".
+       * them concurrently makes them race the branch ref: GitHub accepts whichever arrives
+       * first and rejects the others with "is at <commit> but expected <commit>".
        *
        * That is not theoretical. The first real scan wrote index.json, trend.json and
        * history/2026-09-07.json and lost benchmark.json to exactly this, with the two shas in
@@ -487,7 +553,7 @@ export async function GET(request: Request) {
        * inherited from app/api/review/route.ts, which writes a single file and therefore
        * cannot race itself.
        *
-       * Three round trips instead of one costs about a second on a scan that already spends
+       * Four round trips instead of one costs about a second on a scan that already spends
        * a minute fetching boards.
        */
       const wroteBenchmark = await writeJson(BENCHMARK_PATH, benchmark, benchmarkFile.sha);
@@ -502,6 +568,37 @@ export async function GET(request: Request) {
       }
       if (!wroteHistory.ok) console.error("[cron/market-scan] history archive not written", { day: today, error: wroteHistory.error });
 
+      /**
+       * The one place in this route where a model runs BEFORE a write, and it has to: the
+       * paragraph is stored in insight.json precisely so the Market tab never calls a model at
+       * request time. The ordering is still the same ordering as everywhere else — index,
+       * benchmark and trend are committed above, so a MiniMax outage costs this paragraph and,
+       * at worst, a day of freshness on one derived file.
+       *
+       * The model sees the five headline statements, not the whole insight. A longer prompt
+       * buys no better an 80-word answer, and every number in it is one more number a model
+       * inclined to quote can reach for.
+       */
+      const reading = await quaereReading([
+        insight.readiness.statement,
+        `Largest readiness gains available: ${insight.readiness.marginal.slice(0, 2).map((m) => m.statement).join(" | ") || "none"}`,
+        insight.reachability.statement,
+        `Segments, best fit first: ${insight.segments.slice(0, 3).map((s) => s.statement).join(" | ")}`,
+        insight.velocity.statement,
+      ].join("\n"));
+      if (!reading) console.error("[cron/market-scan] no reading from the model; storing the insight without one");
+
+      // Sequential like the three above, and last because it is the most derived of the four.
+      // `|| null`: modelParagraph returns "" on every failure path, and an empty string in the
+      // file would render an empty Quaere block instead of no Quaere block.
+      const wroteInsight = await writeJson(INSIGHT_PATH, { ...insight, quaere: reading || null }, insightFile.sha);
+      // Logged, not fatal — the same call the history archive makes. The insight is a pure
+      // function of index.json, the benchmark and the progress history, all of which survive
+      // this run, so it recomputes tomorrow. A 502 here would report a completed cycle as
+      // failed, and Vercel would retry the cron and spend another 47 MB re-scanning a market
+      // that has already been scanned.
+      if (!wroteInsight.ok) console.error("[cron/market-scan] insight not written", { day: today, error: wroteInsight.error });
+
       summary = {
         baseline: benchmark.baseline,
         core: benchmark.coreCount,
@@ -512,24 +609,29 @@ export async function GET(request: Request) {
         missing: swept.missing,
         deleted: swept.deleted,
         evicted,
+        // Both, and separately, exactly as the email reports `emailed` and `emailFraming`:
+        // they fail independently and neither failure is fatal, so a run that quietly stopped
+        // producing a reading is otherwise indistinguishable from one that produces them.
+        insight: wroteInsight.ok,
+        reading: Boolean(reading),
       };
 
       /**
        * The weekly email, Monday only, and last on purpose.
        *
        * Vercel Hobby caps at two crons, so this is folded in behind a day check rather than
-       * given its own entry — see spec section 6. It sits after all four writes and outside
+       * given its own entry — see spec section 6. It sits after all five writes and outside
        * the branches that return 502, so the ordering is: the index is committed, then the
-       * benchmark and the trend, and only then does anything talk to Resend or MiniMax. That
-       * order is the whole point. The scan's deliverable is the benchmark; an email is a
-       * notification about it. Sending first and then failing to persist would mean an inbox
+       * benchmark and the trend, and only then does anything talk to Resend. That order is the
+       * whole point. The scan's deliverable is the benchmark; an email is a notification about
+       * it. Sending first and then failing to persist would mean an inbox
        * asserting numbers the tab cannot show, and a Monday send that threw before the writes
        * would lose a full cycle of scanning to a third party's outage.
        */
       if (now.getUTCDay() === 1) {
         // `sendWeekly` catches its own network failures, so this catch only fires on a bug in
         // the rendering. It is here anyway: an exception escaping to the outer handler would
-        // return 500 for a cycle whose four files are already committed, and Vercel retrying a
+        // return 500 for a cycle whose five files are already committed, and Vercel retrying a
         // "failed" cron would spend another 47 MB re-scanning a market that was already scanned.
         const weekly = await sendWeekly(benchmark).catch((error) => {
           console.error("[cron/market-scan] weekly email render failed", { error: String(error) });

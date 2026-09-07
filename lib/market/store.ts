@@ -1,5 +1,5 @@
 /**
- * Persistence for the job-market benchmark: four files in the repo, each read whole and
+ * Persistence for the job-market benchmark: five files in the repo, each read whole and
  * written whole with its sha, exactly as `app/api/review/route.ts` does it.
  *
  * The same rationale applies here as there, for the same reason: this is mutable state
@@ -16,12 +16,22 @@
  * requisition in the corpus as new the following day.
  */
 
+// Type-only: reach.ts is pure and importing it for a value would be harmless, but nothing in
+// this file classifies anything — the scan hands the tier in already computed.
+import type { ReachTier } from "./reach";
+
 const repo = process.env.GITHUB_REPO || "rasulshaikh/lumen-fde";
 const branch = process.env.GITHUB_BRANCH || "main";
 
 export const INDEX_PATH = "reports/market/index.json";
 export const BENCHMARK_PATH = "reports/market/benchmark.json";
 export const TREND_PATH = "reports/market/trend.json";
+/**
+ * The personal reading of the benchmark. Separate file, not a key inside benchmark.json,
+ * because benchmark.json is impersonal and publishable and this one is neither — and because
+ * a scan that fails to write this one must still leave a correct benchmark behind.
+ */
+export const INSIGHT_PATH = "reports/market/insight.json";
 /** Write-only archive. Nothing in a request path ever lists or reads this directory. */
 export const historyPath = (day: string) => `reports/market/history/${day}.json`;
 
@@ -64,6 +74,22 @@ export type ReqRecord = {
    * benchmark denominator, so a failure understates a count rather than corrupting it.
    */
   skills: string[] | null;
+  /**
+   * The reachability tier, and the second thing reduced out of the JD before it is discarded.
+   *
+   * `location` alone gets three of the five tiers, so this field exists only for the two it
+   * cannot: the US-person clause and the active-clearance clause live in the JD body and
+   * nowhere else. Same treatment as `skills` for the same reason — the body is matched to a
+   * small value in memory and never stored.
+   *
+   * Optional, and absent on every requisition scanned before the field existed. A missing
+   * value is unknown, not `relocate-sponsor`: consumers re-derive from `location` and say so,
+   * and the next scan of that board fills it in. Making it required would mean re-scanning
+   * 47 MB to backfill a field that arrives free on the next cycle.
+   *
+   * `null` means "no body this run" — see `markSeen`, which keeps the stored tier instead.
+   */
+  reach?: ReachTier | null;
 };
 
 export type MarketIndex = {
@@ -152,6 +178,73 @@ export async function writeJson(path: string, data: unknown, sha: string | null)
   }
 }
 
+/** The study-progress history: one markdown file per event, as POST /api/progress writes it. */
+export const PROGRESS_DIR = "reports/progress";
+
+/**
+ * Newest first, and structurally exactly what `computeInsight` reads.
+ *
+ * Declared here rather than imported from insight.ts, which already imports types from this
+ * file: a four-field record is cheaper than a type cycle between the pure module and the
+ * network one, and the compiler still holds the two shapes together at the call site.
+ */
+export type ProgressEntry = { topic: string; status: string; date: string };
+
+/**
+ * Read the study-progress history: list the directory, then fetch every file.
+ *
+ * This is the N+1 the header above refuses for the index, and it is right here for the reason
+ * stated there — an append-only history of small markdown files is exactly the shape that
+ * listing suits. It is deliberately the same listing, the same newest-100 slice and the same
+ * three regexes as GET /api/progress: readiness matches events to plan rows by topic string,
+ * and a second parser would let the tab and the tab's own readiness number disagree about
+ * which rows are done.
+ *
+ * Newest 100, not oldest. Ascending is what GitHub returns and slicing it was a live bug in
+ * the route: past a hundred events a topic's status could never advance again.
+ *
+ * `null` means "we do not know", never "no progress", and it is all-or-nothing on purpose. A
+ * partial set — one file's fetch failing inside a Promise.all that kept the rest — would drop
+ * a `done` event, lower readiness by that skill's whole market share and raise a readiness
+ * flag out of a network blip. With null, the insight reports zero matched events in its own
+ * statement, which reads as missing data instead of as regression.
+ */
+export async function readProgress(): Promise<{ events: ProgressEntry[] } | null> {
+  if (!process.env.GITHUB_TOKEN) return null;
+  try {
+    const listing = await fetch(`https://api.github.com/repos/${repo}/contents/${PROGRESS_DIR}?ref=${branch}`, { headers: headers(), cache: "no-store" });
+    // 404 is a history that has not started yet, which is genuinely empty rather than unknown.
+    if (listing.status === 404) return { events: [] };
+    const files = await listing.json();
+    if (!listing.ok) throw new Error(files.message || `GitHub returned ${listing.status}`);
+
+    // Filenames start with an ISO stamp, so name order is chronological.
+    const newest = (files as { name: string; path: string }[])
+      .filter((file) => file?.name?.endsWith(".md"))
+      .sort((a, b) => b.name.localeCompare(a.name))
+      .slice(0, 100);
+
+    const events = await Promise.all(
+      newest.map(async (file) => {
+        const response = await fetch(`https://api.github.com/repos/${repo}/contents/${file.path}?ref=${branch}`, { headers: headers(), cache: "no-store" });
+        const item = await response.json();
+        if (!response.ok) throw new Error(item.message || `GitHub returned ${response.status}`);
+        const body = Buffer.from(item.content ?? "", "base64").toString("utf8");
+        // The filename fallback is intentionally not a plan topic: an unparseable file matches
+        // no row and is counted as unmatched, rather than guessed onto one.
+        return {
+          topic: body.match(/^Topic:\s*(.+)$/m)?.[1] || file.name,
+          status: body.match(/^Status:\s*(.+)$/m)?.[1] || "Not started",
+          date: body.match(/^Date:\s*(.+)$/m)?.[1] || "",
+        };
+      }),
+    );
+    return { events };
+  } catch {
+    return null;
+  }
+}
+
 /** A req absent from an OK board this long is treated as closed and deleted. */
 export const MISSING_DAYS = 14;
 /** Hard ceiling on stored requisitions, evicting oldest `lastSeen` first. */
@@ -199,6 +292,13 @@ export function markSeen(index: MarketIndex, id: string, seen: SeenReq, day: str
     // wipe the fingerprint of every already-known Greenhouse req and drop it out of the
     // denominators — the counts would fall each run for no reason in the market.
     skills: seen.skills ?? previous?.skills ?? null,
+    // Same rule as `skills`, and here it is not merely a lost value but a wrong one. Without a
+    // body the scan can only tier from `location`, and that pass is an upper bound: the body is
+    // the only thing that ever moves a req INTO `out-of-reach`. Assigning a bodyless tier
+    // through would quietly promote every cleared Palantir and Anduril req back into the
+    // reachable slice on the second run — the denominator of "the market you can actually
+    // take" would grow while the market did nothing.
+    reach: seen.reach ?? previous?.reach ?? null,
     // Seen again clears the decay clock; a req that flickers must not accumulate absence.
     missingSince: null,
   };
