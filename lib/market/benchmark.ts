@@ -39,6 +39,8 @@ export const DELTA_MIN_BOARDS = 24;
 
 /** A skill must move at least this many points, or cross a band, to be reported as movement. */
 export const MOVE_MIN_POINTS = 3;
+/** Spec section 5a: the digest prints at most three new roles, then "+N more". */
+export const NEW_ROLES_CAP = 3;
 const BANDS = [25, 50, 75];
 
 export type PlanRow = (string | number | null)[];
@@ -130,7 +132,10 @@ export type Benchmark = {
   gaps: GapEntry[];
   overInvested: OverInvestedEntry[];
   overInvestedTotal: { tracks: number; rowCount: number; hours: number; activeHours: number; pct: number; statement: string };
+  /** Capped at NEW_ROLES_CAP. Consumers print the overflow as "+N more". */
   newSinceLastRun: NewReqEntry[];
+  newSinceLastRunTotal: number;
+  newSinceLastRunOverflow: number;
   movement: Movement;
 };
 
@@ -389,6 +394,16 @@ export function computeBenchmark(
   }
 
   /**
+   * Capped, and the remainder counted rather than silently dropped. A day when 40 new core
+   * roles appear is a real event, and a list truncated to 3 with no "+N more" would report
+   * it as a quiet day -- the same class of silent-truncation error the fetch guard exists
+   * to catch. Consumers render the first NEW_ROLES_CAP and print newSinceLastRunOverflow.
+   */
+  const newSinceLastRunTotal = newSinceLastRun.length;
+  const newSinceLastRunOverflow = Math.max(0, newSinceLastRunTotal - NEW_ROLES_CAP);
+  newSinceLastRun = newSinceLastRun.slice(0, NEW_ROLES_CAP);
+
+  /**
    * Movement, week over week.
    *
    * Compared in whole points against the rounded previous share, not in raw fractions: the
@@ -452,6 +467,8 @@ export function computeBenchmark(
     overInvested,
     overInvestedTotal,
     newSinceLastRun,
+    newSinceLastRunTotal,
+    newSinceLastRunOverflow,
     movement,
   };
 }

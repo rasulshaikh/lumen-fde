@@ -32,6 +32,8 @@ export type Source = {
   fieldGuards?: FieldGuard[];
   boilerplate: string[];
   verifiedMatches: number;
+  /** Board total from the audit. The truncation floor is 60% of THIS, not of the match count. */
+  verifiedTotal: number;
   verifiedBytes: number;
   verifiedAt: string;
   why: string;
@@ -133,15 +135,15 @@ export async function fetchBoard(source: Source): Promise<BoardResult> {
      * looks like success: the Decagon audit had a fetch return 10 of 139 jobs, which
      * produced 2 matches instead of 34 and would have been written to the index as truth.
      *
-     * `verifiedMatches` is a match count, not a board total, so 60% of it is a floor and
-     * not the real check — matched ≤ total always holds, so a board that clears this can
-     * still be short. It is deliberately cheap and one-sided: it fires only when a board
-     * returns fewer postings than it previously returned *matches*, which no healthy board
-     * ever does, and it needs no classification pass to run.
+     * Checked against the board TOTAL, not the match count. Comparing against matches was
+     * the same bug wearing the guard's clothes: Databricks matched 97 of 870 rows, so a
+     * match-based floor was 58 and a truncated fetch returning 100 of 870 sailed through
+     * as healthy. Against the total the floor is 522, and the Decagon case (10 of 139)
+     * fails a floor of 83 by design rather than by luck.
      */
-    const floor = Math.floor(source.verifiedMatches * 0.6);
+    const floor = Math.floor(source.verifiedTotal * 0.6);
     if (postings.length < floor) {
-      return { ok: false, postings: [], bytes, error: `suspiciously small: ${postings.length} postings, under 60% of ${source.verifiedMatches} verified matches` };
+      return { ok: false, postings: [], bytes, error: `suspiciously small: ${postings.length} of ${source.verifiedTotal} verified postings, under 60%` };
     }
     return { ok: true, postings, error: null, bytes };
   } catch (error) {
