@@ -210,7 +210,7 @@ To recover a lost cycle without waiting for tomorrow, re-run the scan; it recomp
 downstream of `index.json` from scratch.
 
 **Class: corrupts.** Not the seen-set, but the reader's belief. A stale benchmark presented as
-current is a wrong measurement. The tab does give you the means to catch it — `app/page.tsx`
+current is a wrong measurement. The tab does give you the means to catch it — `components/Market.tsx`
 renders `Computed <benchmark.computedAt> UTC · N of M boards` above every Market panel — but it
 is an absolute timestamp with no relative age and no warning state, deliberately, so catching it
 requires reading the date rather than noticing a colour. On this failure that date is
@@ -530,7 +530,7 @@ returning `synced: false`.
 | GitHub did not answer | `false` | set | `null` |
 | cold start, no cycle yet | `true` | `null` | `null` |
 
-**The tab cannot tell you which.** `app/page.tsx` renders one message for `synced === false` —
+**The tab cannot tell you which.** `components/Market.tsx` renders one message for `synced === false` —
 "The benchmark store is unreachable … Check `GITHUB_TOKEN`" — so a missing token and a GitHub
 outage look identical on screen, and that message names the token in both cases. Read `error` off
 `/api/market` directly before you conclude which one you have.
@@ -630,7 +630,7 @@ rebuilds it.
    alert. The cheapest fix that closes the remaining hole is a dead-man's-switch ping to a service
    outside this repo at the end of the scan's success path. Nothing like that is built.
 2. **No *relative* staleness indicator on the Market tab.** The absolute one exists:
-   `app/page.tsx` renders `benchmark.computedAt` and the board count above every panel, and the
+   `components/Market.tsx` renders `benchmark.computedAt` and the board count above every panel, and the
    comment there says absolute-not-relative was chosen because "3 days ago" hides how stale. What
    is missing is any age computation or warning state, so nine-day-old numbers render in the same
    type as fresh ones and only the date says otherwise.

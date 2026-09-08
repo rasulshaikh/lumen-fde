@@ -400,7 +400,7 @@ the case for adding.
 
 ## 2. The 10 tabs
 
-`app/page.tsx`, the `TABS` constant, in order. All ten are one client component; the recall strip
+`components/Nav.tsx`, the `NAV` constant, in order. Each is its own route under `app/(app)/`, sharing one layout; the recall strip
 sits above the tab bar, so it is on every one of them (architecture.md §3.2).
 
 **Overview** — the four metrics (plan progress, hours remaining, weekly commitment, mocks),

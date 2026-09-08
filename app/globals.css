@@ -719,3 +719,29 @@ th{padding:0 12px 10px}
   .mkt-tierline{grid-template-columns:minmax(0,1fr) 40px 44px;gap:8px}
   .mkt-tierline .mkt-bar{display:none}
 }
+
+/* ---------------------------------------------------------------------------
+   Quaere dock — the route line.
+
+   Purely additive. .ask-panel, .ask-fab, .messages and the message rules above
+   are the dock's visual treatment and are not touched here; this adds the one
+   thing the dock gained by becoming route-aware — a statement of which of the
+   ten views the next question will be read against, and the key that opens it.
+
+   Set in the same register as .eyebrow and .panel-head: an uppercase hairline
+   label, the value carrying the weight, a rule under it separating the standing
+   description from what changes as you navigate.
+   --------------------------------------------------------------------------- */
+.ask-scope{display:flex;align-items:baseline;gap:9px;margin:0 0 14px;padding-bottom:12px;
+  border-bottom:1px solid var(--line)}
+.ask-scope>span{color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase}
+.ask-scope>b{flex:1;min-width:0;color:var(--ink);font-size:13px;font-weight:600;
+  letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* The shortcut, drawn as the key it is. Tabular mono so ⌘K and Ctrl K sit on
+   the same baseline as every other measured value in the app. */
+.ask-kbd{flex:none;font-family:'Geist Mono',ui-monospace,monospace;font-size:10px;
+  font-weight:500;color:var(--ink-2);background:var(--surface-strong);
+  border:1px solid var(--line-strong);border-radius:var(--r-sm);padding:2px 6px;
+  white-space:nowrap}

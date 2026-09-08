@@ -52,7 +52,7 @@ redeploy, be diffable, and be readable by a second process on a different host.
 ┌───────┴────────────────────┴──────────┐   ┌─────────┴───────────────────────┐
 │  Vercel — Next.js (proxy.ts gate)     │   │  Render — mcp/server.js          │
 │                                       │   │  Node http, JSON-RPC at /mcp     │
-│  app/page.tsx    10 tabs              │   │  18 tools, MCP 2025-03-26        │
+│  app/(app)/     10 routes              │   │  18 tools, MCP 2025-03-26        │
 │  app/api/*       10 routes            │   │  /healthz · free tier, sleeps    │
 │  vercel.json     2 crons              │   └─────────┬───────────────────────┘
 │                                       │             │ POST /api/ask
@@ -120,7 +120,7 @@ check is reached. "Every route is public" was true before the cron prefix was ga
 
 ### 3.2 The 10 tabs
 
-`app/page.tsx`, the `TABS` constant:
+`components/Nav.tsx`, the `NAV` constant:
 
 `Overview` · `Plan` · `Curriculum` · `Sandbox` · `Mocks` · `Roadmaps` · `Library` ·
 `Assessments` · `Comp reality` · `Market`
@@ -244,12 +244,12 @@ Measured over `data/workbook.json`:
 - **117 active, 2 Skipped.** The two skipped are PySpark (6h) and the MIT 6.824 Raft lab (20h).
   Column 15 currently holds only `Not started` (117) and `Skipped` (2).
 - **1,588 active hours**, 1,614h including the skipped 26h. "Active" means status ≠ Skipped, and
-  that one definition is used by `app/page.tsx`, `app/api/ask/route.ts` `planMap()`,
+  that one definition is used by `components/shared.tsx`, `app/api/ask/route.ts` `planMap()`,
   `app/api/cron/daily-digest/route.ts` `digest()` and `lib/market/insight.ts` alike.
 - **Months 1–23**, 23 distinct values.
 
 Row numbering has one trap and it appears in four files. The market subsystem cites
-**1-based plan rows**: row N is `workbook.Plan[N]`, which is `planRows[N-1]` in `app/page.tsx`
+**1-based plan rows**: row N is `workbook.Plan[N]`, which is `planRows[N-1]` in `components/shared.tsx`
 and curriculum topic key `N-1`. `Market.marginalRef()` and `openPlanRow()` both resolve it in
 that direction; `lib/market/benchmark.ts` resolves it in the other.
 
@@ -658,7 +658,7 @@ export const PER_TOPIC = 3;
   due" is what kills these systems; recognition is the illusion that makes rereading feel
   productive.
 - Only topics marked `In progress` or `Done` enter the schedule (`startedTopics` in
-  `app/page.tsx`). `retention()` counts a card matured at rung ≥ 3, i.e. a 60-day interval.
+  `app/(app)/layout.tsx`). `retention()` counts a card matured at rung ≥ 3, i.e. a 60-day interval.
 
 ---
 
@@ -774,7 +774,7 @@ standing fact. The market block at the bottom is all of the second kind.
 | boards configured / enabled | 32 <!-- verify:boards=32 --> / 27 <!-- verify:enabled_boards=27 --> | `data/market-sources.json` |
 | `BOARD_COUNT` | 27 | `lib/market/benchmark.ts` |
 | skills / gaps / over-invested | 34 <!-- verify:skills=34 --> / 13 <!-- verify:gaps=13 --> / 3 | `data/market-skill-map.json` |
-| tabs | 10 <!-- verify:tabs=10 --> | `app/page.tsx` `TABS` |
+| tabs | 10 <!-- verify:tabs=10 --> | `components/Nav.tsx` `NAV` |
 | API routes | 10 <!-- verify:api_routes=10 --> | `app/api/**/route.ts` |
 | crons | 2 <!-- verify:crons=2 --> (03:00, 03:30 UTC) | `vercel.json` |
 | MCP tools | 18 <!-- verify:mcp_tools=18 --> | `mcp/server.js` `tools` |

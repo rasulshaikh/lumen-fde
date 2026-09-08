@@ -175,7 +175,7 @@ M1).
 
 **The decision.** `scripts/verify-docs.py` reads every `verify:<anchor>=<value>` HTML comment in
 `docs/platform/*.md` and asserts it against source data — `data/workbook.json`, `mcp/server.js`,
-`app/page.tsx`, `vercel.json`. Unknown anchor names are a hard error, so a typo cannot pass by
+`components/Nav.tsx`, `vercel.json`. Unknown anchor names are a hard error, so a typo cannot pass by
 matching nothing.
 
 **Why anchors and not a regex over prose.** A regex over prose matches years, percentages and

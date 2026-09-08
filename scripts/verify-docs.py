@@ -47,12 +47,20 @@ def mcp_tools() -> int:
 
 
 def tabs() -> int:
-    src = (ROOT / "app" / "page.tsx").read_text()
-    block = re.search(r"const TABS = \[(.*?)\]", src, re.S).group(1)
-    return counted(r'"[^"]+"', block)
+    """The nav entries, from components/Nav.tsx.
+
+    This read app/page.tsx and its `TABS` constant until the routing migration deleted that
+    file. The failure was not a wrong number: `anchors()` builds every value eagerly, so an
+    uncaught FileNotFoundError here meant all 52 anchors across four documents went unchecked
+    while the script reported nothing at all. `resilient()` below is the structural fix; this
+    is the correct source.
+    """
+    src = (ROOT / "components" / "Nav.tsx").read_text()
+    block = re.search(r"export const NAV = \[(.*?)\];", src, re.S).group(1)
+    return counted(r"label:", block)
 
 
-def anchors() -> dict:
+def anchor_builders() -> dict:
     rows = plan_rows()
     active = [r for r in rows if str(r[15]).strip().lower() != "skipped"]
     curriculum = json.loads((ROOT / "data" / "curriculum.json").read_text())["topics"]
@@ -63,34 +71,54 @@ def anchors() -> dict:
     ladder = re.search(r"export const LADDER = \[(.*?)\]", (ROOT / "lib" / "review.ts").read_text()).group(1)
     return {
         # data/workbook.json Plan — col 15 is Status, "Skipped" means inactive
-        "rows": len(rows),
-        "active_rows": len(active),
-        "skipped_rows": len(rows) - len(active),
-        "hours": int(sum(float(r[13] or 0) for r in active)),          # col 13, active rows only
-        "months": len({int(float(r[1])) for r in active}),             # col 1
+        "rows": lambda: len(rows),
+        "active_rows": lambda: len(active),
+        "skipped_rows": lambda: len(rows) - len(active),
+        "hours": lambda: int(sum(float(r[13] or 0) for r in active)),  # col 13, active rows only
+        "months": lambda: len({int(float(r[1])) for r in active}),     # col 1
         # data/curriculum/NN.json is the SOURCE; data/curriculum.json is built from it
-        "curriculum_files": len(list((ROOT / "data" / "curriculum").glob("*.json"))),
-        "curriculum_topics": len(curriculum),
-        "subtopics": sum(len(t["subtopics"]) for t in curriculum.values()),
+        "curriculum_files": lambda: len(list((ROOT / "data" / "curriculum").glob("*.json"))),
+        "curriculum_topics": lambda: len(curriculum),
+        "subtopics": lambda: sum(len(t["subtopics"]) for t in curriculum.values()),
         # market config and the study scheduler
-        "boards": len(sources),
-        "enabled_boards": sum(1 for b in sources if b.get("enabled") is not False),
-        "skills": len(skill_map["skills"]),
-        "gaps": len(skill_map["gaps"]),
-        "prompts": len(bank["prompts"]),
-        "ladder_rungs": counted(r"\d+", ladder),
+        "boards": lambda: len(sources),
+        "enabled_boards": lambda: sum(1 for b in sources if b.get("enabled") is not False),
+        "skills": lambda: len(skill_map["skills"]),
+        "gaps": lambda: len(skill_map["gaps"]),
+        "prompts": lambda: len(bank["prompts"]),
+        "ladder_rungs": lambda: counted(r"\d+", ladder),
         # code surfaces
-        "mcp_tools": mcp_tools(),
-        "tabs": tabs(),
-        "api_routes": len(list((ROOT / "app" / "api").rglob("route.ts"))),
-        "crons": len(vercel["crons"]),
-        "market_modules": len(list((ROOT / "lib" / "market").glob("*.ts"))),  # tests are .mts, not matched
-        "market_tests": len(list((ROOT / "lib" / "market").glob("*.test.mts"))),
+        "mcp_tools": lambda: mcp_tools(),
+        "tabs": lambda: tabs(),
+        "api_routes": lambda: len(list((ROOT / "app" / "api").rglob("route.ts"))),
+        "crons": lambda: len(vercel["crons"]),
+        "market_modules": lambda: len(list((ROOT / "lib" / "market").glob("*.ts"))),  # tests are .mts
+        "market_tests": lambda: len(list((ROOT / "lib" / "market").glob("*.test.mts"))),
     }
 
 
+def resilient(builders: dict) -> tuple[dict, list[str]]:
+    """Evaluate each extractor independently.
+
+    anchors() used to build every value in one dict literal, so the first extractor to raise
+    aborted the whole run before a single document was read — a stale file path silently
+    disabled documentation verification entirely, which is the opposite of what a checker is
+    for. Now a broken extractor costs its own anchor, is named in the output, and fails the
+    run, while every other anchor is still checked.
+    """
+    values, broken = {}, []
+    for name, build in builders.items():
+        try:
+            values[name] = build()
+        except Exception as error:  # noqa: BLE001 - the point is that any failure is contained
+            broken.append(f"{name}: {type(error).__name__}: {error}")
+    return values, broken
+
+
 def main() -> None:
-    values = anchors()
+    values, broken = resilient(anchor_builders())
+    for failure in broken:
+        print(f"  ! anchor extractor failed - {failure}")
     if "--list" in sys.argv:
         for name, value in values.items():
             print(f"  {name:<18} {value}")

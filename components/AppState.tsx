@@ -1,0 +1,276 @@
+"use client";
+
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { compRows, months, planRows, topicKey, tracks, verdictTier, type Row, type Syllabus } from "./shared";
+import { SyllabusView } from "./SyllabusView";
+
+/**
+ * The state that outlives a route change.
+ *
+ * Before the split every one of these lived in `app/page.tsx`, which was the only mounted
+ * component — so "survives navigation" was free. It is not free any more, and the split is only
+ * safe because this provider sits in `app/(app)/layout.tsx`, above the route slot: React keeps a
+ * layout mounted while the segment below it changes, so nothing here remounts or refetches when
+ * you move between the ten pages.
+ *
+ * What is deliberately NOT here: the Plan explorer's filters (track/month/query/progress) and
+ * which syllabus row is expanded. Those are one page's view of its own data, they mean nothing on
+ * /market, and keeping them local is what stops this file from becoming the old page.tsx again.
+ */
+
+export type ProgressSync = "loading" | "ready" | "failed";
+type Message = { role: "user" | "assistant"; content: string; reportUrl?: string };
+
+type AppState = {
+  // progress
+  statuses: Record<string, string>;
+  progressSync: ProgressSync;
+  setStatus: (r: Row, status: string) => void;
+  statusOf: (r: Row) => string;
+  // settings
+  theme: "light" | "dark";
+  toggleTheme: () => void;
+  weeklyHours: number;
+  setWeekly: (value: number) => void;
+  // curriculum
+  curSummary: Record<string, { parts: number; minutes: number }> | null;
+  ensureSummary: () => void;
+  requestSyllabus: (indices: number[]) => void;
+  renderSyllabus: (index: number) => React.ReactNode;
+  // Quaere
+  askOpen: boolean;
+  setAskOpen: (open: boolean) => void;
+  askText: string;
+  setAskText: (text: string) => void;
+  askTopic: number | null;
+  setAskTopic: (index: number | null) => void;
+  messages: Message[];
+  asking: boolean;
+  askLumen: (prompt?: string) => Promise<void>;
+  setPageContext: (context: string, topicIndex: number | null) => void;
+  // derived from statuses, shared by the layout chrome and the Overview page
+  done: number;
+  skipped: number;
+  activeRows: Row[];
+  hours: number;
+  doneHours: number;
+  skippedHours: number;
+  monthHours: { month: number; hours: number }[];
+  maxMonthHours: number;
+  peakMonth: { month: number; hours: number };
+  nextRow: Row | null;
+  nextIndex: number;
+  focus: { month: number; track: string } | null;
+  trackTotals: { name: string; count: number; hours: number; done: number }[];
+  startedTopics: number[];
+  marketTiers: { market: string; window: string; rank: number; label: string; tone: string }[];
+  curParts: number;
+};
+
+const Ctx = createContext<AppState | null>(null);
+
+export function useAppState() {
+  const value = useContext(Ctx);
+  if (!value) throw new Error("useAppState must be used inside <AppStateProvider>");
+  return value;
+}
+
+export function AppStateProvider({ children }: { children: React.ReactNode }) {
+  // statuses starts empty and hydrates asynchronously below, so between first paint and
+  // hydration every select shows the workbook baseline ("Not started" on 117 rows) rather
+  // than recorded state. Touching one in that window used to POST a durable commit that
+  // reverted real progress — that is how a not_started event landed on "Shell mastery and
+  // scripting" two days after it was marked in progress. No write is allowed until the
+  // fetch settles, and on failure it stays blocked: the baseline is known-possibly-stale,
+  // and a read-only dashboard is recoverable by refreshing, while a wrong commit is not.
+  //
+  // Routing makes this stricter, not looser. If this pair lived in a route page it would
+  // return to "loading" on every navigation, and — far worse — the fetch would re-run per
+  // route, reopening the un-hydrated write window each time. It lives above the route slot
+  // for that reason: one fetch per session, one settle, and the guard is never re-armed.
+  const [statuses, setStatuses] = useState<Record<string, string>>({});
+  const [progressSync, setProgressSync] = useState<ProgressSync>("loading");
+
+  // A non-ok response must reject rather than resolve to null: swallowing it would mark the
+  // sync settled and re-open writes against the un-hydrated baseline, which is the exact bug.
+  useEffect(() => { try { setStatuses(JSON.parse(localStorage.getItem("lumen-statuses") || "{}")); } catch {} fetch("/api/progress").then((res) => res.ok ? res.json() : Promise.reject(new Error(String(res.status)))).then((data) => { const synced: Record<string, string> = {}; for (const event of data?.events || []) { const row = planRows.find((item) => String(item[2]).trim().toLowerCase() === String(event.topic).trim().toLowerCase()); if (row && !synced[topicKey(row)]) synced[topicKey(row)] = String(event.status).replace("_", " ").replace(/^\w/, (letter) => letter.toUpperCase()); } if (Object.keys(synced).length) { setStatuses((current) => { const merged = { ...current, ...synced }; localStorage.setItem("lumen-statuses", JSON.stringify(merged)); return merged; }); } setProgressSync("ready"); }).catch(() => setProgressSync("failed")); }, []);
+
+  // Every POST here is a permanent commit in the user's repo, so it has to be a deliberate
+  // change: refuse while the sync is unsettled or failed (the select is disabled then, but a
+  // stale event handler or an autofill must not slip through), and skip a re-select of the
+  // value already shown — a no-op should write nothing, not another commit for readiness to
+  // replay. Local state is only written on a real change, for the same reason.
+  // The POST stays outside the state updater on purpose: React StrictMode invokes an updater
+  // twice, and a durable commit is not something to run twice.
+  const setStatus = useCallback((r: Row, status: string) => {
+    if (progressSync !== "ready") return;
+    if (status === String(statuses[topicKey(r)] || r[15] || "Not started")) return;
+    const next = { ...statuses, [topicKey(r)]: status }; setStatuses(next); localStorage.setItem("lumen-statuses", JSON.stringify(next));
+    fetch("/api/progress", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topic: String(r[2]), status: status.toLowerCase().replace(" ", "_") }) }).catch(() => {});
+  }, [progressSync, statuses]);
+
+  // Was hardcoded "16h" next to a separate hours/16, so the two could disagree and
+  // neither tracked reality. One source of truth, editable, persisted like statuses.
+  const [weeklyHours, setWeeklyHours] = useState(16);
+  useEffect(() => { const v = Number(localStorage.getItem("lumen-weekly-hours")); if (v >= 1 && v <= 80) setWeeklyHours(v); }, []);
+  const setWeekly = useCallback((value: number) => { const v = Math.min(80, Math.max(1, Math.round(value) || 1)); setWeeklyHours(v); localStorage.setItem("lumen-weekly-hours", String(v)); }, []);
+
+  // The applied theme is set by an inline script in layout.tsx before first paint, so this
+  // only mirrors it into React state for the button label — reading it here rather than
+  // recomputing avoids a flash of the wrong icon on hydration. It is provider state because a
+  // per-route copy would re-read the DOM on every navigation for no gain.
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  useEffect(() => { setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light"); }, []);
+  const toggleTheme = useCallback(() => setTheme((current) => {
+    const next = current === "dark" ? "light" : "dark";
+    const root = document.documentElement;
+    root.classList.add("theme-switching");
+    root.dataset.theme = next;
+    localStorage.setItem("lumen-theme", next);
+    requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("theme-switching")));
+    return next;
+  }), []);
+
+  // The merged syllabus is ~3.7MB, so never fetch it whole: pull a tiny summary to label
+  // collapsed rows, then one topic at a time as it is opened. Both caches are provider state
+  // because /plan and /curriculum render the same syllabus — refetching a topic because you
+  // walked from one page to the other is exactly the regression routing invites.
+  const [curriculum, setCurriculum] = useState<Record<string, Syllabus>>({});
+  const [curriculumState, setCurriculumState] = useState<"idle" | "loading" | "error">("idle");
+  const [curSummary, setCurSummary] = useState<Record<string, { parts: number; minutes: number }> | null>(null);
+  const summaryRequested = useRef(false);
+
+  const ensureSummary = useCallback(() => {
+    if (summaryRequested.current) return;
+    summaryRequested.current = true;
+    fetch("/api/curriculum?summary=1").then((res) => res.ok ? res.json() : Promise.reject(new Error(String(res.status))))
+      .then((data) => setCurSummary(Object.fromEntries((data.summary || []).map((x: { i: number; parts: number; minutes: number }) => [String(x.i), { parts: x.parts, minutes: x.minutes }]))))
+      .catch(() => { summaryRequested.current = false; });
+  }, []);
+
+  // Requested indices are tracked in a ref rather than read off `curriculum`, so this callback
+  // has a stable identity and a page can safely call it from an effect. A failed topic is
+  // un-marked so reopening the row retries, which is what the old effect did by looking at a
+  // still-missing key.
+  const requested = useRef<Record<string, true>>({});
+  const requestSyllabus = useCallback((indices: number[]) => {
+    const need = indices.filter((i) => !requested.current[String(i)]);
+    if (!need.length) return;
+    for (const i of need) requested.current[String(i)] = true;
+    setCurriculumState("loading");
+    Promise.all(need.map((i) => fetch(`/api/curriculum?i=${i}`).then((res) => res.ok ? res.json() : null).then((d) => [i, d] as const).catch(() => [i, null] as const)))
+      .then((pairs) => {
+        const add: Record<string, Syllabus> = {};
+        let failed = false;
+        for (const [i, d] of pairs) { if (d) add[String(i)] = d as Syllabus; else { failed = true; delete requested.current[String(i)]; } }
+        if (Object.keys(add).length) setCurriculum((c) => ({ ...c, ...add }));
+        setCurriculumState(failed ? "error" : "idle");
+      });
+  }, []);
+
+  const renderSyllabus = useCallback((idx: number) => {
+    const s = curriculum[String(idx)];
+    if (s) return <SyllabusView s={s} row={planRows[idx]} />;
+    if (curriculumState === "loading") return <p className="syllabus-empty">Loading the syllabus…</p>;
+    if (curriculumState === "error") return <p className="syllabus-empty">The syllabus could not be loaded. Refresh and try again.</p>;
+    return <p className="syllabus-empty">No deep syllabus for this topic yet.</p>;
+  }, [curriculum, curriculumState]);
+
+  // The conversation. This is the one piece of state whose whole point is that it outlives the
+  // page you asked from: a dock that follows you across routes but drops the answer you are
+  // waiting on is worse than no dock.
+  const [askOpen, setAskOpen] = useState(false);
+  const [askText, setAskText] = useState("");
+  const [askTopic, setAskTopic] = useState<number | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [asking, setAsking] = useState(false);
+
+  // What the page you are standing on contributes to a question. /plan sets its visible rows
+  // and its expanded topic here; every other route contributes nothing, and /api/ask falls back
+  // to "No topic filter is active." — which is honest, since the route already builds the
+  // complete 119-topic plan server-side and never trusts this for grounding.
+  const pageContext = useRef<{ context: string; topicIndex: number | null }>({ context: "", topicIndex: null });
+  const setPageContext = useCallback((context: string, topicIndex: number | null) => { pageContext.current = { context, topicIndex }; }, []);
+
+  const askLumen = useCallback(async (prompt = askText) => {
+    if (!prompt.trim() || asking) return;
+    setMessages((m) => [...m, { role: "user", content: prompt }]); setAskText(""); setAsking(true);
+    const topicIndex = askTopic ?? pageContext.current.topicIndex ?? undefined;
+    try { const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, context: pageContext.current.context, topicIndex, history: messages }) }); const data = await res.json(); setMessages((m) => [...m, { role: "assistant", content: data.answer || data.error || "Lumen could not answer right now.", reportUrl: data.reportUrl || undefined }]); } catch { setMessages((m) => [...m, { role: "assistant", content: "Lumen is unavailable. Add MINIMAX_API_KEY in Vercel project settings and try again." }]); } finally { setAsking(false); }
+  }, [askText, asking, askTopic, messages]);
+
+  useEffect(() => {
+    if (!askOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setAskOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [askOpen]);
+
+  const statusOf = useCallback((r: Row) => String(statuses[topicKey(r)] || r[15] || "Not started"), [statuses]);
+
+  // Everything below is derived from `statuses`, and it is derived once here because the layout
+  // chrome (hero, footer) and the Overview page both read it. Two copies of these definitions is
+  // how the plan once advertised 916h that included 26h of skipped work.
+  const derived = useMemo(() => {
+    const of = (r: Row) => String(statuses[topicKey(r)] || r[15] || "Not started");
+    const done = planRows.filter((r) => of(r) === "Done").length;
+    const skipped = planRows.filter((r) => of(r) === "Skipped").length;
+    // Progress counted non-skipped topics (117 of 119) while every hours figure counted all
+    // 119, so the plan advertised 916h that included 26h you had already decided to skip —
+    // and inflated the timeline by 1.6 weeks. Scope is now one definition: active = not
+    // skipped. The skipped amount is disclosed rather than silently dropped.
+    const activeRows = planRows.filter((r) => of(r) !== "Skipped");
+    const planHours = planRows.reduce((n, r) => n + Number(r[13] || 0), 0);
+    const hours = activeRows.reduce((n, r) => n + Number(r[13] || 0), 0);
+    const doneHours = planRows.filter((r) => of(r) === "Done").reduce((n, r) => n + Number(r[13] || 0), 0);
+    const monthHours = months.map((m) => ({ month: m, hours: activeRows.filter((r) => Number(r[1]) === m).reduce((n, r) => n + Number(r[13] || 0), 0) }));
+    const maxMonthHours = Math.max(...monthHours.map((x) => x.hours));
+    // Built from activeRows and `of` for the same reason every other figure on this screen
+    // is: the By-track list was the one place that still counted skipped rows and re-derived
+    // status inline, so it summed to 1,614h under a header saying 1,588h, and a track whose only
+    // incomplete topic was skipped could never reach 100%.
+    const trackTotals = tracks
+      .map((name) => {
+        const rows = activeRows.filter((r) => r[0] === name);
+        return { name, count: rows.length, hours: rows.reduce((n, r) => n + Number(r[13] || 0), 0), done: rows.filter((r) => of(r) === "Done").length };
+      })
+      // A track every one of whose topics is skipped is not a track with no work left; it is a
+      // track that is not in the plan, and "0 topics 0h" reads as the former.
+      .filter((t) => t.count > 0);
+    // The first topic that is neither done nor skipped, in plan order — the real "you are here".
+    const nextIndex = planRows.findIndex((x) => { const st = of(x); return st !== "Done" && st !== "Skipped"; });
+    const nextRow = nextIndex >= 0 ? planRows[nextIndex] : null;
+    // Only topics actually in play enter the review schedule — drilling something never
+    // opened is noise. Indices are curriculum keys, which are plan-row indices.
+    const startedTopics = planRows.map((r, i) => [i, of(r)] as const).filter(([, s]) => s === "In progress" || s === "Done").map(([i]) => i);
+    return {
+      done, skipped, activeRows, hours, doneHours, skippedHours: planHours - hours,
+      monthHours, maxMonthHours, peakMonth: monthHours.find((x) => x.hours === maxMonthHours)!,
+      nextRow, nextIndex, trackTotals, startedTopics,
+      focus: nextRow ? { month: Number(nextRow[1]), track: String(nextRow[0]).replace(/^[A-Z]\. /, "") } : null,
+    };
+  }, [statuses]);
+
+  // The Target calibration panel sat as one paragraph beside a 15-row track list, leaving
+  // most of its column empty. The CompReality sheet already answers the question the panel
+  // asks — which markets are actually reachable, and when — so it carries a ranked digest
+  // instead of blank space. Tier is read off the probability prose, so it stays in sync
+  // with the sheet rather than being a second hardcoded opinion.
+  const marketTiers = useMemo(() => compRows
+    .map((r) => ({ market: String(r[0]), window: String(r[4]), ...verdictTier(String(r[4])) }))
+    .sort((a, b) => a.rank - b.rank), []);
+
+  // Footer provenance. Scale is derived rather than written down, for the same reason every
+  // other count on this page is.
+  const curParts = useMemo(() => (curSummary ? Object.values(curSummary).reduce((n, x) => n + x.parts, 0) : 0), [curSummary]);
+
+  const value = useMemo<AppState>(() => ({
+    statuses, progressSync, setStatus, statusOf,
+    theme, toggleTheme, weeklyHours, setWeekly,
+    curSummary, ensureSummary, requestSyllabus, renderSyllabus,
+    askOpen, setAskOpen, askText, setAskText, askTopic, setAskTopic, messages, asking, askLumen, setPageContext,
+    ...derived, marketTiers, curParts,
+  }), [statuses, progressSync, setStatus, statusOf, theme, toggleTheme, weeklyHours, setWeekly, curSummary, ensureSummary, requestSyllabus, renderSyllabus, askOpen, askText, askTopic, messages, asking, askLumen, setPageContext, derived, marketTiers, curParts]);
+
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
