@@ -6,6 +6,7 @@ import { RecallStrip } from "@/app/recall";
 import { AppStateProvider, useAppState } from "@/components/AppState";
 import { NAV, Nav } from "@/components/Nav";
 import { AskDock } from "./dock";
+import { HeroLines } from "./hero-lines";
 
 /**
  * The shell every one of the ten routes renders inside.
@@ -24,8 +25,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 }
 
 function Chrome({ children }: { children: React.ReactNode }) {
-  const { askOpen, setAskOpen, setAskTopic, theme, toggleTheme, hours, focus, activeRows, curParts, startedTopics } = useAppState();
+  const { askOpen, setAskOpen, setAskTopic, theme, toggleTheme, hours, focus, activeRows, curParts, startedTopics, done, doneHours, peakMonth, monthHours } = useAppState();
   const [shared, setShared] = useState(false);
+
+  // What the hero rotates through. Every line is arithmetic over values this component already
+  // holds — no new fetch, and nothing here can say something the footer would contradict. A line
+  // that cannot be derived is dropped rather than filled in, which is why this is a filter and
+  // not a fixed array.
+  const heroLines = [
+    `Your ${hours}-hour Senior FDE plan, reduced to the pace, practice, and proof that matter this week.`,
+    focus ? `Month ${focus.month} of ${monthHours.length} · ${focus.track}.` : null,
+    `${done} of ${activeRows.length} topics recorded · ${hours - doneHours}h still ahead.`,
+    curParts ? `${curParts.toLocaleString()} syllabus parts, each naming one public resource.` : null,
+    peakMonth ? `Heaviest month is ${peakMonth.month}, at ${peakMonth.hours}h.` : null,
+  ].filter((line): line is string => Boolean(line));
 
   const share = async () => {
     const url = window.location.href;
@@ -38,7 +51,7 @@ function Chrome({ children }: { children: React.ReactNode }) {
 
   return <main className={askOpen ? "shell ask-open" : "shell"}>
     <header className="topbar"><a className="brand brand-link" href="/" aria-label="Return to Lumen home"><LogoMark className="brand-mark" /><div><div className="brand-name">Lumen</div><div className="brand-sub">by Rasul</div></div></a><div className="top-actions"><button className="ask-trigger" onClick={() => { setAskTopic(null); setAskOpen(true); }}><AskMark size={14} /> Quaere</button><button className="ghost-button" onClick={share} aria-live="polite">{shared ? "✓ Link copied" : "↗ Share"}</button><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`} title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>{theme === "dark" ? "☀" : "☾"}</button></div></header>
-    <section className="hero"><div><p className="kicker">Preparation command center</p><h1>Build proof, not just knowledge.</h1><p className="hero-copy">Your {hours}-hour Senior FDE plan, reduced to the pace, practice, and proof that matter this week.</p></div><div className="hero-note"><span className="note-pin">●</span><div><strong>Current focus</strong><p>{focus ? `Month ${focus.month} · ${focus.track}` : "Plan complete"}</p></div></div></section>
+    <section className="hero"><div><p className="kicker">Preparation command center</p><h1>Build proof, not just knowledge.</h1><HeroLines lines={heroLines} /></div><div className="hero-note"><span className="note-pin">●</span><div><strong>Current focus</strong><p>{focus ? `Month ${focus.month} · ${focus.track}` : "Plan complete"}</p></div></div></section>
     <Nav /><RecallStrip startedTopics={startedTopics} />
     {children}
     {/* The dock slot. Everything Quaere needs is already in the provider above, so this is a

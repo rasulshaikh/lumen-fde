@@ -1048,3 +1048,38 @@ th{padding:0 12px 10px}
 @media(max-width:480px){
   .login-intro{padding:20px}
 }
+
+/* ============================================================
+   The rotating hero line, and the landed row.
+   ============================================================ */
+
+/* One grid cell, every line stacked in it. This is what stops the hero changing height every
+   7s and pushing the page down under whatever is being read — the tallest line reserves the
+   space and the others fade through it. */
+.hero-lines{display:grid}
+.hero-lines>.hero-copy{grid-area:1/1;opacity:0;transition:opacity .5s ease;pointer-events:none}
+.hero-lines>.hero-copy.is-current{opacity:1;pointer-events:auto}
+
+.hero-dots{display:flex;gap:7px;margin-top:12px}
+.hero-dot{width:7px;height:7px;padding:0;border-radius:50%;border:1px solid var(--line-strong);
+  background:transparent;cursor:pointer;transition:background-color .3s ease,border-color .3s ease}
+.hero-dot.on{background:var(--accent);border-color:var(--accent)}
+/* 7px is well under the 24px target minimum, so the hit area is grown without growing the dot. */
+.hero-dot:before{content:'';position:absolute;width:24px;height:24px;transform:translate(-9px,-9px)}
+.hero-dot{position:relative}
+.hero-dot:focus-visible{outline:2px solid var(--accent-text);outline-offset:3px}
+
+/* No fade either — the reduced-motion branch renders a single line, but a stale transition
+   would still animate the swap if the preference changed mid-session. */
+@media(prefers-reduced-motion:reduce){
+  .hero-lines>.hero-copy{transition:none}
+  .hero-dot{transition:none}
+}
+
+/* The mark on a row arrived at from a citation. Clears itself after 2.4s from the effect that
+   set it; the transition here is what makes the clearing read as a fade rather than a flick. */
+.table-wrap tbody tr>td{transition:background-color .8s ease}
+.table-wrap tbody tr.row-landed>td{background:var(--accent-soft);transition:background-color .12s ease}
+@media(prefers-reduced-motion:reduce){
+  .table-wrap tbody tr>td,.table-wrap tbody tr.row-landed>td{transition:none}
+}
