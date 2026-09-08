@@ -142,6 +142,23 @@ def main() -> None:
                 if claimed.replace(",", "") != str(values[name]):
                     problems.append(f"{rel}:{lineno}: {name} claims {claimed}, source says {values[name]}")
 
+            # The anchor is invisible; the number beside it is what a person reads. Those two
+            # drifted apart in architecture.md — `| API routes | 10 <!-- verify:api_routes=11 -->`
+            # passed this script for as long as it existed, because the anchor was right and the
+            # anchor was the only thing being read. Compare the rendered number too.
+            #
+            # Only when a digit is directly adjacent to the anchor. A trailing anchor on a prose
+            # sentence ("...117 of them active. <!-- verify:rows=119 -->") has no number of its
+            # own and must not be judged against whichever one happened to come last.
+            for match in ANCHOR.finditer(line):
+                name, claimed = match.group(1), match.group(2)
+                prefix = ANCHOR.sub("", line[: match.start()])
+                shown = re.search(r"(\d[\d,]*)\s*$", prefix)
+                if shown and shown.group(1).replace(",", "") != claimed.replace(",", ""):
+                    problems.append(
+                        f"{rel}:{lineno}: {name} renders as {shown.group(1)} but its anchor says {claimed}"
+                    )
+
     print(f"checked {checked} anchors across {len(files)} files")
     for p in problems:
         print("  !", p)

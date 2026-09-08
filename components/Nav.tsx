@@ -25,6 +25,9 @@ export const NAV = [
   { label: "Assessments", href: "/assessments" },
   { label: "Comp reality", href: "/comp" },
   { label: "Market", href: "/market" },
+  // Last, and deliberately so: /design is the only view that is about the app rather than about
+  // the plan. It renders the tokens the other ten views are drawn with, measured live.
+  { label: "Design", href: "/design" },
 ];
 
 export function Nav() {
