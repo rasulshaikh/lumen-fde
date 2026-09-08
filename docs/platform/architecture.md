@@ -6,8 +6,10 @@ cite it rather than restating it; a number appears here once and nowhere else in
 Every number below names the file it was read from, so `scripts/verify-docs.py` can check it
 against source data instead of against an editor's memory. Supersedes
 `docs/lumen-fde-architecture.md`, which predates the Sandbox tab, the Market tab, the market
-cron, and the 890h → 1,588h / 13 → 23 month rebaseline, and which says "13 tools" where
-`mcp/server.js` serves 14.
+cron, and the 890h → 1,588h / 13 → 23 month rebaseline. That file says "13 tools", and its own
+superseding banner corrects it to 14; both numbers are now stale. The count is 18 — §3.6, read
+from the `tools` array in `mcp/server.js`, which is where it should be read from rather than
+from either doc.
 
 ---
 
@@ -56,7 +58,7 @@ redeploy, be diffable, and be readable by a second process on a different host.
 │                                       │             │ POST /api/ask
 │   ┌─ /api/cron/market-scan  03:00 UTC │◄────────────┘ x-lumen-internal-key
 │   │    27 boards → classify → skills  │
-│   │    → benchmark → insight → 4 files│
+│   │    → benchmark → insight → 5 files│
 │   └─ /api/cron/daily-digest 03:30 UTC │──────► Resend ──► inbox
 │                                       │
 │  data/*.json  bundled at build time   │──────► MiniMax-M3 (Ask, digest framing,
@@ -92,7 +94,13 @@ Two edges are worth naming because they are the ones that surprise people:
 exempts, in this order: no `LUMEN_PASSWORD` set at all, `/login`, `/api/auth/*`, `/_next/*`,
 the branding assets matched by its `publicAsset` regex (favicon, `icon*.svg|png|ico`,
 `apple-icon*.png`, `(opengraph|twitter)-image*`, `manifest.webmanifest`, `robots.txt`,
-`sitemap.xml`), and **`/api/cron`** — that last one being the only functional exemption. Cron
+`sitemap.xml`). **`/api/cron/` is NOT in that list — it is GATED, not exempted**, and the check
+runs FIRST, before the `LUMEN_PASSWORD` fall-through: a request without a valid
+`Bearer $CRON_SECRET` gets 401 whatever the password gate is doing. The trailing slash is
+load-bearing (`/api/crontab` must not match). Gating at the prefix rather than exempting it means
+a third cron route is protected the day it is created, instead of on the day someone remembers to
+paste the check into its body — the routes keep their own identical check as the layer that
+survives the proxy being skipped. Cron
 routes authenticate themselves instead, on `Authorization: Bearer ${CRON_SECRET}`.
 
 `/api/ask` has one extra bypass: a matching `x-lumen-internal-key` header when
@@ -106,7 +114,9 @@ failures at 8 per 10 minutes per client IP, in a `Map` in one serverless instanc
 
 Unauthenticated `/api/*` gets 401 JSON; anything else gets a 307 to `/login`.
 
-If `LUMEN_PASSWORD` is unset, **the gate is off entirely** and every route is public.
+If `LUMEN_PASSWORD` is unset the password gate is off and the rest of the app is public — but
+`/api/cron/*` still 401s without `CRON_SECRET`, because that branch returns before the password
+check is reached. "Every route is public" was true before the cron prefix was gated and is not now.
 
 ### 3.2 The 10 tabs
 
@@ -165,7 +175,7 @@ into the market scan behind `now.getUTCDay() === 1` rather than being a third en
 session, 120 s per command, 256 KB output cap) via `Sandbox.getOrCreate`, so files and installed
 packages survive between sessions. `env: {}` is load-bearing: the microVM inherits none of this
 app's secrets, which is the whole reason the shell does not run on the Render host that holds
-`GITHUB_TOKEN`, `MINIMAX_API_KEY`, `RESEND_API_KEY` and `MCP_API_KEY`.
+`GITHUB_TOKEN`, `MINIMAX_API_KEY` and `MCP_API_KEY`. Not `RESEND_API_KEY`: `grep -c RESEND_API_KEY mcp/server.js` is 0, and only the two Vercel crons send mail.
 
 `cd` cannot persist across `runCommand` calls, so the working directory is stored inside the
 sandbox at `/tmp/.lumen-cwd` and `$HOME` is read from the sandbox rather than assumed.
@@ -176,7 +186,8 @@ sandbox at `/tmp/.lumen-cwd` and `$HOME` is read from the sandbox rather than as
 
 `mcp/server.js`, deployed from `mcp/render.yaml` (Render web service `lumen-mcp`, free plan,
 `rootDir: mcp`, health check `/healthz`). JSON-RPC over `POST /mcp`, protocol version
-`2025-03-26`, server version `1.1.0`.
+`2025-03-26` (`PROTOCOL_VERSION`), server version `1.2.0` — both read from `mcp/server.js`, the
+version from the `serverInfo` in the `initialize` reply, which is the only place it is declared.
 
 The 18 tools, exactly as the `tools` array declares them:
 
@@ -191,12 +202,20 @@ Transport facts that matter operationally:
 - `buildFilter` in `mcp/render.yaml` includes `data/**` as well as `mcp/**`, because
   `server.js` reads `../data/*.json` from outside its `rootDir`. Without it, plan edits never
   reach the live MCP and it silently serves stale rows.
-- Auth is `Bearer ${MCP_API_KEY}`. **If `MCP_API_KEY` is unset, `allowed()` returns true for
-  everyone** — the server is open.
-- Rate limit: 30 requests per 60 s per bearer token (or per remote address when anonymous).
-  Request body cap 128 KB.
-- `get_audit_log` is in-memory only (last 500 events, lost on restart). The durable audit trail
-  is `reports/audit/*.json`, written by `save_study_note` and `record_progress`.
+- Auth is `Bearer ${MCP_API_KEY}`, checked by `authError()` in `mcp/server.js` before any
+  dispatch. **It refuses by default: unset `MCP_API_KEY` is `503 "MCP_API_KEY is not
+  configured"` for every request, a wrong key is 401.** So an MCP that answers `/healthz` and
+  503s every tool call is missing its key, not under attack — `mcp/render.yaml` declares no
+  `envVars`, so nothing in this repo guarantees the variable exists on the service. It failed
+  open until 1.2.0, and the function's header comment records that; do not read the comment as
+  current behaviour.
+- Rate limit: 30 requests per 60 s per bearer token. Request body cap 128 KB. `rateLimited()`
+  also keys on the remote address, but that branch is unreachable — an unauthenticated request
+  never gets past `authError()`.
+- `get_audit_log` returns two lists. `inProcess` is in-memory (last 500 events, lost on every
+  free-tier spin-down). `durable` is `reports/audit/*.json` read back from GitHub, written by
+  `save_study_note` and `record_progress`, and included unless the call passes
+  `durable: false`.
 - Free tier sleeps after inactivity; `get_connection_map` says so in its own output.
 
 ---
@@ -424,8 +443,9 @@ gets its full 45 s, and 220,000 + 45,000 leaves headroom under 300 s.
 4. **Bounded phrase match, not `includes`.** Every board excludes "Intern"; a bare substring
    test also voids "Internal Tools Engineer" and every "International" title.
 5. **The JD body is never stored.** It is fetched, stripped, reduced to `skills[]` and a `reach`
-   tier, and discarded. The measured corpus is ~47 MB decompressed per cycle (46.98 MB across
-   the 27 boards in the current `index.json`), 38 MB of it Ashby descriptions; storing it would
+   tier, and discarded. The measured corpus is ~47 MB decompressed per cycle — sum
+   `boards[].bytes` in `reports/market/index.json` for the exact figure of the last scan; it was
+   46.96 MB across 27 boards on 2026-09-08, 38 MB of it Ashby — storing it would
    turn a ~500 KB file into ~40 MB and break read-whole/write-whole against the contents API.
    The fingerprint is also what lets the benchmark be recomputed with no network when the skill
    map's phrasing changes.
@@ -452,9 +472,22 @@ sets a headline; if it entered, "the market" would be measured by Databricks Sol
 Architects and Datadog Sales Engineers and the answer would be about pre-sales.
 
 Deduplication is by `dedupeKey(company, title)` — company plus a normalized title with the
-location suffix stripped — which collapses city clones. `reports/market/index.json` currently
-stores 750 requisition records (382 core, 342 adjacent, 26 leadership) that dedupe to 189, 208
-and 21 distinct ones.
+location suffix stripped — which collapses city clones. On 2026-09-08
+`reports/market/index.json` stored 750 requisition records (382 core, 342 adjacent, 26
+leadership) that dedupe to 189, 208 and 21 distinct ones.
+
+Those are the raw dedupe of `index.json` and they are **not** the numbers `benchmark.json`
+reports — on that same run it published 206 adjacent, because `distinct()` counts only
+requisitions that are live and measured: it skips any record with `skills === null` (no JD body
+has ever been read for it) or `missingSince !== null` (absent from its board this run and
+inside the 14-day decay window). Five records carried `missingSince` that morning and two
+adjacent dedupe keys had nothing else behind them, so 208 became 206. Core and leadership were
+unaffected, which is how the gap stayed invisible — it only opens off the headline.
+
+So there are two denominators, and they answer different questions. **Quote
+`benchmark.json`'s `adjacentCount` for anything user-facing**; it is what the tab, the weekly
+email and the MCP tools all serve. The index dedupe is only the right number when the argument
+is about deduplication itself.
 
 Outputs, per `reports/market/benchmark.json`: `coreCount`, `companyCount`, `coreStatement`,
 `adjacentStatement`, `baselineStatement`, `skillShares` (34), `coverage` (34 entries with
@@ -521,37 +554,51 @@ paragraph.** There is no allow-set, because the prompt says "write no numbers at
 digit is a violation of exactly the instruction given. Two weaker versions leaked in production:
 deriving the allow-set from the prompt whitelisted `60` forever (the instruction says "In 60
 words or fewer"), and deriving it from the facts block still whitelisted `58`, because coverage
-statements cite plan rows and hours (`row 58, "…" — 18h, month 4`) and a row number reads as a
+statements cite plan rows and hours (`row 59, "…" — 18h, month 14`) and a row number reads as a
 percentage once the model puts a `%` after it. "Coverage sits at 58% this week" shipped under
 both.
 
 `modelParagraph()` returning `""` is stored as `null`, not `""` — an empty string in the file
 would render an empty Quaere block instead of no block.
 
-### 5.7 Live numbers from the first real scan
+### 5.7 One cycle, as an example — the scan of 2026-09-08
+
+**Read this as a worked example of the shape and magnitude of a cycle's output, not as current
+fact.** Every figure below is rewritten by the 03:00 UTC scan, so a section transcribing them is
+stale the next morning by construction — which is exactly what happened to its predecessor,
+which sat here for a day describing itself as "the first real scan" while the second cycle had
+already overwritten `baseline`, velocity, `quaere` and the trend length underneath it.
+
+It is dated rather than anchored because `scripts/verify-docs.py` deliberately refuses anchors
+under `reports/market/`: an anchor there would fail most mornings with no defect behind it, and
+a checker that cries wolf gets muted. Its rule is that live figures are cited by report file and
+scan date instead, and that is what this section now does. **For the current numbers, open the
+Market tab or read the two files** — do not quote this table.
 
 From `reports/market/benchmark.json` and `reports/market/insight.json`, both `computedAt`
-`2026-09-07T17:37:03.572Z`, `day` `2026-09-07`:
+`2026-09-08T03:38:54.948Z`, `day` `2026-09-08` — the second cycle:
 
-| figure | value |
+| figure | value on that run |
 |---|---|
 | boards scanned | 27 of 27 |
 | core requisitions (distinct) | **189** across **23 companies** |
-| adjacent | 208 across 17 companies, plus 21 leadership — counted separately, in no percentage |
+| adjacent | `adjacentCount` 206 across 17 companies, plus 21 leadership — counted separately, in no percentage, and not the index dedupe's 208 (§5.3) |
 | stored requisition records | 750 |
-| baseline | `true` — first cycle, so no "new roles" list |
+| baseline | `false` — a prior cycle existed, so `newSinceLastRun` is a real diff (empty that morning) |
 | readiness | **0%** — 0 of 490 share points, 0 of 34 skills cleared, from 2 matched progress events |
 | ranked marginal rows | 27 |
 | reachable today (`india-remote` + `emea-apac-remote`) | 7 of 189 (4%), 3 companies |
 | takeable without leaving India (+ `india-office`) | **11** of 189 (6%), 5 companies |
 | tier split | india-remote 4 · india-office 4 · emea-apac-remote 3 · relocate-sponsor 147 · out-of-reach 31 |
 | segments | 5 — data-platform 43, frontier-lab-applied 50, agent-engineer 42, deployment-strategist 42, inference-infra 12 |
-| velocity | unavailable — 1 scan recorded |
+| velocity | unavailable — 2 scans spanning 1 day, and velocity needs 7; nothing is interpolated |
 | over-investment | 335h across 3 tracks and 26 rows, 21% of the 1,588 active hours |
-| flags · Quaere | 0 flags; `quaere` is `null` on this run |
+| flags · Quaere | 0 flags; `quaere` non-null — the reading argued data-platform first |
 
 0% readiness at month one is the expected reading, not a failure. It is why the Decide zone
-leads with the ranked marginal table rather than with the headline percentage.
+leads with the ranked marginal table rather than with the headline percentage. That one is
+structural rather than incidental: readiness is 0 until progress events start matching plan
+rows, so it will read 0 on every cycle for a while yet.
 
 ---
 
@@ -617,13 +664,22 @@ export const PER_TOPIC = 3;
 
 ## 8. Environment variables
 
-Read from `process.env` across `app/`, `lib/`, `mcp/` and `proxy.ts`. The right-hand column is
-what actually happens when the variable is absent — every one of these degrades rather than
-crashes, except where noted.
+Read from `process.env` across `app/`, `lib/`, `mcp/` and `proxy.ts`. The list is meant to be
+exhaustive, so regenerate it rather than trusting it — a variable added to the code and not to
+this table is invisible exactly when someone is deploying:
+
+```bash
+grep -rhoE "process\.env\.[A-Z_]+" app lib mcp proxy.ts | sort -u
+```
+
+That returns 23 names: the 22 in the table, plus `VERCEL_OIDC_TOKEN`, whose only occurrence is
+inside a comment and which is discussed after it. The right-hand column is what actually happens
+when the variable is absent — every one of these degrades rather than crashes, except where
+noted.
 
 | variable | where | absent ⇒ |
 |---|---|---|
-| `LUMEN_PASSWORD` | `proxy.ts`, `/api/auth/login`, `lib/auth.ts` | **the gate is off** — `proxy.ts` passes every request through. Login returns 503. |
+| `LUMEN_PASSWORD` | `proxy.ts`, `/api/auth/login`, `lib/auth.ts` | the password gate is off and pages are public; `/api/cron/*` still 401s on `CRON_SECRET`. Login returns 503. |
 | `LUMEN_USERNAME` | `proxy.ts`, `/api/auth/login` | defaults to `rasul` |
 | `LUMEN_INTERNAL_API_KEY` | `proxy.ts`, `mcp/server.js` | the MCP server cannot bypass the gate for `/api/ask`; `ask_lumen` falls back to calling MiniMax directly |
 | `LUMEN_ASK_URL` | `mcp/server.js` | same fallback — the direct path, which is why `marketContext()` is duplicated there |
@@ -637,8 +693,9 @@ crashes, except where noted.
 | `DIGEST_TO_EMAIL` | daily-digest, market-scan | the digest defaults to `shaikhrasul02@gmail.com`; the market email has no recipient unless `MARKET_TO_EMAIL` is set |
 | `MARKET_TO_EMAIL` | market-scan only | falls back to `DIGEST_TO_EMAIL`. **Not in `.env.example`.** Read with `\|\|` and not `??`, because an empty string set in a dashboard is absent in every way that matters and `??` would hand Resend a `""` recipient |
 | `SCAN_DEADLINE_MS` | market-scan | defaults to 220,000 — correct for a 300 s function, too long for a 60 s one |
-| `MCP_API_KEY` | `mcp/server.js` | **the MCP server accepts anonymous requests** |
+| `MCP_API_KEY` | `mcp/server.js` | **every request to `/mcp` gets `503 "MCP_API_KEY is not configured"`** — `authError()` refuses before dispatch, so the server is hard-down rather than exposed. `/healthz` still answers 200, which is what makes this look like a working service serving nothing |
 | `PUBLIC_MCP_URL` | `mcp/server.js` | `get_connection_map` reports `https://lumen-fde.onrender.com/mcp` |
+| `LUMEN_DASHBOARD_URL` | `mcp/server.js` | `get_connection_map` reports `https://lumen-fde.vercel.app`. **Not in `.env.example`**, same condition as `MARKET_TO_EMAIL` above |
 | `PORT` | `mcp/server.js` | defaults to 10000 (Render sets it) |
 | `SURFSENSE_API_KEY`, `SURFSENSE_WORKSPACE_ID` | `mcp/server.js` | `semantic_search` falls back to GitHub code search over this repo; an explicit `provider: "surfsense"` errors instead of falling back |
 | `SURFSENSE_API_URL` | `mcp/server.js` | defaults to `https://api.surfsense.com` |
@@ -664,18 +721,25 @@ npm run build          # next build — this is what CI runs
 npm run test:market    # npx tsx lib/market/benchmark.test.mts
 npm run test:surfacing # npx tsx lib/market/surfacing.test.mts
 npm run test:insight   # npx tsx lib/market/insight.test.mts
-npx tsx lib/review.test.mts   # the scheduler simulation — no npm script
+npm run test:review    # npx tsx lib/review.test.mts — the scheduler simulation
+python3 scripts/verify-docs.py        # docs/platform/*.md against the repo
 python3 scripts/build-curriculum.py   # after ANY edit under data/curriculum/
 ```
 
-- `package.json` declares **3** test scripts against `lib/market/`. There are **4** test files:
-  `lib/review.test.mts` has no script and is run directly, per its own header comment.
+- **4 test files, 4 npm scripts** — 3 under `lib/market/` plus `lib/review.test.mts`, which
+  used to have no script and be run by hand.
 - `.github/workflows/ci.yml` runs `npm ci && npm run build` on Node 22 for pushes to `main` and
-  for pull requests. It does **not** run the test suites.
+  for pull requests, **then all four suites and `scripts/verify-docs.py`**. Each suite calls
+  `process.exit(fails ? 1 : 0)`, so a failure fails the job with no reporter attached, and doc
+  drift fails the build rather than waiting for someone to notice. The suites were unenforced
+  until that landed — `next build` type-checks and executes no assertion, so every behavioural
+  claim in them held only while someone remembered to run them, and a scheduler defect reached
+  `main` through the gap.
 - Vercel builds from `next.config.ts` (`reactStrictMode: true`) with the framework and crons
   from `vercel.json`. Render builds `mcp/` from `mcp/render.yaml`.
-- `scripts/` also holds`build-icons.mjs`, `canonicalise_curriculum_urls.py`,
-  `index-library.py`, `rebaseline-hours.py`, `renumber-months.py`, `verify_curriculum_urls.py`.
+- `scripts/` also holds `build-icons.mjs`, `canonicalise_curriculum_urls.py`,
+  `index-library.py`, `rebaseline-hours.py`, `renumber-months.py`, `verify-docs.py`,
+  `verify_curriculum_urls.py`.
   `rebaseline-hours.py` and `renumber-months.py` are the two that must write the per-topic source
   files and then be followed by `build-curriculum.py` — see §4.2.
 
@@ -683,47 +747,59 @@ python3 scripts/build-curriculum.py   # after ANY edit under data/curriculum/
 
 ## 10. Number index
 
-Every figure asserted above, and the file it was read from. This is the table
-`scripts/verify-docs.py` checks.
+Every figure asserted above, and the file it was read from.
+
+Rows carrying a `verify:` anchor are checked by `scripts/verify-docs.py` on every CI run, so
+they cannot drift silently — the anchor is an HTML comment in the source of this table, invisible
+when rendered. Rows without one are either not anchorable by that script or live scan output,
+which it deliberately refuses to anchor; those are dated instead and are a reading, not a
+standing fact. The market block at the bottom is all of the second kind.
 
 | claim | value | source |
 |---|---|---|
-| plan rows | 119 | `data/workbook.json` `Plan` |
-| active rows (status ≠ Skipped) | 117 | `data/workbook.json` `Plan` col 15 |
-| skipped rows / hours | 2 / 26h | `data/workbook.json` `Plan` cols 15, 13 |
-| active hours | 1,588 | `data/workbook.json` `Plan` col 13 |
+| plan rows | 119 <!-- verify:rows=119 --> | `data/workbook.json` `Plan` |
+| active rows (status ≠ Skipped) | 117 <!-- verify:active_rows=117 --> | `data/workbook.json` `Plan` col 15 |
+| skipped rows / hours | 2 <!-- verify:skipped_rows=2 --> / 26h | `data/workbook.json` `Plan` cols 15, 13 |
+| active hours | 1,588 <!-- verify:hours=1588 --> | `data/workbook.json` `Plan` col 13 |
 | total hours incl. skipped | 1,614 | `data/workbook.json` `Plan` col 13 |
-| months | 1–23 (23 distinct) | `data/workbook.json` `Plan` col 1 |
+| months | 1–23 (23 distinct) <!-- verify:months=23 --> | `data/workbook.json` `Plan` col 1 |
 | tracks | 15 | `data/workbook.json` `Plan` col 0 |
 | mock rows / total reps | 11 / 57 | `data/workbook.json` `Mocks` |
 | roadmap rows | 16 | `data/workbook.json` `Roadmaps` |
 | comp-reality rows | 6 | `data/workbook.json` `CompReality` |
-| curriculum source files | 119 | `data/curriculum/*.json` |
-| subtopics | 2,236 | `data/curriculum/*.json` and `data/curriculum.json` |
-| recall prompts | 1,710 (835 recall + 875 drill) | `data/recall-bank.json` |
+| curriculum source files | 119 <!-- verify:curriculum_files=119 --> | `data/curriculum/*.json` |
+| subtopics | 2,236 <!-- verify:subtopics=2236 --> | `data/curriculum/*.json` and `data/curriculum.json` |
+| recall prompts | 1,710 <!-- verify:prompts=1710 --> (835 recall + 875 drill) | `data/recall-bank.json` |
 | books / pages / repos | 16 / 10,521 / 2 | `data/library-context.json`, `data/repository-context.json` |
-| boards configured / enabled | 32 / 27 | `data/market-sources.json` |
+| boards configured / enabled | 32 <!-- verify:boards=32 --> / 27 <!-- verify:enabled_boards=27 --> | `data/market-sources.json` |
 | `BOARD_COUNT` | 27 | `lib/market/benchmark.ts` |
-| skills / gaps / over-invested | 34 / 13 / 3 | `data/market-skill-map.json` |
-| tabs | 10 | `app/page.tsx` `TABS` |
-| API routes | 10 | `app/api/**/route.ts` |
-| crons | 2 (03:00, 03:30 UTC) | `vercel.json` |
-| MCP tools | 18 | `mcp/server.js` `tools` |
-| review ladder | `[1, 7, 21, 60, 150, 240, 330]` | `lib/review.ts` |
+| skills / gaps / over-invested | 34 <!-- verify:skills=34 --> / 13 <!-- verify:gaps=13 --> / 3 | `data/market-skill-map.json` |
+| tabs | 10 <!-- verify:tabs=10 --> | `app/page.tsx` `TABS` |
+| API routes | 10 <!-- verify:api_routes=10 --> | `app/api/**/route.ts` |
+| crons | 2 <!-- verify:crons=2 --> (03:00, 03:30 UTC) | `vercel.json` |
+| MCP tools | 18 <!-- verify:mcp_tools=18 --> | `mcp/server.js` `tools` |
+| review ladder | `[1, 7, 21, 60, 150, 240, 330]` — 7 rungs <!-- verify:ladder_rungs=7 --> | `lib/review.ts` |
 | daily cap / new per day / per topic | 5 / 2 / 3 | `lib/review.ts` |
 | session TTL | 14 days | `lib/auth.ts` |
 | login rate limit | 8 per 10 min | `lib/auth.ts` |
 | MCP rate limit / body cap | 30 per 60 s / 128 KB | `mcp/server.js` |
+| test files / npm test scripts | 4 / 4 — 3 under `lib/market/` <!-- verify:market_tests=3 --> plus `lib/review.test.mts` | `lib/**/*.test.mts`, `package.json` |
+
+The rest is the 2026-09-08 scan, held to the same rule as §5.7: dated, not anchored, and
+superseded by the next 03:00 UTC run. Read the report file before quoting any of it.
+
+| claim | value on 2026-09-08 | source |
+|---|---|---|
 | core reqs / companies | 189 / 23 | `reports/market/benchmark.json` |
-| adjacent / companies / leadership | 208 / 17 / 21 | `reports/market/benchmark.json` |
+| adjacent / companies / leadership | 206 / 17 / 21 | `reports/market/benchmark.json` `adjacentCount` |
+| adjacent, index dedupe | 208 — a different denominator, see §5.3 | `reports/market/index.json` |
 | stored req records | 750 (382 core, 342 adjacent, 26 leadership) | `reports/market/index.json` |
 | boards ok | 27 of 27 | `reports/market/benchmark.json` |
-| corpus size | 46.98 MB decompressed | `reports/market/index.json` `boards[].bytes` |
+| corpus size | 46.96 MB decompressed | `reports/market/index.json` `boards[].bytes` |
 | readiness | 0% — 0 of 490 share points, 0 of 34 skills | `reports/market/insight.json` |
 | reachable today | 7 of 189 (4%), 3 companies | `reports/market/insight.json` |
 | takeable without leaving India | 11 of 189 (6%), 5 companies | `reports/market/insight.json` |
 | tier split | 4 / 4 / 3 / 147 / 31 | `reports/market/insight.json` `reachability.tiers` |
 | segments | 5 | `reports/market/insight.json` |
 | over-investment | 335h, 3 tracks, 26 rows, 21% | `reports/market/benchmark.json` `overInvestedTotal` |
-| trend points recorded | 1 | `reports/market/trend.json` |
-| test files / npm test scripts | 4 / 3 | `lib/**/*.test.mts`, `package.json` |
+| trend points recorded | 2 | `reports/market/trend.json` |

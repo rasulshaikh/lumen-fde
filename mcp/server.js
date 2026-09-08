@@ -133,7 +133,24 @@ function marketContext(benchmark, insight) {
     if (kept.length) lines.push("", header(kept.length), ...kept);
   }
   const text = lines.join("\n");
-  return text.length > MARKET_CAP ? `${text.slice(0, MARKET_CAP)}…` : text;
+  if (text.length <= MARKET_CAP) return text;
+  // The last resort, and it drops whole LINES rather than characters — the same shape
+  // app/api/ask/route.ts uses, so both surfaces answer from a byte-comparable digest.
+  //
+  // This function used to end `text.slice(0, MARKET_CAP)`, which is precisely the bisected
+  // numeral the header comment above warns about: only the coverage block is fill-checked, so
+  // the cap is reachable from in front of it — `insight.segments` is mapped with no slice — and
+  // a character cut there would deliver "189 distinct requisitions" to a model as "18". A wrong
+  // measured number in the context is strictly worse than a shorter digest. The dashboard route
+  // was fixed and this copy was not, so Claude Code was the surface still exposed to it.
+  const trimmed = [];
+  let used = 0;
+  for (const line of lines) {
+    if (used + line.length + 1 > MARKET_CAP) break;
+    used += line.length + 1;
+    trimmed.push(line);
+  }
+  return trimmed.join("\n");
 }
 
 /** Stated only when there is a block to state it about; telling the model to quote a benchmark

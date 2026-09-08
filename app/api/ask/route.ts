@@ -36,6 +36,24 @@ function syllabusContext(index: number | undefined) {
  *
  * One line per topic keeps all 119 well inside the context window, and grounding is built
  * server-side so no caller can silently narrow it again.
+ *
+ * Two things this got wrong for as long as it existed, both of which only bite because the
+ * market digest lands in the SAME user message:
+ *
+ * 1. It listed only the active rows and numbered them 0-based over that filtered list, while
+ *    every other citation of a plan row in this codebase is 1-based over all of workbook.Plan
+ *    (`PlanRowRef.row`, `page.tsx`'s `planRows[row - 1]`) — and MARKET_RULE tells the model to
+ *    quote those numbers verbatim. The offset was not even constant: -1 before the first
+ *    skipped row and -3 after it, so "row 59" named one topic in the digest and a different
+ *    one in the list, and the model had no way to tell which was meant.
+ * 2. It then declared "This is the complete plan; nothing is hidden from you" over a list with
+ *    two topics missing. That is the exact failure the function was written to fix — the fix
+ *    moved the truncation from 8-of-119 to 117-of-119 rather than removing it, so "does my plan
+ *    cover PySpark?" still answers no.
+ *
+ * So: every row, numbered as workbook.Plan numbers them, and a skipped row says Skipped in its
+ * own status field rather than being deleted. The track totals stay over the active rows, since
+ * they are a workload figure and skipped hours are not work — labelled as such.
  */
 type PlanRow = (string | number | null)[];
 function planMap() {
@@ -48,8 +66,13 @@ function planMap() {
     byTrack.set(t, { n: cur.n + 1, h: cur.h + Number(r[13] || 0) });
   }
   const tracks = [...byTrack.entries()].map(([t, v]) => `${t} — ${v.n} topics, ${v.h}h`).join("\n");
-  const lines = active.map((r, i) => `${i}. [M${r[1]}] ${r[0]} :: ${r[2]} (${r[13]}h) — ${r[15]}`).join("\n");
-  return `THE FULL PLAN — ${active.length} active topics, ${active.reduce((n, r) => n + Number(r[13] || 0), 0)}h across ${byTrack.size} tracks.\nThis is the complete plan; nothing is hidden from you.\n\nTracks:\n${tracks}\n\nEvery topic:\n${lines}`;
+  const lines = rows.map((r, i) => `${i + 1}. [M${r[1]}] ${r[0]} :: ${r[2]} (${r[13]}h) — ${r[15]}`).join("\n");
+  const skipped = rows.length - active.length;
+  return `THE FULL PLAN — all ${rows.length} topics, of which ${active.length} are active (${active.reduce((n, r) => n + Number(r[13] || 0), 0)}h across ${byTrack.size} tracks)`
+    + `${skipped ? ` and ${skipped} are marked Skipped — those are listed below too, with Skipped as their status` : ""}.`
+    + `\nEvery topic in the plan is in this list; nothing is hidden from you.`
+    + `\n\nTracks, counting active topics only:\n${tracks}`
+    + `\n\nEvery topic. The number is the plan row number, the same numbering any market benchmark below uses:\n${lines}`;
 }
 
 /**
@@ -116,9 +139,9 @@ async function readMarket<T>(path: string): Promise<T | null> {
  * real corpus the personal blocks alone come to 4,192 characters and the assembled digest
  * renders 6,740, holding eight coverage statements and dropping the ninth and tenth skills.
  *
- * Nothing is ever cut mid-statement. A blunt tail slice at 7000 can bisect a numeral — "189
- * distinct requisitions" ending as "18" — and a wrong measured number in the model's context is
- * strictly worse than one fewer skill in the list. The header is written after the fill for the
+ * Nothing is ever cut mid-statement, on either path: the coverage fill stops on a whole
+ * statement, and the cap below it drops whole lines. A wrong measured number in the model's
+ * context is strictly worse than one fewer skill in the list. The header is written after the fill for the
  * same reason: it states how many entries are actually present rather than how many were asked
  * for, so it cannot describe a list the budget shortened.
  */
@@ -165,7 +188,23 @@ function marketContext(benchmark: Benchmark | null, insight: Insight | null) {
     if (kept.length) lines.push("", header(kept.length), ...kept);
   }
   const text = lines.join("\n");
-  return text.length > MARKET_CAP ? `${text.slice(0, MARKET_CAP)}…` : text;
+  if (text.length <= MARKET_CAP) return text;
+  // The last resort, and it drops whole lines rather than characters. Only the coverage block
+  // is fill-checked above, so the cap is reachable from in front of it — `insight.segments` is
+  // mapped with no slice, and a sixth SEGMENT_LABEL would push the pre-coverage block towards
+  // 7,000 on its own with `kept` already empty. A character slice there would bisect a
+  // statement — "189 distinct requisitions" ending as "18" — and a wrong measured number in the
+  // model's context is strictly worse than a shorter digest. Trimming by line keeps the
+  // never-cut-mid-statement invariant whichever block grows, rather than depending on the
+  // arithmetic in front of it staying true.
+  const trimmed: string[] = [];
+  let used = 0;
+  for (const line of lines) {
+    if (used + line.length + 1 > MARKET_CAP) break;
+    used += line.length + 1;
+    trimmed.push(line);
+  }
+  return trimmed.join("\n");
 }
 
 /**
@@ -216,7 +255,11 @@ export async function POST(request: Request) {
     const market = marketContext(benchmark, insight);
     const messages = [
       { role: "system", content: `You are Quaere, the study guide inside Lumen. Lumen is the dashboard; you are the guide within it. Explain every idea in fifth-grade reading language while keeping the technical meaning exact. Use short sentences, define jargon immediately, give one concrete technical example, connect it to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. The user message contains the COMPLETE plan — every topic across every track. Never tell the learner a subject is missing from the plan without checking that full list first. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. The learner's indexed learning map is:\n${JSON.stringify(library)}\n\nThe local source catalog (metadata and chapter map only) is:\n${JSON.stringify(sourceCatalog)}\n\nThe public repository map is:\n${JSON.stringify(repositories)}${market ? MARKET_RULE : ""}` },
-      ...(body.history || []).slice(-8),
+      // Picked field by field, not spread. The client stores an assistant turn as
+      // `{role, content, reportUrl?}`, and forwarding a turn that saved a report shipped a
+      // `reportUrl` key into an OpenAI-shaped messages array. The declared type hid it from
+      // tsc, so only the wire showed it.
+      ...(body.history || []).slice(-8).map((m) => ({ role: m.role, content: m.content })),
       { role: "user", content: `${planMap()}\n\nCurrently visible in the dashboard:\n${body.context || "No topic filter is active."}${deep ? `\n\n${deep}` : ""}${market ? `\n\n${market}` : ""}\n\nQuestion:\n${body.prompt}` },
     ];
     const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, messages, temperature: 0.4, max_completion_tokens: 1600, stream: false }), signal: AbortSignal.timeout(55000) });

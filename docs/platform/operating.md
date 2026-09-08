@@ -29,43 +29,53 @@ Transport, auth, rate limit and the Render deploy filter are architecture.md §3
 
 Two things are true of every tool and are easier to state once:
 
-- **Row numbering.** `get_plan` returns `index`, and `get_syllabus` takes `index`, and both are
-  **0-based** — the offset into `Plan` after the header row. The Market tab and the benchmark
-  cite **1-based** plan rows. "Row 58" on the Market tab is `index: 57` here. (architecture.md
-  §4.1.)
+- **Row numbering. Nothing needs converting by hand any more.** Every tool takes and returns
+  `row`, the **1-based** plan row the Market tab, the benchmark and the weekly email all cite:
+  `get_plan` accepts `row` and returns it, `get_syllabus` prefers `row` over the older `index`,
+  and the four market tools return `row` and `syllabus_index` together. The 0-based number still
+  exists because `data/curriculum.json` is keyed by it — it is always `row - 1`, and the banner at
+  the top of `mcp/server.js` explains why both are carried rather than one. (architecture.md §4.1.)
 - **Freshness.** Everything read from `data/*.json` is the copy baked into the Render deploy;
-  everything read from `reports/` is fetched live from GitHub. So plan and syllabus answers are
-  as fresh as the last Render deploy, and progress and market answers are as fresh as the repo.
+  everything read from `reports/` is fetched live from GitHub. So plan and syllabus answers are as
+  fresh as the last Render deploy, and progress answers as fresh as the repo. **The market tools
+  are the exception:** each report is held per process for `MARKET_TTL_MS` (`mcp/server.js`), so a
+  market answer can trail the repo by that window. The scan runs daily, so this is invisible in
+  normal use and shows only if you re-ask straight after running a scan by hand.
 
 | tool | reach for it when |
 |---|---|
 | `get_plan` | you need a row's month, hours, depth target, deliverable or resource links |
 | `get_learning_context` | you want a book or repo picked for the topic you are on |
 | `get_syllabus` | you are starting a topic and want the 12–20 parts, failure modes and proof of work |
-| `ask_lumen` | you want an explanation grounded in the plan *and* the measured market, saved to GitHub |
+| `ask_lumen` | you want something explained in prose, grounded in the plan — not a market figure |
 | `list_ask_reports` | you want to find an Ask you saved earlier |
 | `read_ask_report` | you have the path and want the answer back |
 | `save_study_note` | you asked, explicitly, for a note to outlive the session |
 | `record_progress` | you actually finished a topic and want it to count toward readiness |
 | `get_progress_history` | you want to confirm an event landed in the repo |
-| `get_progress_analytics` | you want the count of recorded events by status |
+| `get_progress_analytics` | you want what is actually done — per-topic status, hours cleared against the active plan hours, and which events matched no row |
 | `score_assessment` | you have finished a weekly, monthly or quarterly and want it graded |
 | `semantic_search` | you need the open web, or you need to find something in this repo remotely |
 | `get_audit_log` | a tool call just failed and you want the reason it recorded |
 | `get_connection_map` | you do not know which server or which search backend you are talking to |
-| `get_market_priorities` | what to study next, given what the market actually asks for: the incomplete plan rows ranked by the readiness points finishing each one buys, plus where readiness stands today and which of the five market segments the work moves toward |
-| `get_market_reach` | which of the measured requisitions are takeable without leaving india, at which named companies, and whether that slice asks for something different from the market at large |
-| `get_market_skill` | does the market ask for what a plan row teaches, and what does finishing it buy? joins the measured coverage of a skill (whole-market share, the plan rows that teach it, the quoted jd evidence) with its share of the reachable slice and the readiness gain if its row is unfinished |
-| `get_market_plan_risk` | which of the 1588 planned hours the market is not paying for, and what it asks for that the plan never teaches: the audited gaps with their nearest plan row, and the over-invested tracks with their measured jd frequency and combined hour cost |
+| `get_market_priorities` | you want to know what to study next, ranked by the readiness the market says each row buys |
+| `get_market_reach` | you want the requisitions takeable without leaving India, and the named companies behind them |
+| `get_market_skill` | you want to know whether the market asks for what one plan row teaches |
+| `get_market_plan_risk` | you want the planned hours the market is not paying for, and what it asks for that the plan never teaches |
 
 ### `get_plan`
 
 **Answers:** what does the plan say about these rows — track, month, topic, depth target, hours,
 deliverable, status, and the Read/Watch/Do label-and-URL pairs.
 
-**Inputs:** `query` (case-insensitive substring of the topic), `month` (exact number), `track`
-(case-insensitive substring). All optional and ANDed; no arguments returns all 119 rows
-<!-- verify:rows=119 -->.
+**Inputs:** `row` (one 1-based plan row), `query` (case-insensitive substring of the topic),
+`month` (exact number), `track` (case-insensitive substring), `limit`. All optional and ANDed.
+
+**It returns 30 rows, not the whole plan.** `limit` defaults to 30 and caps at the full 119
+<!-- verify:rows=119 -->; the unfiltered plan is roughly 131 KB, which the handler prices at some
+33k tokens of a caller's context for "show me the plan". Truncation is stated, not silent — every
+response carries `total` and `returned`, so `returned < total` is your cue to filter or raise
+`limit`. Each row carries both `row` and `index` (`row - 1`), so nothing has to be converted.
 
 **Reach for it when** you need row metadata, or the exact topic string to hand to
 `record_progress`. It is the cheapest tool here — no network at all, just the bundled workbook.
@@ -86,7 +96,8 @@ own. It returns `data/library-context.json`, `data/repository-context.json` and
 `data/lesson-context.json` whole — 16 books, 10,521 pages, 2 repositories (architecture.md §3.2).
 
 **It will not search inside a book.** The PDFs are not in this repo. You get title, author, page
-count, role and topic tags, which is enough to choose, not enough to quote.
+count, role and topic tags, which is enough to choose, not enough to quote. `lesson-context.json`
+is one hardcoded lesson, not one per topic — the per-topic material is `get_syllabus`.
 
 ### `get_syllabus`
 
@@ -95,12 +106,13 @@ parts with one public resource each, outcomes, production failure modes, senior-
 questions, and the proof-of-work artifact. 2,236 subtopics <!-- verify:subtopics=2236 --> across
 119 source files <!-- verify:curriculum_files=119 -->.
 
-**Inputs:** `index` (0-based plan row), or `query` (substring of topic or track). No arguments
-lists every topic with its index, month, hours and part count.
+**Inputs:** `row` (1-based plan row, and the one to use — it is the number every market statement
+and the Market tab cite), `index` (the older 0-based key, `row - 1`), or `query` (substring of
+topic or track). No arguments lists every topic with its row, index, month, hours and part count.
 
-Three behaviours worth knowing: `index` wins if both are passed; a `query` matching exactly one
-topic returns that full syllabus; a `query` matching several returns the short list, so you can
-pick an index from it.
+Precedence is `row`, then `index`, then `query`, and only the first one present is read. Beyond
+that: a `query` matching exactly one topic returns that full syllabus; a `query` matching several
+returns the short list, so you can pick a row from it.
 
 **Reach for it when** you open a topic for real — this is the day's material. Reach for
 `get_plan` instead when you only want the row's hours or links, and for `ask_lumen` when you want
@@ -112,16 +124,22 @@ editing `data/curriculum/NN.json` and rerunning `scripts/build-curriculum.py` (a
 
 ### `ask_lumen`
 
-**Answers:** an open question about the plan, in plain language, with the whole plan and the
-measured market in context.
+**Answers:** an open question about the plan, in plain language, with the whole plan and a capped
+digest of the measured market in context.
 
 **Inputs:** `prompt` (required), `context` (optional free text — the active topic, what you just
 tried, what confused you).
 
-**Reach for it when** the question is "why" or "how does this connect", especially if it touches
-the market: the answer carries the benchmark and insight numbers, and the model is instructed to
-quote them rather than compute them (architecture.md §2, §5.6). Reach for `get_syllabus` instead
-when you want the topic's own material, which is deterministic and free.
+**Reach for it when** the question is "why" or "how does this connect" — prose, not figures.
+Reach for `get_syllabus` instead when you want the topic's own material, which is deterministic
+and free.
+
+**It is not the tool for a market number.** It is handed a capped digest of the scan, not the
+reports, so a number it was not given is a number it cannot have; the system prompt forbids it to
+compute, rescale or round one (architecture.md §2, §5.6), which is protection against invention
+and not a substitute for measurement. Its own description routes market questions to
+`get_market_priorities`, `get_market_reach`, `get_market_skill` and `get_market_plan_risk`, which
+return the stored sentences unchanged. Ask it *why* a market finding holds; ask them *what* it is.
 
 **Two paths, and you can tell them apart by the result.** Proxied through `/api/ask`, the answer
 is saved to `reports/asks/` and `list_ask_reports` will find it. Called directly against MiniMax
@@ -181,8 +199,10 @@ Plan tab's status dropdown writes, so the two are interchangeable.
 
 1. **The topic string must match a plan row exactly** after trimming and lowercasing. Both the
    dashboard's merge and the insight pass match on that string and nothing else; an event that
-   matches no row is counted as unmatched and silently does nothing (architecture.md §5.4). Copy
-   the topic out of `get_plan` rather than typing it.
+   matches no row is saved but counts toward nothing (architecture.md §5.4). Copy the topic out of
+   `get_plan` rather than typing it. **This tool says so out loud** — the response carries
+   `matchedPlanRow`, and on a miss a `warning` and a `didYouMean` list of near topics, so re-record
+   with the verbatim string. It is the Plan tab's dropdown that fails silently here, not this.
 2. **Only `done` moves readiness.** `in_progress` is not evidence and `skipped` is a decision not
    to acquire the skill. The insight pass accepts `done`, `complete`, `completed` or `finished`
    and nothing else.
@@ -202,31 +222,45 @@ history that has not started is genuinely empty rather than unknown.
 
 ### `get_progress_analytics`
 
-**Answers:** how many progress events are recorded, split by status, plus the newest ten.
+**Answers:** what is actually done — how many topics stand at each status, the hours those done
+topics clear against the active plan hours <!-- verify:hours=1588 --> with a completion
+percentage, the rows done, the newest ten events, and any event whose topic matched no plan row.
 
 **Inputs:** none.
 
-**Reach for it when** you want the one-line answer to "how much have I actually logged".
+**Reach for it when** you want the honest answer to "how far in am I", and every time before
+`get_plan`'s `status` tempts you (see above). It is the only tool that reads progress as progress.
 
-**It counts filenames, over the newest 100 events, and computes nothing else.** Despite the
-tool's own description naming "completion, hours", no hours figure and no percentage is
-produced — those live in the Market tab's readiness, which weights by market share rather than
-row count (architecture.md §5.4). Two events for the same topic count twice here; the readiness
-pass takes only the newest per row.
+**It counts topics, not events, and it reads filenames only.** The status, topic and date are
+parsed out of each progress filename, so a hundred events cost one directory listing rather than a
+hundred fetches; the notes inside the files are not read. Per topic the newest event wins, exactly
+as the readiness pass does it, so taking one topic from `in_progress` to `done` is one topic and
+not two. Every event is considered — there is no window — until GitHub's 1,000-file directory
+maximum, which the response says out loud in its `note` when it is reached.
+
+**Its percentage is not the Market tab's readiness, and they will disagree.** This one is hours:
+the plan's own hours of the done rows over the active plan hours. Readiness weights each skill by
+how often the market asks for it (architecture.md §5.4), so clearing a heavy row the market rarely
+mentions moves this number a lot and that one barely at all. Both are correct; they answer
+different questions.
 
 ### `score_assessment`
 
 **Answers:** what does this assessment score, and what should be done about it.
 
-**Inputs:** `assessment` (`quick_check` / `weekly` / `monthly` / `quarterly`) and `answers`, an
-array whose meaning depends on the first:
+**Inputs:** `assessment` and `answers`, one 0–4 rating per rubric criterion:
 
-- `quick_check` — four numeric choices, graded against a fixed key. Returns per-question
-  correctness, the expected value, and a percentage.
-- `weekly` and `monthly` — four ratings, 0 to 4, weighted 40 / 25 / 20 / 15.
-- `quarterly` — five ratings, 0 to 4, weighted 20 / 25 / 25 / 15 / 15.
+- `weekly` and `monthly` — four ratings, weighted 40 / 25 / 20 / 15.
+- `quarterly` — five ratings, weighted 20 / 25 / 25 / 15 / 15.
 
-Ratings are clamped into 0–4, so a stray 7 scores as 4 rather than erroring.
+Ratings are clamped into 0–4, so a stray 7 scores as 4 rather than erroring. Too *few* ratings
+does error, because the missing criterion would otherwise be graded as a zero you never gave.
+
+**`quick_check` is retired and always throws.** The enum still lists it, so the value is offerable
+and the error is the only thing that tells you — the four-question quiz it graded was replaced by
+the recall strip, and grading against a key whose questions no longer exist is an invented score.
+The handler in `mcp/server.js` says the same in its refusal message. Use `weekly`, `monthly` or
+`quarterly`, or ask for a recall prompt.
 
 **Reach for it when** you have finished the work the Assessments tab describes. Weekly and monthly
 use identical weights — the difference is the rubric you hold yourself to, not the arithmetic.
@@ -253,15 +287,18 @@ capped at 10 results, and inherits GitHub's indexing lag.
 
 **Answers:** what did this MCP process just do, and did it work.
 
-**Inputs:** `limit` (default 50, capped at 100).
+**Inputs:** `limit` (default 50, capped at 100) and `durable` (boolean, default true — pass
+`false` to skip the GitHub read and answer from memory alone).
 
 **Reach for it when** a tool call failed and the error you saw was terse. Entries carry the
 action, ok/failed, up to 180 characters of detail, and a timestamp.
 
-**It is memory on one process, last 500 events.** A Render restart empties it, and the free tier
-sleeps after inactivity, so an empty log usually means the server restarted rather than that
-nothing happened. The durable trail is `reports/audit/*.json`, written only by `save_study_note`
-and `record_progress` (architecture.md §3.6).
+**Two lists, and only one of them survives.** `inProcess` is memory on this one Render process,
+last 500 events: a restart empties it, and the free tier sleeps after inactivity, so an empty
+`inProcess` usually means the server restarted rather than that nothing happened. `durable` is
+`reports/audit/*.json` on GitHub, which only the two repo-writing tools append to —
+`save_study_note` and `record_progress` (architecture.md §3.6). So a read that failed before the
+sleep is gone; a write is not.
 
 ### `get_connection_map`
 
@@ -273,6 +310,91 @@ writes go, whether SurfSense is live, and the free-tier sleep caveat.
 **Reach for it first** when something is behaving strangely — it is the cheapest call that
 distinguishes "wrong server" from "wrong data", and it is also the fastest way to wake a sleeping
 Render instance before a call you care about.
+
+### The four market tools, and what they share
+
+`get_market_priorities`, `get_market_reach`, `get_market_skill` and `get_market_plan_risk` read
+the two reports the 03:00 scan writes and the Market tab renders, and they hand back each entry's
+stored `statement` verbatim rather than rephrasing the numbers in it — which is why the MCP, the
+tab and the Monday email say one sentence and not three. Every response opens with a `scan` header
+carrying the scan day and board coverage, so a number cannot be quoted next week as though it were
+today's, and every plan row arrives as `row` with `syllabus_index` beside it.
+
+**They do not need the same report, so they do not fail together.** `get_market_priorities` and
+`get_market_reach` need `insight.json`; `get_market_skill` and `get_market_plan_risk` need
+`benchmark.json` and merely degrade without the insight — the reachable share and the readiness
+gain come back `null` while the coverage and the gaps are intact. When the report a tool needs is
+missing, it returns `{market: "unavailable", reason}` and does not throw: "no gaps found" and "the
+scan did not load" are opposite answers, and an omitted block reads as the first.
+
+#### `get_market_priorities`
+
+**Answers:** which incomplete plan rows buy the most readiness, ranked by how often the market
+asks for the skills each one clears; where readiness stands today; and the five market segments
+ranked by fit.
+
+**Inputs:** `limit` (default 8, schema maximum 27), `max_month` (1–23
+<!-- verify:months=23 -->, rows scheduled that month or earlier), `track` (case-insensitive
+substring), `include_segments` (default true; only an explicit `false` drops the segment lines).
+
+**The default shows eight of them.** Filters are applied first and `limit` last, and the response
+carries `total` and `returned` — raise `limit` toward `total` for the whole ranked list.
+
+**Reach for it when** the question is "what next". It reads the same ranked table the Market tab's
+Decide zone renders, so Claude Code and the tab cannot name different rows.
+
+#### `get_market_reach`
+
+**Answers:** how much of the measured market is takeable without leaving India, at which named
+companies, and whether that slice asks for something different from the market at large — the tier
+distribution, the named roles with their URLs, and the per-skill whole-market versus reachable
+share.
+
+**Inputs:** `tier` (one of `india-remote`, `emea-apac-remote`, `india-office`,
+`relocate-sponsor`, `out-of-reach`) and `skills_limit` (default 10, maximum the full mapped-skill
+count <!-- verify:skills=34 -->, `0` to omit the skills entirely).
+
+**Omitting `tier` is not "every tier".** It is the slice that needs no move — `india-remote`,
+`india-office` and `emea-apac-remote` together. And named roles are stored only for those, so
+asking for `relocate-sponsor` or `out-of-reach` returns an empty `roles` plus a `rolesNote` saying
+why; the tier counts above it still cover every core requisition.
+
+**Read `derivedCount` before you believe the reach.** Requisitions tiered from the location string
+alone never had their body read, and the body pass only ever moves a requisition *out* of reach.
+So the reachable figure is an upper bound, and the response says so in `derivedCaveat`.
+
+#### `get_market_skill`
+
+**Answers:** does the market ask for what a plan row teaches, and what does finishing it buy —
+whole-market share, the plan rows that teach the skill, the quoted JD evidence, its share of the
+reachable slice, and the readiness gain if its row is unfinished.
+
+**Inputs:** `skill` (a skill id such as `python`, or a case-insensitive substring of its label) or
+`row` (1-based plan row). `row` is read first if both are passed. No arguments returns the compact
+index of every mapped skill <!-- verify:skills=34 --> — id, label, market share, reachable share,
+primary row — which is the routing table for the other three.
+
+**A miss is an answer here, not an error.** A `skill` matching nothing returns a message pointing
+back at the index. A `row` no mapped skill lists returns a note saying the market does not
+measurably ask for what that row teaches — which is `get_market_plan_risk`'s finding, at one row
+instead of a whole track.
+
+**Reach for it when** you are about to spend a month on a row and want to know what it buys.
+
+#### `get_market_plan_risk`
+
+**Answers:** which of the 1,588 active plan hours <!-- verify:hours=1588 --> the market is not
+paying for, and what it asks for that the plan never teaches — the audited gaps with their nearest
+plan row, and the over-invested tracks with their measured JD frequency and combined hour cost.
+The answer to "should I cut something".
+
+**Inputs:** `kind` (`gaps`, `over_invested` or `both`, default `both`) and `limit` (default and
+schema maximum both the audited gap count <!-- verify:gaps=13 -->).
+
+**`kind` decides which half of the answer you get**, and the two halves point opposite ways:
+`gaps` is what the market asks for and the plan does not teach, `over_invested` is what the plan
+teaches and the market rarely asks for. Ask "what should I drop" with `kind: "gaps"` and you get
+the case for adding.
 
 ---
 
@@ -329,9 +451,12 @@ tab. Plan rows cited here are 1-based and clicking one clears the Plan tab's fil
 that row.
 *It will not tell you anything fresher than the last completed scan cycle*, and it says so: the
 header prints `Computed <timestamp> UTC · N of M boards`. No model runs on this path at request
-time. As of the first real scan — `reports/market/benchmark.json` and
-`reports/market/insight.json`, both `2026-09-07T17:37:03.572Z` — it reads 189 core requisitions
-across 23 companies, 11 takeable without leaving India, readiness 0% (architecture.md §5.7).
+time. Every figure on the tab is read from two files rather than computed here — core requisitions
+and companies from `reports/market/benchmark.json` (`coreCount`, `companyCount`), the reachable
+count and readiness from `reports/market/insight.json` (`reachability.inIndiaCount`,
+`readiness.pct`) — and each file carries the `computedAt` and `day` of the scan that wrote it. Read
+them there rather than from here; the 03:00 scan rewrites them, so any figure quoted in this
+document is a figure that stopped being true (architecture.md §5.7).
 
 **The recall strip**, above all ten: at most five cards a day, most-overdue first, from a bank of
 1,710 prompts <!-- verify:prompts=1710 --> on a 7-rung ladder <!-- verify:ladder_rungs=7 -->.
@@ -344,7 +469,8 @@ You write before you can reveal; you grade Fluent / Halting / Gone. Only topics 
 ## 3. The 2 crons
 
 `vercel.json`. Both are `GET`, both authenticate on `Authorization: Bearer ${CRON_SECRET}`, and
-neither is behind the password gate — `/api/cron` is the proxy's only functional exemption
+neither is behind the password gate, but neither is exempt either: `proxy.ts` GATES `/api/cron/`
+on `CRON_SECRET` before the password check runs, so an unauthenticated call gets 401
 (architecture.md §3.1). To run either by hand, call it with that header.
 
 ### `/api/cron/market-scan` — 03:00 UTC (08:30 IST)
@@ -391,12 +517,17 @@ this cron is read-only against GitHub.
 returned nothing and the deterministic digest was sent alone, which is the designed degrade and
 not worth chasing.
 
-**The one that will confuse you: the digest reads workbook column 15, not your progress events.**
-Its "TODAY" is the first row that is neither skipped nor `Done` *in the committed workbook*, and
-that column holds only `Not started` and `Skipped` — so the email keeps naming the same topic and
-keeps saying `0 of 117 topics done` however much you record, until `data/workbook.json` itself is
-edited. The dashboard does not behave this way: it merges `GET /api/progress` on load. The pace
-line also assumes 16 h/week regardless of what you set on the Overview tab.
+**The one that will confuse you: the email repeats a topic until you record progress against it.**
+It reads your progress events first and falls back to workbook column 15 per row — the same
+matcher the dashboard and readiness use, so all three agree on which row is next
+(`app/api/cron/daily-digest/route.ts`, the `digest` function). A topic marked `in_progress` wins
+over plan order, because plan order outranking recorded evidence is what used to send row 0 to a
+reader who had already started row 5. What it will not do is rotate: nothing recorded means
+nothing moved, so the same brief arrives tomorrow — and the email says so, either as "no progress
+has ever been recorded on this topic" or as a day count once something has. Recording is the only
+thing that advances it. An unreadable progress store costs freshness rather than truth: the
+fallback column holds only `Not started` and `Skipped`, so the email degrades to plan order rather
+than to a false claim. The pace line assumes 16 h/week regardless of the Overview tab.
 
 ---
 
@@ -448,46 +579,8 @@ why the readiness one refuses the workbook column.
 every `verify:<anchor>=<value>` HTML comment in `docs/platform/*.md` and asserts it against
 `data/`, `app/`, `lib/`, `mcp/` and `vercel.json`; an unknown anchor name is a hard error, so a
 typo cannot pass by matching nothing. `--list` prints every anchor and its current value. Live
-scan output — the 189 core requisitions, the 34 mapped skills' <!-- verify:skills=34 --> shares,
-readiness — is deliberately not anchorable, because the 03:00 scan rewrites it; cite those with
-the report file and the scan date instead, the way section 2 does.
-
-### `get_market_priorities`
-
-What to study next, given what the market actually asks for: the incomplete plan rows ranked by the readiness points finishing each one buys, plus where readiness stands today and which of the five market segments the work moves toward. Every row carries both `row` (1-based, as the statements cite it) and `syllabus_index` (row - 1, what get_syllabus and get_plan take).
-
-Arguments: `max_month` (integer), `track` (string), `include_segments` (boolean).
-Reads `reports/market/insight.json` and `reports/market/benchmark.json`, written by the 03:00 scan;
-returns the stored `statement` strings, so this tool, the Market tab and the weekly email say the
-identical sentence. Before the first completed scan it returns a stated unavailable result rather
-than throwing.
-
-### `get_market_reach`
-
-Which of the measured requisitions are takeable without leaving India, at which named companies, and whether that slice asks for something different from the market at large. Returns the tier distribution, the named roles with their URLs, the per-skill whole-market versus reachable share, and derivedCount — how many requisitions were tiered from the location string alone, which overstates reach.
-
-Arguments: `skills_limit` (integer).
-Reads `reports/market/insight.json` and `reports/market/benchmark.json`, written by the 03:00 scan;
-returns the stored `statement` strings, so this tool, the Market tab and the weekly email say the
-identical sentence. Before the first completed scan it returns a stated unavailable result rather
-than throwing.
-
-### `get_market_skill`
-
-Does the market ask for what a plan row teaches, and what does finishing it buy? Joins the measured coverage of a skill (whole-market share, the plan rows that teach it, the quoted JD evidence) with its share of the reachable slice and the readiness gain if its row is unfinished. With no arguments it returns the compact 34-skill index — id, label, market share, reachable share, primary row — which is the routing table for the other market tools.
-
-Arguments: `row` (integer).
-Reads `reports/market/insight.json` and `reports/market/benchmark.json`, written by the 03:00 scan;
-returns the stored `statement` strings, so this tool, the Market tab and the weekly email say the
-identical sentence. Before the first completed scan it returns a stated unavailable result rather
-than throwing.
-
-### `get_market_plan_risk`
-
-Which of the 1588 planned hours the market is not paying for, and what it asks for that the plan never teaches: the audited gaps with their nearest plan row, and the over-invested tracks with their measured JD frequency and combined hour cost. The answer to \
-
-Arguments: no arguments.
-Reads `reports/market/insight.json` and `reports/market/benchmark.json`, written by the 03:00 scan;
-returns the stored `statement` strings, so this tool, the Market tab and the weekly email say the
-identical sentence. Before the first completed scan it returns a stated unavailable result rather
-than throwing.
+scan output — core requisition counts, the mapped skills' <!-- verify:skills=34 --> shares,
+readiness — is deliberately not anchorable, because the 03:00 scan rewrites it, and a checker that
+fails most mornings for no defect gets muted in a week. **So do not restate those numbers here at
+all**: name the report file and the field to read it from, the way section 2 and the market tools
+in section 1 do. A number this file repeats is a number that has to be maintained twice.

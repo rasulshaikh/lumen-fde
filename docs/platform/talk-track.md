@@ -49,10 +49,14 @@ it is partial evidence for. "Partial" is doing real work in that sentence — se
 code, it has no cold start, and it gives a real PTY instead of a line-based shell.
 
 **Why not.** That box holds `GITHUB_TOKEN` — which has write access to this repo, which *is* the
-study plan — plus `MINIMAX_API_KEY`, `RESEND_API_KEY` and `MCP_API_KEY` (`architecture.md` §8).
-A single auth bug in a shell endpoint there is a full credential compromise and write access to
-the plan in the same step. In the microVM the isolation is structural rather than earned:
-`env: {}` means no Lumen secret exists inside it even if the shell is completely owned.
+study plan — plus every other secret `mcp/server.js` reads: `MCP_API_KEY`,
+`LUMEN_INTERNAL_API_KEY`, `MINIMAX_API_KEY`, `SURFSENSE_API_KEY`. That list is the `process.env`
+reads in that one file rather than a copy of `architecture.md` §8's table, because a hand-copied
+blast radius drifts the moment a secret changes host — this one carried `RESEND_API_KEY` until a
+fact-check found only the Vercel crons read it. A single auth bug in a shell endpoint there is a
+full credential compromise and write access to the plan in the same step. In the microVM the
+isolation is structural rather than earned: `env: {}` means no Lumen secret exists inside it even
+if the shell is completely owned.
 
 **How I know, rather than assume.** I asked the VM. All nine secret names absent; 18 environment
 variables total, every one of them CA-bundle and PATH plumbing (commit `53fcb77`). That is a
@@ -85,10 +89,11 @@ silently reintroduce every false positive the taxonomy work eliminated
 rejected).
 
 **The corollary I like better than the decision.** The model is not banned from the subsystem —
-it is confined to interpretation. Two calls exist inside the scan, both ≤80 words, both framing
-rather than measurement, and both dropped entirely if the returned paragraph contains a digit
-(`architecture.md` §5.6). The Market tab calls no model at request time at all. A market
-benchmark whose numbers came from a model is not a benchmark.
+it is confined to interpretation. Two calls exist inside the scan — the email's framing line at
+≤60 words and Quaere's reading of the tab at ≤80 — both framing rather than measurement, and both
+dropped entirely if the returned paragraph contains a digit (`architecture.md` §5.6). The 60 is
+load-bearing two sections later; see §3.4. The Market tab calls no model at request time at all.
+A market benchmark whose numbers came from a model is not a benchmark.
 
 **Rows:** 59 (Evals as infrastructure — "answer 'how do you know it works?' with numbers, per
 class, over time", M14), 63 (Drift, feedback loops, registries, rollout, M15), 51 (Prompt
@@ -100,24 +105,28 @@ engineering as code: versioning, regression sets, M12).
 implementation, engagement — is counted, reported, and excluded from every percentage
 (`architecture.md` §5.3).
 
-**Why it matters here specifically.** On the 2026-09-07 scan, `reports/market/benchmark.json`
-holds 189 distinct core requisitions across 23 companies and **208 adjacent across 17
-companies**, plus 21 leadership. Adjacent outnumbers core. Fold them together and "the FDE
-market" becomes Databricks Solutions Architects and Datadog Sales Engineers, and every readiness
-number I compute is then a readiness for pre-sales.
+**Why it matters here specifically.** On the 2026-09-08 scan, `reports/market/benchmark.json`
+holds 189 distinct core requisitions across 23 companies and **206 adjacent across 17
+companies**, plus 21 leadership. Those counts are rewritten by the 03:00 cron and are quoted with
+a scan date for that reason; the claim that survives every scan is the ordering — adjacent
+outnumbers core. Fold them together and "the FDE market" becomes Databricks Solutions Architects
+and Datadog Sales Engineers, and every readiness number I compute is then a readiness for
+pre-sales.
 
 The first live probe made the same point louder: Databricks alone returned 105 core and 161
 adjacent before dedupe (commit `355fede`). One board could have set the entire denominator.
 
 **The related discipline.** Dedupe runs *before* counting, on `dedupeKey(company, title)` with
-the location suffix stripped — Palantir's 63 postings are 26 requisitions, LangChain's 15 city
-clones are one role. Seniority tokens survive normalization, because "Senior" is signal; only
-location suffixes are stripped.
+the location suffix stripped — on that same scan Palantir's 63 postings are 26 requisitions, and
+LangChain's city clones of one Deployed Engineer role are one key. The clone counts move with the
+boards, which is why I cite the mechanism (`lib/market/classify.ts`) and not the tally: what does
+not move is that uncollapsed, two boards' cloning habits decide every percentage. Seniority
+tokens survive normalization, because "Senior" is signal; only location suffixes are stripped.
 
-**Rows:** 104 (Model evaluation: metric choice, and the denominator you compute a rate over,
-M20), 38 (Entity resolution and record linkage: blocking, fuzzy matching — the clone collapse is
-exactly this, M9), 91 (Target list: 40 companies ranked by fit, M9 — the scan is a mechanized
-version of that row's deliverable).
+**Rows:** 104 (Model evaluation, M20 — the denominator you compute a rate over is the half of
+that row this exercises), 38 (Entity resolution and record linkage, M9 — the clone collapse is
+exactly this), 91 (Target list: 40 companies, referrals, warm intros, M9 — the scan mechanizes
+the target-list half of that deliverable and touches neither referrals nor warm intros).
 
 ### 2.4 One rendered sentence per fact — which was right for the email and wrong for the tab
 
@@ -173,7 +182,9 @@ matching nothing.
 version numbers, and a checker that reports three false alarms gets muted inside a week.
 
 **Why it exists at all.** `docs/lumen-fde-architecture.md` said "13 tools" while `mcp/server.js`
-served 14 <!-- verify:mcp_tools=18 -->, and nothing caught it because nothing read the document.
+served 14, and nothing caught it because nothing read the document. It serves
+18 <!-- verify:mcp_tools=18 --> today, and the anchor is the reason that sentence cannot rot the
+same way twice.
 Live scan output is deliberately *not* anchorable — the 03:00 cron rewrites those numbers, so
 anchoring them would fail most mornings for no defect. Those are cited by report file and scan
 date instead, which is what §2.3 above does.
@@ -183,9 +194,9 @@ data: a file's `topic`, `track`, `month` and `hours` must equal the plan's, and 
 records why — a renumber once silently desynced 90 files (`architecture.md` §4.2). Same idea,
 pointed at prose.
 
-**Rows:** 20 (CI/CD and supply chain — its depth target is "a failing test blocks the deploy",
-M5), 40 (Testing and contracts — "a failing contract breaks the build", M10), 74 (runbooks and
-design docs, M17).
+**Rows:** 20 (CI/CD and supply chain — its depth target is "A failing test or a HIGH CVE blocks
+the deploy; ArgoCD syncs on green", M5), 40 (Testing and contracts — "A failing contract breaks
+the build; coverage published", M10), 74 (runbooks and design docs, M17).
 
 ### 2.7 The MCP server is a narrow, audited tool surface
 
@@ -193,15 +204,23 @@ design docs, M17).
 an audit trail split deliberately: `get_audit_log` is in-memory and lossy, the durable trail is
 `reports/audit/*.json` written by the two tools that mutate anything (`architecture.md` §3.6).
 
-Two things I would raise before an interviewer does. If `MCP_API_KEY` is unset, `allowed()`
-returns true for everyone and the server is open — that is documented in `architecture.md` §8
-rather than hidden, and it is a real sharp edge, not a feature. And `mcp/render.yaml`'s
-`buildFilter` has to include `data/**` as well as `mcp/**`, because `server.js` reads
-`../data/*.json` from outside its `rootDir`; without it, plan edits never reach the live MCP and
-it serves stale rows silently.
+Two things I would raise before an interviewer does. `read_ask_report` validated its argument
+with `startsWith("reports/asks/")` and then interpolated that same string into a GitHub URL — and
+WHATWG URL parsing collapses `..` before the request leaves the process, so
+`reports/asks/../../data/workbook.json` passed the prefix check and resolved to the plan. The
+general shape is the lesson: a check on a value that a *later* stage will still rewrite is not a
+check on what that stage receives. Traversal is now rejected before the prefix is consulted. The
+same audit found the auth guard returning true for every request whenever `MCP_API_KEY` was
+unset; it now refuses with 503 when the key is unconfigured, the shape `github()` already used
+for a missing token (both `mcp/server.js`, commit `88a619c`).
 
-**Rows:** 52 (Tool use, structured outputs and MCP servers — its depth target is "build an MCP
-server with auth and narrow tools; explain the trust boundary", M13), 30 (Auth, M7).
+And `mcp/render.yaml`'s `buildFilter` has to include `data/**` as well as `mcp/**`, because
+`server.js` reads `../data/*.json` from outside its `rootDir`; without it, plan edits never reach
+the live MCP and it serves stale rows silently.
+
+**Rows:** 52 (Tool use, structured outputs and MCP servers — its depth target is "Build an MCP
+server with auth and narrow tools; explain the trust boundary", M12), 30 (Auth, M7), 56
+(Guardrails, prompt injection, red-teaming — the traversal is the injection case, M13).
 
 ### 2.8 The review scheduler has two caps, and never shows a backlog
 
@@ -216,15 +235,17 @@ rungs, not to zero, because a lapse is not amnesia and resetting to day 1 is wha
 systems feel punitive. And the backlog count is never rendered, because seeing "37 due" is what
 kills them.
 
-**Rows:** 40 (property-style testing — `lib/review.test.mts` is a 400-day simulation, and it is
-the fourth test file with no npm script, `architecture.md` §9, M10).
+**Rows:** 40 (Testing and contracts: pytest, property tests, OpenAPI contract tests, M10 —
+`lib/review.test.mts` is that 400-day simulation, and `.github/workflows/ci.yml` runs it with the
+other three suites and `verify-docs.py`, so the simulation blocks a deploy rather than waiting to
+be remembered).
 
 ---
 
 ## 3. What I got wrong
 
-Six of these. Every one was caught by something specific, and the catching mechanism is the part
-worth talking about.
+Seven of these. Every one was caught by something specific, and the catching mechanism is the
+part worth talking about.
 
 ### 3.1 I wrote the built artifact and not the source, and reverted 117 of 119 topics
 
@@ -261,9 +282,11 @@ and therefore cannot race itself. The shape was safe in its original context and
 one.
 
 **The fix and its price.** Sequential writes, `index.json` first and alone because it is the only
-file that cannot be recomputed — benchmark, trend and insight are pure functions of it. Four
-round trips instead of one costs about a second on a scan that already spends a minute fetching
-boards (commit `b6c1ef7`, `architecture.md` §5.5).
+file that cannot be recomputed — benchmark, trend and insight are pure functions of it. A round
+trip per file instead of one for all of them costs about a second on a scan that already spends a
+minute fetching boards. I quote it as a rate rather than a count because the file set grows:
+`insight.json` joined after this fix and made four writes five (commit `b6c1ef7`,
+`architecture.md` §5.5).
 
 **Related, and deliberate:** failure severity is graded. A failed `index.json` or
 `benchmark.json` write returns 502; a failed `history/` or `insight.json` write is logged and the
@@ -292,9 +315,10 @@ by luck (commit `a9f082c`, `architecture.md` §5.2 rule 2).
 The Monday email's framing paragraph is forbidden from containing a number. The post-check built
 its allow-set from the prompt — and the prompt says "In 60 words or fewer", so `60` was
 whitelisted forever. Narrowing the allow-set to the facts block was not enough either: coverage
-statements cite plan rows and hours (`row 58, "…" — 18h, month 4`), and a row number reads as a
-percentage the moment the model puts a `%` after it. **"Coverage sits at 58% this week" shipped
-under both versions.**
+statements cite plan rows and hours (`row 59, "…" — 18h, month 14`), so every row number the
+block cites is a whitelisted token — 58 among them — and a row number reads as a percentage the
+moment the model puts a `%` after it. **"Coverage sits at 58% this week" shipped under both
+versions.**
 
 **The fix.** There is no allow-set. The prompt forbids every digit, so any digit is a violation of
 exactly the instruction given, and the whole paragraph is dropped. Any allow-set built from text
@@ -308,7 +332,8 @@ to flip when fixed. They flipped, and they are the regression guard now (commit 
 
 The Market tab's gap list came from three JD taxonomies I had written. Every claim was then
 challenged on three independent lenses — find-the-coverage, jd-evidence, worth-closing. **All 18
-claims were refuted. Thirteen died on coverage alone**
+claims were refuted.** No lens was the sole executioner: worth-closing refuted 18 of 18,
+find-the-coverage 13 of 18, jd-evidence 9 of 18, and five claims lost on all three
 (`docs/research/2026-09-07-gap-claims-challenge.md`).
 
 The failure mode was uniform: the taxonomies grepped subtopic *names* and `learn` prose, and none
@@ -318,9 +343,9 @@ audit could not see it.
 - My own strongest claim — "codify patterns and feed them back to Product/Research, 12 of 15 JDs,
   weakest plan match" — is refuted by row 27 `subtopics[19]`, which runs the loop as a measured
   practice, plus row 59 and row 63 `subtopics[9]`, which gives the literal event schema.
-- Five claims asserted a zero that is not a zero. "Distillation is not covered" against row 99
-  `subtopics[16]`, a named 15-minute subtopic with the full soft-teacher objective and a
-  `KLDivLoss` resource.
+- Six claims asserted a zero that is not a zero — the same six `benchmark.ts` had been printing
+  "No plan row covers this" about. "Distillation is not covered" against row 99 `subtopics[16]`,
+  a named 15-minute subtopic with the full soft-teacher objective and a `KLDivLoss` resource.
 - Three frequencies were inflated by clones: knowledge-graphs 3/95 collapses to one distinct JD
   at `difflib` similarity 0.999; public-sector 4/15 is really 1/20.
 
@@ -366,9 +391,23 @@ location is not in India".
 
 **The general lesson, which I believe more than any of the specifics.** Bugs 3.2, 3.6-two and the
 CSS specificity defect in the same commit were all invisible to reading and obvious to running.
-The two that reading *did* catch — 3.3 and 3.5 — were caught by an adversarial pass with an
-explicit contract ("check the code against the spec clause by clause", "try to refute each
-claim"), never by a general review.
+The three that reading *did* catch — 3.3, 3.5 and 3.7 below — were each caught by an adversarial
+pass with an explicit contract ("check the code against the spec clause by clause", "try to
+refute each claim", "audit this tool surface"), never by a general review.
+
+### 3.7 The seam in §4's header, shipped as a silent off-by-one
+
+`get_syllabus` took only a 0-based `index`. Every market statement this system emits cites a
+1-based plan row — "NEXT - row 28, 'Production Python architecture…'". So a caller who followed
+its own recommendation into the syllabus got row 29's content: FastAPI in production, not
+production Python architecture. No error, no empty result, no way to notice from the response.
+
+**Why it is the worst kind.** The two numbers are both small integers naming a plan topic, and
+the wrong one returns a plausible topic. Nothing about the output says which base it assumed.
+
+**The fix.** Both parameters are explicit — `row` (1-based) and `index` (row − 1) — and every
+market tool returns `row` and `syllabus_index` together, so the caller never has to infer a base
+(commit `88a619c`). §4's header exists to state the same seam in prose.
 
 ### Two smaller ones, for completeness
 
@@ -388,32 +427,38 @@ claim"), never by a general review.
 
 Which rows this platform is evidence for. Row numbers and titles are 1-based `Plan` rows from
 `data/workbook.json`; row N is `Plan[N]` and curriculum topic `N-1` (`architecture.md` §4.1).
+That seam is not decorative — getting it wrong is §3.7.
+
+Titles and months here are copied verbatim from `Plan[N][2]` and `Plan[N][1]`, not paraphrased,
+because this is the table I read a row number off before saying it out loud. The abbreviated
+glosses in §2 are abbreviations of these.
 
 | row | month | title | what in this system is the evidence |
 |---|---|---|---|
-| 5 | M1 | Git at depth: rebase, bisect, reflog, hooks | GitHub-as-database; the sha-carrying write; the `git add -A` correction (§3.2, §3.6) |
-| 6 | M2 | Docker internals: namespaces, cgroups, layers | choosing a Firecracker microVM over a container over a process, on an isolation argument (§2.1) |
-| 20 | M5 | CI/CD and supply chain: build, test, scan, sign, deploy | `.github/workflows/ci.yml` on Node 22; `verify-docs.py`; `build-curriculum.py`'s hard drift check (§2.6) |
+| 5 | M1 | Git at depth: rebase, bisect, reflog, hooks, monorepo hygiene | GitHub-as-database; the sha-carrying write; the `git add -A` correction (§3.2, §3.6) |
+| 6 | M2 | Docker internals: namespaces, cgroups, layers, networking | choosing a Firecracker microVM over a container over a process, on an isolation argument (§2.1) |
+| 20 | M5 | CI/CD and supply chain: build, test, scan, sign, deploy | `.github/workflows/ci.yml` on Node 22 running the build, all four suites and `verify-docs.py`; `build-curriculum.py`'s hard drift check (§2.6) |
 | 25 | M6 | Incident response and postmortems | the lost-`benchmark.json` write race, diagnosed from the sha in the error (§3.2) |
-| 27 | M6 | Supporting a deployment you cannot log into: preflight checks | per-board failure isolation, `ok:false` rather than skip; the truncation guard (§3.3) |
-| 34 | M8 | Redis: caching, rate limiting, idempotency | the login limiter and the MCP limiter — see the caveat in §5 |
-| 35 | M8 | Real-time transports: SSE, WebSockets, streaming | the sandbox's NDJSON stream — partial, see §5 |
-| 38 | M9 | Entity resolution and record linkage: blocking, fuzzy matching | `dedupeKey` and clone groups; 750 records → 189 core (§2.3, §3.6) |
-| 40 | M10 | Testing and contracts: pytest, property tests | 4 test files, 3 <!-- verify:market_tests=3 --> of them under `lib/market/`; the 400-day scheduler simulation (§2.8) |
-| 44 | M10 | Designing Data-Intensive Applications | read-whole/write-whole with a sha; lost updates; `synced:false` ≠ empty (§2.5) |
-| 51 | M12 | Prompt engineering as code: versioning, regression sets | the digit post-check, written as characterization tests (§3.4) |
-| 52 | M13 | Tool use, structured outputs and MCP servers | `mcp/server.js` — 18 tools, bearer auth, narrow schemas, audit trail (§2.7) |
-| 56 | M13 | Guardrails, prompt injection, red-teaming | confining the model to interpretation; dropping any paragraph containing a digit (§2.2, §3.4) |
-| 59 | M14 | Evals as infrastructure: eval sets, CI gates | `benchmark.ts` and `insight.ts` as pure functions, exercised by tests instead of by a 47 MB live scan (§2.2) |
+| 27 | M6 | Supporting a deployment you cannot log into: preflight checks, support bundles, remote diagnosis | per-board failure isolation, `ok:false` rather than skip; the truncation guard (§3.3) |
+| 30 | M7 | Auth: OAuth2, OIDC, JWT, RBAC, multi-tenant claims | the sandbox authenticating by OIDC; the MCP bearer check, timing-safe and fail-closed (§2.1, §2.7) |
+| 34 | M8 | Redis: caching, rate limiting, idempotency, streams | the login limiter and the MCP limiter — see the caveat in §5 |
+| 35 | M8 | Real-time transports: SSE, WebSockets, streaming at scale | the sandbox's NDJSON stream — partial, see §5 |
+| 38 | M9 | Entity resolution and record linkage: blocking, fuzzy and probabilistic matching, survivorship | `dedupeKey` and clone groups; 750 stored records → 189 core on the 2026-09-08 scan (§2.3, §3.6) |
+| 40 | M10 | Testing and contracts: pytest, property tests, OpenAPI contract tests | 4 test files, 3 <!-- verify:market_tests=3 --> of them under `lib/market/`, all four run by CI; the 400-day scheduler simulation (§2.8) |
+| 44 | M10 | Designing Data-Intensive Applications and Kleppmann's lectures | read-whole/write-whole with a sha; lost updates; `synced:false` ≠ empty (§2.5) |
+| 51 | M12 | Prompt engineering as code: versioning, regression sets, structured outputs | the digit post-check, written as characterization tests (§3.4) |
+| 52 | M12 | Tool use, structured outputs and MCP servers | `mcp/server.js` — 18 tools, bearer auth, narrow schemas, audit trail (§2.7); the `get_syllabus` base error (§3.7) |
+| 56 | M13 | Guardrails, prompt injection, red-teaming | confining the model to interpretation; dropping any paragraph containing a digit; the `read_ask_report` traversal (§2.2, §2.7, §3.4) |
+| 59 | M14 | Evals as infrastructure: eval sets, LLM-as-judge, human review, CI gates | `benchmark.ts` and `insight.ts` as pure functions, exercised by tests instead of by a 47 MB live scan (§2.2) |
 | 63 | M15 | Drift, feedback loops, registries, rollout | week-over-week movement as the reason extraction must be deterministic; `trend.json`; the drift checks in build and docs (§2.2, §2.6) |
 | 68 | M16 | Threat modelling and secrets lifecycle | the sandbox isolation argument, verified against nine secret names (§2.1) |
-| 74 | M17 | Engagement documents: design docs, ADRs, runbooks | this four-document set, and the checker that keeps it true (§2.6) |
+| 74 | M17 | Engagement documents: site survey, PRD-lite, SOW, ADRs, design docs, runbooks | this four-document set, and the checker that keeps it true (§2.6) |
 | 75 | M17 | Demos, executive communication, defending trade-offs | this file; the statement-vs-table scope error is the clearest trade-off story in it (§2.4) |
 | 76 | M17 | Technical writing and public write-ups | `docs/research/` and the commit messages that carry the reasoning (§3 throughout) |
 | 82 | M19 | Resume defence: every line | §3 is the rehearsal — "what broke, what you changed, what you'd do differently" |
-| 91 | M9 | Target list: 40 companies ranked by fit | the market scan is that row's deliverable, mechanized: 23 companies with core reqs today (§2.3) |
-| 92 | M19 | Application pipeline: apply in waves | the five reach tiers, and the 11 roles takeable without leaving India (§3.6) |
-| 104 | M20 | Model evaluation: metric choice, data leakage | core-vs-adjacent denominators; both reachability denominators reported, never one (§2.3) |
+| 91 | M9 | Target list: 40 companies, referrals, warm intros | the scan mechanizes the target-list half — 23 companies with core reqs on the 2026-09-08 scan — and nothing of the referral half (§2.3) |
+| 92 | M19 | Application pipeline: apply in waves, run three or four loops in parallel | the five reach tiers, and the roles takeable without leaving India — 11 on the 2026-09-08 scan (§3.6) |
+| 104 | M20 | Model evaluation: cross-validation, data leakage, metric choice, calibration | core-vs-adjacent denominators; both reachability denominators reported, never one (§2.3) |
 
 ---
 
@@ -423,7 +468,7 @@ The honest half, and the reason the platform computes readiness the way it does.
 
 **None of these rows are done.** Column 15 of `data/workbook.json` holds
 117 <!-- verify:active_rows=117 --> `Not started` and 2 <!-- verify:skipped_rows=2 --> `Skipped`
-(`architecture.md` §4.1). Readiness on the 2026-09-07 scan is **0%** — 0 of 490 share points, 0 of
+(`architecture.md` §4.1). Readiness on the 2026-09-08 scan is **0%** — 0 of 490 share points, 0 of
 34 skills cleared, from 2 matched progress events (`reports/market/insight.json`). That is the
 expected reading at month one of 23, not a failure, and it is why the Decide zone leads with the
 ranked marginal table rather than with the headline percentage.
@@ -449,15 +494,16 @@ Three rows in the map above are only partially evidenced, and I would say so bef
 And one thing the whole platform does not touch: tracks M, N and O — 26 rows of mathematics, ML
 systems and deep learning — are 335h and 21% of the 1,588 <!-- verify:hours=1,588 --> active
 hours, and the benchmark's own over-investment section flags them against measured JD frequency
-(`reports/market/benchmark.json`, 2026-09-07 scan). The system that says so is not evidence for
-them.
+(`reports/market/benchmark.json`, 2026-09-08 scan). Those three figures come from the workbook
+rather than the scan, so unlike the market counts they move only when I re-baseline the plan. The
+system that says so is not evidence for them.
 
 ---
 
 ## 6. Questions I expect, and the shortest true answer
 
 **"What would you do differently?"** Render the surface before designing the data that feeds it.
-Three of the six defects in §3 were invisible to reading and immediate on screen, and the
+Three of the seven defects in §3 were invisible to reading and immediate on screen, and the
 statement-string mistake (§2.4) was a data decision that could only be evaluated as a layout.
 
 **"How do you know your numbers are right?"** I mostly do not, so the system is built so that
@@ -478,9 +524,10 @@ are commits on one branch, so they must be sequential (§3.2), and `reports/prog
 N+1 by design (`architecture.md` §4.6).
 
 **"What breaks first if this grows?"** The read-whole/write-whole shape. `reports/market/index.json`
-is 439 KB at 750 stored requisition records; `MAX_REQS` is 3,000 (`architecture.md` §5.1). The JD body is
-never stored, which is what keeps that file near 500 KB instead of ~40 MB — and that decision is
-load-bearing, not incidental (`architecture.md` §5.2 rule 5).
+is 439 KB at 750 stored requisition records on the 2026-09-08 scan; `MAX_REQS` is 3,000
+(`lib/market/store.ts`, `architecture.md` §5.1). The JD body is never stored, which is what keeps
+that file near 500 KB instead of ~40 MB — and that decision is load-bearing, not incidental
+(`architecture.md` §5.2 rule 5).
 
 ---
 
