@@ -745,3 +745,92 @@ th{padding:0 12px 10px}
   font-weight:500;color:var(--ink-2);background:var(--surface-strong);
   border:1px solid var(--line-strong);border-radius:var(--r-sm);padding:2px 6px;
   white-space:nowrap}
+
+/* ============================================================
+   HOMEPAGE — the motivation layer
+   Evidence, standing and the wall, sharing one register with the
+   Market tab: a 14px lead line, a 13px detail line, a hairline
+   between blocks, and no card inside a card. Nothing here adds a
+   colour or a type size — the accent stays on the numbers that
+   move and on the one CTA per panel, exactly as everywhere else.
+
+   The three surface steps are the ones already audited: panel on
+   --surface, nested chip on --surface-strong, hairline --line.
+   ============================================================ */
+
+/* The By-track row lost its partner when Reality check moved up beside the pace map. */
+.content-grid.single{grid-template-columns:minmax(0,1fr)}
+
+/* A block inside a panel. The rule between two of them is the separation; neither gets a
+   ground of its own, because a tinted sub-card inside a card is the thing this system
+   refuses everywhere else. */
+.home-block+.home-block{margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}
+.home-block .eyebrow{margin:0 0 9px}
+
+.home-line{margin:0;font-size:14px;line-height:1.5;color:var(--ink);max-width:92ch}
+.home-sub{margin:5px 0 0;font-size:13px;line-height:1.55;color:var(--muted);max-width:92ch}
+.home-note{margin:12px 0 0;font-size:12px;line-height:1.5;color:var(--muted);max-width:92ch}
+.home-warn{color:var(--danger)}
+.panel .home-block+.home-block .home-line:first-child{margin-top:0}
+.panel>.text-button{margin-top:18px;padding:7px 0}
+
+/* The measured pair, drawn as chips so a readiness move is scannable before it is read.
+   Mono and tabular, because every measured value in this app is. */
+.home-stats{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px}
+.home-stat{display:inline-flex;flex-direction:column;gap:3px;padding:8px 11px;
+  background:var(--surface-strong);border:1px solid var(--line);border-radius:var(--r-sm);
+  color:var(--muted);font-size:11px;line-height:1.35}
+.home-stat b{font-family:'Geist Mono',ui-monospace,monospace;font-size:13px;font-weight:500;
+  font-variant-numeric:tabular-nums;color:var(--ink);letter-spacing:-.01em;white-space:nowrap}
+
+/* The rhythm figure. Same weight as a .metric so the two halves of the page agree about
+   what a headline number looks like — but never a zero: the panel swaps to the longest
+   run, which is a maximum over an append-only history, before it would print one. */
+.home-figure{display:flex;align-items:baseline;gap:10px;margin:0 0 14px}
+.home-figure strong{font-size:28px;letter-spacing:-.03em;color:var(--ink);
+  font-variant-numeric:tabular-nums;line-height:1}
+.home-figure span{font-size:12px;color:var(--muted);line-height:1.35}
+
+/* The wall's teaching empty state. A numbered list because the three steps are ordered
+   and the third is a command; the counter carries the accent, as it does in the syllabus. */
+.home-steps{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:0;counter-reset:step}
+.home-steps li{counter-increment:step;display:grid;grid-template-columns:22px minmax(0,1fr);
+  gap:2px 10px;padding:11px 0;border-top:1px solid var(--line)}
+.home-steps li:before{content:counter(step);grid-row:1 / span 2;
+  font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;font-weight:500;
+  color:var(--accent-text);padding-top:2px}
+.home-steps strong{font-size:13px;font-weight:600;color:var(--ink);line-height:1.4}
+.home-steps span{font-size:12.5px;line-height:1.5;color:var(--muted)}
+.home-code{font-family:'Geist Mono',ui-monospace,monospace;font-size:11.5px;
+  background:var(--surface-strong);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:1px 5px;color:var(--ink-2);white-space:nowrap}
+
+/* Recorded artifacts. One line each: the row it evidences, what it is, when. The row
+   number is a chip and not a link — the title already carries the URL, and two targets on
+   one line is one more than the line is worth. */
+.wall-list{list-style:none;margin:0;padding:0;display:grid;gap:0}
+.wall-row{display:grid;grid-template-columns:52px minmax(0,1fr) 88px;gap:4px 12px;
+  align-items:baseline;padding:11px 0;border-top:1px solid var(--line)}
+.wall-list li:first-child{border-top:0;padding-top:0}
+.wall-num{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:.02em;
+  color:var(--ink-2);background:var(--surface-strong);border:1px solid var(--line);
+  border-radius:var(--r-sm);padding:2px 6px;text-align:center}
+.wall-main{min-width:0;display:grid;gap:3px}
+.wall-topic{font-size:12px;line-height:1.4;color:var(--muted)}
+.wall-date{font-family:'Geist Mono',ui-monospace,monospace;font-size:11.5px;
+  font-variant-numeric:tabular-nums;color:var(--muted);text-align:right}
+
+@media(max-width:600px){
+  .home-stats{gap:6px}
+  .home-stat{flex:1 1 auto}
+  .wall-row{grid-template-columns:48px minmax(0,1fr);gap:4px 10px}
+  .wall-date{grid-column:2;text-align:left}
+}
+
+/* The three motivation panels carry a longer meta than the rest of the app ("Readiness 0% ·
+   0 of 34 skills"), which competes with the heading for the same line under ~700px. Stack it
+   there rather than shortening the sentence — the count is the part that makes the percentage
+   checkable. Scoped to these panels so the Pace map's two-word meta is untouched. */
+@media(max-width:700px){
+  .home-panel .panel-head{flex-direction:column;align-items:flex-start;gap:6px;margin-bottom:18px}
+}

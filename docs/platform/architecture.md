@@ -17,7 +17,7 @@ from either doc.
 
 A single-user study platform for one 23-month Senior FDE plan. Three things run:
 
-1. **A Next.js app on Vercel** — the dashboard (10 tabs), 10 API routes, and 2 cron endpoints.
+1. **A Next.js app on Vercel** — the dashboard (10 tabs), 11 API routes, and 2 cron endpoints.
 2. **An MCP server on Render** — 18 tools, so Claude Code can read the same plan the dashboard
    reads, and write progress back to it.
 3. **GitHub, as the database** — every mutable artifact (progress events, review schedule,
@@ -142,7 +142,7 @@ Three tabs fetch; the rest render bundled JSON:
 The Plan tab writes status to `localStorage` under `lumen-statuses` and mirrors it to
 `POST /api/progress`; on load it merges back whatever `GET /api/progress` returns.
 
-### 3.3 The 10 API routes
+### 3.3 The 11 API routes
 
 | route | methods | what it does | degrades to |
 |---|---|---|---|
@@ -775,7 +775,7 @@ standing fact. The market block at the bottom is all of the second kind.
 | `BOARD_COUNT` | 27 | `lib/market/benchmark.ts` |
 | skills / gaps / over-invested | 34 <!-- verify:skills=34 --> / 13 <!-- verify:gaps=13 --> / 3 | `data/market-skill-map.json` |
 | tabs | 10 <!-- verify:tabs=10 --> | `components/Nav.tsx` `NAV` |
-| API routes | 10 <!-- verify:api_routes=10 --> | `app/api/**/route.ts` |
+| API routes | 10 <!-- verify:api_routes=11 --> | `app/api/**/route.ts` |
 | crons | 2 <!-- verify:crons=2 --> (03:00, 03:30 UTC) | `vercel.json` |
 | MCP tools | 18 <!-- verify:mcp_tools=18 --> | `mcp/server.js` `tools` |
 | review ladder | `[1, 7, 21, 60, 150, 240, 330]` — 7 rungs <!-- verify:ladder_rungs=7 --> | `lib/review.ts` |
