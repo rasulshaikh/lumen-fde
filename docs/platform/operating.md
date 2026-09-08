@@ -53,6 +53,10 @@ Two things are true of every tool and are easier to state once:
 | `semantic_search` | you need the open web, or you need to find something in this repo remotely |
 | `get_audit_log` | a tool call just failed and you want the reason it recorded |
 | `get_connection_map` | you do not know which server or which search backend you are talking to |
+| `get_market_priorities` | what to study next, given what the market actually asks for: the incomplete plan rows ranked by the readiness points finishing each one buys, plus where readiness stands today and which of the five market segments the work moves toward |
+| `get_market_reach` | which of the measured requisitions are takeable without leaving india, at which named companies, and whether that slice asks for something different from the market at large |
+| `get_market_skill` | does the market ask for what a plan row teaches, and what does finishing it buy? joins the measured coverage of a skill (whole-market share, the plan rows that teach it, the quoted jd evidence) with its share of the reachable slice and the readiness gain if its row is unfinished |
+| `get_market_plan_risk` | which of the 1588 planned hours the market is not paying for, and what it asks for that the plan never teaches: the audited gaps with their nearest plan row, and the over-invested tracks with their measured jd frequency and combined hour cost |
 
 ### `get_plan`
 
@@ -447,3 +451,43 @@ typo cannot pass by matching nothing. `--list` prints every anchor and its curre
 scan output — the 189 core requisitions, the 34 mapped skills' <!-- verify:skills=34 --> shares,
 readiness — is deliberately not anchorable, because the 03:00 scan rewrites it; cite those with
 the report file and the scan date instead, the way section 2 does.
+
+### `get_market_priorities`
+
+What to study next, given what the market actually asks for: the incomplete plan rows ranked by the readiness points finishing each one buys, plus where readiness stands today and which of the five market segments the work moves toward. Every row carries both `row` (1-based, as the statements cite it) and `syllabus_index` (row - 1, what get_syllabus and get_plan take).
+
+Arguments: `max_month` (integer), `track` (string), `include_segments` (boolean).
+Reads `reports/market/insight.json` and `reports/market/benchmark.json`, written by the 03:00 scan;
+returns the stored `statement` strings, so this tool, the Market tab and the weekly email say the
+identical sentence. Before the first completed scan it returns a stated unavailable result rather
+than throwing.
+
+### `get_market_reach`
+
+Which of the measured requisitions are takeable without leaving India, at which named companies, and whether that slice asks for something different from the market at large. Returns the tier distribution, the named roles with their URLs, the per-skill whole-market versus reachable share, and derivedCount — how many requisitions were tiered from the location string alone, which overstates reach.
+
+Arguments: `skills_limit` (integer).
+Reads `reports/market/insight.json` and `reports/market/benchmark.json`, written by the 03:00 scan;
+returns the stored `statement` strings, so this tool, the Market tab and the weekly email say the
+identical sentence. Before the first completed scan it returns a stated unavailable result rather
+than throwing.
+
+### `get_market_skill`
+
+Does the market ask for what a plan row teaches, and what does finishing it buy? Joins the measured coverage of a skill (whole-market share, the plan rows that teach it, the quoted JD evidence) with its share of the reachable slice and the readiness gain if its row is unfinished. With no arguments it returns the compact 34-skill index — id, label, market share, reachable share, primary row — which is the routing table for the other market tools.
+
+Arguments: `row` (integer).
+Reads `reports/market/insight.json` and `reports/market/benchmark.json`, written by the 03:00 scan;
+returns the stored `statement` strings, so this tool, the Market tab and the weekly email say the
+identical sentence. Before the first completed scan it returns a stated unavailable result rather
+than throwing.
+
+### `get_market_plan_risk`
+
+Which of the 1588 planned hours the market is not paying for, and what it asks for that the plan never teaches: the audited gaps with their nearest plan row, and the over-invested tracks with their measured JD frequency and combined hour cost. The answer to \
+
+Arguments: no arguments.
+Reads `reports/market/insight.json` and `reports/market/benchmark.json`, written by the 03:00 scan;
+returns the stored `statement` strings, so this tool, the Market tab and the weekly email say the
+identical sentence. Before the first completed scan it returns a stated unavailable result rather
+than throwing.

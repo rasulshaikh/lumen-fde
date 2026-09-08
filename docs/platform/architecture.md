@@ -183,7 +183,8 @@ The 18 tools, exactly as the `tools` array declares them:
 `get_plan` · `get_learning_context` · `get_syllabus` · `ask_lumen` · `list_ask_reports` ·
 `read_ask_report` · `save_study_note` · `record_progress` · `get_progress_history` ·
 `get_progress_analytics` · `score_assessment` · `semantic_search` · `get_audit_log` ·
-`get_connection_map`
+`get_connection_map` · `get_market_priorities` · `get_market_reach` · `get_market_skill` ·
+`get_market_plan_risk`
 
 Transport facts that matter operationally:
 
@@ -707,7 +708,7 @@ Every figure asserted above, and the file it was read from. This is the table
 | tabs | 10 | `app/page.tsx` `TABS` |
 | API routes | 10 | `app/api/**/route.ts` |
 | crons | 2 (03:00, 03:30 UTC) | `vercel.json` |
-| MCP tools | 14 | `mcp/server.js` `tools` |
+| MCP tools | 18 | `mcp/server.js` `tools` |
 | review ladder | `[1, 7, 21, 60, 150, 240, 330]` | `lib/review.ts` |
 | daily cap / new per day / per topic | 5 / 2 / 3 | `lib/review.ts` |
 | session TTL | 14 days | `lib/auth.ts` |

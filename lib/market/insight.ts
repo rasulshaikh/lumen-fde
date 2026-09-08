@@ -245,6 +245,7 @@ export type Readiness = {
   evidencedWeight: number;
   totalWeight: number;
   evidenced: SkillWeight[];
+  /** Mapped skills the market currently asks for. A 0%-share skill is not part of the goal. */
   skillCount: number;
   /** The same computation over only the events recorded seven days ago or earlier. */
   weekAgoPct: number;
@@ -493,9 +494,13 @@ function statusByRow(progress: Progress | null, workbook: Workbook, cutoff: stri
  * share of every mapped skill.
  *
  * Weighted, not counted. `python` is 67% of core requisitions and `latency-cost` is 1%; a row
- * count calls finishing either of them the same 1/34th of the way there, which is the wrong
+ * count calls finishing either of them the same 1/32nd of the way there, which is the wrong
  * advice at precisely the moment the advice matters. On the current corpus the denominator is
- * 490 share points across 34 skills.
+ * 490 share points across 32 asked-for skills.
+ *
+ * `coverage` here is the caller's asked-for slice, never the raw benchmark rows: a skill at 0%
+ * share adds 0 to both sides of the fraction, so it cannot change the percentage, and listing it
+ * in `evidenced` would credit a clearing that bought nothing.
  */
 function readinessOf(coverage: CoverageEntry[], done: (row: number | null) => boolean) {
   let evidencedWeight = 0;
@@ -533,13 +538,39 @@ export function computeInsight(
   // 1. Readiness, and the marginal table that is the actual deliverable.
   // -------------------------------------------------------------------------
 
+  /**
+   * The skills the market actually asks for, which is not every skill the benchmark emits.
+   *
+   * `computeBenchmark` renders a coverage row for every skill in data/market-skill-map.json,
+   * including the ones no live requisition mentions — `async-comms` and `llm-as-judge` are both
+   * at 0% on the current corpus. That is correct THERE: a mapped skill that nothing asks for is
+   * a finding about the plan. It is wrong in everything below, because everything below prices
+   * STUDY, and clearing a skill with no demand behind it buys exactly nothing.
+   *
+   * Left unfiltered it produced marginal row 80: one skill, +0 readiness, a whole ranked "study
+   * this next" row whose entire content was the absence of demand. And it listed `llm-as-judge`
+   * beside `evals` on row 59, which reads as a row that clears two things the market pays for
+   * when it clears one.
+   *
+   * Filtering here rather than in the tab because the tab is one of four consumers — the weekly
+   * email, /api/ask, the MCP market tools and insight.json itself all read these same rows, and
+   * a row's worth is not a rendering question.
+   *
+   * The readiness PERCENTAGE cannot move as a result: a 0% skill contributes 0 to both
+   * `evidencedWeight` and `totalWeight`. Only the counts change, and they change toward the
+   * truth — "0 of 32 skills cleared" is the goal; "0 of 34" counts two nobody is hiring for.
+   * The test pins the percentage across this filter, so if it ever moves, the defect is
+   * elsewhere and this is where it surfaces.
+   */
+  const asked = coverage.filter((entry) => entry.pct > 0);
+
   const weekAgo = iso(new Date(now.getTime() - VELOCITY_MIN_DAYS * 864e5));
   const current = statusByRow(progress, workbook, null);
   const before = statusByRow(progress, workbook, weekAgo);
   const isDone = (rows: Map<number, string>) => (row: number | null) => row !== null && DONE_STATUSES.has(rows.get(row) ?? "");
 
-  const nowReady = readinessOf(coverage, isDone(current.rows));
-  const thenReady = readinessOf(coverage, isDone(before.rows));
+  const nowReady = readinessOf(asked, isDone(current.rows));
+  const thenReady = readinessOf(asked, isDone(before.rows));
 
   /**
    * Every incomplete plan row that carries a skill, with the readiness it would buy.
@@ -548,10 +579,11 @@ export function computeInsight(
    * `agents`, `multi-agent`, `agent-memory` and `human-in-the-loop`, and four separate lines
    * would understate it four times over and rank it below rows worth less than it. A completed
    * row cannot appear — its skills are already in the numerator, so its gain is empty and the
-   * group is never created.
+   * group is never created. Nor can a row whose only skills sit at 0% share: `asked` never hands
+   * one over, so no group is created for it at all.
    */
   const byRow = new Map<number, SkillWeight[]>();
-  for (const entry of coverage) {
+  for (const entry of asked) {
     if (entry.primaryRow === null || isDone(current.rows)(entry.primaryRow)) continue;
     const held = byRow.get(entry.primaryRow) ?? [];
     held.push({ id: entry.id, label: entry.label, pct: entry.pct });
@@ -563,6 +595,15 @@ export function computeInsight(
     const ref = planRow(workbook, row);
     if (!ref) continue;
     const gainWeight = skills.reduce((n, s) => n + s.pct, 0);
+    // A row that buys nothing is not a move, and ranking it is noise. `asked` already makes this
+    // unreachable, and it stays because the two rules are independent: the sort below orders on
+    // `gainWeight`, so a zero can only ever be last, and "last" is where a reader looks for the
+    // cheapest remaining move rather than for a row that does not exist.
+    //
+    // Tested on `gainWeight`, never on `gainPoints`. Rows 61 and 65 each carry a 1% skill and
+    // round to +0 readiness against a 490-point denominator; they are real demand and real work,
+    // and dropping them would delete the market's tail rather than its absence.
+    if (gainWeight === 0) continue;
     const to = pctOf(nowReady.evidencedWeight + gainWeight, nowReady.totalWeight);
     marginal.push({
       row,
@@ -589,7 +630,11 @@ export function computeInsight(
     evidencedWeight: nowReady.evidencedWeight,
     totalWeight: nowReady.totalWeight,
     evidenced: nowReady.evidenced,
-    skillCount: coverage.length,
+    // The skills with demand behind them, not every mapped skill. `coverage.length` was 34 while
+    // two of those rows were at 0% share, so the statement read "0 of 34 cleared" against a goal
+    // of 32 — and the Market tab's own coverage table, which filters pct > 0, printed 32 rows
+    // directly beneath it. The weighted denominator is untouched by this: 0% adds 0 either way.
+    skillCount: asked.length,
     weekAgoPct: thenReady.pct,
     deltaPoints: nowReady.pct - thenReady.pct,
     eventCount: current.events,
@@ -597,7 +642,7 @@ export function computeInsight(
     marginal,
     statement:
       `READINESS - ${nowReady.pct}% of the market you can evidence today: ${nowReady.evidencedWeight} of ${nowReady.totalWeight} share points,` +
-      ` ${plural(nowReady.evidenced.length, "skill", "skills")} of ${coverage.length} cleared, weighted by how often the market asks for each.` +
+      ` ${plural(nowReady.evidenced.length, "skill", "skills")} of ${asked.length} cleared, weighted by how often the market asks for each.` +
       ` From ${plural(current.matched, "progress event", "progress events")} matched to a plan row, not from the workbook baseline.` +
       `\nA low number is the expected month-one reading, not a failure — rank by the marginal gains, not by this.`,
   };

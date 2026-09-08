@@ -171,9 +171,13 @@ ck("insight and benchmark agree on the core denominator",
 const share = (id: string) => benchmark.coverage.find((c) => c.id === id)!.pct;
 ck("python is on every fixture req and latency-cost on two", share("python") === 100 && share("latency-cost") === 20,
   `(python ${share("python")}%, latency-cost ${share("latency-cost")}%)`);
+// The count beside the denominator is the skills with DEMAND, not the size of the skill map:
+// only `python` and `latency-cost` are on a fixture req, so the other 32 mapped skills sit at 0%
+// share and are no part of what "ready" means. Both halves matter — 120 share points is the
+// weighted denominator, 2 is the goal it is spread across.
 ck("the denominator is the summed market share, not the skill count",
-  noProgress.readiness.totalWeight === 120 && noProgress.readiness.skillCount === skillMap.skills.length,
-  `(${noProgress.readiness.totalWeight} share points across ${noProgress.readiness.skillCount} skills)`);
+  noProgress.readiness.totalWeight === 120 && noProgress.readiness.skillCount === 2 && skillMap.skills.length > 2,
+  `(${noProgress.readiness.totalWeight} share points across ${noProgress.readiness.skillCount} of ${skillMap.skills.length} mapped skills)`);
 
 /**
  * The one assertion this whole file is built around.
@@ -240,11 +244,62 @@ ck("...and every other row is still offered", rowsOf(clearedPython).length === r
 ck("the gain is stated against the same denominator as readiness",
   noProgress.readiness.marginal[0].from === 0 && noProgress.readiness.marginal[0].to === 83
     && noProgress.readiness.marginal[0].gainPoints === 83);
-ck("...and a row that clears nothing the market asks for offers no gain",
-  noProgress.readiness.marginal.some((m) => m.gainWeight === 0 && m.gainPoints === 0),
-  "(reported at +0 rather than hidden — a skill at 0% share is a finding about the plan)");
 ck("every marginal row resolves to a real workbook topic",
   noProgress.readiness.marginal.every((m) => m.topic.length > 0 && m.topic === String(workbook.Plan[m.row][2])));
+
+/**
+ * A skill nothing asks for may not be priced, listed, or ranked.
+ *
+ * This is the defect the fixtures reproduce exactly: on the live corpus `async-comms` (row 80)
+ * and `llm-as-judge` (row 59) both sit at 0% share, so row 80 was emitted as a ranked next move
+ * whose only skill was one no requisition mentions and whose gain was +0 — a "study this" row
+ * made entirely of absent demand — while row 59 listed llm-as-judge beside evals and implied it
+ * clears two things the market pays for. Here 32 of the 34 mapped skills are at 0%, so the same
+ * two failures are available on every one of them and the assertions below are not narrow.
+ *
+ * `gainWeight > 0` is the emission rule rather than `gainPoints > 0`: on the live denominator a
+ * 1% skill rounds to +0 readiness and is still real demand and real work.
+ */
+const ZERO_SHARE_ROW = { row: 80, topic: String(workbook.Plan[80][2]) };
+ck("the 0%-share skills are genuinely in the coverage rows this table is built from",
+  benchmark.coverage.filter((c) => c.pct === 0).length === skillMap.skills.length - 2
+    && benchmark.coverage.some((c) => c.pct === 0 && c.primaryRow === ZERO_SHARE_ROW.row),
+  `(${benchmark.coverage.filter((c) => c.pct === 0).length} of ${benchmark.coverage.length} coverage rows at 0% share)`);
+ck("no marginal row lists a skill the market does not ask for",
+  noProgress.readiness.marginal.every((m) => m.skills.length > 0 && m.skills.every((s) => s.pct > 0)),
+  `(${noProgress.readiness.marginal.length} rows: ${noProgress.readiness.marginal.map((m) => `${m.row} +${m.gainWeight}`).join(", ")})`);
+ck("...so a row whose only skill is one nothing asks for is not emitted at all",
+  !rowsOf(noProgress).includes(ZERO_SHARE_ROW.row), `(row ${ZERO_SHARE_ROW.row}, "${ZERO_SHARE_ROW.topic}")`);
+ck("...and no emitted row buys nothing", noProgress.readiness.marginal.every((m) => m.gainWeight > 0));
+ck("...while a row whose gain rounds to +0 against the denominator is still offered",
+  rowsOf(noProgress).includes(ROW_LATENCY.row),
+  "(gainWeight, never gainPoints: rounding away the market's tail is not the same as dropping its absence)");
+ck("the ranking is still gain-descending after the filter",
+  noProgress.readiness.marginal.every((m, i, all) => i === 0 || all[i - 1].gainWeight >= m.gainWeight)
+    && noProgress.readiness.marginal[0].row === ROW_PYTHON.row);
+
+/**
+ * The filter may not move the percentage, and if it ever does, something else is wrong.
+ *
+ * A 0%-share skill adds 0 to the numerator and 0 to the denominator, so readiness recomputed over
+ * ALL 34 coverage rows must equal the emitted number computed over the 2 asked-for ones. That
+ * equality is what makes the filter safe to apply in the module rather than in the tab: it drops
+ * rows from the table without repricing anything the reader has already been told.
+ */
+const allShare = benchmark.coverage.reduce((n, c) => n + c.pct, 0);
+const shareOfRow = (row: number) => benchmark.coverage.filter((c) => c.primaryRow === row).reduce((n, c) => n + c.pct, 0);
+ck("readiness recomputed over every coverage row, 0% ones included, is the same number",
+  clearedPython.readiness.totalWeight === allShare && clearedPython.readiness.evidencedWeight === shareOfRow(ROW_PYTHON.row)
+    && clearedPython.readiness.pct === Math.round((shareOfRow(ROW_PYTHON.row) / allShare) * 100),
+  `(${clearedPython.readiness.pct}%: ${clearedPython.readiness.evidencedWeight} of ${allShare} share points, unfiltered)`);
+const clearedNoDemand = insightOf(progressOf(event(ZERO_SHARE_ROW.topic, "done", "2026-09-05")), null);
+ck("clearing a row whose skill nothing asks for moves readiness not one point",
+  clearedNoDemand.readiness.pct === noProgress.readiness.pct && clearedNoDemand.readiness.evidencedWeight === 0
+    && clearedNoDemand.readiness.matchedCount === 1,
+  `(${clearedNoDemand.readiness.matchedCount} event matched, readiness ${clearedNoDemand.readiness.pct}%)`);
+ck("...and it is not credited as a skill cleared either",
+  clearedNoDemand.readiness.evidenced.length === 0 && !clearedNoDemand.flags.some((f) => f.kind === "readiness"),
+  "(a 0% skill in `evidenced` would inflate the cleared count and could raise a readiness flag worth 0 points)");
 
 // ---------------------------------------------------------------------------
 console.log("\n  reachability — five exclusive tiers, and what an out-of-reach req may not touch");
@@ -423,23 +478,59 @@ console.log(`    ${live.reachability.statement.split("\n")[0]}`);
 console.log(`    ${live.readiness.marginal[0].statement.split("\n")[0]}`);
 console.log(`    ${live.segments.map((s) => `${s.rank}. ${s.id} ${s.count}/${s.reachableCount}`).join("  ")}`);
 
-ck("the live core count matches the benchmark's", live.reachability.coreCount === liveBenchmark.coreCount && liveBenchmark.coreCount === 189,
-  `(${live.reachability.coreCount})`);
-ck("the tiers partition 189 real requisitions",
-  live.reachability.tiers.reduce((n, t) => n + t.count, 0) === 189,
-  `(${live.reachability.tiers.map((t) => `${t.tier} ${t.count}`).join(", ")})`);
-ck("every one of the 189 lands in exactly one segment",
-  live.segments.reduce((n, s) => n + s.count, 0) === 189, `(${live.segments.map((s) => `${s.id} ${s.count}`).join(", ")})`);
+// Everything below reads reports/market/*.json, which the nightly scan REWRITES. A count pinned
+// here fails CI the first morning a board posts one requisition — a green suite is supposed to
+// mean the arithmetic holds, not that the market stood still. So each of these asserts the rule
+// and prints the number: the diagnostic still shows today's 189, the assertion does not depend
+// on it. `> 0` is carried alongside the equalities because 0 === 0 satisfies every partition
+// claim below, and an empty index is the one corpus that must not read as passing.
+ck("insight and benchmark agree on the live core denominator",
+  live.reachability.coreCount === liveBenchmark.coreCount && liveBenchmark.coreCount > 0,
+  `(${live.reachability.coreCount} distinct core, two private copies of distinct())`);
+ck("the tiers partition the live corpus, whatever its size",
+  live.reachability.tiers.reduce((n, t) => n + t.count, 0) === live.reachability.coreCount,
+  `(${live.reachability.tiers.map((t) => `${t.tier} ${t.count}`).join(", ")} = ${live.reachability.coreCount})`);
+ck("every live core req lands in exactly one segment",
+  live.segments.reduce((n, s) => n + s.count, 0) === live.reachability.coreCount,
+  `(${live.segments.map((s) => `${s.id} ${s.count}`).join(", ")} = ${live.reachability.coreCount})`);
 ck("no live company falls through SEGMENT_BY_COMPANY", !live.segments.some((s) => s.id === "other"),
   "(23 core companies, all mapped — an unmapped board would show here as an unassigned count)");
 ck("the reachable slice excludes every out-of-reach req",
   live.reachability.reachableCount ===
     live.reachability.tiers.filter((t) => t.tier === "india-remote" || t.tier === "emea-apac-remote").reduce((n, t) => n + t.count, 0));
-ck("the live readiness denominator is the summed market share", live.readiness.totalWeight === 490,
-  `(${live.readiness.totalWeight} share points across ${live.readiness.skillCount} skills)`);
-ck("month one reads 0% and leads with the marginal table anyway",
-  live.readiness.pct === 0 && live.readiness.marginal.length > 0 && live.readiness.marginal[0].row === 28,
-  `(row ${live.readiness.marginal[0].row}, +${live.readiness.marginal[0].gainPoints} points)`);
+// The denominator is not 490; it is whatever the coverage rows sum to, and 490 is what that is
+// this week. Summing the rows the readiness is built FROM is the claim worth making — it fails
+// the moment a skill is dropped from the numerator's denominator or double-counted, and it
+// survives the market adding a skill.
+// Summed over ALL coverage rows, 0%-share ones included, which is also the proof that dropping
+// them from the marginal table cannot reprice readiness: they contribute 0 to this sum.
+const liveTotalShare = liveBenchmark.coverage.reduce((n, c) => n + c.pct, 0);
+const liveAsked = liveBenchmark.coverage.filter((c) => c.pct > 0);
+ck("the live readiness denominator is the summed market share of the coverage rows",
+  live.readiness.totalWeight === liveTotalShare && live.readiness.skillCount === liveAsked.length,
+  `(${live.readiness.totalWeight} share points across ${live.readiness.skillCount} asked-for of ${liveBenchmark.coverage.length} mapped skills)`);
+// `live` is computed with progress null, so the 0% is not a fact about the corpus — it is what
+// "nothing evidenced" MUST read as. That is the invariant; the number it produces today is not.
+// pctOf's rounding is reproduced rather than imported because insight.ts does not export it.
+ck("live readiness is the evidenced share over the total share, and null progress evidences nothing",
+  live.readiness.evidenced.length === 0 && live.readiness.evidencedWeight === 0
+    && live.readiness.pct === (live.readiness.totalWeight > 0
+      ? Math.round((live.readiness.evidencedWeight / live.readiness.totalWeight) * 100) : 0),
+  `(${live.readiness.pct}%: ${live.readiness.evidencedWeight} of ${live.readiness.totalWeight} share points)`);
+ck("...and it leads with a marginal table ranked by gain, every row a real plan row",
+  live.readiness.marginal.length > 0
+    && live.readiness.marginal.every((m, i, all) => i === 0 || all[i - 1].gainWeight >= m.gainWeight)
+    && live.readiness.marginal.every((m) =>
+      Number.isInteger(m.row) && m.row >= 1 && m.row < workbook.Plan.length
+        && m.topic.length > 0 && m.topic === String(workbook.Plan[m.row][2])),
+  `(${live.readiness.marginal.length} rows, top is row ${live.readiness.marginal[0].row}, +${live.readiness.marginal[0].gainPoints} points)`);
+// The rule, not today's two: whichever skills have fallen to 0% share this week, none of them may
+// appear on a ranked row and no row may survive on their weight alone. Printed rather than
+// asserted, because a week where every mapped skill has demand must still pass.
+ck("no live marginal row is ranked on a skill the market does not ask for",
+  live.readiness.marginal.every((m) => m.skills.length > 0 && m.skills.every((s) => s.pct > 0))
+    && live.readiness.marginal.every((m) => m.gainWeight > 0),
+  `(${live.readiness.marginal.length} rows; ${liveBenchmark.coverage.length - liveAsked.length} coverage rows at 0% share: ${liveBenchmark.coverage.filter((c) => c.pct === 0).map((c) => `${c.id} (row ${c.primaryRow})`).join(", ") || "none"})`);
 // Asserts the RULE, not the current contents. This pinned `liveTrend.length === 1`, and the
 // nightly scan appended a second point, so a correct system failed its own test the next morning.
 // Span of the live trend in days. Used to assert the velocity RULE rather than a snapshot of

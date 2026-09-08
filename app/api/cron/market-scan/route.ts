@@ -308,7 +308,7 @@ function weeklyFraming(facts: string): Promise<string> {
 function quaereReading(facts: string): Promise<string> {
   return modelParagraph(
     `Here is what this week's measured Forward-Deployed Engineer market means for one candidate in Pune,` +
-      ` at month one of a twenty-month plan. In 80 words or fewer, write the reading that sits beneath these` +
+      ` at month one of a 23-month plan. In 80 words or fewer, write the reading that sits beneath these` +
       ` numbers on his dashboard: which slice of this market to aim at, and what the ranking is really saying.` +
       ` Interpretation only. Write no numbers at all: no digits, no percentages, no counts, no years. The numbers` +
       ` are already printed above your paragraph and repeating them is the one thing that makes this paragraph` +
