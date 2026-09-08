@@ -184,8 +184,18 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
           from under the pace map to sit here: it is the row he actually opens this morning,
           and the panel to its left is why that row is worth opening. */}
       <section className="content-grid">
+        {/* Start here leads, and takes the wide column.
+            This page is opened every morning for roughly two years, so the first thing on it
+            should be what to do today rather than what has not happened yet. At month 1 three of
+            the first four panels are honest zeros, and the widest of them — the slot the eye
+            lands on — was one of those. Evidence keeps everything it says, one column over.
+
+            The description is no longer cut at 118 characters. That cap existed only because this
+            was the narrow panel: 38 of the 119 rows are longer than it, up to 662 characters, so
+            a third of the plan showed its instruction with the end sliced off, in the panel whose
+            whole job is saying what the work actually is. */}
+        <div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Next action</p><h2>Start here</h2></div><span className="priority">P1</span></div><div className="next-action"><div className="action-index">{nextRow ? String(nextIndex + 1).padStart(2, "0") : "—"}</div><div><h3>{nextRow ? String(nextRow[2]) : "Plan complete"}</h3><p>{nextRow ? String(nextRow[3]) : "Every topic is done or skipped."}</p>{nextRow && <Link href={String(nextRow[5])}>Open reading</Link>}</div></div><button className="primary-button" onClick={() => setView("Plan")}>Open the plan <span>→</span></button></div>
         <EvidencePanel feed={feed} openMarket={() => setView("Market")} />
-        <div className="panel"><div className="panel-head"><div><p className="eyebrow">Next action</p><h2>Start here</h2></div><span className="priority">P1</span></div><div className="next-action"><div className="action-index">{nextRow ? String(nextIndex + 1).padStart(2, "0") : "—"}</div><div><h3>{nextRow ? String(nextRow[2]) : "Plan complete"}</h3><p>{nextRow ? (String(nextRow[3]).length > 118 ? `${String(nextRow[3]).slice(0, 118)}…` : String(nextRow[3])) : "Every topic is done or skipped."}</p>{nextRow && <Link href={String(nextRow[5])}>Open reading</Link>}</div></div><button className="primary-button" onClick={() => setView("Plan")}>Open the plan <span>→</span></button></div>
       </section>
 
       {/* 3. The wall, with the rhythm beside it: the two records of accumulation, one of what
