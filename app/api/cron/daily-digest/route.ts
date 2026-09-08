@@ -42,6 +42,61 @@ const norm = (value: unknown) => String(value ?? "").trim().toLowerCase();
 const normStatus = (value: unknown) => norm(value).replace(/_/g, " ");
 
 /**
+ * The one status that means a topic is being worked right now. Not in DONE_STATUSES, and it never
+ * will be — it is not evidence of a skill — but it IS evidence of where the reader is, which is a
+ * different question and the one that picks today's topic.
+ */
+const IN_PROGRESS = "in progress";
+
+/** UTC day, the same slice the stored progress events and this file's day counts are compared on. */
+const iso = (date: Date) => date.toISOString().slice(0, 10);
+
+/**
+ * A topic must have led the email this many days before the email says so.
+ *
+ * Day 1 is the morning after an event was recorded, which is the plan working rather than
+ * stalling. From day 2 the repetition is real and the reader deserves the count instead of an
+ * email that looks stuck without admitting it.
+ */
+const STALE_TOPIC_DAYS = 2;
+
+/**
+ * One topic's current standing: the newest status recorded against it, and the day that event
+ * was recorded.
+ *
+ * The day is carried because two decisions below need it and neither may store anything new —
+ * which of several in-progress topics is the freshest, and how long the chosen one has led.
+ */
+type Standing = {
+  status: string;
+  /** The newest event's day: what you last did. */
+  day: string;
+  /**
+   * The OLDEST event's day: when this topic was first touched.
+   *
+   * The day count is measured from here, not from `day`. Measuring from the newest event let any
+   * event reset the counter, so re-recording "not started" on a topic silenced the stall line
+   * that exists to report the stall -- a no-op that hides the very thing being reported. That is
+   * not hypothetical: an automated session wrote a not_started event on 2026-09-07 against a
+   * topic marked in_progress on 2026-09-05, and it would have reset the count to day 1.
+   */
+  since: string;
+};
+
+/**
+ * Whole days from a recorded event to today, counting both ends: an event recorded today is day 1.
+ *
+ * Null when either day is unparseable, or when the event is dated in the future — a clock skew or
+ * a hand-edited file must cost the line, not ship "Day -3 on this topic".
+ */
+function daysLeading(day: string, today: string) {
+  const from = Date.parse(`${day}T00:00:00Z`);
+  const to = Date.parse(`${today}T00:00:00Z`);
+  if (Number.isNaN(from) || Number.isNaN(to) || from > to) return null;
+  return Math.floor((to - from) / 864e5) + 1;
+}
+
+/**
  * Everything below is derived from the plan, with no model involved.
  *
  * The digest used to be a single model paragraph, so when the model returned nothing the
@@ -60,14 +115,65 @@ const normStatus = (value: unknown) => norm(value).replace(/_/g, " ");
  * The column survives as the per-row fallback: it is where "Skipped" lives, and where an
  * unreadable progress store lands, so a GitHub outage costs freshness and not the brief.
  */
-function digest(rows: Row[], progress: Map<string, string> | null) {
-  const status = (r: Row) => progress?.get(norm(r[2])) ?? normStatus(r[15]);
+function digest(rows: Row[], progress: Map<string, Standing> | null) {
+  const status = (r: Row) => progress?.get(norm(r[2]))?.status ?? normStatus(r[15]);
+  /** "" for a row with no recorded event, which sorts below every real ISO day. */
+  const day = (r: Row) => progress?.get(norm(r[2]))?.day ?? "";
   const active = rows.filter((r) => status(r) !== "skipped");
   const done = active.filter((r) => DONE_STATUSES.has(status(r)));
   const totalH = active.reduce((n, r) => n + Number(r[13] || 0), 0);
   const doneH = done.reduce((n, r) => n + Number(r[13] || 0), 0);
-  const next = active.find((r) => !DONE_STATUSES.has(status(r)));
+
+  /**
+   * Today's topic: what is actually being worked, else the plan's own order.
+   *
+   * "First row not done" ignored `in progress` entirely, so a reader who had started row 5 while
+   * rows 0-4 sat untouched was sent row 0 every morning — plan order outranking the evidence the
+   * reader had gone to the trouble of recording. Prefer the in-progress topic.
+   *
+   * Several at once resolves on the recorded day, newest first, because that is the one being
+   * worked now. `>` and not `>=` on a stable filter order means a tie keeps the earlier plan row,
+   * so two events recorded on the same day cannot make the email alternate between them.
+   *
+   * The fallback is unchanged and has to stay that way: with nothing in progress — the cold
+   * start, and every morning the progress store is unreadable — this is still the first row that
+   * is not done, which is the order the plan itself prescribes.
+   */
+  const underway = active.filter((r) => status(r) === IN_PROGRESS);
+  const next = underway.length
+    ? underway.reduce((best, r) => (day(r) > day(best) ? r : best))
+    : active.find((r) => !DONE_STATUSES.has(status(r)));
   const idx = next ? rows.indexOf(next) : -1;
+
+  /**
+   * How long this topic has led, and when it was last touched.
+   *
+   * The email repeats a topic until progress moves it. That is correct for a study plan — a
+   * rotation through unstarted topics would scatter the focus the plan exists to hold — but it
+   * reads as a stuck email, so the honest fix is to say the repetition out loud. Derived from the
+   * events and today's date alone: a counter file would be new stored state to keep in sync with
+   * a history that already carries the answer.
+   *
+   * Silent when the progress store could not be read. "Nothing was ever recorded" would then be a
+   * claim about a file nobody saw, and the rule in this email is that an outage costs freshness
+   * and never truth.
+   */
+  let age: string | null = null;
+  if (progress && next) {
+    const standing = progress.get(norm(next[2]));
+    // From `since`, so a later no-op event cannot reset the count. See the Standing type.
+    const days = standing ? daysLeading(standing.since || standing.day, iso(new Date())) : null;
+    if (!standing) {
+      // The actionable fact, and the reason the email has not moved: nothing has been recorded
+      // against this topic at all, and recording something is the only thing that advances it.
+      age = "No progress has ever been recorded on this topic. Recording one is what moves this brief on.";
+    } else if (days !== null && days >= STALE_TOPIC_DAYS) {
+      age = `Day ${days} on this topic. Last progress recorded ${standing.day}.`;
+    }
+    // An event whose Date line is missing or unparseable falls through to no line at all: the
+    // topic does have a history, so the sentence above would be false, and no day count can be
+    // honestly derived from a timestamp that is not there.
+  }
 
   const b = bank as unknown as Bank;
   const qs = b.prompts.filter((x) => x.i === idx && x.kind === "recall");
@@ -88,7 +194,7 @@ function digest(rows: Row[], progress: Map<string, string> | null) {
     })) ?? null;
 
   return {
-    next, idx, question, book, track,
+    next, idx, question, book, track, age,
     doneCount: done.length, activeCount: active.length,
     doneH, totalH, remainingH: totalH - doneH,
     weeksLeft: ((totalH - doneH) / 16).toFixed(1),
@@ -107,7 +213,7 @@ const MARKET_READ_MS = 8_000;
 const PROGRESS_READ_MS = 8_000;
 
 /**
- * The current status of every plan row a progress event names, keyed by topic string.
+ * The current standing of every plan row a progress event names, keyed by topic string.
  *
  * `readProgress` already absorbs a missing GITHUB_TOKEN, a 404 cold start (an empty history,
  * which is genuinely "nothing done" rather than unknown) and a transport error, and it is
@@ -119,7 +225,7 @@ const PROGRESS_READ_MS = 8_000;
  * GitHub outage therefore degrades this email to the topic it would have picked yesterday
  * rather than breaking it.
  */
-async function progressStatuses(): Promise<Map<string, string> | null> {
+async function progressStatuses(): Promise<Map<string, Standing> | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const progress = await Promise.race([
@@ -129,12 +235,20 @@ async function progressStatuses(): Promise<Map<string, string> | null> {
       }),
     ]);
     if (!progress) return null;
-    const byTopic = new Map<string, string>();
+    const byTopic = new Map<string, Standing>();
     // Newest first, as readProgress returns them, so the first event for a topic is that row's
     // current status and everything after it is that row's older history.
     for (const event of progress.events) {
       const topic = norm(event?.topic);
-      if (topic && !byTopic.has(topic)) byTopic.set(topic, normStatus(event?.status));
+      // The stored Date is a full ISO instant; sliced to the day because that is the unit both
+      // the freshest-in-progress comparison and the day count are stated in.
+      if (!topic) continue;
+      const day = String(event?.date ?? "").slice(0, 10);
+      const held = byTopic.get(topic);
+      // Newest wins for status and `day`; `since` keeps reaching back, because events arrive
+      // newest-first and the last one seen for a topic is the oldest one recorded.
+      if (!held) byTopic.set(topic, { status: normStatus(event?.status), day, since: day });
+      else if (day && (!held.since || day < held.since)) held.since = day;
     }
     return byTopic;
   } catch (error) {
@@ -338,19 +452,27 @@ export async function GET(request: Request) {
 
     const pace = `${d.doneCount} of ${d.activeCount} topics done · ${d.doneH}h of ${d.totalH}h · ${d.remainingH}h left, about ${d.weeksLeft} weeks at 16h/week`;
     const text = [
-      `TODAY — ${topic}`, `Month ${d.next[1]} · ${d.next[13]}h · ${d.track}`, ``,
-      // Above the framing and everything under it. A broken pipeline outranks today's recall
-      // question: the study brief is still true when the scan is dead, and the market numbers are
-      // not. Buried under SHIP THIS these would be read on the morning someone went looking for
-      // them, which is after the week of silence rather than on its first day. Empty on a healthy
-      // morning, which is most of them, and then this line contributes nothing.
-      market.alerts.length ? `${market.alerts.map((a) => a.line).join("\n\n")}\n` : ``,
+      // Above everything, the new roles below it included. A broken pipeline outranks both the
+      // study brief and the market section, because the study brief is still true when the scan
+      // is dead and the market numbers are not. Buried lower these would be read on the morning
+      // someone went looking for them, which is after the week of silence rather than on its
+      // first day. Empty on a healthy morning, which is most of them.
+      // Spread rather than an empty string, now that these two sections are the first elements in
+      // the array: an empty string here is still joined, and a quiet morning would open the email
+      // on two blank lines instead of on TODAY.
+      ...(market.alerts.length ? [`${market.alerts.map((a) => a.line).join("\n\n")}\n`] : []),
+      // Above TODAY, not under SHIP THIS. This section orders itself: it is empty on almost every
+      // morning — 0 new core roles is the usual reading — so on a quiet day the study brief leads
+      // with no special case anywhere in this array, and on the rare day a role appears it is the
+      // first thing read, which is exactly when it is worth interrupting the brief for.
+      ...(market.entries.length ? [`NEW CORE REQS — ${market.total}\n${marketLines.join("\n")}\n`] : []),
+      `TODAY — ${topic}`, `Month ${d.next[1]} · ${d.next[13]}h · ${d.track}`,
+      // Directly under the header it qualifies, because it is a fact about this exact topic.
+      ...(d.age ? [d.age] : []),
+      ``,
       framing ? `${framing}\n` : ``,
       `WHAT IT ASKS OF YOU`, depth, ``,
       `SHIP THIS`, deliverable, ``,
-      // After SHIP THIS and before ANSWER THIS COLD, so the study content still leads. Most
-      // mornings there is nothing new and this is an empty string, which is the point.
-      market.entries.length ? `NEW CORE REQS — ${market.total}\n${marketLines.join("\n")}\n` : ``,
       d.question ? `ANSWER THIS COLD (before you open anything)\n${d.question}\n` : ``,
       `READ · ${d.next[4]}\n${d.next[5]}`, ``,
       `DO · ${d.next[10]}\n${d.next[11]}`, ``,
@@ -365,12 +487,13 @@ export async function GET(request: Request) {
 <table style="max-width:620px;margin:auto;background:#0f1011;border:1px solid #23252a;border-radius:12px;padding:24px;border-collapse:separate">
 <tr><td style="padding-bottom:4px"><div style="font:500 11px ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#828fff">Lumen brief</div>
 <div style="font-size:22px;font-weight:600;color:#f7f8f8;letter-spacing:-.02em;margin-top:6px">${esc(topic)}</div>
-<div style="color:#8a8f98;font-size:13px;margin-top:4px">Month ${d.next[1]} · ${d.next[13]}h · ${esc(d.track)}</div></td></tr>
+<div style="color:#8a8f98;font-size:13px;margin-top:4px">Month ${d.next[1]} · ${d.next[13]}h · ${esc(d.track)}</div>
+${d.age ? `<div style="color:#8a8f98;font-size:13px;margin-top:4px">${esc(d.age)}</div>` : ""}</td></tr>
 ${market.alerts.map((a) => row(a.label, esc(a.line))).join("")}
+${market.entries.length ? row(`New core reqs — ${market.total}`, `${market.entries.map((r) => `<a href="${esc(r.url)}" style="color:#828fff">${esc(r.statement)}</a>`).join("<br />")}${market.overflow > 0 ? `<br /><span style="color:#8a8f98">+${market.overflow} more</span>` : ""}`) : ""}
 ${framing ? row("Why it matters", esc(framing)) : ""}
 ${row("What it asks of you", esc(depth))}
 ${row("Ship this", esc(deliverable))}
-${market.entries.length ? row(`New core reqs — ${market.total}`, `${market.entries.map((r) => `<a href="${esc(r.url)}" style="color:#828fff">${esc(r.statement)}</a>`).join("<br />")}${market.overflow > 0 ? `<br /><span style="color:#8a8f98">+${market.overflow} more</span>` : ""}`) : ""}
 ${d.question ? row("Answer this cold", esc(d.question)) : ""}
 ${row("Read", `<a href="${esc(String(d.next[5]))}" style="color:#828fff">${esc(String(d.next[4]))}</a>`)}
 ${row("Do", `<a href="${esc(String(d.next[11]))}" style="color:#828fff">${esc(String(d.next[10]))}</a>`)}

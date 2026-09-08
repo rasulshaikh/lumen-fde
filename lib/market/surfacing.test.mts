@@ -228,7 +228,10 @@ const five: [string, string, ReqClass][] = [
   ["Echo", "Field Engineer", "core"],
 ];
 const many = await digest(index(five));
-const marketBlock = many.email.text.split("NEW CORE REQS")[1]?.split("ANSWER THIS COLD")[0] ?? "";
+// The section now sits ABOVE the study brief, so the block ends where the brief begins. Splitting
+// on ANSWER THIS COLD would sweep the whole brief into "the market block" and let a stray company
+// name in a plan row satisfy the assertions below.
+const marketBlock = many.email.text.split("NEW CORE REQS")[1]?.split("TODAY —")[0] ?? "";
 
 ck("the cap constant the route renders against is three", NEW_ROLES_CAP === 3);
 ck("the header carries the true total, not the printed count", many.email.text.includes("NEW CORE REQS — 5"));
@@ -320,7 +323,8 @@ ck("...and the pace credits the finished row's hours", advanced.email.text.inclu
 const spelled = await digest(index([]), [{ topic: ROW0, status: "Completed", date: "2026-09-10" }]);
 ck("\"Completed\" counts as done, as it does for readiness", spelled.body.topic === ROW1);
 const underway = await digest(index([]), [{ topic: ROW0, status: "in_progress", date: "2026-09-10" }]);
-ck("\"in_progress\" is not evidence and does not advance the plan", underway.body.topic === ROW0);
+ck("\"in_progress\" is not evidence of a finished row and does not advance the plan", underway.body.topic === ROW0);
+ck("...and the pace still counts it as nothing done", underway.email.text.includes("0 of 117 topics done"));
 
 // Newest event wins: a row reopened after being marked done is not done. The events are served
 // newest-first, so this pins that the FIRST one for a topic is the one read, not the last.
@@ -351,6 +355,129 @@ ck("both GitHub reads failing still sends the brief", blackout.status === 200 &&
   && blackout.body.topic === ROW0 && !blackout.email.text.includes("NEW CORE REQS"));
 
 // ---------------------------------------------------------------------------
+console.log("\n  digest — the topic being worked leads, not the first unstarted row");
+// ---------------------------------------------------------------------------
+
+/**
+ * "First row not done" ignored `in_progress` entirely. A reader who started row 5 while rows 0-4
+ * sat untouched was still sent row 0 every morning: the plan's order outranked the one piece of
+ * evidence the reader had actually recorded, and no amount of studying row 5 could move the
+ * email. These assertions read `body.topic`, which is also the subject line, so a selection fix
+ * that did not reach the inbox would still fail here.
+ */
+const ROW5 = "Docker internals: namespaces, cgroups, layers, networking";
+
+const started5 = await digest(index([]), [{ topic: ROW5, status: "in_progress", date: "2026-09-10" }]);
+ck("an in_progress row 5 leads the email, not the first unstarted row", started5.body.topic === ROW5, `("${String(started5.body.topic)}")`);
+ck("...in the subject line and the body alike", started5.email.subject === `Lumen · ${ROW5}` && started5.email.text.includes(`TODAY — ${ROW5}`));
+ck("...without claiming any row is finished", started5.email.text.includes("0 of 117 topics done"));
+
+// Two topics under way at once: the freshest event is the one being worked now. The newer event
+// is listed last here on purpose, so array order alone would pick the wrong one.
+const twoOpen = await digest(index([]), [
+  { topic: ROW5, status: "in_progress", date: "2026-09-09" },
+  { topic: ROW2, status: "in_progress", date: "2026-09-11" },
+]);
+ck("with two rows in progress the newest event wins", twoOpen.body.topic === ROW2, `("${String(twoOpen.body.topic)}")`);
+
+// ...and the other way round, so the assertion above cannot be passing on plan order by accident.
+const twoOpenFlipped = await digest(index([]), [
+  { topic: ROW2, status: "in_progress", date: "2026-09-09" },
+  { topic: ROW5, status: "in_progress", date: "2026-09-11" },
+]);
+ck("...and it is the date deciding, not the plan order", twoOpenFlipped.body.topic === ROW5, `("${String(twoOpenFlipped.body.topic)}")`);
+
+// The fallback, unchanged: an event that is neither done nor in progress leaves the plan's own
+// order in charge, which is what every morning before the first recorded event looks like.
+const notStarted = await digest(index([]), [{ topic: ROW2, status: "not_started", date: "2026-09-11" }]);
+ck("nothing in progress falls back to the first row not done", notStarted.body.topic === ROW0, `("${String(notStarted.body.topic)}")`);
+
+// A done row is still stepped over even while another row is under way — in-progress selects the
+// topic, it does not resurrect a finished one.
+const doneAndOpen = await digest(index([]), [
+  { topic: ROW5, status: "in_progress", date: "2026-09-11" },
+  { topic: ROW0, status: "done", date: "2026-09-10" },
+]);
+ck("a done row stays done while another row leads", doneAndOpen.body.topic === ROW5 && doneAndOpen.email.text.includes("1 of 117 topics done"));
+
+// ---------------------------------------------------------------------------
+console.log("\n  digest — it says how long it has been on the same topic");
+// ---------------------------------------------------------------------------
+
+/**
+ * The email repeats a topic until progress moves it, which is right for a study plan and reads
+ * as a stuck email. The fix is not a rotation through unstarted topics — that scatters the focus
+ * the plan exists to hold — but saying the repetition out loud, with the date of the last
+ * recorded event or the fact that there has never been one.
+ *
+ * The clock is 06:00 on 2026-09-14 throughout, so an event dated 2026-09-10 is day 5 counting
+ * both ends. No counter file and no new stored state: the count is derived from the events.
+ */
+const held = await digest(index([]), [{ topic: ROW5, status: "in_progress", date: "2026-09-10" }]);
+ck("a topic led since the 10th is day 5 on the 14th", held.email.text.includes("Day 5 on this topic"),
+  `("${held.email.text.split("\n").find((l) => l.startsWith("Day ")) ?? ""}")`);
+ck("...naming the last recorded progress event's date", held.email.text.includes("Last progress recorded 2026-09-10"));
+ck("...directly under the header, before the brief", held.email.text.indexOf("Day 5 on this topic") < held.email.text.indexOf("WHAT IT ASKS OF YOU"));
+ck("...and in the HTML header too", held.email.html.includes("Day 5 on this topic"));
+
+// One day is the morning after, which is the plan working rather than stalling.
+const recorded = await digest(index([]), [{ topic: ROW5, status: "in_progress", date: DAY }]);
+ck("an event recorded today raises no day count", !recorded.email.text.includes("Day 1 on this topic") && !recorded.email.text.includes("Day "),
+  `("${recorded.email.text.split("\n").slice(0, 3).join(" / ")}")`);
+
+// Nothing recorded at all is the actionable case: recording something is what moves the email on.
+ck("a topic with no recorded event says so plainly",
+  fresh.email.text.includes("No progress has ever been recorded on this topic"));
+ck("...and says what would move the brief on", fresh.email.text.includes("Recording one is what moves this brief on"));
+ck("...without inventing a day count", !fresh.email.text.includes("Day "));
+
+// A history with events, none of them on today's topic, is the same fact — `notStarted` above
+// recorded an event on row 2 and the email is on row 0.
+ck("events on other rows do not count as progress on this one",
+  notStarted.email.text.includes("No progress has ever been recorded on this topic"));
+
+// An unreadable store knows nothing about days, and must not claim otherwise.
+ck("an unreadable progress store makes no claim about the topic's age",
+  !outage.email.text.includes("No progress has ever been recorded") && !outage.email.text.includes("Day ")
+  && !outage.email.html.includes("No progress has ever been recorded"));
+
+// ---------------------------------------------------------------------------
+console.log("\n  digest — new core reqs lead; on a quiet morning the brief does");
+// ---------------------------------------------------------------------------
+
+/**
+ * The section is empty on almost every morning, so the ordering is self-managing: put it above
+ * TODAY and a quiet day still opens on the study brief with no special case, while the rare day
+ * a core role appears opens on the role. The alerts stay above both — a dead scan invalidates the
+ * very numbers the market section prints.
+ */
+ck("with new core reqs, the section is the first thing in the email", many.email.text.startsWith("NEW CORE REQS — 5"));
+ck("...above the TODAY line", many.email.text.indexOf("NEW CORE REQS") < many.email.text.indexOf("TODAY —"));
+ck("...and above the study brief in the HTML", many.email.html.indexOf("New core reqs") < many.email.html.indexOf("What it asks of you")
+  && many.email.html.indexOf("New core reqs") < many.email.html.indexOf("Ship this"));
+ck("...while everything from TODAY down keeps its order",
+  many.email.text.indexOf("TODAY —") < many.email.text.indexOf("WHAT IT ASKS OF YOU")
+  && many.email.text.indexOf("WHAT IT ASKS OF YOU") < many.email.text.indexOf("SHIP THIS")
+  && many.email.text.indexOf("SHIP THIS") < many.email.text.indexOf("ANSWER THIS COLD")
+  && many.email.text.indexOf("ANSWER THIS COLD") < many.email.text.indexOf("READ · ")
+  && many.email.text.indexOf("READ · ") < many.email.text.indexOf("DO · ")
+  && many.email.text.indexOf("DO · ") < many.email.text.indexOf("PACE"));
+
+ck("with none, TODAY leads", quiet.email.text.startsWith(`TODAY — ${ROW0}`));
+ck("...and no empty heading is left above it", !quiet.email.text.includes("NEW CORE REQS") && !quiet.email.html.includes("New core reqs"));
+
+// Alerts outrank the roles, which outrank the brief.
+const loudAndNew = index(five);
+loudAndNew.updatedAt = `${YESTERDAY}T00:00:00.000Z`;
+const stacked = await digest(loudAndNew);
+ck("a stale scan still sits above the new roles",
+  stacked.email.text.startsWith("SCAN STALE")
+  && stacked.email.text.indexOf("SCAN STALE") < stacked.email.text.indexOf("NEW CORE REQS")
+  && stacked.email.text.indexOf("NEW CORE REQS") < stacked.email.text.indexOf("TODAY —"));
+ck("...in the HTML too", stacked.email.html.indexOf("Scan stale") < stacked.email.html.indexOf("New core reqs")
+  && stacked.email.html.indexOf("New core reqs") < stacked.email.html.indexOf("What it asks of you"));
+
+// ---------------------------------------------------------------------------
 console.log("\n  digest — a dead or short scan says so, above the study content");
 // ---------------------------------------------------------------------------
 
@@ -375,8 +502,12 @@ const healthy = await digest(index([]));
 ck("a scan that ran this morning raises no stale line",
   !healthy.email.text.includes("SCAN STALE") && !healthy.email.html.includes("Scan stale"));
 ck("...and no partial line either", !healthy.email.text.includes("PARTIAL SCAN") && !healthy.email.html.includes("Partial scan"));
+// The topic-age line is part of the header block, directly under the month line, so it is allowed
+// here and nothing else is. This fixture's history is empty, so the line it renders is the
+// no-event one; the assertion is still that no ALERT scaffold appears on a healthy morning.
 ck("...leaving nothing between the header and the brief — no empty scaffold on a healthy morning",
-  /^TODAY — .+\nMonth [^\n]+\n\s*$/.test(preamble(healthy.email)), `("${preamble(healthy.email).trim()}")`);
+  /^TODAY — .+\nMonth [^\n]+\n(?:No progress has ever been recorded[^\n]*\n|Day \d+ on this topic[^\n]*\n)?\s*$/.test(preamble(healthy.email)),
+  `("${preamble(healthy.email).trim()}")`);
 
 // 26h is the threshold — one cycle plus slack — so a single missed run must stay silent.
 const lateByADay = index([]);

@@ -440,8 +440,19 @@ ck("the live readiness denominator is the summed market share", live.readiness.t
 ck("month one reads 0% and leads with the marginal table anyway",
   live.readiness.pct === 0 && live.readiness.marginal.length > 0 && live.readiness.marginal[0].row === 28,
   `(row ${live.readiness.marginal[0].row}, +${live.readiness.marginal[0].gainPoints} points)`);
-ck("the live trend holds one point, so no velocity is claimed",
-  liveTrend.length === 1 && live.velocity.available === false && live.velocity.skills.length === 0);
+// Asserts the RULE, not the current contents. This pinned `liveTrend.length === 1`, and the
+// nightly scan appended a second point, so a correct system failed its own test the next morning.
+// Span of the live trend in days. Used to assert the velocity RULE rather than a snapshot of
+// how many points happen to be stored today.
+const daySpan = (t: { d: string }[]) =>
+  t.length < 2 ? 0 : Math.round((Date.parse(t[t.length - 1].d) - Date.parse(t[0].d)) / 86400000);
+
+// A test over live data that moves must assert an invariant of that data, never a snapshot of it.
+ck("velocity is claimed only when the live window spans VELOCITY_MIN_DAYS",
+  live.velocity.available === (liveTrend.length >= 2 && daySpan(liveTrend) >= VELOCITY_MIN_DAYS),
+  `(${liveTrend.length} points spanning ${daySpan(liveTrend)}d, available=${live.velocity.available})`);
+ck("...and no velocity means no skill movement is reported",
+  live.velocity.available || live.velocity.skills.length === 0);
 ck("computeInsight is pure over its arguments",
   JSON.stringify(computeInsight(liveIndex, liveBenchmark, null, workbook, liveTrend, NOW)) === JSON.stringify(live));
 ck("the module never writes a Quaere paragraph", live.quaere === null && noProgress.quaere === null,
