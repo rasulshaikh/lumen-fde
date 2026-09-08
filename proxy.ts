@@ -23,6 +23,19 @@ export async function proxy(request: NextRequest) {
     if (secret && timingSafeEqual(request.headers.get("authorization") ?? "", `Bearer ${secret}`)) return NextResponse.next();
     return new NextResponse("Unauthorized", { status: 401 });
   }
+  // `/` is the public front door, and it is a DIFFERENT page from the signed-in home: a visitor
+  // gets the landing page, a request carrying a valid session is sent to /overview. Both halves
+  // of that decision live here rather than in the page, because a page that reads the session
+  // cookie itself is a second place to get authentication wrong, and this file is supposed to be
+  // the only one. The landing renders from bundled JSON only — no progress, no current focus,
+  // nothing personal — which is the same rule /login already documents and follows.
+  if (path === "/") {
+    if (!process.env.LUMEN_PASSWORD) return NextResponse.next();
+    if (await isValidSession(request.cookies.get(sessionCookie)?.value, process.env.LUMEN_USERNAME || "rasul", process.env.LUMEN_PASSWORD)) {
+      return NextResponse.redirect(new URL("/overview", request.url));
+    }
+    return NextResponse.next();
+  }
   if (!process.env.LUMEN_PASSWORD || path === "/login" || path.startsWith("/api/auth") || path.startsWith("/_next/") || publicAsset.test(path)) return NextResponse.next();
   if (path === "/api/ask" && process.env.LUMEN_INTERNAL_API_KEY && timingSafeEqual(request.headers.get("x-lumen-internal-key") ?? "", process.env.LUMEN_INTERNAL_API_KEY)) return NextResponse.next();
   const username = process.env.LUMEN_USERNAME || "rasul";

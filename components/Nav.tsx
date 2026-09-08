@@ -15,7 +15,7 @@ import { usePathname } from "next/navigation";
  * would otherwise become a number typed by hand next to a list it is supposed to describe.
  */
 export const NAV = [
-  { label: "Overview", href: "/" },
+  { label: "Overview", href: "/overview" },
   { label: "Plan", href: "/plan" },
   { label: "Curriculum", href: "/curriculum" },
   { label: "Sandbox", href: "/sandbox" },

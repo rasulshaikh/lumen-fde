@@ -91,7 +91,8 @@ Two edges are worth naming because they are the ones that surprise people:
 ### 3.1 The password gate
 
 `proxy.ts` (Next's proxy/middleware entry point) is the only auth in front of the app. It
-exempts, in this order: no `LUMEN_PASSWORD` set at all, `/login`, `/api/auth/*`, `/_next/*`,
+exempts, in this order: no `LUMEN_PASSWORD` set at all, **`/` (the public landing page)**,
+`/login`, `/api/auth/*`, `/_next/*`,
 the branding assets matched by its `publicAsset` regex (favicon, `icon*.svg|png|ico`,
 `apple-icon*.png`, `(opengraph|twitter)-image*`, `manifest.webmanifest`, `robots.txt`,
 `sitemap.xml`). **`/api/cron/` is NOT in that list — it is GATED, not exempted**, and the check
@@ -102,6 +103,18 @@ a third cron route is protected the day it is created, instead of on the day som
 paste the check into its body — the routes keep their own identical check as the layer that
 survives the proxy being skipped. Cron
 routes authenticate themselves instead, on `Authorization: Bearer ${CRON_SECRET}`.
+
+**`/` is public and is not the signed-in home.** `app/page.tsx` is a landing page for a visitor
+who is not signed in; a request to `/` carrying a valid session is redirected to `/overview`,
+which is where the dashboard's Overview now lives. Both halves of that decision are made in
+`proxy.ts` and not in the page, so every authentication decision in this app stays in one file —
+a page that reads the session cookie itself is a second place to get it wrong.
+
+The landing renders from bundled JSON only, and the rule it follows is the one `app/login/page.tsx`
+already documents: **scale, never state.** Topic counts, hours, syllabus parts and the board count
+describe how big the system is and are harmless on a public URL. Progress, readiness, current
+focus, streaks and anything naming what has or has not been done stay behind the gate. A number
+that needs `statuses` to compute does not belong on that page.
 
 `/api/ask` has one extra bypass: a matching `x-lumen-internal-key` header when
 `LUMEN_INTERNAL_API_KEY` is set. That is the Render MCP server's service-to-service path.
@@ -127,8 +140,9 @@ check is reached. "Every route is public" was true before the cron prefix was ga
 
 Each is its own route under `app/(app)/`, and each page imports its section from `components/` —
 `Market` is `components/Market.tsx`, not a branch inside a shared file. Nine of the eleven pages
-are 27 lines or fewer; `app/(app)/page.tsx` is the exception at 228, because Overview also
-assembles the home feed rather than just mounting a section.
+are 27 lines or fewer; `app/(app)/overview/page.tsx` is the exception at 228, because Overview
+also assembles the home feed rather than just mounting a section. Overview moved off `/` when the
+public landing page took that path; `/` now belongs to a signed-out visitor (§3.1).
 `Sandbox` renders `Terminal` from `app/terminal.tsx`; the recall strip (`app/recall.tsx`) is
 mounted in `app/(app)/layout.tsx`, which is why it is present on every view.
 

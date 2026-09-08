@@ -1096,3 +1096,68 @@ th{padding:0 12px 10px}
    that, and holding it to a column it cannot fill costs more than the measure buys. */
 .full-panel:has(>.assessment-lead)>.assessment-lead,
 .full-panel:has(>.library-note)>.library-note{max-width:none}
+
+/* ============================================================
+   The public landing page (app/page.tsx).
+
+   Every block that carries text paints an opaque --bg. Same reason as the app's chrome and the
+   login intro, and it is not a preference: --muted measures 4.64 on the flat ground and 3.09
+   where a major rule crosses the glyphs, so text sitting directly on the ruling cannot clear AA
+   in the light theme. The ruling stays visible in the gutters between blocks, which is where it
+   reads as paper rather than as a background image behind words.
+   ============================================================ */
+.lp{max-width:1080px;margin:0 auto;padding:0 44px 90px;min-height:100svh}
+
+.lp-top{display:flex;align-items:center;justify-content:space-between;gap:20px;
+  background:var(--bg);padding:26px 0 22px}
+.lp-brand{display:flex;align-items:center;gap:11px;font-family:var(--font-display);
+  font-size:17px;font-weight:700;letter-spacing:-.01em}
+.lp-signin{color:var(--accent-text);font-size:13px;font-weight:700;text-decoration:none;
+  padding:9px 2px;min-height:44px;display:inline-flex;align-items:center}
+.lp-signin:hover{text-decoration:underline}
+
+.lp-hero{background:var(--bg);padding:56px 0 44px}
+.lp-kicker{font-family:var(--font-data);font-size:11px;font-stretch:87.5%;letter-spacing:.03em;
+  text-transform:uppercase;color:var(--accent-text);margin:0 0 20px}
+.lp-hero h1{font-family:var(--font-display);font-size:clamp(34px,4.6vw,58px);line-height:1.04;
+  letter-spacing:-.035em;margin:0 0 26px;max-width:19ch;text-wrap:balance}
+.lp-lede{color:var(--muted);font-size:clamp(15px,1.3vw,17px);line-height:1.6;margin:0;max-width:68ch}
+
+/* A rule between sections rather than a card around each one. The panel treatment belongs to the
+   dashboard, where a panel means "a view of data"; here it would be eight boxes in a column. */
+.lp-scale,.lp-block{background:var(--bg);padding:38px 0;border-top:1px solid var(--line)}
+.lp-h2{font-family:var(--font-data);font-size:11px;font-stretch:87.5%;letter-spacing:.03em;
+  text-transform:uppercase;color:var(--muted);font-weight:400;margin:0 0 26px}
+
+.lp-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:30px 26px;margin:0;padding:0}
+.lp-stats dt{font-family:var(--font-data);font-size:clamp(22px,2.4vw,30px);font-stretch:87.5%;
+  color:var(--ink);letter-spacing:-.02em;line-height:1.1}
+.lp-stats dd{margin:7px 0 0;color:var(--muted);font-size:12.5px;line-height:1.4}
+
+.lp-list{list-style:none;margin:0;padding:0;display:grid;gap:26px}
+.lp-list li{display:grid;grid-template-columns:52px minmax(0,1fr);gap:0 18px;align-items:start}
+.lp-num{font-family:var(--font-data);font-size:12px;font-stretch:87.5%;color:var(--accent-text);
+  padding-top:4px}
+.lp-list h3{font-family:var(--font-display);font-size:17px;letter-spacing:-.02em;margin:0 0 8px}
+.lp-list p{color:var(--muted);font-size:14px;line-height:1.6;margin:0;max-width:74ch}
+
+.lp-body{color:var(--muted);font-size:14px;line-height:1.65;margin:0 0 16px;max-width:80ch}
+.lp-body:last-child{margin-bottom:0}
+
+.lp-foot{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;
+  background:var(--bg);border-top:1px solid var(--line);padding:26px 0 0;margin-top:38px;
+  font-family:var(--font-data);font-size:10.5px;font-stretch:87.5%;letter-spacing:.02em;
+  text-transform:uppercase;color:var(--muted)}
+.lp-foot a{color:var(--accent-text);text-decoration:none;min-height:44px;display:inline-flex;align-items:center}
+.lp-foot a:hover{text-decoration:underline}
+
+@media(max-width:900px){
+  .lp{padding:0 24px 64px}
+  .lp-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .lp-hero{padding:40px 0 32px}
+  .lp-hero h1{max-width:none}
+}
+@media(max-width:480px){
+  .lp{padding:0 16px 52px}
+  .lp-list li{grid-template-columns:34px minmax(0,1fr);gap:0 12px}
+}
