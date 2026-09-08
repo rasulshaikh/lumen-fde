@@ -25,10 +25,16 @@ export const NAV = [
   { label: "Assessments", href: "/assessments" },
   { label: "Comp reality", href: "/comp" },
   { label: "Market", href: "/market" },
-  // Last, and deliberately so: /design is the only view that is about the app rather than about
-  // the plan. It renders the tokens the other ten views are drawn with, measured live.
-  { label: "Design", href: "/design" },
 ];
+
+/**
+ * /design is deliberately NOT in NAV. It is the only view about the app rather than about the
+ * plan, and the tab bar is for the work. The route still exists and still measures the tokens
+ * and the five contrast floors live — it is reachable at /design, it just does not compete for
+ * attention with the ten views that are actually the plan.
+ *
+ * Anything counting "views" counts NAV, which is the nav, not the route table.
+ */
 
 export function Nav() {
   const pathname = usePathname();

@@ -12,7 +12,7 @@ Three surfaces, and they are not interchangeable:
 
 | surface | reach for it when |
 |---|---|
-| the dashboard, 11 tabs <!-- verify:tabs=11 --> | you are reading, filtering, marking status, or looking at the market |
+| the dashboard, 10 tabs <!-- verify:tabs=10 --> | you are reading, filtering, marking status, or looking at the market |
 | the MCP, 18 tools <!-- verify:mcp_tools=18 --> | Claude Code needs the plan in its context, or needs to write something durable |
 | the 2 crons <!-- verify:crons=2 --> | they reach for you — 03:00 and 03:30 UTC, unattended |
 
@@ -398,7 +398,7 @@ the case for adding.
 
 ---
 
-## 2. The 11 tabs
+## 2. The 10 tabs
 
 `components/Nav.tsx`, the `NAV` constant, in order. Each is its own route under `app/(app)/`, sharing one layout; the recall strip
 sits above the tab bar, so it is on every one of them (architecture.md §3.2).

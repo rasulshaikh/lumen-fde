@@ -589,8 +589,8 @@ block is simply absent from the answer.
 Two absences that fail in **opposite** directions. Do not read them as one class:
 
 - **`LUMEN_PASSWORD` unset → fails open.** `proxy.ts` passes every request through. The whole app
-  is public, including all 11 tabs and all 11 API routes.
-  <!-- verify:tabs=11 --> <!-- verify:api_routes=11 -->
+  is public, including all 10 tabs and all 11 API routes.
+  <!-- verify:tabs=10 --> <!-- verify:api_routes=11 -->
   **Observable:** nothing is logged. `curl -I https://<app>/` returning 200 instead of a 307 to
   `/login` is the check.
 - **`MCP_API_KEY` unset → fails closed.** `authError()` in `mcp/server.js` refuses by default:
