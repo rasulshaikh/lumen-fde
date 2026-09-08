@@ -1083,3 +1083,16 @@ th{padding:0 12px 10px}
 @media(prefers-reduced-motion:reduce){
   .table-wrap tbody tr>td,.table-wrap tbody tr.row-landed>td{transition:none}
 }
+
+/* The lede fills its column.
+   Measured on /assessments at 1728px: the lede was 684px wide with 379px of nothing to its
+   right, while every line below it ran the full 1063px column. A multi-line paragraph whose
+   right edge stops well short of everything under it is what reads as truncated — the eye takes
+   the ragged column edge for a cut. Everything else in the card already fills (emptyRight 2px),
+   so this one cap was the whole effect.
+
+   Dropping the cap puts these ledes on one or two full-width lines. The 66ch measure is kept
+   everywhere it governs a real block of body copy; a single-sentence lede under a heading is not
+   that, and holding it to a column it cannot fill costs more than the measure buys. */
+.full-panel:has(>.assessment-lead)>.assessment-lead,
+.full-panel:has(>.library-note)>.library-note{max-width:none}
