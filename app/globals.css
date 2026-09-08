@@ -955,10 +955,6 @@ th{padding:0 12px 10px}
   .assessment-body>.answer-key{grid-column:1;grid-row:auto}
 }
 
-/* The login mask is padding around text, so it shrinks with the text it covers. */
-@media(max-width:480px){
-  .login-intro{padding:20px}
-}
 
 /* ============================================================
    The front door gets the ruling.
@@ -1043,4 +1039,12 @@ th{padding:0 12px 10px}
   .full-panel:has(>.library-note)>.panel-head>.panel-meta,
   .full-panel:has(>.assessment-lead)>.assessment-lead,
   .full-panel:has(>.library-note)>.library-note{grid-column:1;grid-row:auto}
+}
+
+/* The login mask is padding around text, so it shrinks with the text it covers.
+   This has to come after `.login-intro`'s own rule above and not next to the other mobile
+   overrides: a media query carries no extra specificity, so an unconditional rule written
+   later in the file beats it. Written earlier, this measured 30px at 375px — dead. */
+@media(max-width:480px){
+  .login-intro{padding:20px}
 }
