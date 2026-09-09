@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import library from "@/data/library-context.json";
+import { applyMemory, readMemory, recurring, writeMemory } from "@/lib/companion/memory";
 import sourceCatalog from "@/data/library-sources.json";
 import repositories from "@/data/repository-context.json";
 import curriculum from "@/data/curriculum.json";
@@ -246,6 +247,33 @@ export async function POST(request: Request) {
   if (!apiKey) return NextResponse.json({ error: "MiniMax is not configured yet. Add MINIMAX_API_KEY in Vercel project settings." }, { status: 503 });
   try {
     const body = await request.json() as { prompt?: string; context?: string; topicIndex?: number; history?: { role: "user" | "assistant"; content: string }[] };
+
+    /**
+     * What the companion already knows about this reader.
+     *
+     * `history` is the current conversation and dies with the panel; this is the part that
+     * survives it. Only two things are handed to the model — what it has already explained, so it
+     * can stop re-teaching, and what keeps coming back, which is the signal worth acting on. Both
+     * are short by construction (the digest is capped at 40 entries a list) so this cannot grow
+     * into a context-window problem the way a transcript store would.
+     *
+     * Best-effort and never fatal: an unreadable digest costs continuity for one answer, and
+     * failing the question over it would be a far larger loss than the memory itself.
+     */
+    let memoryBlock = "";
+    let memoryState: Awaited<ReturnType<typeof readMemory>> | null = null;
+    try {
+      memoryState = await readMemory();
+      if (memoryState.synced) {
+        const explained = memoryState.memory.explained.slice(0, 8).map((n) => n.key);
+        const repeats = recurring(memoryState.memory).slice(0, 5).map((n) => `${n.key} (asked ${n.count} times)`);
+        const parts: string[] = [];
+        if (explained.length) parts.push(`Already explained to this learner before: ${explained.join("; ")}. Do not re-explain from scratch unless asked.`);
+        if (repeats.length) parts.push(`Questions this learner has come back to: ${repeats.join("; ")}. A topic asked repeatedly has not landed; try a different angle.`);
+        if (memoryState.memory.sessions > 0) parts.push(`Study sessions recorded so far: ${memoryState.memory.sessions}.`);
+        if (parts.length) memoryBlock = `\n\nWhat you already know about this learner:\n${parts.join("\n")}`;
+      }
+    } catch { /* continuity is not worth failing an answer over */ }
     if (!body.prompt?.trim()) return NextResponse.json({ error: "Ask a question first." }, { status: 400 });
     const deep = syllabusContext(body.topicIndex);
     // Two reads, one budget. Neither can fail the request: `readMarket` resolves null on every
@@ -254,7 +282,7 @@ export async function POST(request: Request) {
     const [benchmark, insight] = await Promise.all([readMarket<Benchmark>(BENCHMARK_PATH), readMarket<Insight>(INSIGHT_PATH)]);
     const market = marketContext(benchmark, insight);
     const messages = [
-      { role: "system", content: `You are Quaere, the study guide inside Lumen. Lumen is the dashboard; you are the guide within it. Explain every idea in fifth-grade reading language while keeping the technical meaning exact. Use short sentences, define jargon immediately, give one concrete technical example, connect it to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. The user message contains the COMPLETE plan — every topic across every track. Never tell the learner a subject is missing from the plan without checking that full list first. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. The learner's indexed learning map is:\n${JSON.stringify(library)}\n\nThe local source catalog (metadata and chapter map only) is:\n${JSON.stringify(sourceCatalog)}\n\nThe public repository map is:\n${JSON.stringify(repositories)}${market ? MARKET_RULE : ""}` },
+      { role: "system", content: `You are Quaere, the study guide inside Lumen. Lumen is the dashboard; you are the guide within it. Explain every idea in fifth-grade reading language while keeping the technical meaning exact. Use short sentences, define jargon immediately, give one concrete technical example, connect it to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. The user message contains the COMPLETE plan — every topic across every track. Never tell the learner a subject is missing from the plan without checking that full list first. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. The learner's indexed learning map is:\n${JSON.stringify(library)}\n\nThe local source catalog (metadata and chapter map only) is:\n${JSON.stringify(sourceCatalog)}\n\nThe public repository map is:\n${JSON.stringify(repositories)}${market ? MARKET_RULE : ""}${memoryBlock}` },
       // Picked field by field, not spread. The client stores an assistant turn as
       // `{role, content, reportUrl?}`, and forwarding a turn that saved a report shipped a
       // `reportUrl` key into an OpenAI-shaped messages array. The declared type hid it from
@@ -271,6 +299,30 @@ export async function POST(request: Request) {
     if (!answer) { console.error("[api/ask] MiniMax returned an empty answer", { status: response.status }); return NextResponse.json({ error: "The learning guide returned an empty answer. Try asking again." }, { status: 502 }); }
     let reportUrl: string | null = null;
     try { reportUrl = await saveAskReport(body.prompt, body.context || "", answer); } catch (error) { console.error("[api/ask] GitHub report save exception", { error: String(error) }); }
+    /**
+     * Remember the exchange — only now, and only because it succeeded.
+     *
+     * Recorded after the answer, never before: a question that errored was not explained, and a
+     * digest that claims otherwise would make Quaere skip an explanation it never gave. What is
+     * stored is the question text, normalised and capped, and the topic when one is in view —
+     * study facts, not the transcript. `applyMemory` returns the same object when nothing
+     * changed, so a repeat within the same day costs no write.
+     *
+     * Best-effort by construction. The answer is already on its way back; failing the request
+     * because a digest write did not land would trade the thing the reader asked for against
+     * bookkeeping.
+     */
+    if (memoryState?.synced && body.prompt) {
+      try {
+        const topic = typeof body.topicIndex === "number" ? String((workbook.Plan as unknown[][])[body.topicIndex + 1]?.[2] ?? "") : "";
+        const next = applyMemory(memoryState.memory, {
+          asked: [body.prompt],
+          explained: topic ? [topic] : [],
+        }, new Date());
+        if (next !== memoryState.memory) await writeMemory(next, memoryState.sha);
+      } catch { /* the answer matters more than the bookkeeping */ }
+    }
+
     return NextResponse.json({ answer, reportUrl });
   } catch (error) { const message = String(error); console.error("[api/ask] request failed", { error: message }); if (message.includes("TimeoutError") || message.includes("timed out")) return NextResponse.json({ error: "Lumen is taking longer than expected. Try the question again with a shorter prompt." }, { status: 504 }); return NextResponse.json({ error: "Lumen could not reach the learning guide. Try again in a moment." }, { status: 500 }); }
 }
