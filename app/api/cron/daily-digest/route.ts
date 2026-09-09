@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { weeklyPace, weeksAtPace } from "@/lib/profile";
 import workbook from "@/data/workbook.json";
 import library from "@/data/library-context.json";
 import bank from "@/data/recall-bank.json";
@@ -197,7 +198,12 @@ function digest(rows: Row[], progress: Map<string, Standing> | null) {
     next, idx, question, book, track, age,
     doneCount: done.length, activeCount: active.length,
     doneH, totalH, remainingH: totalH - doneH,
-    weeksLeft: ((totalH - doneH) / 16).toFixed(1),
+    // Divided by the declared weekly target, not by a literal. This line and the sentence that
+    // renders it below each carried their own hand-written 16, so the pace could be changed in
+    // one and not the other. AppState already records having fixed exactly this on the client
+    // ("was hardcoded 16h next to a separate hours/16, so the two could disagree") — the digest
+    // simply never got the same treatment.
+    weeksLeft: (weeksAtPace(totalH - doneH) ?? 0).toFixed(1),
   };
 }
 
@@ -450,7 +456,7 @@ export async function GET(request: Request) {
     const marketLines = market.entries.map((r) => r.statement);
     if (market.overflow > 0) marketLines.push(`+${market.overflow} more`);
 
-    const pace = `${d.doneCount} of ${d.activeCount} topics done · ${d.doneH}h of ${d.totalH}h · ${d.remainingH}h left, about ${d.weeksLeft} weeks at 16h/week`;
+    const pace = `${d.doneCount} of ${d.activeCount} topics done · ${d.doneH}h of ${d.totalH}h · ${d.remainingH}h left, about ${d.weeksLeft} weeks at ${weeklyPace()}`;
     const text = [
       // Above everything, the new roles below it included. A broken pipeline outranks both the
       // study brief and the market section, because the study brief is still true when the scan

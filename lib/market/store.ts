@@ -153,11 +153,15 @@ export async function readJson<T>(path: string): Promise<{ data: T | null; sha: 
  * index.json is ~500 KB, roughly 700 KB once base64'd — inside the contents API's practical
  * ceiling, which is the other reason JD text is never stored.
  */
-export async function writeJson(path: string, data: unknown, sha: string | null): Promise<{ ok: boolean; sha: string | null; synced: boolean; error: string | null }> {
+export async function writeJson(path: string, data: unknown, sha: string | null, message?: string): Promise<{ ok: boolean; sha: string | null; synced: boolean; error: string | null }> {
   if (!process.env.GITHUB_TOKEN) return { ok: false, sha: null, synced: false, error: null };
   try {
     const payload: Record<string, unknown> = {
-      message: `market: update ${path}`,
+      // Optional, defaulting to the market wording every existing caller relies on. The commit
+      // message is the only thing in git history explaining why a file moved, and a companion
+      // write landing as "market: update ..." would misattribute it to the nightly scan — the
+      // one place someone looks first when the market numbers are wrong.
+      message: message ?? `market: update ${path}`,
       content: Buffer.from(JSON.stringify(data, null, 1)).toString("base64"),
       branch,
     };

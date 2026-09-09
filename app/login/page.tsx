@@ -1,6 +1,7 @@
 import workbook from "@/data/workbook.json";
 import curriculum from "@/data/curriculum.json";
 import library from "@/data/library-context.json";
+import { weeklyPace } from "@/lib/profile";
 import { LogoMark } from "../brand";
 import { LoginForm } from "./form";
 
@@ -32,7 +33,7 @@ export default function LoginPage() {
   const stats: [string, string][] = [
     [String(active.length), "topics"],
     [`${hours}h`, "of planned work"],
-    [String(months), "months at 16h/week"],
+    [String(months), `months at ${weeklyPace()}`],
     [String(tracks), "tracks"],
     [parts.toLocaleString(), "syllabus parts"],
     [questions.toLocaleString(), "interview questions"],
