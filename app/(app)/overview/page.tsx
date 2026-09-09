@@ -273,6 +273,9 @@ export default function OverviewPage() {
     setTrack={setTrack}
     marketTiers={state.marketTiers}
     brief={brief}
+    // The provider's own setter: same validation, same hydration write-guard, same append-only
+    // POST the Plan page uses. The session loop must not acquire a second way to write progress.
+    setFocusStatus={(status) => { if (state.nextRow) state.setStatus(state.nextRow, status); }}
     readingUrl={state.nextRow ? String(state.nextRow[5] ?? "") || null : null}
     feed={feed}
   />;

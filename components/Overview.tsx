@@ -161,7 +161,7 @@ function StandingPanel({ streak, loading, openPlan }: { streak: Streak | null; l
   </div>;
 }
 
-export function Overview({ done, activeRows, skipped, hours, doneHours, skippedHours, weeklyHours, setWeekly, monthHours, maxMonthHours, peakMonth, nextRow, nextIndex, setView, trackTotals, setTrack, marketTiers, feed, brief, readingUrl }: {
+export function Overview({ done, activeRows, skipped, hours, doneHours, skippedHours, weeklyHours, setWeekly, monthHours, maxMonthHours, peakMonth, nextRow, nextIndex, setView, trackTotals, setTrack, marketTiers, feed, brief, readingUrl, setFocusStatus }: {
   done: number;
   activeRows: Row[];
   skipped: number;
@@ -179,6 +179,8 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
   trackTotals: { name: string; count: number; hours: number; done: number }[];
   setTrack: (name: string) => void;
   marketTiers: { market: string; window: string; rank: number; label: string; tone: string }[];
+  /** Sets the focus row's status, through the same guarded path the Plan page uses. */
+  setFocusStatus: (status: string) => void;
   feed: HomeFeed;
   /**
    * Null until the first client effect has run. The brief is a function of `new Date()` and the
@@ -214,7 +216,7 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
             Until the first effect runs there is no brief, and the old panel renders in its place
             so the page is never headless. */}
         {brief
-          ? <BriefPanel brief={brief} readingUrl={readingUrl} onOpenPlan={() => setView("Plan")} />
+          ? <BriefPanel brief={brief} readingUrl={readingUrl} onOpenPlan={() => setView("Plan")} setStatus={setFocusStatus} />
           : <div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Next action</p><h2>Start here</h2></div><span className="priority">P1</span></div><div className="next-action"><div className="action-index">{nextRow ? String(nextIndex + 1).padStart(2, "0") : "—"}</div><div><h3>{nextRow ? String(nextRow[2]) : "Plan complete"}</h3><p>{nextRow ? String(nextRow[3]) : "Every topic is done or skipped."}</p>{nextRow && <Link href={String(nextRow[5])}>Open reading</Link>}</div></div><button className="primary-button" onClick={() => setView("Plan")}>Open the plan <span>→</span></button></div>}
         <EvidencePanel feed={feed} openMarket={() => setView("Market")} />
       </section>

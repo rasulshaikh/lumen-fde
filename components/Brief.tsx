@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { Brief } from "@/lib/companion/brief";
 import { opening } from "@/lib/companion/brief";
+import { SessionLoop } from "./Session";
 
 /**
  * The daily brief, at the top of the home page.
@@ -17,7 +18,7 @@ import { opening } from "@/lib/companion/brief";
  * what makes a spaced-repetition system get abandoned, and the returning reader is exactly who
  * would see it.
  */
-export function BriefPanel({ brief, onOpenPlan, readingUrl }: { brief: Brief; onOpenPlan: () => void; readingUrl: string | null }) {
+export function BriefPanel({ brief, onOpenPlan, readingUrl, setStatus }: { brief: Brief; onOpenPlan: () => void; readingUrl: string | null; setStatus: (status: string) => void }) {
   const focus = brief.focus;
   return (
     <section className="panel wide brief-panel">
@@ -61,6 +62,8 @@ export function BriefPanel({ brief, onOpenPlan, readingUrl }: { brief: Brief; on
       </div>
 
       {brief.buys && <p className="brief-buys">{brief.buys}</p>}
+
+      {focus && <SessionLoop row={focus.row} topic={focus.topic} status={focus.status} setStatus={setStatus} />}
 
       <div className="brief-actions">
         <button className="primary-button" onClick={onOpenPlan}>Open the plan <span>→</span></button>
