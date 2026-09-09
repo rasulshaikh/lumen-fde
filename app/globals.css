@@ -1161,3 +1161,41 @@ th{padding:0 12px 10px}
   .lp{padding:0 16px 52px}
   .lp-list li{grid-template-columns:34px minmax(0,1fr);gap:0 12px}
 }
+
+/* ============================================================
+   The daily brief.
+   The panel that replaced four zeros with the one thing worth reading first.
+   ============================================================ */
+.brief-panel{display:grid;gap:0}
+
+/* The warm line. Sized between the heading and the body so it reads as the companion talking
+   rather than as a caption, and held to a real measure so it never strands. */
+.brief-opening{margin:0 0 14px;max-width:62ch;font-size:15px;line-height:1.55;color:var(--ink)}
+.brief-what{margin:0 0 18px;max-width:70ch;font-size:13.5px;line-height:1.6;color:var(--muted)}
+
+.brief-parts{margin:0 0 18px}
+.brief-parts .eyebrow{margin:0 0 8px}
+.brief-parts ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.brief-parts li{background:var(--surface-strong);border-radius:6px;padding:6px 9px;
+  font-family:var(--font-data);font-size:11px;font-stretch:87.5%;color:var(--ink-2);line-height:1.35}
+
+/* Facts sit in a row of their own so the numbers are scannable without competing with the
+   sentence above them. auto-fit with a min() floor, because a fixed minimum is what pushed
+   96px of overflow onto /market at 375px. */
+.brief-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));
+  gap:10px;margin:0 0 16px;padding:14px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.brief-fact{display:grid;gap:3px;min-width:0}
+.brief-fact-wide{grid-column:1/-1}
+.brief-fact-label{font-family:var(--font-data);font-size:10px;font-stretch:87.5%;letter-spacing:.03em;
+  text-transform:uppercase;color:var(--muted)}
+.brief-fact strong{font-size:13px;font-weight:700;color:var(--ink);line-height:1.45}
+
+.brief-buys{margin:0 0 18px;max-width:74ch;font-size:13px;line-height:1.6;color:var(--muted)}
+
+.brief-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brief-actions .primary-button{margin:0}
+
+@media(max-width:700px){
+  .brief-opening{font-size:14.5px}
+  .brief-actions{align-items:stretch;flex-direction:column;gap:10px}
+}

@@ -1,6 +1,8 @@
 import type { Evidence, Streak } from "@/lib/motivation";
 import { Link, mockRows, pct, planRows, tracks, type Row } from "./shared";
 import { ShippedWall, type ArtifactsFeed } from "./ShippedWall";
+import { BriefPanel } from "./Brief";
+import type { Brief } from "@/lib/companion/brief";
 
 /**
  * The homepage.
@@ -159,7 +161,7 @@ function StandingPanel({ streak, loading, openPlan }: { streak: Streak | null; l
   </div>;
 }
 
-export function Overview({ done, activeRows, skipped, hours, doneHours, skippedHours, weeklyHours, setWeekly, monthHours, maxMonthHours, peakMonth, nextRow, nextIndex, setView, trackTotals, setTrack, marketTiers, feed }: {
+export function Overview({ done, activeRows, skipped, hours, doneHours, skippedHours, weeklyHours, setWeekly, monthHours, maxMonthHours, peakMonth, nextRow, nextIndex, setView, trackTotals, setTrack, marketTiers, feed, brief, readingUrl }: {
   done: number;
   activeRows: Row[];
   skipped: number;
@@ -178,6 +180,15 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
   setTrack: (name: string) => void;
   marketTiers: { market: string; window: string; rank: number; label: string; tone: string }[];
   feed: HomeFeed;
+  /**
+   * Null until the first client effect has run. The brief is a function of `new Date()` and the
+   * fetched feed, and neither exists during the server render — so the panel is simply absent for
+   * that first paint rather than rendered with a guessed day, which is the hydration mismatch
+   * this page already avoids for the streak's sentences.
+   */
+  brief: Brief | null;
+  /** The focus row's Read link, passed through so the brief does not reach into the workbook. */
+  readingUrl: string | null;
 }) {
   return <>
       {/* 1 + 2. Evidence, and the next action beside it. The old "Start here" panel moves up
@@ -194,7 +205,17 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
             was the narrow panel: 38 of the 119 rows are longer than it, up to 662 characters, so
             a third of the plan showed its instruction with the end sliced off, in the panel whose
             whole job is saying what the work actually is. */}
-        <div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Next action</p><h2>Start here</h2></div><span className="priority">P1</span></div><div className="next-action"><div className="action-index">{nextRow ? String(nextIndex + 1).padStart(2, "0") : "—"}</div><div><h3>{nextRow ? String(nextRow[2]) : "Plan complete"}</h3><p>{nextRow ? String(nextRow[3]) : "Every topic is done or skipped."}</p>{nextRow && <Link href={String(nextRow[5])}>Open reading</Link>}</div></div><button className="primary-button" onClick={() => setView("Plan")}>Open the plan <span>→</span></button></div>
+        {/* The brief supersedes the old "Start here" panel rather than sitting next to it. It
+            carries everything that panel did — the row, its description, both actions — and adds
+            what the reader actually needs first: how long it has been, what the topic is made of,
+            whether recall is waiting, and what finishing it buys. Two panels saying the same
+            thing differently is how a page stops being read.
+
+            Until the first effect runs there is no brief, and the old panel renders in its place
+            so the page is never headless. */}
+        {brief
+          ? <BriefPanel brief={brief} readingUrl={readingUrl} onOpenPlan={() => setView("Plan")} />
+          : <div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Next action</p><h2>Start here</h2></div><span className="priority">P1</span></div><div className="next-action"><div className="action-index">{nextRow ? String(nextIndex + 1).padStart(2, "0") : "—"}</div><div><h3>{nextRow ? String(nextRow[2]) : "Plan complete"}</h3><p>{nextRow ? String(nextRow[3]) : "Every topic is done or skipped."}</p>{nextRow && <Link href={String(nextRow[5])}>Open reading</Link>}</div></div><button className="primary-button" onClick={() => setView("Plan")}>Open the plan <span>→</span></button></div>}
         <EvidencePanel feed={feed} openMarket={() => setView("Market")} />
       </section>
 

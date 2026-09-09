@@ -7,6 +7,8 @@ import { NAV } from "@/components/Nav";
 import { useAppState } from "@/components/AppState";
 import { planRows } from "@/components/shared";
 import { computeEvidence, computeStreak } from "@/lib/motivation";
+import { buildBrief, type Brief } from "@/lib/companion/brief";
+import type { ReviewState } from "@/lib/review";
 import type { Benchmark } from "@/lib/market/benchmark";
 import type { Insight, Progress } from "@/lib/market/insight";
 import type { StoredArtifact } from "@/lib/artifacts";
@@ -132,6 +134,10 @@ export default function OverviewPage() {
   const router = useRouter();
   const state = useAppState();
   const [feed, setFeed] = useState<HomeFeed>(EMPTY);
+  // The review schedule, read for one bit of information: is anything waiting. Never a count —
+  // lib/review.ts and app/recall.tsx both record why ("'37 due', close it forever").
+  const [review, setReview] = useState<{ state: ReviewState; synced: boolean } | null>(null);
+  const [brief, setBrief] = useState<Brief | null>(null);
 
   // `new Date()` lives inside the effect, never in render: the streak's sentences are text, and
   // text derived from the clock during a server render is a hydration mismatch waiting for the
@@ -180,6 +186,49 @@ export default function OverviewPage() {
     return () => { live = false; };
   }, []);
 
+  // Same shape the recall strip uses. A failure leaves `review` null, which `recallState` reads
+  // as "unknown" rather than "nothing due" — telling a returning reader nothing is waiting when
+  // the store was simply unreadable is the one sentence this panel must never produce.
+  useEffect(() => {
+    let live = true;
+    fetch("/api/review")
+      .then((r) => r.json())
+      .then((data) => { if (live) setReview({ state: (data?.state ?? {}) as ReviewState, synced: !!data?.synced }); })
+      .catch(() => { if (live) setReview(null); });
+    return () => { live = false; };
+  }, []);
+
+  // The syllabus for today's row, so the brief can name what the topic is actually made of.
+  // Cached in the provider and shared with /plan and /curriculum, so this costs one request the
+  // first time and none after it.
+  useEffect(() => { if (state.nextIndex >= 0) state.requestSyllabus([state.nextIndex]); }, [state.nextIndex, state.requestSyllabus]);
+
+  // `new Date()` stays inside the effect for the reason the feed effect states: a brief is text
+  // derived from the clock, and deriving it during render is a hydration mismatch waiting for
+  // the one load that straddles midnight.
+  useEffect(() => {
+    if (feed.loading) return;
+    const row = state.nextRow;
+    const syllabus = state.nextIndex >= 0 ? state.syllabusFor(state.nextIndex) : null;
+    setBrief(buildBrief({
+      focus: row ? {
+        row: state.nextIndex + 1,
+        topic: String(row[2]),
+        status: state.statusOf(row),
+        description: String(row[3] ?? ""),
+        month: Number(row[1]),
+        hours: Number(row[13] || 0),
+      } : null,
+      parts: (syllabus?.subtopics ?? []).slice(0, 6).map((part) => part.name),
+      review,
+      evidence: feed.next,
+      streak: feed.streak,
+      // Consumed from the streak rather than recomputed: it already owns the newest dated event.
+      lastEventDay: feed.streak?.lastDay ?? null,
+      shipped: feed.artifacts.artifacts.length,
+    }, new Date()));
+  }, [feed, review, state]);
+
   // Overview still speaks in tab names, because it is a shared component and its API is not
   // this migration's to rewrite. One adapter, here, turns the two calls it makes into routes.
   //
@@ -223,6 +272,8 @@ export default function OverviewPage() {
     trackTotals={state.trackTotals}
     setTrack={setTrack}
     marketTiers={state.marketTiers}
+    brief={brief}
+    readingUrl={state.nextRow ? String(state.nextRow[5] ?? "") || null : null}
     feed={feed}
   />;
 }

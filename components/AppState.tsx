@@ -37,6 +37,16 @@ type AppState = {
   ensureSummary: () => void;
   requestSyllabus: (indices: number[]) => void;
   renderSyllabus: (index: number) => React.ReactNode;
+  /**
+   * The cached syllabus for one row, or null if it has not been fetched yet.
+   *
+   * `renderSyllabus` returns JSX, which is the wrong shape for a caller that needs the part
+   * NAMES as data — the daily brief lists what today's topic is actually made of. Reading the
+   * same cache rather than adding a second one is the point: the merged syllabus is ~3.7MB and
+   * is deliberately fetched per topic and kept, so /plan, /curriculum and the brief share one
+   * copy and one request.
+   */
+  syllabusFor: (index: number) => Syllabus | null;
   // Quaere
   askOpen: boolean;
   setAskOpen: (open: boolean) => void;
@@ -153,6 +163,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // un-marked so reopening the row retries, which is what the old effect did by looking at a
   // still-missing key.
   const requested = useRef<Record<string, true>>({});
+  const syllabusFor = useCallback((index: number) => curriculum[String(index)] ?? null, [curriculum]);
+
   const requestSyllabus = useCallback((indices: number[]) => {
     const need = indices.filter((i) => !requested.current[String(i)]);
     if (!need.length) return;
@@ -267,10 +279,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AppState>(() => ({
     statuses, progressSync, setStatus, statusOf,
     theme, toggleTheme, weeklyHours, setWeekly,
-    curSummary, ensureSummary, requestSyllabus, renderSyllabus,
+    curSummary, ensureSummary, requestSyllabus, renderSyllabus, syllabusFor,
     askOpen, setAskOpen, askText, setAskText, askTopic, setAskTopic, messages, asking, askLumen, setPageContext,
     ...derived, marketTiers, curParts,
-  }), [statuses, progressSync, setStatus, statusOf, theme, toggleTheme, weeklyHours, setWeekly, curSummary, ensureSummary, requestSyllabus, renderSyllabus, askOpen, askText, askTopic, messages, asking, askLumen, setPageContext, derived, marketTiers, curParts]);
+  }), [statuses, progressSync, setStatus, statusOf, theme, toggleTheme, weeklyHours, setWeekly, curSummary, ensureSummary, requestSyllabus, renderSyllabus, syllabusFor, askOpen, askText, askTopic, messages, asking, askLumen, setPageContext, derived, marketTiers, curParts]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
