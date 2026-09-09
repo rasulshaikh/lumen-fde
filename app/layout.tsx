@@ -9,7 +9,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Bricolage Grotesque (display), Atkinson Hyperlegible (body/UI), Martian Mono
+        {/* Archivo (display), Schibsted Grotesk (body/UI), JetBrains Mono
             (data). This has to be a <link> and not the @import that globals.css used for
             Geist: Next's CSS pipeline strips a remote @import out of the emitted chunk, so
             Geist had never actually been downloading. Verified by the absence of any
@@ -19,7 +19,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link
           rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:ital,wght@0,300..800;1,300..800&family=Bricolage+Grotesque:opsz,wght@12..96,300..800&family=Martian+Mono:wdth,wght@75..112.5,300..700&family=Archivo:wght@400..800&family=Source+Sans+3:wght@300..700&family=Schibsted+Grotesk:wght@400..800&family=JetBrains+Mono:wght@400..700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400..800&family=Schibsted+Grotesk:ital,wght@0,400..800;1,400..700&family=JetBrains+Mono:wght@400..700&family=Source+Sans+3:wght@300..700&display=swap"
         />
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>

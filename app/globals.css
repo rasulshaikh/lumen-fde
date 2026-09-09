@@ -23,12 +23,12 @@
    ochre below that size takes --accent-text, which is derived against the worst surface
    in each theme and clears 4.5:1 on canvas, card, chip and the soft tint in both. */
 :root{                         /* dark — the default */
-  --bg:#201810;--surface:#392f27;--surface-strong:#463d34;
-  --ink:#f0e5dd;--ink-2:#cec4ba;--muted:#b4a9a0;
-  --line:#564c43;--line-strong:#948980;
-  --grid:#3c3229;--grid-strong:#483e35;
-  --accent:#b89435;--accent-text:#cda640;--accent-soft:#4a3d1f;--on-accent:#201810;
-  --teal:#47be98;--danger:#fc8b76;
+  --bg:#0a0d13;--surface:#1f242d;--surface-strong:#2a323f;
+  --ink:#e8ecf3;--ink-2:#c3cbd8;--muted:#93a0b4;
+  --line:#2b3340;--line-strong:#646e7e;
+  --grid:#161b23;--grid-strong:#1b212a;
+  --accent:#4c8dff;--accent-text:#7fb0ff;--accent-soft:#16233c;--on-accent:#04122e;
+  --teal:#3ddb8b;--danger:#f0736a;--warn:#e0a33a;
   /* Legacy aliases. ~50 rules below still name --primary/--brass; they now resolve to the
      solved tokens, so no rule can hold an old value. Declared once — var() substitution
      re-resolves them per theme, because the light block redefines --accent on the same
@@ -36,28 +36,28 @@
   --primary:var(--accent);--primary-hover:var(--accent-text);
   --primary-soft:var(--accent-soft);--brass:var(--accent-text);
   --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;--sp-8:32px;--sp-10:40px;--sp-12:48px;--sp-16:64px;
-  --r-sm:6px;--r-md:8px;--r-lg:12px;--r-pill:9999px;
+  --r-sm:3px;--r-md:4px;--r-lg:6px;--r-pill:3px;
   /* Shadows and scrims are alpha over the ground, not surfaces, so no contrast floor
      applies to them — but they are warmed to the neutral hue so nothing in the app is
      tinted blue. --scrim is the horizontal-overflow cue on .table-wrap. */
-  --scrim:rgba(12,7,2,.55);
-  --shadow-card:none;--shadow-cta:none;
-  --elev-1:none;--elev-2:none;--elev-3:0 16px 48px -12px rgba(8,5,2,.7);
+  --scrim:rgba(2,5,10,.60);
+  --shadow-card:0 1px 2px rgba(0,0,0,.45);--shadow-cta:0 2px 10px -2px rgba(76,141,255,.45);
+  --elev-1:0 1px 2px rgba(0,0,0,.4);--elev-2:0 4px 14px -4px rgba(0,0,0,.55);--elev-3:0 16px 48px -12px rgba(0,0,0,.7);
   color-scheme:dark;
 }
 :root[data-theme="light"]{
-  --bg:#dbd0c7;--surface:#faefe7;--surface-strong:#e3d9cf;
-  --ink:#2c231a;--ink-2:#4e453c;--muted:#61574f;
-  --line:#ccc1b8;--line-strong:#7c7268;
-  --grid:#c3b8af;--grid-strong:#b5aaa1;
-  --accent:#876918;--accent-text:#6f5611;--accent-soft:#e8d9b8;--on-accent:#faefe7;
-  --teal:#15654e;--danger:#aa2812;
-  --scrim:rgba(44,35,26,.20);
+  --bg:#e3e6eb;--surface:#ffffff;--surface-strong:#e2e7f0;
+  --ink:#0d1420;--ink-2:#334052;--muted:#55637a;
+  --line:#d5dce7;--line-strong:#8a96a8;
+  --grid:#d5dce7;--grid-strong:#c8d1de;
+  --accent:#1f6feb;--accent-text:#1550b8;--accent-soft:#dde9fd;--on-accent:#ffffff;
+  --teal:#0b6739;--danger:#b3261e;--warn:#8a5a00;
+  --scrim:rgba(13,20,32,.22);
   /* Must stay non-none: in light the panel hairline against the ground is only 1.166, so
      the shadow is one of the two things carrying the panel edge (the fill step, 1.340, is
      the other). */
-  --shadow-card:0 1px 2px rgba(44,35,26,.10);
-  --elev-3:0 16px 48px -12px rgba(44,35,26,.18);
+  --shadow-card:0 1px 2px rgba(13,20,32,.10);
+  --elev-1:0 1px 2px rgba(13,20,32,.08);--elev-2:0 4px 14px -4px rgba(13,20,32,.14);--elev-3:0 16px 48px -12px rgba(13,20,32,.18);
   color-scheme:light;
 }
 *{box-sizing:border-box}html{background:var(--bg)}body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:16px;-webkit-font-smoothing:antialiased}button,input,select{font:inherit}button{cursor:pointer}.shell{max-width:1440px;margin:auto;padding:0 44px}.topbar{height:76px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}.brand{display:flex;gap:12px;align-items:center}.brand-mark{width:34px;height:34px;display:block;flex:none}.brand-name{font-weight:700;font-size:15px}.brand-sub,.top-actions{font-size:12px;color:var(--muted)}.top-actions{display:flex;align-items:center;gap:12px}.sync-dot{width:7px;height:7px;background:var(--teal);border-radius:50%;display:inline-block}.ghost-button,.text-button{border:0;background:transparent;color:var(--muted);padding:7px 0}.hero{display:flex;justify-content:space-between;gap:40px;padding:54px 0 42px}.kicker,.eyebrow{margin:0 0 10px;color:var(--primary);font-size:11px;font-weight:700;letter-spacing:.02em;text-transform:uppercase}.hero h1{font-size:42px;line-height:1.05;letter-spacing:-.045em;margin:0 0 14px;max-width:620px}.hero-copy{font-size:17px;line-height:1.5;color:var(--muted);max-width:610px;margin:0}.hero-note{align-self:end;min-width:300px;display:flex;gap:12px;align-items:flex-start;padding:16px 18px;background:var(--primary-soft);border-radius:12px}.note-pin{color:var(--primary);font-size:18px}.hero-note strong{font-size:13px}.hero-note p{margin:5px 0 0;color:var(--muted);font-size:12px}.tabs{display:flex;gap:27px;border-bottom:1px solid var(--line);margin-bottom:24px}.tab{border:0;background:none;color:var(--muted);padding:0 0 13px;position:relative}.tab.active{color:var(--ink);font-weight:700}.tab.active:after{content:'';height:2px;background:var(--primary);position:absolute;bottom:-1px;left:0;right:0}.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}.metric{padding:18px 20px;border:1px solid var(--line);border-radius:12px;background:var(--surface);min-height:125px;display:flex;flex-direction:column}.metric-label,.metric-detail{color:var(--muted);font-size:12px}.metric strong{font-size:31px;letter-spacing:-.04em;margin:11px 0 5px}.metric.rose strong{color:var(--primary)}.metric.teal strong{color:var(--teal)}.metric.brass strong{color:var(--brass)}/* align-items:start, not the default stretch. Stretch made every panel in a row as tall as
@@ -207,14 +207,14 @@ td .topic-toggle{margin-bottom:6px}
    Mono is confined to data on purpose: 2,236 subtopics set in a monospace would be
    fatiguing to read and is an AI tell in its own right. */
 :root{
-  --font-display:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;
+  --font-display:'Archivo',ui-sans-serif,system-ui,sans-serif;
   /* Next, not the original: the original family ships 400 and 700 ONLY, so every one of
      the 19 `font-weight:500` declarations below rendered at 400 — measured identical, 276.88px
      for both. The active tab was the same weight as body text. Google silently drops weights a
      family does not have, so requesting 500 returned 400 with no error anywhere. `Next` is the
      same typeface with a real 300..800 variable axis. */
-  --font-body:'Atkinson Hyperlegible Next','Atkinson Hyperlegible',ui-sans-serif,system-ui,sans-serif;
-  --font-data:'Martian Mono',ui-monospace,SFMono-Regular,monospace;
+  --font-body:'Schibsted Grotesk',ui-sans-serif,system-ui,sans-serif;
+  --font-data:'JetBrains Mono',ui-monospace,SFMono-Regular,monospace;
 }
 
 html{background:var(--bg)}
@@ -238,17 +238,7 @@ html{background:var(--bg)}
 
    min-height:100svh so the body box, which is what the background paints into, always
    covers the viewport on a short page. */
-body{
-  background-color:var(--bg);
-  background-image:
-    repeating-linear-gradient(to right,  var(--grid-strong) 0 1px, transparent 1px 96px),
-    repeating-linear-gradient(to bottom, var(--grid-strong) 0 1px, transparent 1px 96px),
-    repeating-linear-gradient(to right,  var(--grid) 0 1px, transparent 1px 24px),
-    repeating-linear-gradient(to bottom, var(--grid) 0 1px, transparent 1px 24px);
-  background-attachment:fixed;
-  min-height:100svh;
-  color:var(--ink);font-family:var(--font-body);
-  font-size:16px;line-height:1.5;letter-spacing:0;-webkit-font-smoothing:antialiased}
+body{background-color:var(--bg);min-height:100svh;margin:0;color:var(--ink)}
 body::before{content:none}
 /* The ruling stops where body text meets the bare canvas.
    Provably necessary, not a preference: in light theme --muted #61574f is 4.64 on the flat
@@ -258,7 +248,8 @@ body::before{content:none}
    of the canvas, i.e. invisible. So the ruling and muted body text cannot share a ground, which
    is what the contract already implied by saying the ruling must not compete with body text.
    A real notebook has an unruled head and foot margin for exactly this reason. */
-.topbar,.hero,.tabs,footer{background-color:var(--bg)}
+/* The four masks that lived here painted an opaque --bg over the chrome so the ruling
+   could not cross text. With the ruling gone they masked nothing and cost a paint. */
 /* The ruling is texture. In forced colours it would become a system border and read as a
    diagram; on paper it would be a printer's practical joke. */
 @media (forced-colors:active){body{background-image:none}}
@@ -283,10 +274,10 @@ h3{font-size:.9375rem;line-height:1.35;letter-spacing:-.01em}
    tracking that Geist Mono needed is cut from .06em to .02em; keeping it would have made
    every eyebrow overrun its panel head. */
 .kicker,.eyebrow,.quiz-label,.metric-label,.comp-market,.res-kind,th{
-  font-family:var(--font-data);font-size:10.5px;font-weight:500;font-stretch:87.5%;
+  font-family:var(--font-data);font-size:10.5px;font-weight:500;
   letter-spacing:.02em;text-transform:uppercase;color:var(--muted)}
 .metric strong,.mock-stats b,.track-hours,.bar-value,td{font-variant-numeric:tabular-nums}
-code,.mono{font-family:var(--font-data);font-size:12px;font-stretch:87.5%}
+code,.mono{font-family:var(--font-data);font-size:12px}
 .hero-copy,.assessment-lead,.library-note,.reality p,.syllabus-why,.assessment-body p{max-width:66ch}
 
 /* --- Panels: charcoal, hairline, 12px. No shadow — the hairline is the edge. --- */
@@ -325,7 +316,7 @@ code,.mono{font-family:var(--font-data);font-size:12px;font-stretch:87.5%}
 
 /* --- Chips: mono, tight, quiet --- */
 .topic-chips span,.status,.res-kind,.priority{border-radius:var(--r-sm);color:var(--ink-2);
-  font-family:var(--font-data);font-size:10.5px;font-stretch:87.5%;letter-spacing:.01em;padding:3px 7px}
+  font-family:var(--font-data);font-size:10.5px;letter-spacing:.01em;padding:3px 7px}
 .priority{background:var(--primary-soft);color:var(--accent-text)}
 .res-read{background:var(--primary-soft);color:var(--accent-text)}
 .res-watch{background:var(--surface-strong);color:var(--teal)}
@@ -490,7 +481,7 @@ th{padding:0 12px 10px}
 .market-list{list-style:none;margin:18px 0 20px;padding:0;display:grid;gap:0}
 .market-list li{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;
   padding:11px 0;border-top:1px solid var(--line);align-items:baseline}
-.market-tier{grid-row:1;font-family:var(--font-data);font-size:10px;font-stretch:87.5%;
+.market-tier{grid-row:1;font-family:var(--font-data);font-size:10px;
   letter-spacing:.02em;text-transform:uppercase;padding:2px 6px;border-radius:var(--r-sm);
   background:var(--surface-strong);color:var(--ink-2);white-space:nowrap}
 .market-tier.go{background:var(--surface-strong);color:var(--teal)}
@@ -525,7 +516,7 @@ th{padding:0 12px 10px}
 .login-brand{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:600;letter-spacing:-.01em}
 .login-brand .brand-mark{width:26px;height:26px}
 .login-kicker{font-family:var(--font-data);color:var(--accent-text);
-  font-size:10.5px;font-weight:500;font-stretch:87.5%;letter-spacing:.02em;text-transform:uppercase;margin:26px 0 10px}
+  font-size:10.5px;font-weight:500;letter-spacing:.02em;text-transform:uppercase;margin:26px 0 10px}
 .login-card h1{font-size:1.75rem;line-height:1.15;letter-spacing:-.028em;margin:0 0 10px}
 .login-copy{color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 24px}
 .login-form{display:grid;gap:14px}
@@ -542,7 +533,7 @@ th{padding:0 12px 10px}
 
 /* The shell's second row: the page gets a baseline instead of one card adrift. */
 .login-shell:after{content:'lumenfde.com · private workspace';
-  font-family:var(--font-data);font-size:10.5px;font-stretch:87.5%;letter-spacing:.02em;
+  font-family:var(--font-data);font-size:10.5px;letter-spacing:.02em;
   text-transform:uppercase;color:var(--muted);padding-bottom:4px}
 @media(max-height:620px){.login-shell:after{display:none}}
 @media(max-width:480px){.login-card{padding:24px}.login-card h1{font-size:1.5rem}}
@@ -985,9 +976,9 @@ th{padding:0 12px 10px}
    4.64 on the flat ground but 3.09 where a major rule crosses the glyphs. They paint --bg,
    the canvas colour, so nothing reads as a panel — the ruling just stops behind the words.
    ============================================================ */
-.login-shell{background:transparent}
-.login-intro{background:var(--bg);padding:30px;border-radius:12px}
-.login-shell:after{background:var(--bg);padding:7px 14px;border-radius:8px}
+.login-shell{background:var(--bg)}
+.login-intro{padding:0}
+.login-shell:after{padding:7px 0}
 
 /* Quaere's reading gets a rail.
    The reading itself is capped at 74ch — correct, and not the problem. The problem was that
@@ -1131,7 +1122,7 @@ th{padding:0 12px 10px}
 .lp-signin:hover{text-decoration:underline}
 
 .lp-hero{background:var(--bg);padding:56px 0 44px}
-.lp-kicker{font-family:var(--font-data);font-size:11px;font-stretch:87.5%;letter-spacing:.03em;
+.lp-kicker{font-family:var(--font-data);font-size:11px;letter-spacing:.03em;
   text-transform:uppercase;color:var(--accent-text);margin:0 0 20px}
 .lp-hero h1{font-family:var(--font-display);font-size:clamp(34px,4.6vw,58px);line-height:1.04;
   letter-spacing:-.035em;margin:0 0 26px;max-width:19ch;text-wrap:balance}
@@ -1140,17 +1131,17 @@ th{padding:0 12px 10px}
 /* A rule between sections rather than a card around each one. The panel treatment belongs to the
    dashboard, where a panel means "a view of data"; here it would be eight boxes in a column. */
 .lp-scale,.lp-block{background:var(--bg);padding:38px 0;border-top:1px solid var(--line)}
-.lp-h2{font-family:var(--font-data);font-size:11px;font-stretch:87.5%;letter-spacing:.03em;
+.lp-h2{font-family:var(--font-data);font-size:11px;letter-spacing:.03em;
   text-transform:uppercase;color:var(--muted);font-weight:400;margin:0 0 26px}
 
 .lp-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:30px 26px;margin:0;padding:0}
-.lp-stats dt{font-family:var(--font-data);font-size:clamp(22px,2.4vw,30px);font-stretch:87.5%;
+.lp-stats dt{font-family:var(--font-data);font-size:clamp(22px,2.4vw,30px);
   color:var(--ink);letter-spacing:-.02em;line-height:1.1}
 .lp-stats dd{margin:7px 0 0;color:var(--muted);font-size:12.5px;line-height:1.4}
 
 .lp-list{list-style:none;margin:0;padding:0;display:grid;gap:26px}
 .lp-list li{display:grid;grid-template-columns:52px minmax(0,1fr);gap:0 18px;align-items:start}
-.lp-num{font-family:var(--font-data);font-size:12px;font-stretch:87.5%;color:var(--accent-text);
+.lp-num{font-family:var(--font-data);font-size:12px;color:var(--accent-text);
   padding-top:4px}
 .lp-list h3{font-family:var(--font-display);font-size:17px;letter-spacing:-.02em;margin:0 0 8px}
 .lp-list p{color:var(--muted);font-size:14px;line-height:1.6;margin:0;max-width:74ch}
@@ -1160,7 +1151,7 @@ th{padding:0 12px 10px}
 
 .lp-foot{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;
   background:var(--bg);border-top:1px solid var(--line);padding:26px 0 0;margin-top:38px;
-  font-family:var(--font-data);font-size:10.5px;font-stretch:87.5%;letter-spacing:.02em;
+  font-family:var(--font-data);font-size:10.5px;letter-spacing:.02em;
   text-transform:uppercase;color:var(--muted)}
 .lp-foot a{color:var(--accent-text);text-decoration:none;min-height:44px;display:inline-flex;align-items:center}
 .lp-foot a:hover{text-decoration:underline}
@@ -1191,7 +1182,7 @@ th{padding:0 12px 10px}
 .brief-parts .eyebrow{margin:0 0 8px}
 .brief-parts ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
 .brief-parts li{background:var(--surface-strong);border-radius:6px;padding:6px 9px;
-  font-family:var(--font-data);font-size:11px;font-stretch:87.5%;color:var(--ink-2);line-height:1.35}
+  font-family:var(--font-data);font-size:11px;color:var(--ink-2);line-height:1.35}
 
 /* Facts sit in a row of their own so the numbers are scannable without competing with the
    sentence above them. auto-fit with a min() floor, because a fixed minimum is what pushed
@@ -1200,7 +1191,7 @@ th{padding:0 12px 10px}
   gap:10px;margin:0 0 16px;padding:14px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 .brief-fact{display:grid;gap:3px;min-width:0}
 .brief-fact-wide{grid-column:1/-1}
-.brief-fact-label{font-family:var(--font-data);font-size:10px;font-stretch:87.5%;letter-spacing:.03em;
+.brief-fact-label{font-family:var(--font-data);font-size:10px;letter-spacing:.03em;
   text-transform:uppercase;color:var(--muted)}
 .brief-fact strong{font-size:13px;font-weight:700;color:var(--ink);line-height:1.45}
 
@@ -1226,7 +1217,7 @@ th{padding:0 12px 10px}
 .session-start input:focus-visible{outline:2px solid var(--accent-text);outline-offset:2px}
 
 .session-running{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:0 0 12px}
-.session-running strong{font-family:var(--font-data);font-size:17px;font-stretch:87.5%;color:var(--ink)}
+.session-running strong{font-family:var(--font-data);font-size:17px;color:var(--ink)}
 .session-running span{color:var(--muted);font-size:13px;line-height:1.5;min-width:0}
 
 .session-actions{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
