@@ -6,8 +6,8 @@ import type { StoredArtifact } from "@/lib/artifacts";
  * It is empty today and it will be empty for weeks, so the empty state is the primary state and
  * it is designed first. What it must NOT do is apologise: "no artifacts yet" is a sentence that
  * teaches nothing and reads as a scolding on a plan whose first deliverable is legitimately
- * months of reading away. So the empty state carries the three things a full wall would carry —
- * how many deliverables the plan holds, which one is next, and exactly how one gets recorded —
+ * months of reading away. So the empty state carries the three things a full wall would carry -
+ * how many deliverables the plan holds, which one is next, and exactly how one gets recorded -
  * which makes the panel worth opening before a single row is done.
  *
  * Four states, and the caller must be able to tell them apart, for the reason lib/artifacts.ts
@@ -28,7 +28,7 @@ const SHOWN = 6;
 
 export function ShippedWall({ feed, planCount, nextRow, nextIndex, openPlan }: {
   feed: ArtifactsFeed;
-  /** Plan rows, from the workbook. Derived — no number describing the plan is ever typed. */
+  /** Plan rows, from the workbook. Derived - no number describing the plan is ever typed. */
   planCount: number;
   nextRow: (string | number | null)[] | null;
   nextIndex: number;
@@ -49,10 +49,10 @@ export function ShippedWall({ feed, planCount, nextRow, nextIndex, openPlan }: {
       ? <p className="home-sub">Reading reports/artifacts…</p>
       : !synced
         ? <div className="home-block">
-            <p className="home-line">This list is unknown, not empty.</p>
+            <p className="home-line">This list could not be read.</p>
             <p className="home-sub">{error
-              ? `GitHub did not answer: ${error}. Nothing has been lost — the artifacts live in the repo, and this panel will read them again on the next load.`
-              : "Artifact sync is not configured, so the repo cannot be read from here. Recorded work still exists; this panel simply cannot see it."}</p>
+              ? `GitHub did not answer: ${error}. Nothing has been lost: the artifacts live in the repo, and this panel will read them again on the next load.`
+              : "Artifact sync is not configured, so the repo cannot be read from here. Recorded work still exists; this panel cannot see it."}</p>
           </div>
         : artifacts.length === 0
           ? <div className="home-block">
@@ -65,10 +65,10 @@ export function ShippedWall({ feed, planCount, nextRow, nextIndex, openPlan }: {
                 <li>
                   <strong>Build the one you are on.</strong>
                   {nextRow
-                    ? <span>Row {nextIndex + 1} · {String(nextRow[2])}{deliverable ? ` — ships “${deliverable}”.` : "."}</span>
+                    ? <span>Row {nextIndex + 1} · {String(nextRow[2])}{deliverable ? `, ships “${deliverable}”.` : "."}</span>
                     : <span>Every topic is done or skipped.</span>}
                 </li>
-                <li><strong>Put it somewhere with a URL.</strong><span>A repo, a write-up or a demo. The URL is what makes it evidence rather than a claim.</span></li>
+                <li><strong>Put it somewhere with a URL.</strong><span>A repo, a write-up or a demo. The URL is what makes it evidence.</span></li>
                 <li><strong>Record it.</strong><span>POST <code className="home-code">/api/artifacts</code> with <code className="home-code">{"{ row, title, url }"}</code>, or ask Quaere to record it for you.</span></li>
               </ol>
               <p className="home-note">The plan row is the join key and it is checked against the workbook, so a row that does not exist cannot be written. There is no edit and no delete: an artifact records that something happened on a date.</p>

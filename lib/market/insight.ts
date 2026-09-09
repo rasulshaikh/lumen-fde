@@ -4,7 +4,7 @@
  *
  * `benchmark.ts` answers what the market asks for. It is impersonal, publishable, and the same
  * for every reader. This file answers what that costs and what to do about it, and it is
- * neither — different inputs, different audience, different blast radius if wrong. That is why
+ * neither - different inputs, different audience, different blast radius if wrong. That is why
  * it is a second module rather than three hundred more lines in the first one.
  *
  * Pure, for the same reason `benchmark.ts` is: `now` is a parameter, there is no network, no
@@ -38,7 +38,7 @@ import { MOVE_MIN_POINTS, type Benchmark, type CoverageEntry, type PlanRow, type
  * Tiering is reach.ts's job, not this file's.
  *
  * That module runs at scan time with the JD body in hand, which is the only place the
- * US-person clause and the clearance language exist — 22 of the 189 distinct core reqs sit in
+ * US-person clause and the clearance language exist - 22 of the 189 distinct core reqs sit in
  * the Washington/Maryland/Virginia belt and read as ordinary on-site roles until you read the
  * body. Re-deriving tiers here from `location` alone would give the tab a second, more
  * permissive answer than the one stored on the requisition, and the two would disagree in the
@@ -55,7 +55,7 @@ export type { ReachTier } from "./reach";
 /**
  * A readiness move of this many whole points raises a flag.
  *
- * Three points is roughly one mid-sized skill clearing — `rag` at 22% of the market is 4.5
+ * Three points is roughly one mid-sized skill clearing - `rag` at 22% of the market is 4.5
  * points of readiness on the current corpus. Below that the flag would fire on the rounding of
  * a single 1% skill and stop meaning anything.
  */
@@ -74,7 +74,7 @@ export const VELOCITY_MIN_DAYS = 7;
 const BANDS = [25, 50, 75];
 
 /**
- * "Employable from Pune today" — the two tiers that need no move and no visa.
+ * "Employable from Pune today" - the two tiers that need no move and no visa.
  *
  * Every percentage this file describes as reachable is computed over exactly these two, so an
  * `out-of-reach` requisition cannot enter one by omission. It lives here rather than in
@@ -87,7 +87,7 @@ const BANDS = [25, 50, 75];
 const REACHABLE_TIERS: ReachTier[] = ["india-remote", "emea-apac-remote"];
 
 /**
- * "Takeable without leaving India" — the above plus `india-office`.
+ * "Takeable without leaving India" - the above plus `india-office`.
  *
  * Both sets exist because collapsing to either one alone reports something false. Answering
  * only with REACHABLE_TIERS is what made the first run claim data-platform was the sole segment
@@ -98,7 +98,7 @@ const REACHABLE_TIERS: ReachTier[] = ["india-remote", "emea-apac-remote"];
  * one.
  *
  * So: headline counts report both, and everything whose purpose is to inform a MULTI-MONTH
- * decision — segment ranking, per-segment reach — uses this wider set. Over a 23-month plan a
+ * decision - segment ranking, per-segment reach - uses this wider set. Over a 23-month plan a
  * domestic move is a choice, not a barrier, and treating it as one distorts the only question
  * the segment ranking exists to answer.
  */
@@ -180,7 +180,7 @@ const DONE_STATUSES = new Set(["done", "complete", "completed", "finished"]);
 
 const iso = (now: Date) => now.toISOString().slice(0, 10);
 const pctOf = (hits: number, total: number) => (total > 0 ? Math.round((hits / total) * 100) : 0);
-/** 18 stays "18h", 14.5 stays "14.5h" — never "18.0h", which reads like false precision. */
+/** 18 stays "18h", 14.5 stays "14.5h" - never "18.0h", which reads like false precision. */
 const hrs = (n: number) => `${Number.isInteger(n) ? n : n.toFixed(1)}h`;
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const signed = (n: number) => `${n > 0 ? "+" : ""}${n}`;
@@ -188,7 +188,7 @@ const signed = (n: number) => `${n > 0 ? "+" : ""}${n}`;
 const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /**
- * The denominator, always as a pair — the same rule benchmark.ts enforces, and the same
+ * The denominator, always as a pair - the same rule benchmark.ts enforces, and the same
  * helper, copied because it is not exported and this file may not edit that one. A skill at
  * 100% of one company's 26 cloned reqs and a skill at 40% across 12 companies are different
  * findings that a bare percentage renders identically.
@@ -208,7 +208,7 @@ export type ProgressEvent = {
   status: string;
   /**
    * The instant the event was recorded. The design names it `at`; the live route emits the
-   * same ISO string as `date`, so both are read — a caller that pipes /api/progress straight
+   * same ISO string as `date`, so both are read - a caller that pipes /api/progress straight
    * through must not silently lose every timestamp.
    *
    * An event with no usable timestamp counts in BOTH the current and the week-ago snapshot.
@@ -352,7 +352,7 @@ export type Insight = {
 type ReachableReq = ReqRecord & { reach?: ReachTier | null };
 
 /**
- * The live core corpus, deduped — the same three exclusions `benchmark.ts` applies, because
+ * The live core corpus, deduped - the same three exclusions `benchmark.ts` applies, because
  * this file's counts have to add up to that file's `coreCount` or the tab contradicts itself
  * in two adjacent panels. Duplicated rather than imported because `distinct` is private there
  * and this task may not edit it; the test pins the two totals equal.
@@ -385,7 +385,7 @@ const companiesOf = (reqs: ReqRecord[]) => new Set(reqs.map((r) => r.company)).s
  * `distinctCore` keeps the oldest clone as the representative, which is right for counting and
  * wrong for reach: a clone group is ONE role posted in several cities, and you apply to
  * whichever city you can reach. Tiering the representative alone hid five real openings behind
- * whichever location happened to be posted first — Anthropic's Applied AI Architect read as
+ * whichever location happened to be posted first - Anthropic's Applied AI Architect read as
  * relocate-sponsor while a clone sat in Bangalore, Databricks' Forward Deployed Engineer the
  * same while a clone was Remote - India, and Cresta's Senior FDE read as out-of-reach while a
  * clone was remote in Australia.
@@ -417,8 +417,8 @@ function bestTierByKey(index: MarketIndex, tierOf: (r: ReachableReq) => ReachTie
  * Tier one requisition. Returns the tier and whether it was derived from `location` alone.
  *
  * The stored `reach` wins outright when it is there, because it is the only value that ever
- * saw the JD body. When it is absent — every requisition in an index scanned before the field
- * existed — `classifyReach(req, null)` is that same function with no body, which reach.ts
+ * saw the JD body. When it is absent - every requisition in an index scanned before the field
+ * existed - `classifyReach(req, null)` is that same function with no body, which reach.ts
  * documents as an upper bound on every tier but one: the body pass only ever moves reqs INTO
  * `out-of-reach`. So a derived corpus overstates what is reachable, and `derivedCount` is how
  * the tab says that out loud instead of letting the reader assume the visa and clearance
@@ -431,7 +431,7 @@ function tierOf(req: ReachableReq): { tier: ReachTier; derived: boolean } {
 
 /**
  * Resolve a plan row against the workbook. `workbook.Plan[N]` is plan row N with the header at
- * index 0 — verified against data/curriculum/50.json, which carries `"i": 50` for the topic at
+ * index 0 - verified against data/curriculum/50.json, which carries `"i": 50` for the topic at
  * plan row 51. Off by one here cites the wrong topic in every sentence this file renders.
  */
 function planRow(workbook: Workbook, row: number | null): PlanRowRef | null {
@@ -454,7 +454,7 @@ const citeRow = (ref: PlanRowRef) => `row ${ref.row}, "${ref.topic}" - ${hrs(ref
  * The status of every plan row, from progress events.
  *
  * Matching is by topic string, trimmed and lowercased, exactly as app/page.tsx matches
- * `/api/progress` against the plan — one matcher, or the tab and the tab's own readiness number
+ * `/api/progress` against the plan - one matcher, or the tab and the tab's own readiness number
  * disagree about which rows are done. First event wins because /api/progress returns newest
  * first; a second event for the same topic is the older history of that row.
  *
@@ -462,8 +462,8 @@ const citeRow = (ref: PlanRowRef) => `row ${ref.row}, "${ref.topic}" - ${hrs(ref
  * anywhere: the same event list, filtered to what had already happened by that instant. An
  * event with no timestamp is always included, so a missing field can never manufacture a move.
  *
- * Workbook column 15 is deliberately NOT consulted here. It is the committed baseline — 117
- * "Not started", 2 "Skipped", no other value ever written — so a readiness that reads it is
+ * Workbook column 15 is deliberately NOT consulted here. It is the committed baseline - 117
+ * "Not started", 2 "Skipped", no other value ever written - so a readiness that reads it is
  * pinned at 0% for the life of the plan and looks like a bug rather than like month one. The
  * column survives only as the display fallback in `planRow`, so a skipped row still reads as
  * skipped in the marginal table.
@@ -542,7 +542,7 @@ export function computeInsight(
    * The skills the market actually asks for, which is not every skill the benchmark emits.
    *
    * `computeBenchmark` renders a coverage row for every skill in data/market-skill-map.json,
-   * including the ones no live requisition mentions — `async-comms` and `llm-as-judge` are both
+   * including the ones no live requisition mentions - `async-comms` and `llm-as-judge` are both
    * at 0% on the current corpus. That is correct THERE: a mapped skill that nothing asks for is
    * a finding about the plan. It is wrong in everything below, because everything below prices
    * STUDY, and clearing a skill with no demand behind it buys exactly nothing.
@@ -552,13 +552,13 @@ export function computeInsight(
    * beside `evals` on row 59, which reads as a row that clears two things the market pays for
    * when it clears one.
    *
-   * Filtering here rather than in the tab because the tab is one of four consumers — the weekly
+   * Filtering here rather than in the tab because the tab is one of four consumers - the weekly
    * email, /api/ask, the MCP market tools and insight.json itself all read these same rows, and
    * a row's worth is not a rendering question.
    *
    * The readiness PERCENTAGE cannot move as a result: a 0% skill contributes 0 to both
    * `evidencedWeight` and `totalWeight`. Only the counts change, and they change toward the
-   * truth — "0 of 32 skills cleared" is the goal; "0 of 34" counts two nobody is hiring for.
+   * truth - "0 of 32 skills cleared" is the goal; "0 of 34" counts two nobody is hiring for.
    * The test pins the percentage across this filter, so if it ever moves, the defect is
    * elsewhere and this is where it surfaces.
    */
@@ -578,7 +578,7 @@ export function computeInsight(
    * Grouped by row rather than by skill because a row is the unit of work: row 53 carries
    * `agents`, `multi-agent`, `agent-memory` and `human-in-the-loop`, and four separate lines
    * would understate it four times over and rank it below rows worth less than it. A completed
-   * row cannot appear — its skills are already in the numerator, so its gain is empty and the
+   * row cannot appear - its skills are already in the numerator, so its gain is empty and the
    * group is never created. Nor can a row whose only skills sit at 0% share: `asked` never hands
    * one over, so no group is created for it at all.
    */
@@ -632,7 +632,7 @@ export function computeInsight(
     evidenced: nowReady.evidenced,
     // The skills with demand behind them, not every mapped skill. `coverage.length` was 34 while
     // two of those rows were at 0% share, so the statement read "0 of 34 cleared" against a goal
-    // of 32 — and the Market tab's own coverage table, which filters pct > 0, printed 32 rows
+    // of 32 - and the Market tab's own coverage table, which filters pct > 0, printed 32 rows
     // directly beneath it. The weighted denominator is untouched by this: 0% adds 0 either way.
     skillCount: asked.length,
     weekAgoPct: thenReady.pct,
@@ -644,7 +644,7 @@ export function computeInsight(
       `READINESS - ${nowReady.pct}% of the market you can evidence today: ${nowReady.evidencedWeight} of ${nowReady.totalWeight} share points,` +
       ` ${plural(nowReady.evidenced.length, "skill", "skills")} of ${asked.length} cleared, weighted by how often the market asks for each.` +
       ` From ${plural(current.matched, "progress event", "progress events")} matched to a plan row, not from the workbook baseline.` +
-      `\nA low number is the expected month-one reading, not a failure — rank by the marginal gains, not by this.`,
+      `\nA low number is the expected month-one reading, not a failure - rank by the marginal gains, not by this.`,
   };
 
   // -------------------------------------------------------------------------
@@ -773,7 +773,7 @@ export function computeInsight(
   };
 
   // -------------------------------------------------------------------------
-  // 3. Segments — the market is five markets, and they are not equally takeable.
+  // 3. Segments - the market is five markets, and they are not equally takeable.
   // -------------------------------------------------------------------------
 
   const segmentOf = (req: ReqRecord): SegmentId => SEGMENT_BY_COMPANY[req.company] ?? "other";
@@ -782,7 +782,7 @@ export function computeInsight(
     const reqs = core.filter((r) => segmentOf(r) === id);
     // `other` is emitted only when a company genuinely fell through the table, so an empty
     // catch-all never appears in a ranked fit list. The five real segments always render, at
-    // zero if need be — a segment that has emptied out this week is itself the finding.
+    // zero if need be - a segment that has emptied out this week is itself the finding.
     if (id === "other" && !reqs.length) continue;
 
     /**
@@ -831,7 +831,7 @@ export function computeInsight(
    * The fit ranking, and why it is a count rather than a score.
    *
    * The obvious formula is reachability × coverage, and at month one it evaluates to zero for
-   * every segment — a ranking that goes flat exactly when it is most needed. Reachable
+   * every segment - a ranking that goes flat exactly when it is most needed. Reachable
    * requisition count is a measurement, not a composite: it already contains "60% reachable of
    * a big segment beats 5% reachable of a bigger one", and it stays meaningful all twenty
    * months. Readiness breaks ties, so as skills clear, the segment they clear for rises.
@@ -840,7 +840,7 @@ export function computeInsight(
   segments.forEach((segment, i) => { segment.rank = i + 1; });
 
   // -------------------------------------------------------------------------
-  // 4. Velocity — two points, seven days, or nothing at all.
+  // 4. Velocity - two points, seven days, or nothing at all.
   // -------------------------------------------------------------------------
 
   const velocity = ((): Velocity => {
@@ -905,7 +905,7 @@ export function computeInsight(
   })();
 
   // -------------------------------------------------------------------------
-  // 5. Flags — deterministic, model-free, and suppressed on the runs the benchmark suppresses.
+  // 5. Flags - deterministic, model-free, and suppressed on the runs the benchmark suppresses.
   // -------------------------------------------------------------------------
 
   const flags: Flag[] = [];

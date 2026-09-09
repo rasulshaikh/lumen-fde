@@ -6,7 +6,7 @@
  * exactly the memories worth keeping and still looks like it is working. Neither has a natural
  * failure signal, so both are asserted directly.
  *
- * Everything here is pure with `now` passed in — no clock, no network, no filesystem — matching
+ * Everything here is pure with `now` passed in - no clock, no network, no filesystem - matching
  * lib/motivation.ts and lib/market/insight.ts.
  */
 import {

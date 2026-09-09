@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
  * ## Nothing is written until it is confirmed
  *
  * This is the decision the design records with its reason. A progress marker in this repo was
- * silently overwritten once — a browser session wrote `not_started` over `in_progress` on a real
+ * silently overwritten once - a browser session wrote `not_started` over `in_progress` on a real
  * row, and the fix was to append a correction rather than edit history. A loop that writes
  * progress automatically at the end of every session points that same hazard at that same file,
  * and it fires on the sessions nobody meant to have: the abandoned tab, the accidental click,
@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from "react";
  * ## The running session survives a reload
  *
  * Held in localStorage, not in React state alone. A refresh, a crash or a closed laptop
- * mid-session would otherwise lose the clock and — worse — silently start a fresh one at zero,
+ * mid-session would otherwise lose the clock and - worse - silently start a fresh one at zero,
  * so the reader would record twenty minutes for two hours of work and the number would be wrong
  * in the direction that discourages.
  *

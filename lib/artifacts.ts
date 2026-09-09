@@ -3,14 +3,14 @@
  *
  * data/curriculum.json carries a `proofOfWork` deliverable for all 119 plan rows and nothing
  * in this repo recorded that one of them existed. reports/ held asks, audit, market, notes and
- * progress — five kinds of evidence about studying, none about shipping. So the system could
+ * progress - five kinds of evidence about studying, none about shipping. So the system could
  * report hours, pace and readiness and could not answer the one question an interviewer opens
  * with: what have you built. That is what this file stores.
  *
  * Storage follows the shape `app/api/progress/route.ts` already uses, and for the reason
  * `lib/market/store.ts` sets out at its head: one small markdown file per event, listed and
  * read back, is the right shape for an append-only history and the wrong one for an inventory
- * that gets rewritten. An artifact is a history entry in the strongest sense — it is a record
+ * that gets rewritten. An artifact is a history entry in the strongest sense - it is a record
  * that a thing happened on a date, so nothing here edits one and nothing here deletes one.
  * `writeArtifact` never sends a `sha`, which is not a stylistic choice: without it the GitHub
  * contents API refuses to overwrite an existing path, so append-only is enforced by the
@@ -18,7 +18,7 @@
  *
  * VALIDATION IS THE POINT, not a formality. The same weakness has now bitten twice: POST
  * /api/progress accepted any `topic` string, so a caller typo committed a permanent file that
- * readiness matched to no plan row and silently skipped — the event looked recorded and
+ * readiness matched to no plan row and silently skipped - the event looked recorded and
  * counted toward nothing. An artifact keyed by a free-text topic would fail identically and
  * worse, because the failure is invisible in exactly the moment it matters. So the join key
  * here is the PLAN ROW NUMBER, validated against data/workbook.json, and the topic string is
@@ -41,7 +41,7 @@ export const ARTIFACTS_DIR = "reports/artifacts";
 
 /**
  * Plan rows, counted the way every other citation in this codebase counts them: 1-based over
- * `workbook.Plan`, whose index 0 is the header. Derived, never typed — the row count is a
+ * `workbook.Plan`, whose index 0 is the header. Derived, never typed - the row count is a
  * number that describes the plan, and each of those that was ever hand-written here was wrong
  * within a month.
  */
@@ -51,7 +51,7 @@ export const PLAN_ROWS = (workbook.Plan as unknown[]).length - 1;
  * Newest artifacts read back per request.
  *
  * Deliberately not the 100 that /api/progress uses. 100 is below the 119 rows in the plan, so
- * a complete run of proof-of-work would start truncating itself before it finished — and
+ * a complete run of proof-of-work would start truncating itself before it finished - and
  * truncation on THIS list does not merely lose an old event, it reports that work which
  * exists was never done. 400 leaves room for several artifacts per row and still sits inside
  * one GitHub directory page.
@@ -130,10 +130,10 @@ export function validateArtifact(input: ArtifactInput, now: Date = new Date()): 
   if (!topic) return { ok: false, error: `Plan row ${row} has no topic in data/workbook.json.` };
 
   const title = typeof input.title === "string" ? oneLine(input.title) : "";
-  if (!title) return { ok: false, error: `Title is required — what was built. Received ${shown(input.title)}.` };
+  if (!title) return { ok: false, error: `Title is required - what was built. Received ${shown(input.title)}.` };
 
   const rawUrl = typeof input.url === "string" ? input.url.trim() : "";
-  if (!rawUrl) return { ok: false, error: `URL is required — the repo, write-up or demo that proves it. Received ${shown(input.url)}.` };
+  if (!rawUrl) return { ok: false, error: `URL is required - the repo, write-up or demo that proves it. Received ${shown(input.url)}.` };
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -160,8 +160,8 @@ export function validateArtifact(input: ArtifactInput, now: Date = new Date()): 
 }
 
 /**
- * The committed path. The ISO stamp leads so that name order is chronological — the same
- * property /api/progress and lib/market/store.ts both rely on to sort without opening files —
+ * The committed path. The ISO stamp leads so that name order is chronological - the same
+ * property /api/progress and lib/market/store.ts both rely on to sort without opening files -
  * and it carries milliseconds, which is what keeps two artifacts recorded in the same second
  * from colliding on a path that, being append-only, cannot be overwritten.
  */
@@ -216,8 +216,8 @@ function headers() {
 }
 
 /**
- * Bounded fan-out. Reading the list is an N+1 by construction — the contents API returns
- * names, not bodies — which store.ts calls ruinous for the market index and correct for a
+ * Bounded fan-out. Reading the list is an N+1 by construction - the contents API returns
+ * names, not bodies - which store.ts calls ruinous for the market index and correct for a
  * history of small files. At 119 rows the history is the second case, but `Promise.all` over
  * every file at once is how a burst of a hundred-odd requests trips GitHub's secondary rate
  * limit and turns a good read into a 403.
@@ -247,14 +247,14 @@ export type ArtifactsRead = {
 /**
  * Every recorded artifact, newest first.
  *
- * All-or-nothing on a network failure, for the reason `readProgress` gives: a partial set — one
- * file's fetch failing inside a fan-out that kept the rest — would drop a shipped artifact and
+ * All-or-nothing on a network failure, for the reason `readProgress` gives: a partial set - one
+ * file's fetch failing inside a fan-out that kept the rest - would drop a shipped artifact and
  * render as "you have not built this yet" out of a blip. `synced: false` with an empty list
  * reads as missing data. A silently short list reads as a smaller body of work, which is the
  * one lie this file exists to prevent.
  *
  * A 404 on the directory is not a failure: it is the cold start, before the first artifact,
- * and it is genuinely empty rather than unknown — so it returns `synced: true`.
+ * and it is genuinely empty rather than unknown - so it returns `synced: true`.
  */
 export async function readArtifacts(): Promise<ArtifactsRead> {
   if (!process.env.GITHUB_TOKEN) return { artifacts: [], unreadable: 0, synced: false, error: null };
@@ -291,7 +291,7 @@ export async function readArtifacts(): Promise<ArtifactsRead> {
 }
 
 /**
- * Commit one artifact. No `sha` is sent and none ever should be — that omission is what makes
+ * Commit one artifact. No `sha` is sent and none ever should be - that omission is what makes
  * the store append-only at the API level rather than by convention.
  */
 export async function writeArtifact(
@@ -307,7 +307,7 @@ export async function writeArtifact(
       method: "PUT",
       headers: { ...headers(), "Content-Type": "application/json" },
       body: JSON.stringify({
-        message: `build: record artifact for plan row ${record.row} — ${record.title}`,
+        message: `build: record artifact for plan row ${record.row} - ${record.title}`,
         content: Buffer.from(renderArtifact(record)).toString("base64"),
         branch,
       }),

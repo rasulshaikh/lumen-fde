@@ -4,8 +4,8 @@
  *
  * benchmark.test.mts pins the arithmetic. This file pins the rendering, which is a separate
  * class of bug: `computeBenchmark` can be perfectly right and the email still wrong, because
- * every decision about what reaches the inbox — omit the section, cap at three, print "+N
- * more", send on Monday only, drop a paragraph that invented a number — lives in the route,
+ * every decision about what reaches the inbox - omit the section, cap at three, print "+N
+ * more", send on Monday only, drop a paragraph that invented a number - lives in the route,
  * not in the pure module. None of those decisions has a return value anybody inspects. They
  * are only observable in the bytes handed to Resend.
  *
@@ -154,7 +154,7 @@ type Event = { topic: string; status: string; date: string };
  * Both hops are stubbed because `readProgress` makes both, and a stub that answered only the
  * listing would fail the whole read and be indistinguishable from the outage case below.
  *
- * "unreadable" is a 500 on the listing — GitHub down, which is NOT an empty history. `[]` is the
+ * "unreadable" is a 500 on the listing - GitHub down, which is NOT an empty history. `[]` is the
  * empty history, and the two must produce different behaviour: the first falls back to the
  * workbook baseline, the second is a truthful "nothing is done yet".
  *
@@ -191,7 +191,7 @@ async function digest(stored: MarketIndex | "unreadable", progress: Event[] | "u
 }
 
 // ---------------------------------------------------------------------------
-console.log("\n  digest — the market section is omitted, not emptied");
+console.log("\n  digest - the market section is omitted, not emptied");
 // ---------------------------------------------------------------------------
 
 freeze(`${DAY}T06:00:00Z`);
@@ -200,7 +200,7 @@ const quiet = await digest(index([]));
 ck("a morning with no new core roles still sends the brief", quiet.status === 200 && quiet.body.ok === true && Boolean(quiet.email));
 ck("the plain-text section header is absent entirely", !quiet.email.text.includes("NEW CORE REQS"));
 ck("...and so is the HTML block", !quiet.email.html.includes("New core reqs"));
-ck("...leaving no empty scaffold behind", !quiet.email.text.includes("+0 more") && !/NEW CORE REQS\s*[-—]\s*0/.test(quiet.email.text));
+ck("...leaving no empty scaffold behind", !quiet.email.text.includes("+0 more") && !/NEW CORE REQS\s*[–—-]\s*0/.test(quiet.email.text));
 ck("the study brief is untouched by the omission", quiet.email.text.includes("SHIP THIS") && quiet.email.text.includes("PACE"));
 ck("the response reports zero rather than omitting the field", quiet.body.newCoreReqs === 0);
 
@@ -217,7 +217,7 @@ ck("an unreadable market index omits the section instead of failing the email",
 ck("...and the study brief still ships", blind.email.text.includes("SHIP THIS"));
 
 // ---------------------------------------------------------------------------
-console.log("\n  digest — at most three, then \"+N more\" with the right N");
+console.log("\n  digest - at most three, then \"+N more\" with the right N");
 // ---------------------------------------------------------------------------
 
 const five: [string, string, ReqClass][] = [
@@ -231,15 +231,15 @@ const many = await digest(index(five));
 // The section now sits ABOVE the study brief, so the block ends where the brief begins. Splitting
 // on ANSWER THIS COLD would sweep the whole brief into "the market block" and let a stray company
 // name in a plan row satisfy the assertions below.
-const marketBlock = many.email.text.split("NEW CORE REQS")[1]?.split("TODAY —")[0] ?? "";
+const marketBlock = many.email.text.split("NEW CORE REQS")[1]?.split("TODAY -")[0] ?? "";
 
 ck("the cap constant the route renders against is three", NEW_ROLES_CAP === 3);
-ck("the header carries the true total, not the printed count", many.email.text.includes("NEW CORE REQS — 5"));
+ck("the header carries the true total, not the printed count", many.email.text.includes("NEW CORE REQS - 5"));
 ck("exactly three roles are printed", ["Alpha", "Bravo", "Charlie"].every((c) => marketBlock.includes(c)));
 ck("...and the rest are not", !marketBlock.includes("Delta") && !marketBlock.includes("Echo"));
 ck("the overflow is 5 - 3, not 5 and not 3", marketBlock.includes("+2 more"),
   `("${marketBlock.trim().split("\n").pop()}")`);
-ck("the HTML block agrees with the text", many.email.html.includes("New core reqs — 5") && many.email.html.includes("+2 more"));
+ck("the HTML block agrees with the text", many.email.html.includes("New core reqs - 5") && many.email.html.includes("+2 more"));
 ck("the HTML prints three links, not five",
   (many.email.html.match(/https:\/\/example\.test\/(alpha|bravo|charlie|delta|echo)/g) ?? []).length === 3,
   `(${(many.email.html.match(/https:\/\/example\.test\/(alpha|bravo|charlie|delta|echo)/g) ?? []).length})`);
@@ -247,7 +247,7 @@ ck("the response's count is the total, so a truncated list is still auditable", 
 
 // Exactly at the cap: the "+N more" line must not appear at all.
 const exact = await digest(index(five.slice(0, 3)));
-ck("exactly three prints no overflow line", exact.email.text.includes("NEW CORE REQS — 3") && !exact.email.text.includes("more"),
+ck("exactly three prints no overflow line", exact.email.text.includes("NEW CORE REQS - 3") && !exact.email.text.includes("more"),
   "");
 ck("...and none in the HTML either", !exact.email.html.includes("+0 more") && !exact.email.html.includes("more</span>"));
 
@@ -259,10 +259,10 @@ const clones = await digest(index([
   ["LangChain", "Deployed Engineer (Berlin)", "core"],
 ]));
 ck("four city clones are one line and zero overflow",
-  clones.body.newCoreReqs === 1 && clones.email.text.includes("NEW CORE REQS — 1") && !clones.email.text.includes("more"));
+  clones.body.newCoreReqs === 1 && clones.email.text.includes("NEW CORE REQS - 1") && !clones.email.text.includes("more"));
 
 // ---------------------------------------------------------------------------
-console.log("\n  digest — core only; adjacent and leadership never surface");
+console.log("\n  digest - core only; adjacent and leadership never surface");
 // ---------------------------------------------------------------------------
 
 const mixed = await digest(index([
@@ -274,9 +274,9 @@ const mixed = await digest(index([
 ck("the one core role is surfaced", mixed.email.text.includes("Coreco") && mixed.body.newCoreReqs === 1);
 ck("a new adjacent role never reaches the reader", !mixed.email.text.includes("Adjco") && !mixed.email.html.includes("Adjco"));
 ck("nor does a new leadership role", !mixed.email.text.includes("Leadco") && !mixed.email.html.includes("Leadco"));
-ck("adjacent roles cannot inflate the header count", mixed.email.text.includes("NEW CORE REQS — 1"));
+ck("adjacent roles cannot inflate the header count", mixed.email.text.includes("NEW CORE REQS - 1"));
 
-// Three new adjacent roles and no new core role must render as no section at all — the
+// Three new adjacent roles and no new core role must render as no section at all - the
 // failure would be a section headed "NEW CORE REQS" listing pre-sales requisitions.
 const adjacentOnly = await digest(index([
   ["Adjco", "Solutions Engineer", "adjacent"],
@@ -287,14 +287,14 @@ ck("a day of only adjacent and leadership news renders no market section",
   !adjacentOnly.email.text.includes("NEW CORE REQS") && adjacentOnly.body.newCoreReqs === 0);
 
 // ---------------------------------------------------------------------------
-console.log("\n  digest — today's topic comes from recorded progress, not the baseline");
+console.log("\n  digest - today's topic comes from recorded progress, not the baseline");
 // ---------------------------------------------------------------------------
 
 /**
  * The bug this section exists to keep closed. `status()` read workbook column 15, which is the
  * committed baseline: 117 "Not started", 2 "Skipped", nothing else ever written to it. No row
  * could therefore become done, so `next` was plan row 0 every morning for the life of the plan
- * and only the recall question rotated — within that one topic, for twenty-three months.
+ * and only the recall question rotated - within that one topic, for twenty-three months.
  *
  * These assertions read `body.topic`, which is the same string the route puts in the subject
  * line, and the plain text, so a fix that changed the selection without changing what shipped
@@ -306,14 +306,14 @@ const ROW2 = "Networking: TCP/IP, DNS, TLS, HTTP/2, load balancers, firewalls";
 const asked = (email: Email) => email.text.split("ANSWER THIS COLD (before you open anything)\n")[1]?.split("\n")[0] ?? "";
 
 const fresh = await digest(index([]), []);
-ck("an empty history still yields plan row 0 — the baseline reading is unchanged", fresh.body.topic === ROW0, `("${String(fresh.body.topic)}")`);
-ck("...in the subject line and the body alike", fresh.email.subject === `Lumen · ${ROW0}` && fresh.email.text.startsWith(`TODAY — ${ROW0}`));
+ck("an empty history still yields plan row 0 - the baseline reading is unchanged", fresh.body.topic === ROW0, `("${String(fresh.body.topic)}")`);
+ck("...in the subject line and the body alike", fresh.email.subject === `Lumen · ${ROW0}` && fresh.email.text.startsWith(`TODAY - ${ROW0}`));
 ck("...and the pace counts nothing done", fresh.email.text.includes("0 of 117 topics done · 0h of 1588h"));
 ck("...while the recall question is one of row 0's", asked(fresh.email).length > 0);
 
 const advanced = await digest(index([]), [{ topic: ROW0, status: "done", date: "2026-09-10" }]);
 ck("a progress event marking row 0 done moves the digest off row 0", advanced.body.topic !== ROW0, `("${String(advanced.body.topic)}")`);
-ck("...onto the next incomplete row", advanced.body.topic === ROW1 && advanced.email.text.startsWith(`TODAY — ${ROW1}`));
+ck("...onto the next incomplete row", advanced.body.topic === ROW1 && advanced.email.text.startsWith(`TODAY - ${ROW1}`));
 ck("...and the recall question follows the topic instead of rotating inside the old one", asked(advanced.email) !== asked(fresh.email) && asked(advanced.email).length > 0);
 ck("...and the pace credits the finished row's hours", advanced.email.text.includes("1 of 117 topics done · 14h of 1588h"));
 
@@ -335,7 +335,7 @@ const reopened = await digest(index([]), [
 ck("a row reopened after a done event is current again", reopened.body.topic === ROW0);
 
 // "Skipped" is a decision not to acquire the skill, so the row is passed over rather than
-// queued — the same rule the baseline's own two skipped rows have always had.
+// queued - the same rule the baseline's own two skipped rows have always had.
 const skipped = await digest(index([]), [
   { topic: ROW1, status: "skipped", date: "2026-09-11" },
   { topic: ROW0, status: "done", date: "2026-09-10" },
@@ -346,7 +346,7 @@ ck("a skipped row is stepped over, not offered", skipped.body.topic === ROW2);
 // topic the baseline alone would have picked.
 const outage = await digest(index([]), "unreadable");
 ck("an unreadable progress store still sends", outage.status === 200 && outage.body.ok === true && Boolean(outage.email));
-ck("...falling back to the workbook baseline rather than to nothing", outage.body.topic === ROW0 && outage.email.text.startsWith(`TODAY — ${ROW0}`));
+ck("...falling back to the workbook baseline rather than to nothing", outage.body.topic === ROW0 && outage.email.text.startsWith(`TODAY - ${ROW0}`));
 ck("...with the whole brief intact", outage.email.text.includes("SHIP THIS") && outage.email.text.includes("PACE") && outage.email.text.includes("READ · "));
 
 // Both stores down at once is the compound case: neither failure may reach the reader.
@@ -355,7 +355,7 @@ ck("both GitHub reads failing still sends the brief", blackout.status === 200 &&
   && blackout.body.topic === ROW0 && !blackout.email.text.includes("NEW CORE REQS"));
 
 // ---------------------------------------------------------------------------
-console.log("\n  digest — the topic being worked leads, not the first unstarted row");
+console.log("\n  digest - the topic being worked leads, not the first unstarted row");
 // ---------------------------------------------------------------------------
 
 /**
@@ -369,7 +369,7 @@ const ROW5 = "Docker internals: namespaces, cgroups, layers, networking";
 
 const started5 = await digest(index([]), [{ topic: ROW5, status: "in_progress", date: "2026-09-10" }]);
 ck("an in_progress row 5 leads the email, not the first unstarted row", started5.body.topic === ROW5, `("${String(started5.body.topic)}")`);
-ck("...in the subject line and the body alike", started5.email.subject === `Lumen · ${ROW5}` && started5.email.text.includes(`TODAY — ${ROW5}`));
+ck("...in the subject line and the body alike", started5.email.subject === `Lumen · ${ROW5}` && started5.email.text.includes(`TODAY - ${ROW5}`));
 ck("...without claiming any row is finished", started5.email.text.includes("0 of 117 topics done"));
 
 // Two topics under way at once: the freshest event is the one being worked now. The newer event
@@ -392,7 +392,7 @@ ck("...and it is the date deciding, not the plan order", twoOpenFlipped.body.top
 const notStarted = await digest(index([]), [{ topic: ROW2, status: "not_started", date: "2026-09-11" }]);
 ck("nothing in progress falls back to the first row not done", notStarted.body.topic === ROW0, `("${String(notStarted.body.topic)}")`);
 
-// A done row is still stepped over even while another row is under way — in-progress selects the
+// A done row is still stepped over even while another row is under way - in-progress selects the
 // topic, it does not resurrect a finished one.
 const doneAndOpen = await digest(index([]), [
   { topic: ROW5, status: "in_progress", date: "2026-09-11" },
@@ -401,13 +401,13 @@ const doneAndOpen = await digest(index([]), [
 ck("a done row stays done while another row leads", doneAndOpen.body.topic === ROW5 && doneAndOpen.email.text.includes("1 of 117 topics done"));
 
 // ---------------------------------------------------------------------------
-console.log("\n  digest — it says how long it has been on the same topic");
+console.log("\n  digest - it says how long it has been on the same topic");
 // ---------------------------------------------------------------------------
 
 /**
  * The email repeats a topic until progress moves it, which is right for a study plan and reads
- * as a stuck email. The fix is not a rotation through unstarted topics — that scatters the focus
- * the plan exists to hold — but saying the repetition out loud, with the date of the last
+ * as a stuck email. The fix is not a rotation through unstarted topics - that scatters the focus
+ * the plan exists to hold - but saying the repetition out loud, with the date of the last
  * recorded event or the fact that there has never been one.
  *
  * The clock is 06:00 on 2026-09-14 throughout, so an event dated 2026-09-10 is day 5 counting
@@ -431,7 +431,7 @@ ck("a topic with no recorded event says so plainly",
 ck("...and says what would move the brief on", fresh.email.text.includes("Recording one is what moves this brief on"));
 ck("...without inventing a day count", !fresh.email.text.includes("Day "));
 
-// A history with events, none of them on today's topic, is the same fact — `notStarted` above
+// A history with events, none of them on today's topic, is the same fact - `notStarted` above
 // recorded an event on row 2 and the email is on row 0.
 ck("events on other rows do not count as progress on this one",
   notStarted.email.text.includes("No progress has ever been recorded on this topic"));
@@ -442,28 +442,28 @@ ck("an unreadable progress store makes no claim about the topic's age",
   && !outage.email.html.includes("No progress has ever been recorded"));
 
 // ---------------------------------------------------------------------------
-console.log("\n  digest — new core reqs lead; on a quiet morning the brief does");
+console.log("\n  digest - new core reqs lead; on a quiet morning the brief does");
 // ---------------------------------------------------------------------------
 
 /**
  * The section is empty on almost every morning, so the ordering is self-managing: put it above
  * TODAY and a quiet day still opens on the study brief with no special case, while the rare day
- * a core role appears opens on the role. The alerts stay above both — a dead scan invalidates the
+ * a core role appears opens on the role. The alerts stay above both - a dead scan invalidates the
  * very numbers the market section prints.
  */
-ck("with new core reqs, the section is the first thing in the email", many.email.text.startsWith("NEW CORE REQS — 5"));
-ck("...above the TODAY line", many.email.text.indexOf("NEW CORE REQS") < many.email.text.indexOf("TODAY —"));
+ck("with new core reqs, the section is the first thing in the email", many.email.text.startsWith("NEW CORE REQS - 5"));
+ck("...above the TODAY line", many.email.text.indexOf("NEW CORE REQS") < many.email.text.indexOf("TODAY -"));
 ck("...and above the study brief in the HTML", many.email.html.indexOf("New core reqs") < many.email.html.indexOf("What it asks of you")
   && many.email.html.indexOf("New core reqs") < many.email.html.indexOf("Ship this"));
 ck("...while everything from TODAY down keeps its order",
-  many.email.text.indexOf("TODAY —") < many.email.text.indexOf("WHAT IT ASKS OF YOU")
+  many.email.text.indexOf("TODAY -") < many.email.text.indexOf("WHAT IT ASKS OF YOU")
   && many.email.text.indexOf("WHAT IT ASKS OF YOU") < many.email.text.indexOf("SHIP THIS")
   && many.email.text.indexOf("SHIP THIS") < many.email.text.indexOf("ANSWER THIS COLD")
   && many.email.text.indexOf("ANSWER THIS COLD") < many.email.text.indexOf("READ · ")
   && many.email.text.indexOf("READ · ") < many.email.text.indexOf("DO · ")
   && many.email.text.indexOf("DO · ") < many.email.text.indexOf("PACE"));
 
-ck("with none, TODAY leads", quiet.email.text.startsWith(`TODAY — ${ROW0}`));
+ck("with none, TODAY leads", quiet.email.text.startsWith(`TODAY - ${ROW0}`));
 ck("...and no empty heading is left above it", !quiet.email.text.includes("NEW CORE REQS") && !quiet.email.html.includes("New core reqs"));
 
 // Alerts outrank the roles, which outrank the brief.
@@ -473,12 +473,12 @@ const stacked = await digest(loudAndNew);
 ck("a stale scan still sits above the new roles",
   stacked.email.text.startsWith("SCAN STALE")
   && stacked.email.text.indexOf("SCAN STALE") < stacked.email.text.indexOf("NEW CORE REQS")
-  && stacked.email.text.indexOf("NEW CORE REQS") < stacked.email.text.indexOf("TODAY —"));
+  && stacked.email.text.indexOf("NEW CORE REQS") < stacked.email.text.indexOf("TODAY -"));
 ck("...in the HTML too", stacked.email.html.indexOf("Scan stale") < stacked.email.html.indexOf("New core reqs")
   && stacked.email.html.indexOf("New core reqs") < stacked.email.html.indexOf("What it asks of you"));
 
 // ---------------------------------------------------------------------------
-console.log("\n  digest — a dead or short scan says so, above the study content");
+console.log("\n  digest - a dead or short scan says so, above the study content");
 // ---------------------------------------------------------------------------
 
 /**
@@ -486,12 +486,12 @@ console.log("\n  digest — a dead or short scan says so, above the study conten
  * stopped. index.json stops being updated, every surface keeps rendering last week's numbers as
  * current, and a week of dead scans is indistinguishable from a week of quiet market.
  *
- * The digest is the detector — it runs thirty minutes after the scan and already reads the file.
+ * The digest is the detector - it runs thirty minutes after the scan and already reads the file.
  * These assertions are about the two lines it prints and, just as much, about the mornings it
  * prints neither: an alert that renders on a healthy day is one the reader stops seeing.
  *
  * The clock is 06:00 on DAY throughout, and the healthy fixture's updatedAt is 03:00 the same
- * morning, so "fresh" here is three hours old — what a working pipeline actually looks like.
+ * morning, so "fresh" here is three hours old - what a working pipeline actually looks like.
  */
 freeze(`${DAY}T06:00:00Z`);
 
@@ -505,11 +505,11 @@ ck("...and no partial line either", !healthy.email.text.includes("PARTIAL SCAN")
 // The topic-age line is part of the header block, directly under the month line, so it is allowed
 // here and nothing else is. This fixture's history is empty, so the line it renders is the
 // no-event one; the assertion is still that no ALERT scaffold appears on a healthy morning.
-ck("...leaving nothing between the header and the brief — no empty scaffold on a healthy morning",
-  /^TODAY — .+\nMonth [^\n]+\n(?:No progress has ever been recorded[^\n]*\n|Day \d+ on this topic[^\n]*\n)?\s*$/.test(preamble(healthy.email)),
+ck("...leaving nothing between the header and the brief - no empty scaffold on a healthy morning",
+  /^TODAY - .+\nMonth [^\n]+\n(?:No progress has ever been recorded[^\n]*\n|Day \d+ on this topic[^\n]*\n)?\s*$/.test(preamble(healthy.email)),
   `("${preamble(healthy.email).trim()}")`);
 
-// 26h is the threshold — one cycle plus slack — so a single missed run must stay silent.
+// 26h is the threshold - one cycle plus slack - so a single missed run must stay silent.
 const lateByADay = index([]);
 lateByADay.updatedAt = `${YESTERDAY}T05:30:00.000Z`; // 24.5h old: last night's scan failed once
 const late = await digest(lateByADay);
@@ -550,7 +550,7 @@ ck("an index with no timestamp reports no successful run, never \"NaN hours\"",
 /**
  * The partial-scan line answers a question the reader would otherwise answer wrongly. Below
  * DELTA_MIN_BOARDS the benchmark suppresses movement AND the new-core-reqs section, so the email
- * goes quiet — and a quiet email reads as a quiet market rather than as a short scan.
+ * goes quiet - and a quiet email reads as a quiet market rather than as a short scan.
  */
 const short = index([]);
 short.boardsOk = 20;
@@ -582,8 +582,8 @@ ck("a stale AND partial scan prints both lines",
 ck("...stale first, because it is the one that invalidates the numbers",
   bothAlerts.email.text.indexOf("SCAN STALE") < bothAlerts.email.text.indexOf("PARTIAL SCAN"));
 
-// The alert may never cost the email. An unreadable store is not evidence the scan is broken —
-// GitHub may be down and the scan fine — so it buys silence, not a false alarm.
+// The alert may never cost the email. An unreadable store is not evidence the scan is broken -
+// GitHub may be down and the scan fine - so it buys silence, not a false alarm.
 const unread = await digest("unreadable");
 ck("an unreadable store still sends the digest",
   unread.status === 200 && unread.body.ok === true && Boolean(unread.email) && unread.email.text.includes("SHIP THIS"));
@@ -592,11 +592,11 @@ ck("...and raises neither alert, having nothing truthful to say about a file it 
   && !unread.email.html.includes("Scan stale") && !unread.email.html.includes("Partial scan"));
 
 // ---------------------------------------------------------------------------
-console.log("\n  market scan — the weekly email is Monday-only");
+console.log("\n  market scan - the weekly email is Monday-only");
 // ---------------------------------------------------------------------------
 
 /**
- * NOTE — what this section cannot reach.
+ * NOTE - what this section cannot reach.
  *
  * market-scan/route.ts exports only `GET`. `weeklyFraming`, `sendWeekly` and the
  * `now.getUTCDay() === 1` gate are all module-private, and the gate reads a `new Date()`
@@ -606,7 +606,7 @@ console.log("\n  market scan — the weekly email is Monday-only");
  *
  * The boards are all made to fail. That is the cheapest complete cycle: the cursor still
  * wraps, so `complete` is true and the route runs the writes, the Monday gate and the email
- * — and `boardsOk: 0` is also exactly the suppression state the last section needs.
+ * - and `boardsOk: 0` is also exactly the suppression state the last section needs.
  */
 function scanStub(minimax?: string): Stub {
   return (url, init) => {
@@ -652,7 +652,7 @@ const sunday = await scan();
 ck("Sunday is not Monday either", sunday.emailCount === 0 && !("emailed" in sunday.body));
 
 // ---------------------------------------------------------------------------
-console.log("\n  market scan — a paragraph that invents a number is dropped");
+console.log("\n  market scan - a paragraph that invents a number is dropped");
 // ---------------------------------------------------------------------------
 
 freeze(`${DAY}T04:00:00Z`);
@@ -678,7 +678,7 @@ ck("an obviously fabricated figure is dropped", (await scan(HUGE)).body.emailFra
 
 // Even a number the route itself supplied is dropped. The prompt says "Write no numbers at
 // all", the numbers are already printed above the paragraph, and any allow-set built from text
-// the model can read is one the model can quote from — which is exactly how 58 and 60 leaked.
+// the model can read is one the model can quote from - which is exactly how 58 and 60 leaked.
 const SUPPLIED = `Hold the line on evaluation work across all ${BOARD_COUNT} boards before touching deployment tooling.`;
 const echoed = await scan(SUPPLIED);
 ck("even a number the route supplied is dropped", echoed.body.emailFraming === false && !echoed.email.text.includes(`all ${BOARD_COUNT} boards`));
@@ -696,7 +696,7 @@ ck("an unterminated <think> block leaves no framing", onlyThinking.body.emailFra
 ck("...and no empty framing block is rendered", !onlyThinking.email.html.includes("What to do this week"));
 
 // ---------------------------------------------------------------------------
-console.log("\n  market scan — the two number leaks that were found and closed");
+console.log("\n  market scan - the two number leaks that were found and closed");
 // ---------------------------------------------------------------------------
 
 /**
@@ -706,7 +706,7 @@ console.log("\n  market scan — the two number leaks that were found and closed
  * deriving it from the facts still whitelisted 58, because the coverage block cites `row 58,
  * "..." - 18h, month 4` and a row number reads as a percentage once a % follows it.
  *
- * The fix is an empty allow-set — the prompt forbids every digit, so the check enforces that.
+ * The fix is an empty allow-set - the prompt forbids every digit, so the check enforces that.
  * These two assertions are the regression guard; they were characterizations of the bug and
  * are now characterizations of the fix.
  */
@@ -725,7 +725,7 @@ ck("...and the dropped paragraph's wording is absent",
   !promptWords.email.text.includes("About 60% of the work") && !promptWords.email.html.includes("What to do this week"));
 
 // ---------------------------------------------------------------------------
-console.log("\n  market scan — a suppressed movement says so, never a number");
+console.log("\n  market scan - a suppressed movement says so, never a number");
 // ---------------------------------------------------------------------------
 
 const suppressed = monday.email;

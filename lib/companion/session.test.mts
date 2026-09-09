@@ -3,7 +3,7 @@
  *
  * Validation is the point here, not a formality, and the reason is written into
  * `lib/artifacts.ts`: /api/progress once accepted any `topic` string, so a caller typo committed
- * a permanent file that matched no plan row and was silently skipped — it looked recorded and
+ * a permanent file that matched no plan row and was silently skipped - it looked recorded and
  * counted toward nothing. A session keyed on free text fails identically and just as invisibly,
  * so the row is validated against the workbook and the topic is derived, never accepted.
  *
@@ -30,7 +30,7 @@ console.log("the row is the join key, and it is validated");
   ck("past the end is refused", !validateSession({ row: PLAN_ROWS + 1 }, NOW).ok);
   ck("a missing row is refused, not read as 0", !validateSession({}, NOW).ok);
   // Number("") and Number(" ") are both 0. A non-digit parse is what stops a blank row
-  // validating as row 0 and failing for the wrong reason — or passing, one refactor later.
+  // validating as row 0 and failing for the wrong reason - or passing, one refactor later.
   ck("an empty string is refused", !validateSession({ row: "" }, NOW).ok);
   ck("whitespace is refused", !validateSession({ row: "  " }, NOW).ok);
   ck("exponent notation is refused", !validateSession({ row: "1e2" }, NOW).ok);
@@ -49,7 +49,7 @@ console.log("the topic is derived, never accepted");
 
 console.log("minutes");
 {
-  ck("zero is fine — a session that happened still counts", validateSession({ row: 1, minutes: 0 }, NOW).ok);
+  ck("zero is fine - a session that happened still counts", validateSession({ row: 1, minutes: 0 }, NOW).ok);
   ck("a normal sitting is fine", validateSession({ row: 1, minutes: 45 }, NOW).ok);
   // A tab left open overnight would otherwise record a nineteen-hour session and poison every
   // average built on top of it.
@@ -98,7 +98,7 @@ console.log("the path is unique per instant and names the row");
     const path = sessionPath(result.value, NOW);
     ck("lands under the sessions directory", path.startsWith("reports/companion/sessions/"), path);
     ck("names the row, zero padded", path.includes("row-007"), path);
-    ck("carries no colons — GitHub paths and local checkouts both dislike them", !path.includes(":"), path);
+    ck("carries no colons - GitHub paths and local checkouts both dislike them", !path.includes(":"), path);
     ck("a later instant is a different path", sessionPath(result.value, new Date("2026-09-09T18:31:00Z")) !== path);
   }
 }

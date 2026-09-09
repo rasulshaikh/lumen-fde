@@ -6,7 +6,7 @@ Docs opt in per claim with a trailing HTML comment naming an anchor:
 
 Syntax: `<!-- verify:<anchor>=<value> -->`, any number of them per line, value may carry
 thousands commas (1,588). Only anchors are checked; free prose is never scanned. That is
-deliberate — a regex over prose matches years, percentages and version numbers, and a checker
+deliberate - a regex over prose matches years, percentages and version numbers, and a checker
 that reports three false alarms gets muted in a week. An unknown anchor name is a hard error,
 so a typo cannot pass by matching nothing.
 
@@ -70,7 +70,7 @@ def anchor_builders() -> dict:
     vercel = json.loads((ROOT / "vercel.json").read_text())
     ladder = re.search(r"export const LADDER = \[(.*?)\]", (ROOT / "lib" / "review.ts").read_text()).group(1)
     return {
-        # data/workbook.json Plan — col 15 is Status, "Skipped" means inactive
+        # data/workbook.json Plan - col 15 is Status, "Skipped" means inactive
         "rows": lambda: len(rows),
         "active_rows": lambda: len(active),
         "skipped_rows": lambda: len(rows) - len(active),
@@ -101,7 +101,7 @@ def resilient(builders: dict) -> tuple[dict, list[str]]:
     """Evaluate each extractor independently.
 
     anchors() used to build every value in one dict literal, so the first extractor to raise
-    aborted the whole run before a single document was read — a stale file path silently
+    aborted the whole run before a single document was read - a stale file path silently
     disabled documentation verification entirely, which is the opposite of what a checker is
     for. Now a broken extractor costs its own anchor, is named in the output, and fails the
     run, while every other anchor is still checked.
@@ -127,7 +127,7 @@ def main() -> None:
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     files = [pathlib.Path(a).resolve() for a in args] if args else sorted(DOCS.glob("*.md"))
     if not files:
-        print(f"no markdown found in {DOCS.relative_to(ROOT)} — nothing to verify")
+        print(f"no markdown found in {DOCS.relative_to(ROOT)} - nothing to verify")
         return
 
     checked, problems = 0, []
@@ -136,14 +136,14 @@ def main() -> None:
         for lineno, line in enumerate(path.read_text().splitlines(), 1):
             for name, claimed in ANCHOR.findall(line):
                 if name not in values:
-                    problems.append(f"{rel}:{lineno}: unknown anchor {name!r} — known: {', '.join(sorted(values))}")
+                    problems.append(f"{rel}:{lineno}: unknown anchor {name!r} - known: {', '.join(sorted(values))}")
                     continue
                 checked += 1
                 if claimed.replace(",", "") != str(values[name]):
                     problems.append(f"{rel}:{lineno}: {name} claims {claimed}, source says {values[name]}")
 
             # The anchor is invisible; the number beside it is what a person reads. Those two
-            # drifted apart in architecture.md — `| API routes | 10 <!-- verify:api_routes=11 -->`
+            # drifted apart in architecture.md - `| API routes | 10 <!-- verify:api_routes=11 -->`
             # passed this script for as long as it existed, because the anchor was right and the
             # anchor was the only thing being read. Compare the rendered number too.
             #

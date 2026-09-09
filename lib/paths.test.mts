@@ -4,8 +4,8 @@
  * Three properties, and the first two are the ones that would make this page lie.
  *
  * 1. **Every CompReality row reaches the page.** A path is a regex over the market column, and a
- *    regex silently drops what it does not match. The sheet's most important row — "Your $250K
- *    target" — matches no path by design, so the test asserts it comes out of `unclaimedBands`
+ *    regex silently drops what it does not match. The sheet's most important row - "Your $250K
+ *    target" - matches no path by design, so the test asserts it comes out of `unclaimedBands`
  *    rather than out of nowhere. Run against the real workbook, not a fixture: a fixture would
  *    keep passing after someone edited the sheet, which is the exact failure it exists to catch.
  *
@@ -14,7 +14,7 @@
  *    to. The tests pin the overlap as real and pin both paths to `attribution: "shared"`, so
  *    removing the disclosure breaks a test instead of quietly inventing a country split.
  *
- * 3. **Unknown is never rendered as none.** No scan, no store, no network — every one of those
+ * 3. **Unknown is never rendered as none.** No scan, no store, no network - every one of those
  *    is `openings: null`, never `{count: 0}`.
  */
 import workbook from "../data/workbook.json" with { type: "json" };
@@ -45,7 +45,7 @@ const slices: ReachSlice[] = [
 
 console.log("the sheet's column order is what the band reader assumes");
 {
-  // If the sheet is ever reordered, this is the test that fails — rather than the page quietly
+  // If the sheet is ever reordered, this is the test that fails - rather than the page quietly
   // labelling a source URL as a salary band.
   ck("column 0 is the market", /market/i.test(String(HEADER[0])), String(HEADER[0]));
   ck("column 1 is the band", /band/i.test(String(HEADER[1])), String(HEADER[1]));
@@ -89,14 +89,14 @@ console.log("openings are attributed honestly, or not attributed");
   const by = (id: string) => views.find((v) => v.id === id)!;
 
   ck("India sums its three no-move tiers", by("india").openings?.count === 22, `${by("india").openings?.count}`);
-  ck("India is exact — those tiers describe nothing else", by("india").attribution === "exact");
+  ck("India is exact - those tiers describe nothing else", by("india").attribution === "exact");
 
   // The disclosure this whole module exists for.
   ck("the Gulf reads the relocation pool", by("gulf").openings?.count === 20, `${by("gulf").openings?.count}`);
   ck("the US reads that same pool plus out-of-reach", by("us").openings?.count === 29, `${by("us").openings?.count}`);
   ck("both are marked shared, never exact", by("gulf").attribution === "shared" && by("us").attribution === "shared");
   const gulfTiers = new Set(by("gulf").tiers);
-  ck("and they genuinely overlap — the disclosure is not decorative", by("us").tiers.some((t) => gulfTiers.has(t)));
+  ck("and they genuinely overlap - the disclosure is not decorative", by("us").tiers.some((t) => gulfTiers.has(t)));
 
   // Companies are a floor, not a sum: one employer can post into two tiers.
   ck("companies is the max across tiers, never the sum", by("india").openings?.companies === 9, `${by("india").openings?.companies}`);
@@ -109,7 +109,7 @@ console.log("no scan is unknown, never an empty market");
 {
   const views = buildPaths(COMP, null);
   ck("every path reports null openings", views.every((v) => v.openings === null));
-  ck("but the bands still render — the sheet is local", views.some((v) => v.bands.length > 0));
+  ck("but the bands still render - the sheet is local", views.some((v) => v.bands.length > 0));
 
   // A scan that ran but found nothing in a tier is a real zero, and must be distinguishable.
   const empty = buildPaths(COMP, [{ tier: "india-remote", label: "l", count: 0, companies: 0 }]);
@@ -133,7 +133,7 @@ console.log("the odds column discloses the horizon it was written for");
 console.log("the disclosure actually reaches the screen");
 {
   // Asserted by rendering, not by reading the source. The caveat lives in the one state a
-  // prerender never reaches — the page ships with `openings: null` and fills in after a fetch —
+  // prerender never reaches - the page ships with `openings: null` and fills in after a fetch -
   // so the built HTML contains every other sentence on this page and not this one. A condition
   // inverted here would have shipped looking fine.
   const { renderToStaticMarkup } = await import("react-dom/server");
@@ -146,13 +146,13 @@ console.log("the disclosure actually reaches the screen");
 
   // A shared path renders NO total and NO denominator. Both were defects: summing the tiers gave
   // the US card the relocation pool PLUS out-of-reach, so its "whole pool" caption described a
-  // number that was not the pool — and the hero styling out-argued the caption either way.
+  // number that was not the pool - and the hero styling out-argued the caption either way.
   const gulf = render("gulf");
   ck("a shared path says no market count exists", /No count of roles in this market exists/.test(gulf), gulf.slice(0, 160));
   ck("it renders NO headline total", !/path-count/.test(gulf), gulf);
   ck("and no 'of N' denominator, which is what made it read as market share", !/of 44/.test(gulf));
   ck("it names the shared pool by its real size", gulf.includes("20") && /same requisitions the other relocation path/.test(gulf));
-  ck("the Gulf does NOT mention out-of-reach — it does not count them", !/closed to you outright/.test(gulf));
+  ck("the Gulf does NOT mention out-of-reach - it does not count them", !/closed to you outright/.test(gulf));
 
   const us = render("us");
   ck("the US card also renders no total", !/path-count/.test(us));
@@ -170,7 +170,7 @@ console.log("the disclosure actually reaches the screen");
   ck("the no-market path says why, and never shows a zero", /No requisition can evidence this one/.test(own) && !/>0</.test(own));
 
   const unread = render("india", { path: { ...views[0], openings: null }, synced: false });
-  ck("an unreadable store says unknown, not zero", /unknown — not zero/.test(unread), unread);
+  ck("an unreadable store says unknown, not zero", /unknown, not zero/.test(unread), unread);
   const noscan = render("india", { path: { ...views[0], openings: null }, synced: true });
   ck("a synced store with no scan says so differently", /No scan has recorded/.test(noscan), noscan);
   ck("the two empty states are not the same sentence", unread !== noscan);
@@ -178,7 +178,7 @@ console.log("the disclosure actually reaches the screen");
 
 console.log("a blank market cell is surfaced, never claimed");
 {
-  // `/$^/` — the previous "matches nothing" regex for the own path — returns TRUE for the empty
+  // `/$^/` - the previous "matches nothing" regex for the own path - returns TRUE for the empty
   // string, so a CompReality row with a blank market column was claimed as a salary band by
   // "Your own thing" instead of surfacing through unclaimedBands. Only a blank cell exposed it,
   // and the real sheet has none, so nothing in the suite caught it.
@@ -196,7 +196,7 @@ console.log("an unreadable artifacts store is unknown, not an empty portfolio");
 {
   // /api/artifacts degrades with HTTP 200 and synced:false, so `r.ok` proves nothing. Reading
   // `.length` off that payload gave 0 and the card printed "0 deliverables recorded" during a
-  // GitHub outage — on the one path whose only stated proof is work you shipped.
+  // GitHub outage - on the one path whose only stated proof is work you shipped.
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createElement } = await import("react");
   const { PathCard } = await import("../components/Paths.tsx");
@@ -208,7 +208,7 @@ console.log("an unreadable artifacts store is unknown, not an empty portfolio");
   ck("a real count says the count", card(3).includes("3 deliverables recorded"));
   ck("one deliverable is singular", card(1).includes("1 deliverable recorded") && !card(1).includes("1 deliverables"));
   const unknown = card(null);
-  ck("unknown says unknown, and never 0", /unknown rather than none/.test(unknown) && !unknown.includes("0 deliverable"), unknown.slice(0, 200));
+  ck("unknown says unknown, and never 0", /could not be read/.test(unknown) && /unknown, not none/.test(unknown) && !unknown.includes("0 deliverable"), unknown.slice(0, 240));
   ck("loading is not the same as unreadable", /reading/i.test(card(null, "loading")) && !/could not be read/.test(card(null, "loading")));
 }
 

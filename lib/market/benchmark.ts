@@ -1,6 +1,6 @@
 /**
  * The benchmark computation: a stored requisition index plus the hand-authored skill map
- * plus the plan workbook, in — rendered statement strings out.
+ * plus the plan workbook, in - rendered statement strings out.
  *
  * Pure. No network, no filesystem, no `Date.now()`. `now` is a parameter, which is the whole
  * reason this file exists separately from the cron route: a market benchmark that can only be
@@ -11,7 +11,7 @@
  * The one rule that shapes every number below: the headline denominator is CORE only. If
  * ADJACENT entered it, "the market" would be measured by 169 Databricks Solutions Architects
  * and 39 Datadog Sales Engineers, and the answer would be about pre-sales, not FDE. ADJACENT
- * is counted and rendered separately — it is real signal about where the roles are — but it
+ * is counted and rendered separately - it is real signal about where the roles are - but it
  * never sets a headline.
  */
 import { dedupeKey } from "./classify";
@@ -23,7 +23,7 @@ import type { MarketIndex, ReqRecord, TrendPoint } from "./store";
  * The enabled board count in data/market-sources.json (32 configured, 27 enabled). It is a
  * constant here rather than a fourth argument because the only thing it feeds is the
  * "N of 27 boards" wording; the counting never depends on it. If the enabled set changes,
- * this changes with it — the test asserts the two agree.
+ * this changes with it - the test asserts the two agree.
  */
 export const BOARD_COUNT = 27;
 
@@ -31,7 +31,7 @@ export const BOARD_COUNT = 27;
  * Below this many successful boards, every delta is suppressed.
  *
  * Three or more dead boards is enough to move a percentage by more points than a real week of
- * hiring does, and a delta computed against a smaller corpus is not a smaller delta — it is a
+ * hiring does, and a delta computed against a smaller corpus is not a smaller delta - it is a
  * wrong one. Suppressing is the honest failure: the reader sees "partial scan" instead of a
  * confident-looking movement line built on two thirds of the market.
  */
@@ -126,7 +126,7 @@ export type Benchmark = {
   adjacentCompanyCount: number;
   leadershipCount: number;
   adjacentStatement: string;
-  /** Fractions, not points — the shape trend.json stores, so the caller can append directly. */
+  /** Fractions, not points - the shape trend.json stores, so the caller can append directly. */
   skillShares: Record<string, number>;
   coverage: CoverageEntry[];
   gaps: GapEntry[];
@@ -141,7 +141,7 @@ export type Benchmark = {
 
 const iso = (now: Date) => now.toISOString().slice(0, 10);
 const pct = (hits: number, total: number) => (total > 0 ? Math.round((hits / total) * 100) : 0);
-/** 18 stays "18h", 121.5 stays "121.5h" — never "18.0h", which reads like false precision. */
+/** 18 stays "18h", 121.5 stays "121.5h" - never "18.0h", which reads like false precision. */
 const hrs = (n: number) => `${Number.isInteger(n) ? n : n.toFixed(1)}h`;
 
 /**
@@ -161,7 +161,7 @@ const statusOf = (row: PlanRow) => String(row[15] ?? "").trim().toLowerCase();
 /**
  * Resolve a plan row number against the workbook.
  *
- * `workbook.Plan[N]` is plan row N with the header at index 0 — verified against
+ * `workbook.Plan[N]` is plan row N with the header at index 0 - verified against
  * data/curriculum/50.json, which carries `"i": 50` for the topic at plan row 51. Getting this
  * off by one would cite the wrong topic in every sentence the benchmark renders.
  *
@@ -199,7 +199,7 @@ const citeRow = (ref: PlanRowRef) => `row ${ref.row}, "${ref.topic}" - ${hrs(ref
  *    Samsara 6 region-cloned SEs; without this, those two boards set every percentage.
  *
  * The key is recomputed from company+title rather than read from the stored `key`, so a fix to
- * the location vocabulary in classify.ts takes effect on the next recompute with no re-scan —
+ * the location vocabulary in classify.ts takes effect on the next recompute with no re-scan -
  * which is the property that storing only a skill fingerprint bought in the first place.
  *
  * The representative of a clone group is chosen deterministically (oldest `firstSeen`, then id)
@@ -281,7 +281,7 @@ export function computeBenchmark(
       statement: `${skill.label} - ${p}% of core FDE requisitions: ${pair(hits, coreCount, companies, companyCount)}.\n${covered}`,
     });
   }
-  // Descending by percentage, then by absolute hits, then by id — a total order, so two runs
+  // Descending by percentage, then by absolute hits, then by id - a total order, so two runs
   // over the same index always render the block in the same sequence.
   coverage.sort((a, b) => b.pct - a.pct || b.hits - a.hits || (a.id < b.id ? -1 : 1));
 
@@ -305,7 +305,7 @@ export function computeBenchmark(
      * A benchmark that overstates its own gaps argues for evicting real curriculum.
      */
     const partial = gap.planCoverage === "partial";
-    const lead = partial ? "Partly covered — see below." : "No plan row covers this.";
+    const lead = partial ? "Partly covered - see below." : "No plan row covers this.";
     return {
       id: gap.id,
       label: gap.label,
@@ -320,7 +320,7 @@ export function computeBenchmark(
   /**
    * Over-investment: scheduled hours against measured JD frequency.
    *
-   * "Active" excludes `skipped` rows, matching the daily digest's definition — hours you have
+   * "Active" excludes `skipped` rows, matching the daily digest's definition - hours you have
    * already struck off the plan are not hours you are over-investing. On the current workbook
    * that gives 117 active rows and 1,588 active hours, and tracks M+N+O sum to 335h, 21%.
    */
@@ -377,7 +377,7 @@ export function computeBenchmark(
    * `skills === null`: a req whose JD fetch failed still appeared on the board today, and that
    * is a fact about the market, not a percentage that a missing fingerprint could corrupt.
    *
-   * Suppressed on a baseline run and on a partial scan, for the same reason the deltas are —
+   * Suppressed on a baseline run and on a partial scan, for the same reason the deltas are -
    * on an incomplete corpus "new" is indistinguishable from "not fetched yet".
    */
   let newSinceLastRun: NewReqEntry[] = [];
@@ -419,7 +419,7 @@ export function computeBenchmark(
    * Compared in whole points against the rounded previous share, not in raw fractions: the
    * rendered sentence says "28% to 33%", and a delta computed on unrounded values can print
    * "+3" beside two numbers four apart. A skill absent from the previous point is skipped
-   * rather than treated as having been at 0% — a newly added skill is not a market movement.
+   * rather than treated as having been at 0% - a newly added skill is not a market movement.
    */
   const movement = ((): Movement => {
     if (deltasSuppressed) {

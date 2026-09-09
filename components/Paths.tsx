@@ -9,7 +9,7 @@ import workbook from "@/data/workbook.json";
  * Which way out.
  *
  * The plan says what to study. Every other tab measures how that is going. None of them answered
- * the question underneath all of it — what is this *for* — and that question has four possible
+ * the question underneath all of it - what is this *for* - and that question has four possible
  * answers for a senior FDE in Pune, with different odds, different evidence and different clocks.
  *
  * The four are not a menu someone wrote. They are the shape of the CompReality sheet the reader
@@ -20,7 +20,7 @@ import workbook from "@/data/workbook.json";
  * ## The line this page will not cross
  *
  * A reach tier says a role needs relocation and a visa. It does not say to which country. So the
- * Gulf and the US read one pool of requisitions, and neither card renders a total — because there
+ * Gulf and the US read one pool of requisitions, and neither card renders a total - because there
  * is no honest total to render. Splitting the pool by guess would invent two confident numbers no
  * scan ever measured, on the one page whose entire purpose is deciding where to aim; summing the
  * tiers instead, which this page did at first, produced "180 of 191" under the heading "The US
@@ -34,31 +34,31 @@ type Load = "loading" | "ready" | "error";
 /** The odds chip, taken from the sheet's own prose so it cannot become a second opinion. */
 function Verdict({ bands }: { bands: PathView["bands"] }) {
   if (!bands.length) return null;
-  // Best odds first — a path whose easiest door is "High" is a High path, and showing the worst
+  // Best odds first - a path whose easiest door is "High" is a High path, and showing the worst
   // of two bands would rank "India" by its hardest variant.
   const best = bands.map((b) => verdictTier(b.odds)).sort((a, b) => a.rank - b.rank)[0];
   return <span className={`prob prob-${best.tone}`}>{best.label}</span>;
 }
 
 /**
- * What the live market says about this path — or, more often, what it cannot say.
+ * What the live market says about this path - or, more often, what it cannot say.
  *
  * Four states, and three of them are some form of "less than you'd like". They are written out
  * rather than collapsed because they mean genuinely different things, and the difference between
  * "no scan has run" and "no roles exist" is the difference between patience and despair.
  *
  * Exported, and pure, because the shared-pool caveat only renders in the one state a prerender
- * never reaches — the page ships with `openings: null` and fills in after a fetch, so the static
+ * never reaches - the page ships with `openings: null` and fills in after a fetch, so the static
  * HTML cannot prove the most important sentence here is ever emitted. As a function of its props
  * it can be rendered directly in the test suite, which is where that is now pinned.
  */
 export function Openings({ path, core, state, synced }: { path: PathView; core: number | null; state: Load; synced: boolean }) {
   if (path.attribution === "none") {
-    return <p className="path-openings path-openings-none">No requisition can evidence this one. It is the only path here whose proof is something you built rather than something someone posted.</p>;
+    return <p className="path-openings path-openings-none">No requisition can evidence this one. It is the only path here whose proof is work you built yourself.</p>;
   }
   if (state === "loading") return <p className="path-openings path-openings-quiet">Reading the last scan…</p>;
   if (!path.openings) {
-    return <p className="path-openings path-openings-quiet">{synced ? "No scan has recorded requisitions yet, so this path has no live count." : "The market store could not be read, so the live count is unknown — not zero."}</p>;
+    return <p className="path-openings path-openings-quiet">{synced ? "No scan has recorded requisitions yet, so this path has no live count." : "The market store could not be read, so the live count is unknown, not zero."}</p>;
   }
   const { count, companies, slices } = path.openings;
 
@@ -68,11 +68,11 @@ export function Openings({ path, core, state, synced }: { path: PathView; core: 
    *
    * The first version rendered every path identically: a 19px accent-coloured total over a 12px
    * grey caveat. Against real scan data that produced "147 of 191" on the Gulf card and "180 of
-   * 191" on the US card — 94% of the entire market presented as US openings — with a disclaimer
+   * 191" on the US card - 94% of the entire market presented as US openings - with a disclaimer
    * underneath in the quietest type on the page. Two failures at once: a visual hierarchy arguing
    * against its own footnote, and, on the US card, a caveat that was flatly false. It said "this
    * is that whole pool", but the US total is the relocation pool PLUS `out-of-reach`, a disjoint
-   * tier the Gulf card does not count — so two different numbers each claimed to be the same pool.
+   * tier the Gulf card does not count - so two different numbers each claimed to be the same pool.
    * And `out-of-reach` is not destination-unknown at all: it is "US-person clause, active
    * clearance, or a region that excludes India", which is a door closed rather than a door
    * elsewhere.
@@ -84,10 +84,10 @@ export function Openings({ path, core, state, synced }: { path: PathView; core: 
     const relocation = slices.find((s) => s.tier === "relocate-sponsor");
     const blocked = slices.find((s) => s.tier === "out-of-reach");
     return <div className="path-openings">
-      <p className="path-pool">No count of roles in this market exists — the scan records what a role <em>demands</em>, never which country it is in.</p>
+      <p className="path-pool">No count of roles in this market exists. The scan records what a role <em>demands</em>, never which country it is in.</p>
       <ul className="path-tiers">{slices.map((s) => <li key={s.tier}><span>{s.count}</span> {s.label}</li>)}</ul>
       <p className="path-caveat">
-        {relocation ? <>The {relocation.count} needing a move and a visa are the same requisitions the other relocation path on this page counts — not additional ones. </> : null}
+        {relocation ? <>The {relocation.count} needing a move and a visa are the same requisitions the other relocation path on this page counts, not additional ones. </> : null}
         {blocked ? <>The {blocked.count} marked out of reach are closed to you outright, not waiting on a destination. </> : null}
         Adding these to the other cards would double-count.
       </p>
@@ -106,12 +106,12 @@ export function Openings({ path, core, state, synced }: { path: PathView; core: 
  *
  * It sits directly under "Reality check", and that placement is the whole argument for it: that
  * panel says "$250K is a 2-3 year target, not something this plan promises", which raises the
- * obvious question — then what am I aiming at — and until now the page had no answer to it. This
+ * obvious question - then what am I aiming at - and until now the page had no answer to it. This
  * is the answer, and the link to the full view.
  *
  * Bands only, no requisition counts. Everything here comes from the bundled CompReality sheet, so
  * the panel costs no request and cannot be the reason the home page waits. The measured openings,
- * and the disclosures they need, live on /paths where there is room to state them properly — a
+ * and the disclosures they need, live on /paths where there is room to state them properly - a
  * rail is not the place to explain why two cards share one pool.
  */
 export function PathsRail({ open }: { open: () => void }) {
@@ -119,7 +119,7 @@ export function PathsRail({ open }: { open: () => void }) {
   return <div className="panel paths-rail">
     <p className="eyebrow">Four routes</p>
     <h2>Which way out</h2>
-    <p className="paths-rail-lead">Same plan either way — what changes is what counts as done.</p>
+    <p className="paths-rail-lead">Same plan either way. What changes is what counts as done.</p>
     <ul className="paths-rail-list">
       {views.map((p) => <li key={p.id}>
         <span className="paths-rail-name">{p.label}</span>
@@ -134,7 +134,7 @@ export function PathsRail({ open }: { open: () => void }) {
 /**
  * One card. Exported and pure for the same reason `Openings` is.
  *
- * Every populated state of this page — a card with its openings filled in, its bands, its odds chip —
+ * Every populated state of this page - a card with its openings filled in, its bands, its odds chip -
  * only exists after a fetch resolves, so the prerendered HTML shows the loading state and nothing
  * else. A component that renders four cards' worth of real data in a state no static build can
  * reach is a component whose layout nobody has looked at. As a function of its props it can be
@@ -160,12 +160,12 @@ export function PathCard({ path, index, core, state, synced, built }: { path: Pa
     </div>)}
 
     {/* The fourth path has no band and no requisition, so its evidence is the only kind it
-        can have: things that exist because you made them. Unknown stays unknown here too —
+        can have: things that exist because you made them. Unknown stays unknown here too -
         an unreadable artifacts directory is not an empty one. */}
     {path.attribution === "none" && <div className="path-band">
       <p className="path-band-market">What would evidence it</p>
-      <p className="path-band-money">{state === "loading" ? "Shipped work — reading…" : built === null ? "Shipped work — the store could not be read, so this is unknown rather than none" : `${built} deliverable${built === 1 ? "" : "s"} recorded`}</p>
-      <p className="path-band-takes">The plan carries one deliverable per topic. On this path they stop being interview evidence and start being the product itself — which is the only route here that pays nothing until it works, and everything after.</p>
+      <p className="path-band-money">{state === "loading" ? "Shipped work: reading…" : built === null ? "Shipped work: the store could not be read, so this is unknown, not none" : `${built} deliverable${built === 1 ? "" : "s"} recorded`}</p>
+      <p className="path-band-takes">The plan carries one deliverable per topic. Elsewhere they are interview evidence; on this path they are the product. It is the only route here that pays nothing until it works, and everything after.</p>
     </div>}
   </article>;
 }
@@ -195,12 +195,12 @@ export function Paths({ planMonths }: { planMonths: number }) {
   /*
    * `synced` decides this, NOT `artifacts.length`, and NOT `r.ok`.
    *
-   * `/api/artifacts` degrades with HTTP **200** and `{artifacts: [], synced: false}` — both when
-   * GITHUB_TOKEN is unset and in readArtifacts' catch block — so `r.ok` passing tells you nothing
+   * `/api/artifacts` degrades with HTTP **200** and `{artifacts: [], synced: false}` - both when
+   * GITHUB_TOKEN is unset and in readArtifacts' catch block - so `r.ok` passing tells you nothing
    * about whether the store was readable. Reading `.length` off that gives 0, and the card then
    * printed "0 deliverables recorded" during a GitHub outage: a portfolio blip rendered as an
    * empty portfolio, on the one path whose only stated proof is work you shipped. That is exactly
-   * the rule this codebase keeps writing down — unknown is never rendered as none — and
+   * the rule this codebase keeps writing down - unknown is never rendered as none - and
    * ShippedWall.tsx already branches on `!synced` against this identical payload.
    */
   const built = shipped === null ? null : shipped.synced ? (shipped.artifacts?.length ?? 0) : null;
@@ -212,12 +212,12 @@ export function Paths({ planMonths }: { planMonths: number }) {
     </div></div>
 
     <p className="path-intro">
-      The plan is the same whichever of these you take — the difference is what counts as done. Each card
+      The plan is the same whichever of these you take. The difference is what counts as done. Each card
       below joins the compensation sheet you wrote to the requisitions the nightly scan actually found, so
       the odds are your own read and the openings are measured.
     </p>
 
-    {/* The target row is not a market, so no path claims it — and it is the number the other five
+    {/* The target row is not a market, so no path claims it - and it is the number the other five
         are calibrated against. Rendered first, as the thing the four cards are answers to. */}
     {unclaimed.map((b) => <div className="path-target" key={b.market}>
       <p className="eyebrow">{b.market}</p>
@@ -234,8 +234,8 @@ export function Paths({ planMonths }: { planMonths: number }) {
     </div>
 
     <p className="path-foot">
-      Bands are public estimates and the odds column is a personal read, not data — both are anchors for a
-      negotiation, not promises. The requisition counts are measured, and they move every night.
+      Bands are public estimates and the odds column is a personal read. Treat both as anchors for a
+      negotiation, not as promises. The requisition counts are measured, and they move every night.
     </p>
   </section>;
 }

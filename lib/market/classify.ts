@@ -1,5 +1,5 @@
 /**
- * Title and structured-field classification. Pure: no network, no I/O, no config loading —
+ * Title and structured-field classification. Pure: no network, no I/O, no config loading -
  * the caller passes the board's own entry from `data/market-sources.json` in.
  *
  * Two rules govern everything below.
@@ -11,8 +11,8 @@
  *    per-company config is the asset; this file is only the matcher for it.
  *
  * 2. **Never classify on description text.** 23 of Baseten's 88 postings mention "forward
- *    deployed" in the body — including `Account Executive - Enterprise` and `Site Reliability
- *    Engineer` — because unrelated roles describe partnering with the FDE team. A JD that
+ *    deployed" in the body - including `Account Executive - Enterprise` and `Site Reliability
+ *    Engineer` - because unrelated roles describe partnering with the FDE team. A JD that
  *    mentions FDEs is not an FDE role. `posting.jd` is deliberately not read here; description
  *    text is for skill extraction only, after a role has already been classified.
  */
@@ -48,7 +48,7 @@ export type Source = {
  * Everything is compared in this form: lowercased, every non-alphanumeric run collapsed to a
  * single space, trimmed.
  *
- * Trimming is mandatory before anything else — Anyscale ships "Head of Customer Engineering ",
+ * Trimming is mandatory before anything else - Anyscale ships "Head of Customer Engineering ",
  * Sierra ships "Deployed Infrastructure Engineer " and dbt/Fivetran ships " Staff Product
  * Manager - dbt v2" with a leading space. Flattening punctuation is what lets the config's
  * "Software Engineer, Agent" match a title whose comma or hyphen differs, and it is why the
@@ -77,7 +77,7 @@ const hasPhrase = (flatTitle: string, pattern: string) => {
  * Location vocabulary, curated rather than inferred.
  *
  * A general "strip the last comma-separated segment" rule would eat "Forward Deployed
- * Engineer, Healthcare" and "Solutions Architect, Public Sector" — the segments that carry the
+ * Engineer, Healthcare" and "Solutions Architect, Public Sector" - the segments that carry the
  * actual signal. So a suffix is only dropped when every word in it is known to be a place.
  * Multi-word entries are matched greedily, longest first, so "bay area" and "new york city"
  * survive tokenization.
@@ -148,8 +148,8 @@ function isPlace(segment: string): boolean {
  * location parentheticals removed.
  *
  * Seniority tokens (Senior, Staff, Lead, Sr.) are KEPT. They are the signal this whole
- * benchmark is about — a market of Staff FDE reqs is a different market from a market of new
- * Senior ones — and stripping them would merge the two.
+ * benchmark is about - a market of Staff FDE reqs is a different market from a market of new
+ * Senior ones - and stripping them would merge the two.
  */
 export function normalizeTitle(title: string): string {
   let working = title.toLowerCase().replace(/\s+/g, " ").trim();
@@ -162,7 +162,7 @@ export function normalizeTitle(title: string): string {
   // two segments and stops at "mid market". Samsara clones one Mid-Market SE req across six
   // regions this way; without the loop only the last of them is removed.
   for (;;) {
-    const cut = Math.max(working.lastIndexOf(" - "), working.lastIndexOf(" – "), working.lastIndexOf(" — "), working.lastIndexOf(","), working.lastIndexOf("|"));
+    const cut = Math.max(working.lastIndexOf(" – "), working.lastIndexOf(" — "), working.lastIndexOf(" - "), working.lastIndexOf(","), working.lastIndexOf("|"));
     if (cut <= 0) break;
     const tail = working.slice(cut).replace(/^[\s,|–—-]+/, "");
     if (!isPlace(tail)) break;
@@ -189,7 +189,7 @@ export function dedupeKey(company: string, title: string): string {
  * title matches: Anyscale's "Head of Customer Engineering" contains "Customer Engineer", and
  * Datadog carries "Manager, Services Architect" and "Area Vice President" over its individual
  * contributor ladder. These are real signal about where the roles are, so they are classified
- * rather than dropped — they just never set the headline denominator.
+ * rather than dropped - they just never set the headline denominator.
  */
 const LEADERSHIP = /\b(manager|managers|management|director|head of|vp|vps|vice president|svp|evp|avp|chief|principal manager)\b/;
 
@@ -211,7 +211,7 @@ const isLeadership = (flatTitle: string) => {
 /**
  * Junior roles are counted separately and never stored. Most boards already exclude them by
  * substring, so this is the backstop for the boards that exclude "Intern" but not "New Grad"
- * (OpenAI, Snowflake, Cohere) — one new-grad FDE req in the denominator moves nothing, but it
+ * (OpenAI, Snowflake, Cohere) - one new-grad FDE req in the denominator moves nothing, but it
  * would show up in the "new roles this week" list as if the market had opened a senior seat.
  */
 const JUNIOR = /\b(intern|interns|internship|new grad|new grads|new graduate|graduate program|early career|apprentice|apprenticeship|campus|working student|student)\b/;
@@ -240,15 +240,15 @@ const fieldsAgree = (guard: FieldGuard, posting: Posting) => {
  *
  * Order is fixed and each step earns its position:
  *
- *   1. `exclude[]` voids the posting outright — it beats `core[]` and `adjacent[]`, so
+ *   1. `exclude[]` voids the posting outright - it beats `core[]` and `adjacent[]`, so
  *      Databricks' "Engagement Manager" and Sierra's "Agent Builder" never reach the matcher
  *      even though a sibling board carries those exact strings as a match.
- *   2. `fieldGuards` — Sierra's "Software Engineer, Agent" is a prefix shared with the product
+ *   2. `fieldGuards` - Sierra's "Software Engineer, Agent" is a prefix shared with the product
  *      platform teams and only counts under `department = Engineering, team = Agent
  *      Engineering`; Baseten's team membership is the only structured signal that catches "AI
  *      Inference Engineer", whose body opens "As a Forward Deployed Engineer at Baseten..."
  *      but whose title carries no FDE substring. A title-only filter silently misses it.
- *   3. `core[]`, then `adjacent[]` — core wins ties, since a title matching both is a build
+ *   3. `core[]`, then `adjacent[]` - core wins ties, since a title matching both is a build
  *      role that also names a pre-sales string.
  *
  * Leadership and junior are demotions applied to a title that already matched. A Director of

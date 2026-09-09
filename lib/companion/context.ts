@@ -15,8 +15,8 @@
  * model knows it is looking at a slice rather than the whole.
  *
  * **2. THE RECALL BACKLOG COUNT IS NEVER PUT IN THE PROMPT.** `lib/review.ts` and
- * `app/recall.tsx` both record the rule and the reason — "'37 due', close it forever… the count
- * is never surfaced" — and `lib/companion/brief.ts` enforces it in the UI by making `recall` a
+ * `app/recall.tsx` both record the rule and the reason - "'37 due', close it forever… the count
+ * is never surfaced" - and `lib/companion/brief.ts` enforces it in the UI by making `recall` a
  * state rather than a number. A model handed the number will eventually say it, and a sentence
  * from the companion is as visible as a panel. So this module passes the same three states the
  * brief does and no integer ever reaches the prompt.
@@ -37,7 +37,7 @@ const cap = (lines: string[], max: number, what: string) =>
 /**
  * The three workbook sheets the ask route never opened.
  *
- * CompReality is the one that matters most for the questions actually being asked — "should I aim
+ * CompReality is the one that matters most for the questions actually being asked - "should I aim
  * at India-remote or UAE" is a compensation question, and the answer has been sitting in the
  * workbook the whole time.
  */
@@ -65,13 +65,13 @@ export function workbookContext(): string {
 /**
  * What has actually been built, and when work last happened.
  *
- * `synced: false` from either store means "we do not know", never "nothing" — the rule
+ * `synced: false` from either store means "we do not know", never "nothing" - the rule
  * `lib/market/store.ts` sets for every reader here. A companion that reports "you have shipped
  * nothing" during a GitHub outage is worse than one that says it cannot see.
  */
 export function evidenceContext(artifacts: { artifacts: StoredArtifact[]; synced: boolean }, sessions: { count: number; latest: string | null; synced: boolean }): string {
   const parts: string[] = [];
-  if (!artifacts.synced) parts.push("SHIPPED ARTIFACTS: unreadable right now. This is unknown, NOT zero — do not tell the learner they have built nothing.");
+  if (!artifacts.synced) parts.push("SHIPPED ARTIFACTS: unreadable right now. This is unknown, NOT zero - do not tell the learner they have built nothing.");
   else if (!artifacts.artifacts.length) parts.push("SHIPPED ARTIFACTS: none recorded yet. The plan carries one deliverable per row; none has been recorded.");
   else {
     parts.push(`SHIPPED ARTIFACTS (${artifacts.artifacts.length} recorded):`);
@@ -84,7 +84,7 @@ export function evidenceContext(artifacts: { artifacts: StoredArtifact[]; synced
 }
 
 /**
- * Whether recall is waiting. A STATE, never a count — see the module header.
+ * Whether recall is waiting. A STATE, never a count - see the module header.
  *
  * Returns the same three values the brief renders, for the same reason: an unreadable schedule is
  * not an empty one, and telling a returning learner nothing is due when the store simply could not
@@ -94,7 +94,7 @@ export function recallContext(review: { state: ReviewState; synced: boolean } | 
   if (!review || !review.synced) return "RECALL: not known right now (the schedule could not be read). Do not claim anything is or is not due.";
   const waiting = Object.values(review.state).some((card) => isDue(card, now));
   return waiting
-    ? "RECALL: something is waiting in the spaced-repetition schedule. NEVER state how many cards are due — say that recall is waiting and name at most the topic. A backlog number is what makes people abandon a review system."
+    ? "RECALL: something is waiting in the spaced-repetition schedule. NEVER state how many cards are due - say that recall is waiting and name at most the topic. A backlog number is what makes people abandon a review system."
     : "RECALL: nothing is due today.";
 }
 
@@ -111,11 +111,11 @@ export function benchmarkGapsContext(benchmark: Benchmark | null): string {
   const gaps = benchmark.gaps ?? [];
   const over = benchmark.overInvested ?? [];
   if (gaps.length) {
-    parts.push(`AUDITED GAPS — asked for by the market, covered by no plan row (${gaps.length}):`);
+    parts.push(`AUDITED GAPS - asked for by the market, covered by no plan row (${gaps.length}):`);
     parts.push(cap(gaps.map((g) => `- ${g.statement ?? g.id}`), 13, "gaps"));
   }
   if (Array.isArray(over) && over.length) {
-    parts.push(`\nOVER-INVESTMENT — plan hours against measured requisition frequency:`);
+    parts.push(`\nOVER-INVESTMENT - plan hours against measured requisition frequency:`);
     parts.push(cap(over.map((o) => `- ${o.statement ?? ""}`).filter(Boolean), 6, "tracks"));
   }
   return parts.join("\n");

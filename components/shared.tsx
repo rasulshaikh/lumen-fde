@@ -12,15 +12,15 @@ export const compRows = (workbook.CompReality.slice(1) as Row[]).filter((r) => i
 export const tracks = Array.from(new Set(planRows.map((r) => String(r[0]))));
 export const months = Array.from(new Set(planRows.map((r) => Number(r[1])))).sort((a, b) => a - b);
 // The Mocks sheet carries its own Month column (index 3), and scripts/renumber-months.py only
-// ever rewrites wb["Plan"] — so re-baselining Hours moved the plan out to M23 and left this
+// ever rewrites wb["Plan"] - so re-baselining Hours moved the plan out to M23 and left this
 // sheet quoting the pre-rebaseline calendar: "Take-home builds" rendered M9 while the plan row
 // that funds it sits at M19. No column ties a mock row to a plan row, so there is nothing to
 // renumber it from. The sheet's own footnote says these hours are already inside the mocks
 // track's plan hours, so the window is read off that track and the sheet's copy is not rendered
-// at all — derived, it cannot drift away from the calendar again.
+// at all - derived, it cannot drift away from the calendar again.
 const mocksTrack = tracks.find((t) => t.toLowerCase().includes("mock"));
 const mockMonths = mocksTrack ? planRows.filter((r) => r[0] === mocksTrack).map((r) => Number(r[1])) : [];
-export const mockWindow = mockMonths.length ? `M${Math.min(...mockMonths)}–M${Math.max(...mockMonths)}` : "";
+export const mockWindow = mockMonths.length ? `M${Math.min(...mockMonths)}-M${Math.max(...mockMonths)}` : "";
 export const pct = (done: number, total: number) => total ? Math.round((done / total) * 100) : 0;
 export const topicKey = (r: Row) => `${String(r[0])}::${String(r[2])}`;
 
@@ -30,7 +30,7 @@ export const topicKey = (r: Row) => `${String(r[0])}::${String(r[2])}`;
  * Both places that colour these six facts now read this. The Comp reality tab used to emit
  * `prob-${i}` against CSS that only defined `.prob-0` through `.prob-3`, so rows 5 and 6 had no
  * colour at all and the other four were right only because the sheet happened to be ordered
- * Low, Very low, Realistic, High — reorder the sheet and Overview would still call "High in 3-6
+ * Low, Very low, Realistic, High - reorder the sheet and Overview would still call "High in 3-6
  * months" green while the tab called it red. The verdict is the fact; its row number is not.
  */
 export const verdictTier = (verdict: string) => {

@@ -3,7 +3,7 @@
  *
  * The class of bug this file exists to catch is the one that never announces itself: a
  * classification false positive, or a missed dedupe, produces a headline percentage that is
- * *plausible*. Nothing throws, nothing 500s, the tab renders, the email sends — and "62% of core
+ * *plausible*. Nothing throws, nothing 500s, the tab renders, the email sends - and "62% of core
  * FDE reqs ask for evals" is quietly a statement about fifteen LangChain city clones of one
  * requisition, or about a Field Marketing Manager that matched "Field", or about Perplexity's
  * core research MTS req that matched "Applied AI" (a string that is genuinely CORE at Mistral and
@@ -49,7 +49,7 @@ const sourceFor = (company: string) => {
 // ---------------------------------------------------------------------------
 // Fixtures: 44 synthetic postings (including Samsara's 3 region clones and Cohere's 2
 // city clones) plus LangChain's 15-clone block, 59 in all. Titles are verbatim shapes
-// from the audit — including the leading tab Databricks ships and the trailing spaces
+// from the audit - including the leading tab Databricks ships and the trailing spaces
 // Sierra and Anyscale ship. `expect` is the audited verdict, not the current output.
 // ---------------------------------------------------------------------------
 
@@ -65,7 +65,7 @@ const FIXTURES: Fixture[] = [
   { company: "OpenAI", title: "Forward Deployed Engineer, Healthcare", expect: "core", skills: EVALS, why: "literal FDE, non-location suffix must survive normalization" },
   { company: "OpenAI", title: "Forward Deployed Engineer, New Grad", expect: "junior", why: "OpenAI excludes Intern but not New Grad; the JUNIOR backstop catches it" },
   { company: "OpenAI", title: "Director, Forward Deployed Engineering", expect: "leadership", why: "matches core but is people leadership; counted, never in the denominator" },
-  { company: "OpenAI", title: "Solutions Engineer, Corporate IT", expect: null, why: "OpenAI's exclude[] — internal IT, not field engineering" },
+  { company: "OpenAI", title: "Solutions Engineer, Corporate IT", expect: null, why: "OpenAI's exclude[] - internal IT, not field engineering" },
   { company: "OpenAI", title: "Technical Account Manager, EMEA", expect: "adjacent", why: "IC delivery role ending in Manager; not demoted to leadership" },
   { company: "OpenAI", title: "Technical Accounting & Reporting Senior Manager", expect: null, why: "must NOT match the adjacent pattern 'Technical Account' by bare substring" },
 
@@ -78,7 +78,7 @@ const FIXTURES: Fixture[] = [
 
   // --- The "Applied AI" trio: the same string, three verdicts, decided per company.
   { company: "Anthropic", title: "Applied AI Architect", expect: "core", skills: EVALS, why: "'Applied AI' is CORE here" },
-  { company: "Anthropic", title: "Research Engineer, Alignment", expect: null, why: "exclude[] — research ladder" },
+  { company: "Anthropic", title: "Research Engineer, Alignment", expect: null, why: "exclude[] - research ladder" },
   { company: "Mistral AI", title: "Applied AI Engineer", expect: "core", skills: EVALS, why: "'Applied AI' is CORE here too" },
   { company: "Perplexity", title: "MTS (Software Engineer, Applied AI)", expect: null, why: "THE guard: core product research, not deployment" },
   { company: "Perplexity", title: "Forward Deployed Engineer", expect: "core", skills: EVALS, why: "the literal title is still core at Perplexity" },
@@ -93,7 +93,7 @@ const FIXTURES: Fixture[] = [
   // --- Baseten: the title carries no FDE substring at all. Only the team field catches it.
   { company: "Baseten", title: "AI Inference Engineer", dept: "Engineering", team: "Forward Deployed Engineering", expect: "core", skills: EVALS, why: "THE guard: caught via team, invisible to a title-only filter" },
   { company: "Baseten", title: "Site Reliability Engineer", dept: "Engineering", team: "Model Performance", expect: null, why: "its JD says 'forward deployed'; classification never reads the JD" },
-  { company: "Baseten", title: "Account Executive - Enterprise", dept: "Sales", team: "Enterprise", expect: null, why: "same — 23 of 88 Baseten bodies mention FDEs" },
+  { company: "Baseten", title: "Account Executive - Enterprise", dept: "Sales", team: "Enterprise", expect: null, why: "same - 23 of 88 Baseten bodies mention FDEs" },
 
   // --- Fireworks: "AI Field Engineer" is core, so "Field" is a live prefix on this board.
   { company: "Fireworks AI", title: "Field Marketing Manager", expect: null, why: "THE guard: must not ride the Field Engineer pattern into core" },
@@ -130,7 +130,7 @@ const FIXTURES: Fixture[] = [
   { company: "Cohere", title: "Forward Deployed Engineer (London)", expect: "core", skills: EVALS, why: "same req, other city" },
 ];
 
-/** LangChain's fifteen location clones of one requisition — the block that would otherwise set every percentage. */
+/** LangChain's fifteen location clones of one requisition - the block that would otherwise set every percentage. */
 const LANGCHAIN_CITIES = ["San Francisco", "New York", "Seattle", "Austin", "Boston", "Denver", "Chicago", "Toronto", "London", "Berlin", "Paris", "Amsterdam", "Dublin", "Singapore", "Sydney"];
 for (const city of LANGCHAIN_CITIES) {
   FIXTURES.push({ company: "LangChain", title: `Deployed Engineer (${city})`, expect: "core", skills: EVALS, firstSeen: "TODAY", why: `location clone: ${city}` });
@@ -151,7 +151,7 @@ const posting = (f: Fixture, i: number): Posting => ({
 });
 
 // ---------------------------------------------------------------------------
-console.log("\n  classification — every row is an audited per-company verdict");
+console.log("\n  classification - every row is an audited per-company verdict");
 // ---------------------------------------------------------------------------
 
 let classified = 0;
@@ -159,7 +159,7 @@ const actual: Expect[] = FIXTURES.map((f, i) => classify(posting(f, i), sourceFo
 FIXTURES.forEach((f, i) => {
   if (actual[i] === f.expect) { classified++; return; }
   fails++;
-  console.log(`  FAIL ${f.company} "${f.title.trim()}" -> ${actual[i]} (want ${f.expect}) — ${f.why}`);
+  console.log(`  FAIL ${f.company} "${f.title.trim()}" -> ${actual[i]} (want ${f.expect}) - ${f.why}`);
 });
 ck(`all ${FIXTURES.length} fixtures classify as audited`, classified === FIXTURES.length, `(${classified}/${FIXTURES.length})`);
 
@@ -179,7 +179,7 @@ ck("'Technical Accounting ... Senior Manager' does not match 'Technical Account'
 ck("'International' does not trip the 'Intern' exclude", one("Applied Intuition", "Field Engineer, International") === "core");
 
 // ---------------------------------------------------------------------------
-console.log("\n  normalization — trim, location vocabulary, seniority");
+console.log("\n  normalization - trim, location vocabulary, seniority");
 // ---------------------------------------------------------------------------
 
 ck("leading tab and trailing spaces normalize away",
@@ -201,14 +201,14 @@ ck("15 LangChain city clones share one key",
   new Set(LANGCHAIN_CITIES.map((c) => dedupeKey("LangChain", `Deployed Engineer (${c})`))).size === 1);
 
 // ---------------------------------------------------------------------------
-console.log("\n  skills — html, boilerplate, and what must not count");
+console.log("\n  skills - html, boilerplate, and what must not count");
 // ---------------------------------------------------------------------------
 
 ck("entities unescape before tags strip", htmlToText("&lt;h3&gt;Responsibilities&lt;/h3&gt;&lt;p&gt;Own the rollout&lt;/p&gt;").split("\n")[0] === "Responsibilities");
-ck("exactly one unescape pass — double-escaped markup stays literal text", htmlToText("&lt;p&gt;Ship it &amp;lt;fast&amp;gt;&lt;/p&gt;").includes("&lt;fast&gt;"));
+ck("exactly one unescape pass - double-escaped markup stays literal text", htmlToText("&lt;p&gt;Ship it &amp;lt;fast&amp;gt;&lt;/p&gt;").includes("&lt;fast&gt;"));
 ck("an escaped comparison operator is not eaten as a tag", htmlToText("&lt;li&gt;Keep p95 latency &lt; 200ms&lt;/li&gt;").includes("< 200ms"));
 
-/** Six Decagon postings that all carry the same infra sentence — the shape the 60% rule exists for. */
+/** Six Decagon postings that all carry the same infra sentence - the shape the 60% rule exists for. */
 const SHARED_INFRA = "We run every customer deployment on Kubernetes and Terraform across three production clouds.";
 const decagonCorpus = ["retail", "fintech", "travel", "telco", "healthcare", "logistics"].map((seg) => [
   "Responsibilities",
@@ -242,7 +242,7 @@ ck("an EEO tail is cut by section scoping",
   !matchSkills("Responsibilities\nBuild evaluation frameworks with customers.\nEqual opportunity employer\nWe use Kubernetes and Terraform in our production cloud.", skillMap).includes("kubernetes"));
 
 // ---------------------------------------------------------------------------
-console.log("\n  benchmark — denominators, dedupe, movement, suppression");
+console.log("\n  benchmark - denominators, dedupe, movement, suppression");
 // ---------------------------------------------------------------------------
 
 const DAY = "2026-09-07";
@@ -284,7 +284,7 @@ function buildIndex(boardsOk: number): MarketIndex {
 
 const index = buildIndex(27);
 // Last week's point. `evals` at 55% is deliberately above the 50 band and 13 points off this
-// week's 42%, so both movement triggers — the ±3-point rule and the band crossing — are exercised
+// week's 42%, so both movement triggers - the ±3-point rule and the band crossing - are exercised
 // by one number. `agents` and `rag` are flat, and every other skill is absent from the point and
 // must therefore be skipped rather than treated as having been at 0%.
 const previous: TrendPoint = { d: "2026-08-31", core: 19, companies: 17, s: { evals: 0.55, agents: 1, rag: 0.16 } };

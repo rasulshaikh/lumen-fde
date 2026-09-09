@@ -3,7 +3,6 @@ import { Link, mockRows, pct, planRows, tracks, type Row } from "./shared";
 import { ShippedWall, type ArtifactsFeed } from "./ShippedWall";
 import { BriefPanel } from "./Brief";
 import { PathsRail } from "./Paths";
-import { OutsidePanel } from "./OutsidePanel";
 import type { Brief } from "@/lib/companion/brief";
 
 /**
@@ -11,21 +10,21 @@ import type { Brief } from "@/lib/companion/brief";
  *
  * This is where he lands every morning for 23 months, and on the morning it was designed the
  * honest reading was 0% of the plan, 0% readiness and nothing shipped. So it cannot be built on
- * achievement — there is none yet — and it may not compensate by flattering, because the whole
+ * achievement - there is none yet - and it may not compensate by flattering, because the whole
  * product's claim is that its numbers are worth trusting. What it does instead is answer four
  * questions in one screen, in the order they are worth asking:
  *
- *   1. EVIDENCE  — what the last finished row bought, priced by the market, and immediately
+ *   1. EVIDENCE  - what the last finished row bought, priced by the market, and immediately
  *      beside it the next row and what it clears. Principle 2: the next action sits next to its
  *      evidence, so the marginal table's top row lives here rather than one navigation away.
- *   2. STANDING  — the study rhythm, as a rate and a longest run. Nothing here may read as a
+ *   2. STANDING  - the study rhythm, as a rate and a longest run. Nothing here may read as a
  *      loss or a zero: a 40-day streak shown as broken in month 20 is a plausible reason to
  *      quit, and that is the outcome this whole layer exists to prevent.
- *   3. THE WALL  — shipped deliverables, empty today, teaching rather than apologising.
- *   4. WHAT IS TRUE TODAY — pace, hours, the calendar. The never-flatters half, unchanged.
+ *   3. THE WALL  - shipped deliverables, empty today, teaching rather than apologising.
+ *   4. WHAT IS TRUE TODAY - pace, hours, the calendar. The never-flatters half, unchanged.
  *
  * Every sentence in 1 and 2 is rendered by lib/motivation.ts or lib/market/*, never here. Four
- * consumers read those modules — this page, the weekly email, /api/ask and the MCP tools — and a
+ * consumers read those modules - this page, the weekly email, /api/ask and the MCP tools - and a
  * sentence assembled four times is a sentence that says four different things. What this file
  * composes is layout: a figure, a label, a rule, an order.
  */
@@ -43,7 +42,7 @@ export type HomeFeed = {
    * The row is deliberately one that is NOT done, which is exactly the precondition
    * `computeEvidence` documents: the insight it is handed must be the one computed before the
    * row moved, and for an unfinished row the current insight is that insight. A finished row
-   * cannot be priced this way after the fact — its marginal entry no longer exists — so the
+   * cannot be priced this way after the fact - its marginal entry no longer exists - so the
    * "last finished" block below reads the coverage sentences instead and invents nothing.
    */
   next: Evidence | null;
@@ -62,7 +61,7 @@ function Metric({ label, value, detail, tone }: { label: string; value: string; 
 /**
  * Evidence: what the work bought, and what the next of it buys.
  *
- * Two blocks under one heading rather than two panels, because they are one argument — the
+ * Two blocks under one heading rather than two panels, because they are one argument - the
  * second is the first run forward. The market feed can be absent in four distinguishable ways
  * and each says so in its own words; "no data" would let a missing token and a cold start read
  * identically, and only one of those is worth waiting for.
@@ -74,8 +73,8 @@ function EvidencePanel({ feed, openMarket }: { feed: HomeFeed; openMarket: () =>
     ? <p className="home-sub">Reading the market scan…</p>
     : !marketSynced
       ? <p className="home-sub">{marketError
-          ? `The market feed did not answer: ${marketError}. What the next row clears is unknown rather than nothing.`
-          : "Market sync is not configured, so no row can be priced from here. This is unknown, not zero."}</p>
+          ? `The market feed did not answer: ${marketError}. What the next row clears is unknown until it answers.`
+          : "Market sync is not configured, so no row can be priced from here: the number is unknown, not zero."}</p>
       : !next
         ? <p className="home-sub">No market scan has completed a cycle yet. The first one prices every remaining row and ranks them by the share of core requisitions each clears.</p>
         : <>
@@ -108,7 +107,7 @@ function EvidencePanel({ feed, openMarket }: { feed: HomeFeed; openMarket: () =>
           </>
         : <>
             <p className="home-line">Nothing is recorded as finished yet.</p>
-            <p className="home-sub">The first row you finish is priced here the way the market prices it: the skill it clears and that skill&apos;s share of core FDE requisitions, with both denominators. Not a compliment — a number you can quote.</p>
+            <p className="home-sub">The first row you finish is priced here the way the market prices it: the skill it clears and that skill&apos;s share of core FDE requisitions, with both denominators. It is a number you can quote.</p>
           </>}
     </div>
 
@@ -125,8 +124,8 @@ function EvidencePanel({ feed, openMarket }: { feed: HomeFeed; openMarket: () =>
  * Standing: the rhythm, in the one shape that cannot report a forfeit.
  *
  * The rate is the headline while it is above zero, because pace is the thing worth knowing. The
- * moment the window is empty the headline becomes the longest run — a maximum over an
- * append-only history, which can only ever rise — and the elapsed days are still stated, once,
+ * moment the window is empty the headline becomes the longest run - a maximum over an
+ * append-only history, which can only ever rise - and the elapsed days are still stated, once,
  * as a fact. What is never drawn is a 0 in the figure slot. The gap is disclosed; it is not
  * scored.
  */
@@ -147,7 +146,7 @@ function StandingPanel({ streak, loading, openPlan }: { streak: Streak | null; l
         : !started
           ? <>
               <p className="home-line">No dated progress event yet.</p>
-              <p className="home-sub">Rhythm here is two numbers and neither can be lost: how many of the last {streak.windowDays} days carried work, and the longest unbroken run ever recorded. There is no chain to break — a gap moves the rate and leaves the run standing.</p>
+              <p className="home-sub">Rhythm here is two numbers and neither can be lost: how many of the last {streak.windowDays} days carried work, and the longest unbroken run ever recorded. There is no chain to break, so a gap moves the rate and leaves the run standing.</p>
               <button className="primary-button" onClick={openPlan}>Mark a row in progress <span>→</span></button>
             </>
           : <>
@@ -186,7 +185,7 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
   feed: HomeFeed;
   /**
    * Null until the first client effect has run. The brief is a function of `new Date()` and the
-   * fetched feed, and neither exists during the server render — so the panel is simply absent for
+   * fetched feed, and neither exists during the server render - so the panel is simply absent for
    * that first paint rather than rendered with a guessed day, which is the hydration mismatch
    * this page already avoids for the streak's sentences.
    */
@@ -199,7 +198,7 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
         TWO FLOWING COLUMNS, not a stack of two-column rows.
 
         Measured on the page this replaces, at 1728px: Today 806 beside Evidence 504, The Wall 463
-        beside Standing 280, Pace map 356 beside Reality check 691 — three holes of 302, 183 and
+        beside Standing 280, Pace map 356 beside Reality check 691 - three holes of 302, 183 and
         335px, roughly 820px of dead space on one screen. All three had one cause: a grid row is
         as tall as its taller child, so the shorter panel leaves a gap beneath it. An earlier
         `align-items:start` stopped the shorter panel STRETCHING, which is a different bug, and
@@ -220,7 +219,7 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
           <div className="home-slot slot-today">
             {brief
               ? <BriefPanel brief={brief} readingUrl={readingUrl} onOpenPlan={() => setView("Plan")} setStatus={setFocusStatus} />
-              : <div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Next action</p><h2>Start here</h2></div><span className="priority">P1</span></div><div className="next-action"><div className="action-index">{nextRow ? String(nextIndex + 1).padStart(2, "0") : "—"}</div><div><h3>{nextRow ? String(nextRow[2]) : "Plan complete"}</h3><p>{nextRow ? String(nextRow[3]) : "Every topic is done or skipped."}</p>{nextRow && <Link href={String(nextRow[5])}>Open reading</Link>}</div></div><button className="primary-button" onClick={() => setView("Plan")}>Open the plan <span>→</span></button></div>}
+              : <div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Next action</p><h2>Start here</h2></div><span className="priority">P1</span></div><div className="next-action"><div className="action-index">{nextRow ? String(nextIndex + 1).padStart(2, "0") : "-"}</div><div><h3>{nextRow ? String(nextRow[2]) : "Plan complete"}</h3><p>{nextRow ? String(nextRow[3]) : "Every topic is done or skipped."}</p>{nextRow && <Link href={String(nextRow[5])}>Open reading</Link>}</div></div><button className="primary-button" onClick={() => setView("Plan")}>Open the plan <span>→</span></button></div>}
           </div>
           <div className="home-slot slot-wall"><ShippedWall feed={feed.artifacts} planCount={planRows.length} nextRow={nextRow} nextIndex={nextIndex} openPlan={() => setView("Plan")} /></div>
           <div className="home-slot slot-pace"><div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Pace map</p><h2>Where the hours go</h2></div><span className="panel-meta">{hours}h · {tracks.length} tracks</span></div><div className="bar-chart">{monthHours.map((item) => <div className="bar-item" key={item.month}><div className="bar-value">{item.hours}h</div><div className="bar-track"><div className="bar-fill" style={{ height: `${Math.max(12, item.hours / maxMonthHours * 100)}%` }} /></div><div className="bar-label">M{item.month}</div></div>)}</div><div className="chart-foot"><span><i className="legend-dot rose" /> planned hours</span><span>Peak: Month {peakMonth.month} · {peakMonth.hours}h</span></div></div></div>
@@ -229,20 +228,19 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
         <div className="home-rail">
           <div className="home-slot slot-evidence"><EvidencePanel feed={feed} openMarket={() => setView("Market")} /></div>
           <div className="home-slot slot-standing"><StandingPanel streak={feed.streak} loading={feed.loading} openPlan={() => setView("Plan")} /></div>
-          <div className="home-slot slot-reality"><div className="panel reality"><p className="eyebrow">Reality check</p><h2>Target calibration</h2><p>“$250K” is a 2–3 year target from Pune, not something this plan promises on its own. The nearer proof point is a strong global-remote India role.</p><details className="reality-more"><summary>Show the five markets</summary><ul className="market-list">{marketTiers.map((m) => <li key={m.market}><span className={`market-tier ${m.tone}`}>{m.label}</span><span className="market-name">{m.market}</span><span className="market-window">{m.window}</span></li>)}</ul></details><button className="text-button" onClick={() => setView("Market")}>Read the assumptions →</button></div></div>
-          {/* The rail ran out of content well before the main column did — it holds three short
-              panels beside a shipped-wall and a 23-bar chart, so `align-content:start` packed it
-              to the top and left roughly 650px of empty column beside the pace map. These two
-              close it with the questions the panels above them raise: "Reality check" says $250K
-              is not what this plan promises, so the next thing to say is what you ARE aiming at;
-              and the outside brief had no on-screen presence anywhere in the product. */}
+          <div className="home-slot slot-reality"><div className="panel reality"><p className="eyebrow">Reality check</p><h2>Target calibration</h2><p>“$250K” is a 2-3 year target from Pune, not something this plan promises on its own. The nearer proof point is a strong global-remote India role.</p><details className="reality-more"><summary>Show the five markets</summary><ul className="market-list">{marketTiers.map((m) => <li key={m.market}><span className={`market-tier ${m.tone}`}>{m.label}</span><span className="market-name">{m.market}</span><span className="market-window">{m.window}</span></li>)}</ul></details><button className="text-button" onClick={() => setView("Market")}>Read the assumptions →</button></div></div>
+          {/* The rail ran out of content well before the main column did. It holds three short
+              panels beside a shipped-wall and a 23-bar chart, so `align-content:start` packs it to
+              the top and leaves roughly 650px of empty column next to the pace map. "Four routes"
+              closes most of that, and it answers the question the panel above it raises: Reality
+              check says $250K is not what this plan promises, so the next thing to say is what you
+              are aiming at instead. */}
           <div className="home-slot slot-paths"><PathsRail open={() => setView("Paths")} /></div>
-          <div className="home-slot slot-outside"><OutsidePanel /></div>
         </div>
       </div>
 
       {/* By track spans both columns rather than sitting at the foot of the main one.
-          With it in the main column the two ran 2365 against 1110 — the rail ended barely
+          With it in the main column the two ran 2365 against 1110 - the rail ended barely
           halfway down and left 1255px of empty right-hand side. Full width closes most of that
           and gives the 15-track list the room it actually wants. */}
       <div className="home-slot slot-track slot-full"><div className="panel wide"><div className="panel-head"><div><p className="eyebrow">By track</p><h2>Coverage at a glance</h2></div><button className="text-button" onClick={() => setView("Plan")}>View all →</button></div><div className="track-list">{trackTotals.map(({ name, count, hours: h, done: trackDone }) => <button className="track-row" key={name} onClick={() => { setTrack(name); setView("Plan"); }}><span className="track-name">{name}</span><span className="track-count">{count} topics</span><span className="track-progress"><span style={{ width: `${pct(trackDone, count)}%` }} /></span><span className="track-hours">{h}h</span></button>)}</div></div></div>

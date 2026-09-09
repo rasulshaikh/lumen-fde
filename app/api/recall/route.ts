@@ -7,7 +7,7 @@ const typed = bank as unknown as { meta: Record<string, Meta>; prompts: Prompt[]
 
 // The bank is ~600KB. Importing it into the client bundle to show at most five cards a day
 // would be absurd, so it stays server-side and this route returns only the topics actually
-// in play. Early in the plan that is one or two topics — a few KB.
+// in play. Early in the plan that is one or two topics - a few KB.
 export async function GET(request: Request) {
   const raw = new URL(request.url).searchParams.get("topics") ?? "";
   const wanted = new Set(

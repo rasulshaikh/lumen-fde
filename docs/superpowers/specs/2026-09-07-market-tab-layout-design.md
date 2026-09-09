@@ -1,4 +1,4 @@
-# Market tab layout — design
+# Market tab layout - design
 
 Date: 2026-09-07
 Status: approved (Option A), ready for implementation
@@ -7,8 +7,8 @@ Status: approved (Option A), ready for implementation
 
 The Market tab renders 34 coverage entries as prose blocks at identical visual weight:
 
-- **2 entries sit at 0%** — a skill no requisition asks for, rendered as coverage data.
-- **8 more sit at 1–4%** (2–7 reqs of 189), visually indistinguishable from Python at 67%.
+- **2 entries sit at 0%** - a skill no requisition asks for, rendered as coverage data.
+- **8 more sit at 1-4%** (2-7 reqs of 189), visually indistinguishable from Python at 67%.
 - **133 plan-row chips, all reading "not started."** Every one. Zero bits of information,
   rendered 133 times.
 - **9,025 characters of prose in one list**, and all 34 sentences contain the phrase
@@ -18,7 +18,7 @@ The Market tab renders 34 coverage entries as prose blocks at identical visual w
 
 `benchmark.ts` and `insight.ts` emit a rendered `statement` string per entry, and the tab prints
 it. That rule exists so the weekly email and the tab say identical sentences with one place to
-fix a wording, and it is correct — **for the email**. An email is a linear read where a full
+fix a wording, and it is correct - **for the email**. An email is a linear read where a full
 sentence is the right unit. A tab is a scannable surface where a sentence per row is a wall.
 
 The structured fields were always there (`pct`, `hits`, `reqs`, `companies`, `rows`,
@@ -32,16 +32,16 @@ for the surface it was written for.
 
 Three zones, in this order, each with its own heading and visual separation:
 
-### 1. Decide — what to study next
+### 1. Decide - what to study next
 Readiness (absolute, stated honestly) then the ranked marginal table. This leads because it is
 the only zone that answers a question you act on today.
 
-### 2. Reach — where you can actually work
-The in-India requisitions **by company and title**, not as a percentage. "Databricks — Staff
+### 2. Reach - where you can actually work
+The in-India requisitions **by company and title**, not as a percentage. "Databricks - Staff
 Forward Deployed Engineer, Remote - India" is more useful than any share. Then the five-tier
 distribution as a compact bar, and the derived-count caveat.
 
-### 3. Market — reference
+### 3. Market - reference
 The coverage table (below), velocity, gaps. Scrolled to, not led with.
 
 Quaere's reading sits last, in its distinct block, still labelled interpretation not measurement.
@@ -52,7 +52,7 @@ One row per skill. Four columns:
 
 | column | content |
 |---|---|
-| Skill | label only — never the sentence |
+| Skill | label only - never the sentence |
 | Market | inline bar + `NN%`, so 67% and 1% look different |
 | Yours | reachable-market %, coloured green when ≥ market, red when below |
 | Plan row | `row NN` link + month, replacing the chip stack |

@@ -14,7 +14,7 @@ import { HeroLines } from "./hero-lines";
  * A layout is the only place the cross-route state can live: Next keeps this component mounted
  * and swaps only the segment below it, so `AppStateProvider` is instantiated once per session
  * rather than once per navigation. Put the provider in a page and the progress fetch re-runs on
- * every tab click — which does not just flicker, it re-arms the un-hydrated write window that
+ * every tab click - which does not just flicker, it re-arms the un-hydrated write window that
  * once overwrote real progress.
  *
  * `Chrome` is a separate component in this same file for the boring reason that a provider
@@ -29,11 +29,11 @@ function Chrome({ children }: { children: React.ReactNode }) {
   const [shared, setShared] = useState(false);
 
   // What the hero rotates through. Every line is arithmetic over values this component already
-  // holds — no new fetch, and nothing here can say something the footer would contradict. A line
+  // holds - no new fetch, and nothing here can say something the footer would contradict. A line
   // that cannot be derived is dropped rather than filled in, which is why this is a filter and
   // not a fixed array.
   const heroLines = [
-    `Your ${hours}-hour Senior FDE plan, reduced to the pace, practice, and proof that matter this week.`,
+    `Your ${hours}-hour Senior FDE plan, cut down to the pace and practice this week asks for.`,
     focus ? `Month ${focus.month} of ${monthHours.length} · ${focus.track}.` : null,
     `${done} of ${activeRows.length} topics recorded · ${hours - doneHours}h still ahead.`,
     curParts ? `${curParts.toLocaleString()} syllabus parts, each naming one public resource.` : null,
@@ -51,7 +51,7 @@ function Chrome({ children }: { children: React.ReactNode }) {
 
   return <main className={askOpen ? "shell ask-open" : "shell"}>
     <header className="topbar"><a className="brand brand-link" href="/overview" aria-label="Return to Lumen home"><LogoMark className="brand-mark" /><div><div className="brand-name">Lumen</div><div className="brand-sub">by Rasul</div></div></a><div className="top-actions"><button className="ask-trigger" onClick={() => { setAskTopic(null); setAskOpen(true); }}><AskMark size={14} /> Quaere</button><button className="ghost-button" onClick={share} aria-live="polite">{shared ? "✓ Link copied" : "↗ Share"}</button><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`} title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>{theme === "dark" ? "☀" : "☾"}</button></div></header>
-    <section className="hero"><div><p className="kicker">Preparation command center</p><h1>Build proof, not just knowledge.</h1><HeroLines lines={heroLines} /></div>{/* Current focus was a 300x73 chip in a 306px hero — about 7% of it — carrying one line.
+    <section className="hero"><div><p className="kicker">Preparation command center</p><h1>Build proof you can show.</h1><HeroLines lines={heroLines} /></div>{/* Current focus was a 300x73 chip in a 306px hero - about 7% of it - carrying one line.
         It is the only thing on the hero that changes as the plan moves, so it now says what it
         knows: where you are in the 23 months, the row you are actually on, and what that row
         costs. Every figure is read from the provider; nothing here is typed. */}

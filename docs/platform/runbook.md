@@ -1,4 +1,4 @@
-# Lumen FDE — runbook
+# Lumen FDE - runbook
 
 What breaks, what it costs, and how to fix it.
 
@@ -22,10 +22,10 @@ Read section 1 first. It is the part that is true at 3am.
 `reports/market/index.json` thirty minutes after the scan and prepends up to two lines to the
 digest, above the study brief, because a broken pipeline outranks it:
 
-- **SCAN STALE** — `index.json` `updatedAt` is older than `STALE_AFTER_MS` (26 h: the 03:00 scan
+- **SCAN STALE** - `index.json` `updatedAt` is older than `STALE_AFTER_MS` (26 h: the 03:00 scan
   plus the 03:30 digest plus one missed night is 24.5 h, and the remainder is slack so a single
   late or retried run does not cry wolf). The same line fires when `updatedAt` is unparseable.
-- **PARTIAL SCAN** — `boardsOk` is under `DELTA_MIN_BOARDS` (`lib/market/benchmark.ts`), which is
+- **PARTIAL SCAN** - `boardsOk` is under `DELTA_MIN_BOARDS` (`lib/market/benchmark.ts`), which is
   the same threshold `computeBenchmark()` suppresses movement and new-roles on. Without this line
   a short scan reads as a still market: the numbers stop moving and nothing says why.
 
@@ -39,7 +39,7 @@ quoted here.
 - **It dies with the digest.** `CRON_SECRET` unset or rotated 401s the digest before it reads
   anything (4.3); a missing `RESEND_API_KEY` or `RESEND_FROM_EMAIL` 503s it (3.5). Either one
   silences the scan and its alerter together. The code's stated answer is that the absence of the
-  email is then the signal — which only works if you would notice an absence.
+  email is then the signal - which only works if you would notice an absence.
 - **A GitHub read failure produces no alert, on purpose.** Every error path in `newCoreReqs()`
   returns `NO_MARKET`, whose `alerts` is empty: GitHub being unreachable is not evidence the scan
   is broken, and a false stale line on an outage morning teaches you to skim the real one. That
@@ -67,7 +67,7 @@ digest itself run.
 
 The git log is the best of these because it is local, free, and structural. A completed cycle
 writes its files in a fixed order (`architecture.md` §5.5), and each write is a commit whose
-message is `market: update <path>` — the string is built in `lib/market/store.ts` `writeJson()`.
+message is `market: update <path>` - the string is built in `lib/market/store.ts` `writeJson()`.
 
 A healthy full cycle therefore leaves, newest first:
 
@@ -93,11 +93,11 @@ print(i['updatedAt'], 'cursor', i['cursor'], 'boardsOk', i['boardsOk'], \
 ```
 
 What the third line should print: a timestamp from within the last 24 hours, `cursor 0`,
-`boardsOk 27` — every enabled board in `data/market-sources.json`
-<!-- verify:enabled_boards=27 --> — and an empty failed list.
+`boardsOk 27` - every enabled board in `data/market-sources.json`
+<!-- verify:enabled_boards=27 --> - and an empty failed list.
 
 - `cursor` non-zero → the cycle is partial. Section 3.4.
-- `boardsOk` below 27 → one or more boards failed. Section 4.1 — benign while it stays at or
+- `boardsOk` below 27 → one or more boards failed. Section 4.1 - benign while it stays at or
   above `DELTA_MIN_BOARDS`. **Strictly below it, movement and new roles are suppressed entirely**
   (`lib/market/benchmark.ts`), so a whole surface goes quiet rather than wrong. That is the
   PARTIAL SCAN alert's trigger too, so the email should already have told you.
@@ -117,7 +117,7 @@ What the third line should print: a timestamp from within the last 24 hours, `cu
 | Curriculum reverted to old hours/months | `git diff data/curriculum/` | 3.3 |
 | Digest led with SCAN STALE | `index.json` `updatedAt`, then Vercel logs for `/api/cron/market-scan` | 1, 3.1, 3.4, 4.3 |
 | Digest led with PARTIAL SCAN | `index.json` `boardsOk` and `boards[token].error` | 4.1, 3.2 |
-| No digest email arrived — which also means no alert | `CRON_SECRET` first, then `RESEND_FROM_EMAIL`, `RESEND_API_KEY` | 4.3, 3.5 |
+| No digest email arrived - which also means no alert | `CRON_SECRET` first, then `RESEND_FROM_EMAIL`, `RESEND_API_KEY` | 4.3, 3.5 |
 | Digest arrived without its framing line | `MINIMAX_API_KEY` | 3.5 |
 | Market tab has no Quaere paragraph | `insight.json` `quaere` is `null` | 3.5, 4.4 |
 | Neither cron ran, no logs at all | `CRON_SECRET` | 4.3 |
@@ -129,40 +129,40 @@ What the third line should print: a timestamp from within the last 24 hours, `cu
 
 This is the only distinction that matters when you are tired.
 
-**Degrades** — an output is missing or stale. The stored state is still true. Doing nothing
+**Degrades** - an output is missing or stale. The stored state is still true. Doing nothing
 until morning costs freshness and nothing else. Most of this system degrades, on purpose:
 `architecture.md` §8 lists every environment variable and what its absence costs, and *most* of
-them degrade rather than crash. Read the qualifier there — the table says "except where noted"
+them degrade rather than crash. Read the qualifier there - the table says "except where noted"
 and bolds its exceptions. The ones that break outright rather than degrade are `CRON_SECRET`
 (both crons 401), `RESEND_API_KEY` / `RESEND_FROM_EMAIL` (the digest 503s, which also takes the
 staleness alert with it), `GITHUB_TOKEN` (the scan 503s, `/api/progress` 502s), `MINIMAX_API_KEY`
-for `/api/ask` only, and `MCP_API_KEY` (the whole MCP server 503s — see 4.6). Exactly one fails
+for `/api/ask` only, and `MCP_API_KEY` (the whole MCP server 503s - see 4.6). Exactly one fails
 open: `LUMEN_PASSWORD`.
 
-**Corrupts** — a wrong value was written and now looks like a measurement. The damage survives
+**Corrupts** - a wrong value was written and now looks like a measurement. The damage survives
 the fix, because the next read cannot tell the bad number from a good one. These are the ones
-worth waking up for, and they are worth waking up for **only until you have stopped the write** —
+worth waking up for, and they are worth waking up for **only until you have stopped the write** -
 the repair is a `git revert`, which can wait.
 
 Every failure mode in this document, classified:
 
 | # | failure | class |
 |---|---|---|
-| 3.1 | concurrent GitHub writes race the branch ref | **corrupts** — a lost file the tab then reads as stale truth |
-| 3.2 | truncation guard measured against the match count | **corrupts** — the worst one in the system |
-| 3.3 | a script writes the curriculum bundle but not its source | **corrupts** — and silently reverts |
-| 3.4 | `SCAN_DEADLINE_MS` assumes a 300 s function | degrades — the cursor is what makes it safe, and on measured runtimes it does not fire at all |
+| 3.1 | concurrent GitHub writes race the branch ref | **corrupts** - a lost file the tab then reads as stale truth |
+| 3.2 | truncation guard measured against the match count | **corrupts** - the worst one in the system |
+| 3.3 | a script writes the curriculum bundle but not its source | **corrupts** - and silently reverts |
+| 3.4 | `SCAN_DEADLINE_MS` assumes a 300 s function | degrades - the cursor is what makes it safe, and on measured runtimes it does not fire at all |
 | 3.5 | `MINIMAX_API_KEY` / `RESEND_FROM_EMAIL` empty | degrades |
-| 3.6 | browser-driving a write control writes real state | **corrupts** — study history; the accidental path is closed on `/api/progress`, not on `/api/review` |
+| 3.6 | browser-driving a write control writes real state | **corrupts** - study history; the accidental path is closed on `/api/progress`, not on `/api/review` |
 | 4.1 | one board fails | degrades, by design |
-| 4.2 | GitHub unreachable | degrades, by design — the abort is the guard |
+| 4.2 | GitHub unreachable | degrades, by design - the abort is the guard |
 | 4.3 | `CRON_SECRET` unset or rotated | degrades silently, which is the problem |
 | 4.4 | model paragraph dropped by the digit check | degrades, by design |
 | 4.5 | Render serves stale plan rows | **corrupts** the answer, not the data |
-| 4.6 | `LUMEN_PASSWORD` unset | exposure, not corruption — the only fail-open left |
-| 4.6 | `MCP_API_KEY` unset | degrades, hard — every MCP tool 503s, and it refuses rather than opens |
+| 4.6 | `LUMEN_PASSWORD` unset | exposure, not corruption - the only fail-open left |
+| 4.6 | `MCP_API_KEY` unset | degrades, hard - every MCP tool 503s, and it refuses rather than opens |
 
-Corruption in this system is almost always *plausible*. There is no crash and no red banner —
+Corruption in this system is almost always *plausible*. There is no crash and no red banner -
 there is a number that is 8% lower than it should be, sitting in a table of numbers that are
 right. That is why the guards in section 4 exist and why section 3.2 is the one to reread.
 
@@ -172,14 +172,14 @@ right. That is why the guards in section 4 exist and why section 3.2 is the one 
 
 ### 3.1 Three GitHub writes in a `Promise.all` raced the branch ref
 
-**Fixed in `b6c1ef7` — "write the three snapshot files sequentially, not concurrently".**
+**Fixed in `b6c1ef7` - "write the three snapshot files sequentially, not concurrently".**
 
 Every write in this system is a commit on `main` via the GitHub contents API. Three of them
 issued concurrently race the branch ref: GitHub accepts whichever arrives first and rejects the
 rest with `is at <sha> but expected <sha>`.
 
 The first real scan hit this. It fetched all 27 boards, computed the benchmark, wrote
-`index.json`, `trend.json` and `history/2026-09-07.json` — and lost `benchmark.json`, the one
+`index.json`, `trend.json` and `history/2026-09-07.json` - and lost `benchmark.json`, the one
 file the Market tab actually reads. It then returned 502.
 
 **How you notice.** The Vercel log line `[cron/market-scan] snapshot write failed`, and a 502
@@ -198,34 +198,34 @@ commits, i.e. the two writes that beat the benchmark to the ref.
 
 **Blast radius.** `benchmark.json` keeps yesterday's content while `index.json` holds today's.
 The tab reads the benchmark, so it shows yesterday's market with no indication that it is a day
-behind. Nothing in the seen-set is wrong — the benchmark is a pure function of `index.json`
+behind. Nothing in the seen-set is wrong - the benchmark is a pure function of `index.json`
 (`architecture.md` §5.3) and recomputes on the next successful cycle.
 
 **Fix.** Already fixed: the four writes are sequential, `index.json` first and alone. If it ever
 comes back, the shape to look for is `Promise.all` around anything that calls `writeJson`. The
 concurrent version was inherited from `app/api/review/route.ts`, which writes a *single* file and
-therefore cannot race itself — copying that shape to a multi-file writer is the mistake.
+therefore cannot race itself - copying that shape to a multi-file writer is the mistake.
 
 To recover a lost cycle without waiting for tomorrow, re-run the scan; it recomputes everything
 downstream of `index.json` from scratch.
 
 **Class: corrupts.** Not the seen-set, but the reader's belief. A stale benchmark presented as
-current is a wrong measurement. The tab does give you the means to catch it — `components/Market.tsx`
-renders `Computed <benchmark.computedAt> UTC · N of M boards` above every Market panel — but it
+current is a wrong measurement. The tab does give you the means to catch it - `components/Market.tsx`
+renders `Computed <benchmark.computedAt> UTC · N of M boards` above every Market panel - but it
 is an absolute timestamp with no relative age and no warning state, deliberately, so catching it
 requires reading the date rather than noticing a colour. On this failure that date is
 yesterday's while `index.json` says today.
 
 ### 3.2 The truncation guard compared a posting count against a *match* count
 
-**Fixed in `a9f082c` — "check the truncation guard against the board total, not the match count".**
+**Fixed in `a9f082c` - "check the truncation guard against the board total, not the match count".**
 
 `fetchBoard()` in `lib/market/fetch.ts` refuses a listing that came back suspiciously short,
 because a partial fetch produces a real-looking small number instead of an error. The floor is
 60% of the board's audited size.
 
-The bug was the denominator. The audit stored `verifiedMatches` — how many of a board's postings
-match the FDE title patterns — and the floor was computed from that. So:
+The bug was the denominator. The audit stored `verifiedMatches` - how many of a board's postings
+match the FDE title patterns - and the floor was computed from that. So:
 
 | board | matches | total | match-based floor | total-based floor |
 |---|---|---|---|---|
@@ -233,8 +233,8 @@ match the FDE title patterns — and the floor was computed from that. So:
 | Decagon | 34 | 139 | 20 | **83** |
 
 A Databricks fetch returning **100 of 870 rows** cleared a floor of 58 and would have been
-written to the index as truth. The Decagon case that motivated the guard in the first place — a
-fetch returning 10 of 139 — cleared a floor of 20 by luck.
+written to the index as truth. The Decagon case that motivated the guard in the first place - a
+fetch returning 10 of 139 - cleared a floor of 20 by luck.
 
 **How you notice.** You mostly do not, which is the entire point. A truncated board is not an
 error; it is a company that appears to have quietly stopped hiring. The observable is a
@@ -253,18 +253,18 @@ is well under `verifiedTotal` and the board still reported `ok: true`, the guard
 should have. Cross-check by hitting the board's `listUrl` directly and counting.
 
 **Blast radius.** Every percentage in the benchmark. Skill shares are computed over the
-*distinct* core requisitions `distinct()` in `lib/market/benchmark.ts` returns — `coreCount` in
+*distinct* core requisitions `distinct()` in `lib/market/benchmark.ts` returns - `coreCount` in
 `benchmark.json` is that number, and the per-board contribution is not in `benchmark.json` at
 all, so recompute it from `index.json` before quoting one. Do not reach for `verifiedMatches` in
 `data/market-sources.json`: that is a raw title-pattern count across all classes, undeduped, and
 it runs several times the real figure. On the 2026-09-08 scan the largest contributor is
-Databricks at 35 of 189, and the truncation above — 100 of 870 rows, 11% of the board — would
+Databricks at 35 of 189, and the truncation above - 100 of 870 rows, 11% of the board - would
 leave roughly 4 of those 35, moving every share in the table. `trend.json` records the bad point
 permanently, and week-over-week movement is then computed against it.
 
 **Fix.** The floor comes from `source.verifiedTotal`, which is now stored on all 32 boards.
 <!-- verify:boards=32 --> If a board legitimately grows or shrinks, re-audit it and update
-`verifiedTotal` — do not lower the ratio. If a bad cycle already landed, revert the
+`verifiedTotal` - do not lower the ratio. If a bad cycle already landed, revert the
 `reports/market/` commits for that day and re-run the scan.
 
 **Class: corrupts, and it is the worst one here.** A false negative looks exactly like a quiet
@@ -272,7 +272,7 @@ week. Nothing downstream can distinguish them, and `trend.json` keeps the lie fo
 
 ### 3.3 Two scripts wrote `data/curriculum.json` but not the per-topic sources
 
-**Fixed in `aa18478` — "write the per-topic curriculum files, not just the bundle".**
+**Fixed in `aa18478` - "write the per-topic curriculum files, not just the bundle".**
 
 `data/curriculum/NN.json` is the **source**, 119 files. `data/curriculum.json` is **built** from
 them by `scripts/build-curriculum.py`. `architecture.md` §4.2 states this rule; it is the
@@ -306,7 +306,7 @@ print(len(f),'files,',sum(len(json.load(open(x))['subtopics']) for x in f),'subt
 ```
 
 That prints `119 files, 2236 subtopics` today, and the same subtopic count must appear in the
-built bundle — that identity is what "in sync" means. <!-- verify:subtopics=2236 -->
+built bundle - that identity is what "in sync" means. <!-- verify:subtopics=2236 -->
 
 **Blast radius.** Everything the plan feeds: the Plan and Curriculum tabs, `/api/ask`'s
 server-side grounding, the daily digest's next-topic pick, `lib/market/insight.ts`'s
@@ -317,7 +317,7 @@ them.
 **Fix.** Both scripts now write `data/curriculum/*.json` and print `Now run: python3
 scripts/build-curriculum.py` as their last line. The rule, restated because it is the one people
 get backwards: **write the source files, then rebuild. Anything that writes only
-`data/curriculum.json` will be silently undone.** To recover, fix the sources and rebuild — the
+`data/curriculum.json` will be silently undone.** To recover, fix the sources and rebuild - the
 bundle is disposable.
 
 **Class: corrupts, silently and on a delay.** The revert happens on the *next* build, which may
@@ -330,14 +330,14 @@ be days after the edit, so the change and its loss are not adjacent in the git l
 
 The route deliberately does not declare `maxDuration`, because Hobby rejects a build that asks
 for more than its cap and hardcoding 300 would make the design plan-specific. So on Hobby the
-deadline never fires — the platform would kill the invocation at 60 s first.
+deadline never fires - the platform would kill the invocation at 60 s first.
 
 **Measure before you act on this.** The archived scans say the deadline is not the live problem:
 `updatedAt` to the last board's `fetchedAt` in `reports/market/index.json` is 4.2 s across all 27
 boards on the 2026-09-08 scan and 14.8 s on 2026-09-07. Six workers exhaust 27 boards long before
 either budget, `next` reaches `boards.length`, and the cycle completes in one invocation with
 seconds spent, not minutes. The 220 s figure is what the scan would need in the pathological case
-— every board hanging to its full 45 s `BOARD_TIMEOUT_MS` (`lib/market/fetch.ts`), 6 at a time,
+- every board hanging to its full 45 s `BOARD_TIMEOUT_MS` (`lib/market/fetch.ts`), 6 at a time,
 ≈225 s. Treat that as the ceiling this design survives, not as the normal cost. Re-derive the two
 numbers above from the current file before concluding anything; they are live scan output and
 this document cannot anchor them.
@@ -346,8 +346,8 @@ The pathological case is survivable, and the reason is the cursor. Workers pull 
 order and `next` ends as the first board never dispatched. `index.cursor` stores it, and the run
 writes `index.json` and stops without computing anything:
 
-> `const complete = next >= boards.length;` … everything below that line — `sweepMissing`,
-> `capReqs`, `computeBenchmark`, `appendTrend`, `computeInsight` — runs only on a complete cycle.
+> `const complete = next >= boards.length;` … everything below that line - `sweepMissing`,
+> `capReqs`, `computeBenchmark`, `appendTrend`, `computeInsight` - runs only on a complete cycle.
 
 That gate is what makes a partial cycle safe rather than merely survivable. A benchmark computed
 over a truncated corpus would print a percentage whose denominator is "the boards that happened
@@ -355,23 +355,23 @@ to fit in this invocation", and it would look exactly like a real one.
 
 **How you notice.** `reports/market/index.json` `cursor` is non-zero, and the scan's JSON
 response carries `partial: true`. The benchmark stops advancing while `index.json` keeps
-updating — an `index.json` commit with no `benchmark.json` commit beside it, night after night.
+updating - an `index.json` commit with no `benchmark.json` commit beside it, night after night.
 
 **How you confirm.** Read the cursor across two consecutive days.
 
 - It advances (0 → 11 → 22 → 0): the cycle is completing over several invocations. Working as
-  designed, and slower than the measurements above say it should be — something is hanging.
+  designed, and slower than the measurements above say it should be - something is hanging.
 - **It sits at the same non-zero value and no `index.json` commit appears: that is this failure
   in its worst form, not a different one.** A hard platform kill lands before the index write, so
   nothing is committed, the cursor stays frozen at wherever it was, and the run leaves no trace
   in the repo. The Vercel logs are where you go next, but do not read a frozen cursor as evidence
-  against a deadline problem — it is the signature of the deadline never getting a chance to fire.
+  against a deadline problem - it is the signature of the deadline never getting a chance to fire.
 - It sits at 0 and `updatedAt` still advances nightly: the deadline is not involved. Cycles are
   completing; look elsewhere.
 
 **Blast radius.** Freshness only. Unreached boards keep yesterday's data rather than looking
 closed, and their new roles arrive a day or two late. How many invocations a cycle takes is a
-function of how slow the boards are that night, not of the plan tier — on the measured runtimes
+function of how slow the boards are that night, not of the plan tier - on the measured runtimes
 it is one.
 
 **Fix.** On a 60 s function, the deadline is the *second* thing to look at, because on measured
@@ -379,7 +379,7 @@ runtimes it is never reached. Look first at what actually runs long after the bo
 `quaereReading()` → `modelParagraph()` carries an `AbortSignal.timeout(40_000)`, and it is the
 one long call in the route. It runs **after** `index.json`, `benchmark.json`, `trend.json` and
 the history archive are already committed, so a 60 s kill inside it costs `insight.json` and
-nothing else — the cursor stays 0, the benchmark advances normally, and the file recomputes
+nothing else - the cursor stays 0, the benchmark advances normally, and the file recomputes
 tomorrow. `SCAN_DEADLINE_MS` does not touch that path at all.
 
 If the boards genuinely are slow enough to approach the cap, then set `SCAN_DEADLINE_MS` to
@@ -395,15 +395,15 @@ property, not a performance one.
 
 In `.env.local` today, three variables are set to the empty string: `MINIMAX_API_KEY`,
 `RESEND_FROM_EMAIL`, and `CRON_SECRET`. An empty string is absent in every way that matters, and
-the code is written to treat it that way — `sendWeekly()` reads its recipient with `||` and not
+the code is written to treat it that way - `sendWeekly()` reads its recipient with `||` and not
 `??` specifically so a dashboard-set `""` does not reach Resend as a recipient and take a 422.
 
 What each absence actually costs:
 
 | absent | what happens |
 |---|---|
-| `MINIMAX_API_KEY` | `modelParagraph()` returns `""` immediately. The digest sends without its framing line; the Monday email sends the deterministic benchmark alone; `insight.quaere` is stored as `null` and the Market tab renders no Quaere block. `/api/ask` returns 503 — the one hard failure, because an Ask with no model has no output at all. |
-| `RESEND_FROM_EMAIL` | The daily digest returns 503 and sends nothing. The Monday market email is skipped with `"Missing RESEND_API_KEY, RESEND_FROM_EMAIL or a recipient."` **The scan itself still completes and still writes all five files** — the email is sent last, outside every branch that returns 502, so a mail outage cannot cost a cycle. |
+| `MINIMAX_API_KEY` | `modelParagraph()` returns `""` immediately. The digest sends without its framing line; the Monday email sends the deterministic benchmark alone; `insight.quaere` is stored as `null` and the Market tab renders no Quaere block. `/api/ask` returns 503 - the one hard failure, because an Ask with no model has no output at all. |
+| `RESEND_FROM_EMAIL` | The daily digest returns 503 and sends nothing. The Monday market email is skipped with `"Missing RESEND_API_KEY, RESEND_FROM_EMAIL or a recipient."` **The scan itself still completes and still writes all five files** - the email is sent last, outside every branch that returns 502, so a mail outage cannot cost a cycle. |
 | `CRON_SECRET` | Both crons return 401 before doing anything. Locally that is correct; in production it means nothing runs. See 4.3. |
 
 **How you notice.** The digest arrives with no "Why it matters" row, or does not arrive. The
@@ -413,7 +413,7 @@ Market tab shows every measurement and no interpretation paragraph. Nothing erro
 rather than trusting a value quoted here: it is rewritten on every complete cycle and has been
 both `null` and populated on consecutive days. `null` alone does not prove a missing key either:
 the digit check (4.4) also produces `null`, and so does a MiniMax timeout. Separate them in the
-Vercel log — a dropped
+Vercel log - a dropped
 paragraph logs `contains numbers, dropping it` with the offending digits; a missing key logs
 nothing at all, because `modelParagraph()` returns before it makes a request.
 
@@ -423,14 +423,14 @@ either cron. `vercel env pull` refreshes `.env.local` from the project. Note tha
 `MARKET_TO_EMAIL` is read by the scan but is **not** in `.env.example`.
 
 **Class: degrades, deliberately.** The design rule behind it: the digest used to be a single
-model paragraph, and when the model returned nothing the email arrived empty — that shipped. The
+model paragraph, and when the model returned nothing the email arrived empty - that shipped. The
 substance is now derived from `data/workbook.json` and `data/recall-bank.json` with no model
 involved, and the model writes at most one line on top. A bad model day costs a paragraph.
 
 ### 3.6 Driving a write control in a browser writes real state
 
-**Three reverts: `2aadad0`, `6ee14a7`, `329b3b4` — all in one session. Partly fixed in
-`8650270` — "viewing the dashboard can no longer overwrite recorded progress".**
+**Three reverts: `2aadad0`, `6ee14a7`, `329b3b4` - all in one session. Partly fixed in
+`8650270` - "viewing the dashboard can no longer overwrite recorded progress".**
 
 The highest-frequency corruption in this repo's history, and it *was* partly a code defect: the
 status select took its value from the workbook baseline until `/api/progress` hydrated, so any
@@ -440,7 +440,7 @@ row's current value a no-op, and made `/api/progress` reject any status outside 
 offers with 400. It reports zero POSTs from loading the page and opening the Plan tab.
 
 What actually landed: two false `done` records on Shell mastery and Linux internals, 220 ms
-apart; then two `not_started` records that **un-skipped** PySpark and the MIT 6.824 Raft lab —
+apart; then two `not_started` records that **un-skipped** PySpark and the MIT 6.824 Raft lab -
 which would have flipped the plan back to 119 active topics in the dashboard and in
 `get_progress_analytics`, undoing a scope decision with data rather than code
 <!-- verify:rows=119 -->; then a `q0-0 rung 1, fluent, due 2026-09-13` review entry that would
@@ -449,7 +449,7 @@ that never happened.
 
 **What is still exposed.** The dev server reads `GITHUB_TOKEN` from `.env.local`, so a status
 select *changed* in a browser still POSTs to `/api/progress` and writes a durable record to this
-repository — the fix removed the accidental writes, not the deliberate ones. And `8650270`
+repository - the fix removed the accidental writes, not the deliberate ones. And `8650270`
 touched progress only: grading a recall card still PUTs to `/api/review` and writes a real
 schedule entry with no equivalent guard in front of it, which is the half of this incident that
 would repeat today.
@@ -467,7 +467,7 @@ column 15, so a fabricated `done` moves the readiness percentage. Active-hours a
 ladder is worse than wrong: a card graded `fluent` by nobody is scheduled 7 days out and its
 rung is now a lie the scheduler cannot detect.
 
-**Fix.** A record that is wholly fabricated — a `done` for a session nobody ran — gets its commit
+**Fix.** A record that is wholly fabricated - a `done` for a session nobody ran - gets its commit
 reverted in the same turn you notice it. A record that *overwrote* a real one gets a correcting
 event appended instead, which is what `8650270` did: the progress store is an append-only
 history, and a corrected history that hides its own correction is not a history. The erroneous
@@ -476,7 +476,7 @@ event stays; the new one says what it corrects.
 The rule, which is in these commit messages three times: **any browser automation touching a
 control that writes is writing for real.** Seed through `localStorage` and read computed values;
 drive the writing path only when the write itself is under test, and clean up immediately. This
-still holds even though the accidental-write path is closed — `/api/review` never had that guard.
+still holds even though the accidental-write path is closed - `/api/review` never had that guard.
 
 **Class: corrupts.** Study history has no other source of truth to reconcile against.
 
@@ -491,7 +491,7 @@ has an observable you should recognise so you do not chase it.
 
 Nothing in `lib/market/fetch.ts` throws. A failed board is recorded as `ok: false` with its
 error, and `sweepMissing()` only touches requisitions whose board reported `ok: true` this run.
-Without that rule, one Ashby 500 sets `missingSince` on every requisition the failed board owns —
+Without that rule, one Ashby 500 sets `missingSince` on every requisition the failed board owns -
 30 of them for Sierra on the 2026-09-08 index, and `sweepMissing()` operates on stored
 requisitions, not on `verifiedMatches` in `data/market-sources.json`, which is a much larger
 undeduped title-match count and not the figure to reach for here.
@@ -499,12 +499,12 @@ undeduped title-match count and not the figure to reach for here.
 Two costs, in that order. Immediately, `distinct()` skips any req with a non-null `missingSince`,
 so the whole board drops out of every denominator that night while `ok: false` was the only thing
 that went wrong. Then, if the outage outlasts `MISSING_DAYS` (`lib/market/store.ts`), the reqs
-are deleted outright — and because `markSeen()` only preserves `firstSeen` for a req still in the
+are deleted outright - and because `markSeen()` only preserves `firstSeen` for a req still in the
 index, the board's entire corpus comes back as new roles on the first run after it recovers.
 
 **Observable:** `boardsOk` below 27, and `index.json` `boards[token].error` carrying `HTTP 500`
 or a timeout. **Do nothing** unless it persists for several days or the error is `suspiciously
-small: N of M verified postings` — that is 3.2's guard firing and it means the board's shape
+small: N of M verified postings` - that is 3.2's guard firing and it means the board's shape
 changed. Re-audit and update `verifiedTotal`.
 
 ### 4.2 GitHub is unreachable
@@ -515,13 +515,13 @@ scan checks it and aborts *before fetching a single board*: 503 when `GITHUB_TOK
 
 That abort is the guard. Falling through to an empty index would rebuild the seen-set from
 scratch, stamp every stored requisition with today's `firstSeen`, and make tomorrow's digest
-announce the entire market as new — the whole seen-set at once, which is ~750 requisition records
+announce the entire market as new - the whole seen-set at once, which is ~750 requisition records
 in `reports/market/index.json` at present size.
 
 **Observable:** a 502 from the scan with zero board activity in the logs, and `/api/market`
 returning `synced: false`.
 
-`/api/market` separates three states, but **not from `synced` alone** — the comment in
+`/api/market` separates three states, but **not from `synced` alone** - the comment in
 `app/api/market/route.ts` says "alone" and its own table does not:
 
 | state | `synced` | `error` | `benchmark` |
@@ -530,8 +530,8 @@ returning `synced: false`.
 | GitHub did not answer | `false` | set | `null` |
 | cold start, no cycle yet | `true` | `null` | `null` |
 
-**The tab cannot tell you which.** `components/Market.tsx` renders one message for `synced === false` —
-"The benchmark store is unreachable … Check `GITHUB_TOKEN`" — so a missing token and a GitHub
+**The tab cannot tell you which.** `components/Market.tsx` renders one message for `synced === false` -
+"The benchmark store is unreachable … Check `GITHUB_TOKEN`" - so a missing token and a GitHub
 outage look identical on screen, and that message names the token in both cases. Read `error` off
 `/api/market` directly before you conclude which one you have.
 
@@ -542,12 +542,12 @@ secret is unset, `!secret` short-circuits and **every** invocation 401s. <!-- ve
 
 This is the failure with the worst signal-to-noise in the whole system, and the one case the
 staleness alert cannot report. Both crons share the secret, so an unset or rotated `CRON_SECRET`
-401s the digest at its first line — before it reads `index.json`, before `scanAlerts()` runs.
+401s the digest at its first line - before it reads `index.json`, before `scanAlerts()` runs.
 Nothing scans, nothing sends, no error is written anywhere in the repo, and the tab keeps
 rendering the last good benchmark.
 
 **Observable:** the digest simply does not arrive, and `index.json` `updatedAt` stops advancing.
-The missing email is the earlier of the two signals but it is an absence, not a message — so this
+The missing email is the earlier of the two signals but it is an absence, not a message - so this
 is the one failure where section 1.2's manual check is the primary detector rather than the
 backup, and the strongest remaining argument for a dead-man's switch outside this repo.
 
@@ -573,13 +573,13 @@ redeploying on plan edits, and the MCP server silently serves rows that were cur
 deploy.
 
 **Observable:** Claude Code quotes hours or months that the dashboard does not show. There is no
-error — the 18 MCP tools answer normally, from stale data. <!-- verify:mcp_tools=18 -->
+error - the 18 MCP tools answer normally, from stale data. <!-- verify:mcp_tools=18 -->
 
 **Confirm:** ask `get_plan` for a row you recently edited and compare against
 `data/workbook.json`. **Fix:** restore the `buildFilter` path and redeploy.
 
 Related and separate: `readMarketReport()` fetches the benchmark and insight **from GitHub**, not
-from the local checkout, on a 4 s budget. That is deliberate — reading the checkout would serve
+from the local checkout, on a 4 s budget. That is deliberate - reading the checkout would serve
 whatever was bundled at deploy time and Claude Code would quote a different market than the
 dashboard. A Render free-tier cold start can exceed that 4 s budget, in which case the market
 block is simply absent from the answer.
@@ -596,11 +596,11 @@ Two absences that fail in **opposite** directions. Do not read them as one class
 - **`MCP_API_KEY` unset → fails closed.** `authError()` in `mcp/server.js` refuses by default:
   no key configured means **503 `MCP_API_KEY is not configured` on every JSON-RPC request**, so
   all 18 tools go dark at once. <!-- verify:mcp_tools=18 --> This is the opposite of what it used
-  to do — it returned `true` for every caller when the variable was unset, a fail-open guard in
+  to do - it returned `true` for every caller when the variable was unset, a fail-open guard in
   front of `save_study_note` and `record_progress`, which commit to the repo with `GITHUB_TOKEN`.
   If your MCP has gone silent, **this is a cause to check, not an exposure to check for.**
   **Observable:** every tool call returns 503 with that message, and `audit("auth", false, …)`
-  logs it. `/healthz` still answers 200 — it is checked before the auth gate — so a green health
+  logs it. `/healthz` still answers 200 - it is checked before the auth gate - so a green health
   check proves the process is up and proves nothing about the key.
 
 `mcp/render.yaml` declares no `envVars`, so nothing in this repo guarantees `MCP_API_KEY` exists;
@@ -610,10 +610,10 @@ or a service recreate.
 Rate limiting is separate from both: `RATE_LIMIT` requests per `RATE_WINDOW_MS` (30 per 60 s
 today, `mcp/server.js`), keyed on the `Authorization` header and falling back to the remote
 address only when there is none. So it is per-token first, not per-address, and it trips on the
-request *after* the limit — a 429 with `Retry-After: 60`.
+request *after* the limit - a 429 with `Retry-After: 60`.
 
 Note that changing `LUMEN_PASSWORD` invalidates every existing session, because the password *is*
-the HMAC signing key for `lumen_session` — rotating it is also a global logout, which is the
+the HMAC signing key for `lumen_session` - rotating it is also a global logout, which is the
 correct response to a suspected leak.
 
 ---

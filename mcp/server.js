@@ -12,7 +12,7 @@ const rateBuckets = new Map();
 const auditEvents = [];
 /**
  * Parsed once per process. data/curriculum.json is 3.8 MB and data/workbook.json is 124 KB, and
- * both are immutable between deploys — Render redeploys on any data/** change, which is the only
+ * both are immutable between deploys - Render redeploys on any data/** change, which is the only
  * way their contents can move. Re-parsing 3.8 MB synchronously per get_syllabus call blocked the
  * event loop of the single free-tier instance for every other request in flight.
  *
@@ -36,8 +36,8 @@ const planRows = () => readJson("data/workbook.json").Plan;
 const planRow = (row) => (Number.isInteger(row) && row >= 1 && row < planRows().length ? planRows()[row] : null);
 const ACTIVE_HOURS = 1588; // Σ hours of the 117 rows the workbook does not mark Skipped; the denominator benchmark.overInvestedTotal uses.
 const tools = [
-  { name: "get_plan", description: "Read Rasul's Senior FDE plan: 119 rows over 23 months, 1588 active hours, with the read/watch/do resources and hours of each. Returns 30 rows per call unless you raise limit; pass row, month, track or query to narrow. The `status` field is the frozen workbook baseline (Not started on 117 rows, Skipped on 2) and never advances — for what is actually done use get_progress_analytics, and for what to do next use get_market_priorities.", inputSchema: { type: "object", properties: { query: { type: "string", description: "Case-insensitive substring of the topic." }, month: { type: "number", description: "Plan month, 1-23." }, track: { type: "string", description: "Case-insensitive substring of the track, e.g. \"Backend\"." }, row: { type: "integer", minimum: 1, maximum: 119, description: "One 1-based plan row, as market statements cite it." }, limit: { type: "integer", minimum: 1, maximum: 119, description: "Rows to return. Default 30; the whole plan is roughly 131 KB." } } } },
-  { name: "get_learning_context", description: "Read the indexed books, the repository references, and the one hardcoded lesson context. The lesson is currently Shell Mastery and Scripting and is not selectable — there is one lesson file, not one per topic.", inputSchema: { type: "object", properties: {} } },
+  { name: "get_plan", description: "Read Rasul's Senior FDE plan: 119 rows over 23 months, 1588 active hours, with the read/watch/do resources and hours of each. Returns 30 rows per call unless you raise limit; pass row, month, track or query to narrow. The `status` field is the frozen workbook baseline (Not started on 117 rows, Skipped on 2) and never advances - for what is actually done use get_progress_analytics, and for what to do next use get_market_priorities.", inputSchema: { type: "object", properties: { query: { type: "string", description: "Case-insensitive substring of the topic." }, month: { type: "number", description: "Plan month, 1-23." }, track: { type: "string", description: "Case-insensitive substring of the track, e.g. \"Backend\"." }, row: { type: "integer", minimum: 1, maximum: 119, description: "One 1-based plan row, as market statements cite it." }, limit: { type: "integer", minimum: 1, maximum: 119, description: "Rows to return. Default 30; the whole plan is roughly 131 KB." } } } },
+  { name: "get_learning_context", description: "Read the indexed books, the repository references, and the one hardcoded lesson context. The lesson is currently Shell Mastery and Scripting and is not selectable - there is one lesson file, not one per topic.", inputSchema: { type: "object", properties: {} } },
   { name: "get_syllabus", description: "Read the deep syllabus for a plan topic: prerequisites, 12-20 parts with what to learn and a public resource each, outcomes, production failure modes, interview questions, and proof of work. Pass row (1-based plan row, the number market statements cite) or index (row minus 1, the key the syllabus is stored under); query matches a topic or track substring; no args lists every topic that has one.", inputSchema: { type: "object", properties: { index: { type: "number", description: "0-based syllabus index. Equals plan row minus 1." }, row: { type: "integer", minimum: 1, maximum: 119, description: "1-based plan row. Preferred when you got the number from a market statement." }, query: { type: "string" } } } },
   { name: "ask_lumen", description: "Ask Lumen for a fifth-grade-language technical explanation using the full indexed Senior FDE context. Prose only: it is handed a 7000-character digest of the market scan, so for measured market numbers call get_market_priorities, get_market_reach, get_market_skill or get_market_plan_risk instead, which return the stored sentences unchanged.", inputSchema: { type: "object", required: ["prompt"], properties: { prompt: { type: "string" }, context: { type: "string" } } } },
   { name: "list_ask_reports", description: "List Markdown Ask Lumen reports saved in GitHub.", inputSchema: { type: "object", properties: { limit: { type: "number" } } } },
@@ -46,13 +46,13 @@ const tools = [
   { name: "record_progress", description: "Record a durable study-progress event in GitHub when the user explicitly says they completed or updated a topic. `topic` must be the verbatim plan topic string: readiness matches events to plan rows by exact topic, so a near-miss saves a file that counts toward nothing. The response reports which row it matched, or that it matched none.", inputSchema: { type: "object", required: ["topic", "status"], properties: { topic: { type: "string", description: "The plan topic, verbatim. Confirm it with get_plan first." }, status: { type: "string", enum: ["not_started", "in_progress", "done", "skipped"] }, notes: { type: "string" } } } },
   { name: "get_progress_history", description: "List durable study-progress events saved in GitHub, newest first, with the topic, status and plan row parsed out of each filename.", inputSchema: { type: "object", properties: { limit: { type: "number" } } } },
   { name: "get_progress_analytics", description: "Summarize progress from GitHub history: hours done against the 1588 active plan hours, per-topic status counts (the newest event per topic, not one count per event), the recent events, and any event whose topic matches no plan row and therefore counts toward nothing.", inputSchema: { type: "object", properties: {} } },
-  { name: "score_assessment", description: "Score a rubric-based weekly, monthly or quarterly self-assessment (one 0-4 rating per criterion) and explain the result. weekly and monthly share one 4-criterion rubric; quarterly has 5. quick_check is retired — the four-question static quiz it graded was replaced by the recall strip, so that branch refuses rather than grading against a key with no questions.", inputSchema: { type: "object", required: ["assessment", "answers"], properties: { assessment: { type: "string", enum: ["quick_check", "weekly", "monthly", "quarterly"] }, answers: { type: "array", description: "One rating per rubric criterion: 4 for weekly/monthly, 5 for quarterly.", items: { type: "number", minimum: 0, maximum: 4 } } } } },
+  { name: "score_assessment", description: "Score a rubric-based weekly, monthly or quarterly self-assessment (one 0-4 rating per criterion) and explain the result. weekly and monthly share one 4-criterion rubric; quarterly has 5. quick_check is retired - the four-question static quiz it graded was replaced by the recall strip, so that branch refuses rather than grading against a key with no questions.", inputSchema: { type: "object", required: ["assessment", "answers"], properties: { assessment: { type: "string", enum: ["quick_check", "weekly", "monthly", "quarterly"] }, answers: { type: "array", description: "One rating per rubric criterion: 4 for weekly/monthly, 5 for quarterly.", items: { type: "number", minimum: 0, maximum: 4 } } } } },
   { name: "semantic_search", description: "Search with SurfSense Google Search or Web Crawl when configured, or search the Lumen GitHub repository as a safe fallback.", inputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" }, provider: { type: "string", enum: ["surfsense", "github"] }, limit: { type: "number" }, country_code: { type: "string" } } } },
   { name: "get_audit_log", description: "View recent MCP actions and their success or failure without exposing secrets. In-process events do not survive a Render free-tier sleep; the durable list, written to reports/audit in GitHub for the two tools that write to the repo, does.", inputSchema: { type: "object", properties: { limit: { type: "number" }, durable: { type: "boolean", description: "Also list the durable reports/audit entries from GitHub. Default true." } } } },
   { name: "get_connection_map", description: "Return the precise Lumen, GitHub, Vercel, Render, SurfSense, and MCP connection map.", inputSchema: { type: "object", properties: {} } },
   { name: "get_market_priorities", description: "What to study next, given what the market actually asks for: the incomplete plan rows ranked by the readiness points finishing each one buys, plus where readiness stands today and which of the five market segments the work moves toward. Every row carries both `row` (1-based, as the statements cite it) and `syllabus_index` (row - 1, what get_syllabus and get_plan take).", inputSchema: { type: "object", properties: { limit: { type: "integer", minimum: 1, maximum: 27, default: 8, description: "How many ranked rows to return, best first." }, max_month: { type: "integer", minimum: 1, maximum: 23, description: "Only rows scheduled in this month or earlier. The plan runs months 1-23." }, track: { type: "string", description: "Case-insensitive substring of the plan track, e.g. \"Backend\" or \"E.\"." }, include_segments: { type: "boolean", default: true, description: "Append the five ranked segment-fit lines." } } } },
-  { name: "get_market_reach", description: "Which of the measured requisitions are takeable without leaving India, at which named companies, and whether that slice asks for something different from the market at large. Returns the tier distribution, the named roles with their URLs, the per-skill whole-market versus reachable share, and derivedCount — how many requisitions were tiered from the location string alone, which overstates reach.", inputSchema: { type: "object", properties: { tier: { type: "string", enum: ["india-remote", "emea-apac-remote", "india-office", "relocate-sponsor", "out-of-reach"], description: "Restrict the named roles to one tier. Omit for every role takeable without leaving India." }, skills_limit: { type: "integer", minimum: 0, maximum: 34, default: 10, description: "Skills to return, ranked by share of the reachable slice. 0 omits them." } } } },
-  { name: "get_market_skill", description: "Does the market ask for what a plan row teaches, and what does finishing it buy? Joins the measured coverage of a skill (whole-market share, the plan rows that teach it, the quoted JD evidence) with its share of the reachable slice and the readiness gain if its row is unfinished. With no arguments it returns the compact 34-skill index — id, label, market share, reachable share, primary row — which is the routing table for the other market tools.", inputSchema: { type: "object", properties: { skill: { type: "string", description: "Skill id (e.g. \"python\", \"rag\") or a case-insensitive substring of its label." }, row: { type: "integer", minimum: 1, maximum: 119, description: "A 1-based workbook plan row, as market statements cite it (\"row 28\"). This is get_syllabus's index + 1." } } } },
+  { name: "get_market_reach", description: "Which of the measured requisitions are takeable without leaving India, at which named companies, and whether that slice asks for something different from the market at large. Returns the tier distribution, the named roles with their URLs, the per-skill whole-market versus reachable share, and derivedCount - how many requisitions were tiered from the location string alone, which overstates reach.", inputSchema: { type: "object", properties: { tier: { type: "string", enum: ["india-remote", "emea-apac-remote", "india-office", "relocate-sponsor", "out-of-reach"], description: "Restrict the named roles to one tier. Omit for every role takeable without leaving India." }, skills_limit: { type: "integer", minimum: 0, maximum: 34, default: 10, description: "Skills to return, ranked by share of the reachable slice. 0 omits them." } } } },
+  { name: "get_market_skill", description: "Does the market ask for what a plan row teaches, and what does finishing it buy? Joins the measured coverage of a skill (whole-market share, the plan rows that teach it, the quoted JD evidence) with its share of the reachable slice and the readiness gain if its row is unfinished. With no arguments it returns the compact 34-skill index - id, label, market share, reachable share, primary row - which is the routing table for the other market tools.", inputSchema: { type: "object", properties: { skill: { type: "string", description: "Skill id (e.g. \"python\", \"rag\") or a case-insensitive substring of its label." }, row: { type: "integer", minimum: 1, maximum: 119, description: "A 1-based workbook plan row, as market statements cite it (\"row 28\"). This is get_syllabus's index + 1." } } } },
   { name: "get_market_plan_risk", description: "Which of the 1588 planned hours the market is not paying for, and what it asks for that the plan never teaches: the audited gaps with their nearest plan row, and the over-invested tracks with their measured JD frequency and combined hour cost. The answer to \"should I cut something\".", inputSchema: { type: "object", properties: { kind: { type: "string", enum: ["gaps", "over_invested", "both"], default: "both", description: "gaps = market asks, plan does not teach. over_invested = plan teaches, market rarely asks." }, limit: { type: "integer", minimum: 1, maximum: 13, default: 13 } } } }
 ];
 
@@ -68,7 +68,7 @@ async function github(pathname, options = {}) {
 function slug(value, fallback) { return String(value).replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase().slice(0, 60) || fallback; }
 function audit(action, ok, detail = "") { auditEvents.unshift({ action, ok, detail: String(detail).slice(0, 180), at: new Date().toISOString() }); if (auditEvents.length > 500) auditEvents.pop(); }
 async function durableAudit(action, detail) { try { const stamp = new Date().toISOString().replace(/[:.]/g, "-"); const file = `reports/audit/${stamp}-${slug(action, "event")}.json`; await github(file, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: `audit: ${action}`, content: Buffer.from(JSON.stringify({ action, detail, at: new Date().toISOString() }, null, 2)).toString("base64"), branch: repoConfig().branch }) }); } catch (error) { audit("durable_audit", false, error.message); } }
-function cleanAnswer(value) { return String(value || "").replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/\*/g, "").replace(/[—–]/g, " - ").replace(/\n{3,}/g, "\n\n").trim(); }
+function cleanAnswer(value) { return String(value || "").replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/\*/g, "").replace(/[–—]/g, " - ").replace(/\n{3,}/g, "\n\n").trim(); }
 
 /**
  * Everything below to the end of `marketContext` is a port of app/api/ask/route.ts, and the two
@@ -82,7 +82,7 @@ function cleanAnswer(value) { return String(value || "").replace(/<think>[\s\S]*
  * It has to exist at all because `askLumen` has two paths and only one of them is a proxy. With
  * LUMEN_ASK_URL and LUMEN_INTERNAL_API_KEY set, the tool posts to /api/ask and inherits the
  * market context for free. Without them it assembles its own context and calls MiniMax
- * directly, and that path would answer a market question from nothing at all — which is worse
+ * directly, and that path would answer a market question from nothing at all - which is worse
  * than not answering it, because the model has no way to know the numbers are missing.
  */
 const MARKET_CAP = 7000;
@@ -94,7 +94,7 @@ const MARKET_READ_MS = 4000;
 
 /** Read live from GitHub rather than from the checkout on disk. `readJson` would serve whatever
  *  reports/market held at deploy time, so Claude Code and the dashboard would quote different
- *  markets — and the whole point of this port is that the two answer identically. Every failure
+ *  markets - and the whole point of this port is that the two answer identically. Every failure
  *  path resolves null and the block is simply absent. */
 async function readMarketReport(file) {
   const read = github(file).then((result) => JSON.parse(Buffer.from(result.content, "base64").toString("utf8"))).catch(() => null);
@@ -134,12 +134,12 @@ function marketContext(benchmark, insight) {
   }
   const text = lines.join("\n");
   if (text.length <= MARKET_CAP) return text;
-  // The last resort, and it drops whole LINES rather than characters — the same shape
+  // The last resort, and it drops whole LINES rather than characters - the same shape
   // app/api/ask/route.ts uses, so both surfaces answer from a byte-comparable digest.
   //
   // This function used to end `text.slice(0, MARKET_CAP)`, which is precisely the bisected
   // numeral the header comment above warns about: only the coverage block is fill-checked, so
-  // the cap is reachable from in front of it — `insight.segments` is mapped with no slice — and
+  // the cap is reachable from in front of it - `insight.segments` is mapped with no slice - and
   // a character cut there would deliver "189 distinct requisitions" to a model as "18". A wrong
   // measured number in the context is strictly worse than a shorter digest. The dashboard route
   // was fixed and this copy was not, so Claude Code was the surface still exposed to it.
@@ -186,7 +186,7 @@ async function askLumen(prompt, context = "") {
  * The `/api/v1` prefix is not optional and was missing.
  *
  * Without it every call returned 404, the catch below fell through to a GitHub code search of
- * this repository, and `semantic_search` answered web questions with repo matches — recorded only
+ * this repository, and `semantic_search` answered web questions with repo matches - recorded only
  * in an audit line reading "surfsense unavailable, fell back to github". Confirmed against the
  * live OpenAPI spec: the endpoint is /api/v1/workspaces/{id}/scrapers/google_search/scrape, and
  * it returns 200 with organicResults.
@@ -200,14 +200,14 @@ async function surfSenseSearch(query, limit, countryCode) {
   return data;
 }
 /** `result.json()` alone returned GitHub's `{"message":"Bad credentials"}` as the search result,
- *  and the caller audited it as a success — a failure presented to the model as data. */
+ *  and the caller audited it as a success - a failure presented to the model as data. */
 async function githubSearch(query, limit) { const result = await fetch(`https://api.github.com/search/code?q=${encodeURIComponent(`${query} repo:${repoConfig().repo}`)}&per_page=${Math.min(Number(limit) || 5, 10)}`, { headers: { Authorization: `Bearer ${repoConfig().token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "lumen-mcp" } }); const data = await result.json().catch(() => ({})); if (!result.ok) throw new Error(data.message || `GitHub code search failed with ${result.status}`); return data; }
 /**
  * Rubric weights. `weekly` used to fall through to the monthly weights by accident while the
  * description advertised three rubrics; there are two, and now both the code and the description
  * say so. quick_check is refused rather than scored: the four-question quiz it graded was
  * replaced by the recall strip (app/recall.tsx, /api/recall), its key exists nowhere in the repo,
- * and the key hardcoded here disagreed with the one the architecture doc records — so any score
+ * and the key hardcoded here disagreed with the one the architecture doc records - so any score
  * it returned would be an invented grade against questions the caller cannot have been asked.
  */
 const RUBRICS = { weekly: [40, 25, 20, 15], monthly: [40, 25, 20, 15], quarterly: [20, 25, 25, 15, 15] };
@@ -231,7 +231,7 @@ async function assessmentScore(assessment, answers) {
  * Separate from `readMarketReport` and deliberately not a refactor of it: everything from the
  * port banner down to `marketContext` must stay byte-comparable with app/api/ask/route.ts, which
  * this process cannot import and this file does not own. This one differs in the two ways that
- * matter here — it keeps the failure reason, because for these tools the market IS the answer and
+ * matter here - it keeps the failure reason, because for these tools the market IS the answer and
  * a silently missing block reads as "no gaps found"; and it allows longer than the ask path's 4 s,
  * because there is no 25 s model call downstream to protect and the first request after a
  * free-tier spin-down is the one most likely to be slow.
@@ -257,7 +257,7 @@ async function marketReports() {
 /** Every market response carries this. MARKET_RULE spends five lines forbidding the model to
  *  produce a market number; a number without its scan day and board coverage is how one gets
  *  quoted next week as though it were today's. Movement and velocity ride along here rather than
- *  in a tool of their own — with one scan recorded they are two sentences, not an answer. */
+ *  in a tool of their own - with one scan recorded they are two sentences, not an answer. */
 function scanHeader(benchmark, insight) {
   return {
     day: benchmark?.day ?? insight?.day ?? null,
@@ -283,7 +283,7 @@ let rowsByTopic = null;
 function rowForTopic(topic) { if (!rowsByTopic) { rowsByTopic = new Map(); const plan = planRows(); for (let n = 1; n < plan.length; n++) { const key = String(plan[n]?.[2] ?? "").trim().toLowerCase(); if (key && !rowsByTopic.has(key)) rowsByTopic.set(key, n); } } return rowsByTopic.get(String(topic ?? "").trim().toLowerCase()) ?? null; }
 let rowsByTopicSlug = null;
 function rowForTopicSlug(value) { if (!rowsByTopicSlug) { rowsByTopicSlug = new Map(); const plan = planRows(); for (let n = 1; n < plan.length; n++) { const key = slug(plan[n]?.[2], ""); if (key && !rowsByTopicSlug.has(key)) rowsByTopicSlug.set(key, n); } } return rowsByTopicSlug.get(value) ?? null; }
-/** Statuses readiness counts as done, mirrored from DONE_STATUSES in lib/market/insight.ts —
+/** Statuses readiness counts as done, mirrored from DONE_STATUSES in lib/market/insight.ts -
  *  this process cannot import that file. Analytics previously recognised none of
  *  complete/completed/finished, so one event could be done for readiness and nothing here. */
 const DONE_STATUSES = new Set(["done", "complete", "completed", "finished"]);
@@ -292,7 +292,7 @@ const STATUS_SLUGS = ["not-started", "in-progress", "completed", "complete", "fi
 /**
  * Progress files are named `${isoStamp}-${slug(topic)}-${slug(status)}.md` by this server and by
  * app/api/progress. Parsing the name is what lets analytics report per-topic status and hours
- * without fetching all 100 files — 100 serialised GitHub reads on a sleeping free instance is not
+ * without fetching all 100 files - 100 serialised GitHub reads on a sleeping free instance is not
  * a summary, it is a timeout.
  */
 function parseProgressName(name) {
@@ -317,7 +317,7 @@ async function callTool(name, args = {}) {
       if (args.track && !String(row[0]).toLowerCase().includes(String(args.track).toLowerCase())) continue;
       matches.push({ index: n - 1, row: n, track: row[0], month: row[1], topic: row[2], depth: row[3], hours: row[13], deliverable: row[14], status: row[15], read: { label: row[4], url: row[5] }, watch: { label: row[7], url: row[8] }, do: { label: row[10], url: row[11] } });
     }
-    // Unfiltered, the whole plan is ~131 KB — roughly 33k tokens of a caller's context for "show
+    // Unfiltered, the whole plan is ~131 KB - roughly 33k tokens of a caller's context for "show
     // me the plan". Truncating silently would be worse than truncating loudly, hence total/returned.
     return text({ total: matches.length, returned: Math.min(matches.length, limit), note: "`row` is the 1-based plan row market statements cite; `index` is row - 1, what get_syllabus takes. `status` is the frozen workbook baseline, not progress - use get_progress_analytics for what is done.", rows: matches.slice(0, limit) });
   }
@@ -356,7 +356,7 @@ async function callTool(name, args = {}) {
     const result = await github(progressPath, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: `study: record ${status} progress`, content: Buffer.from(markdown).toString("base64"), branch: repoConfig().branch }) });
     audit("record_progress", true, `${topic} -> ${status}${row ? ` (row ${row})` : " (no plan row)"}`); await durableAudit("record_progress", { topic, status, row });
     // Readiness matches events to plan rows by exact topic string. A near-miss used to save
-    // cleanly, report {saved:true}, and contribute nothing to readiness with no signal anywhere —
+    // cleanly, report {saved:true}, and contribute nothing to readiness with no signal anywhere -
     // the one failure that looks exactly like success. Saved either way, said out loud either way.
     const near = row ? [] : planRows().slice(1).map((entry) => entry[2]).filter((value) => { const a = String(value).toLowerCase(); const b = topic.toLowerCase(); return a.includes(b) || b.includes(a); }).slice(0, 5);
     return text({ saved: true, path: progressPath, url: result.content?.html_url, matchedPlanRow: row, syllabus_index: row ? row - 1 : null, ...(row ? {} : { warning: "This topic matches no plan row, so readiness and get_progress_analytics will not count it. Re-record with the verbatim plan topic to make it count.", didYouMean: near }) });
@@ -364,7 +364,7 @@ async function callTool(name, args = {}) {
   if (name === "get_progress_history") { const items = await listProgress(); return text(items.slice(0, Math.min(Number(args.limit) || 30, 100)).map((item) => { const parsed = parseProgressName(item.name); return { name: item.name, path: item.path, url: item.html_url, date: parsed?.date ?? null, topic: parsed?.topic ?? parsed?.topicSlug ?? null, status: parsed?.status ?? null, row: parsed?.row ?? null, matchedPlanRow: Boolean(parsed?.row) }; })); }
   if (name === "get_progress_analytics") {
     const items = await listProgress();
-    // Per topic, newest event wins — the same rule readiness applies. Counting per event called
+    // Per topic, newest event wins - the same rule readiness applies. Counting per event called
     // one topic taken from in_progress to done two topics, under a heading labelled "status".
     const byTopic = new Map(); const unmatched = new Map();
     for (const item of items) {
@@ -468,7 +468,7 @@ async function callTool(name, args = {}) {
   throw new Error(`Unknown tool: ${name}`);
 }
 /**
- * Refuse by default. This returned true for every request whenever MCP_API_KEY was unset — a
+ * Refuse by default. This returned true for every request whenever MCP_API_KEY was unset - a
  * fail-open guard in front of save_study_note and record_progress, which commit to the repo with
  * GITHUB_TOKEN. mcp/render.yaml declares no envVars, so nothing in this repo guarantees the
  * variable exists; the key is set on the live service and only that made it latent rather than

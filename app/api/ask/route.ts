@@ -17,11 +17,11 @@ import type { Benchmark } from "@/lib/market/benchmark";
 import type { Insight } from "@/lib/market/insight";
 
 /**
- * 60, because Hobby will not build anything larger — see `market-scan`, which records the same.
+ * 60, because Hobby will not build anything larger - see `market-scan`, which records the same.
  *
  * This route briefly searched the web itself. It cannot: the scrape measures 27-39s, the model
  * call claims up to 55s, and 60 does not hold both. So the search moved to `/api/external-brief`,
- * which gets its own 60s, and the client makes two calls instead of one. Nothing was dropped —
+ * which gets its own 60s, and the client makes two calls instead of one. Nothing was dropped -
  * the arithmetic just does not fit in a single function on this plan.
  */
 export const maxDuration = 60;
@@ -43,7 +43,7 @@ function syllabusContext(index: number | undefined) {
  * The whole plan, compactly, built HERE rather than trusted from the client.
  *
  * This is the fix for a real failure: the client sent `filtered.slice(0, 8)`, so Lumen only
- * ever saw 8 of 119 topics — unfiltered, that is tracks A and B. Asked about a machine
+ * ever saw 8 of 119 topics - unfiltered, that is tracks A and B. Asked about a machine
  * learning book it correctly answered "there is no ML topic in the visible plan", because
  * tracks M, N and O (192h of maths, ML systems and deep learning) were never in the prompt.
  * The model reasoned correctly from a plan we had truncated to 6%.
@@ -56,18 +56,18 @@ function syllabusContext(index: number | undefined) {
  *
  * 1. It listed only the active rows and numbered them 0-based over that filtered list, while
  *    every other citation of a plan row in this codebase is 1-based over all of workbook.Plan
- *    (`PlanRowRef.row`, `page.tsx`'s `planRows[row - 1]`) — and MARKET_RULE tells the model to
+ *    (`PlanRowRef.row`, `page.tsx`'s `planRows[row - 1]`) - and MARKET_RULE tells the model to
  *    quote those numbers verbatim. The offset was not even constant: -1 before the first
  *    skipped row and -3 after it, so "row 59" named one topic in the digest and a different
  *    one in the list, and the model had no way to tell which was meant.
  * 2. It then declared "This is the complete plan; nothing is hidden from you" over a list with
- *    two topics missing. That is the exact failure the function was written to fix — the fix
+ *    two topics missing. That is the exact failure the function was written to fix - the fix
  *    moved the truncation from 8-of-119 to 117-of-119 rather than removing it, so "does my plan
  *    cover PySpark?" still answers no.
  *
  * So: every row, numbered as workbook.Plan numbers them, and a skipped row says Skipped in its
  * own status field rather than being deleted. The track totals stay over the active rows, since
- * they are a workload figure and skipped hours are not work — labelled as such.
+ * they are a workload figure and skipped hours are not work - labelled as such.
  */
 type PlanRow = (string | number | null)[];
 function planMap() {
@@ -79,11 +79,11 @@ function planMap() {
     const cur = byTrack.get(t) ?? { n: 0, h: 0 };
     byTrack.set(t, { n: cur.n + 1, h: cur.h + Number(r[13] || 0) });
   }
-  const tracks = [...byTrack.entries()].map(([t, v]) => `${t} — ${v.n} topics, ${v.h}h`).join("\n");
-  const lines = rows.map((r, i) => `${i + 1}. [M${r[1]}] ${r[0]} :: ${r[2]} (${r[13]}h) — ${r[15]}`).join("\n");
+  const tracks = [...byTrack.entries()].map(([t, v]) => `${t} - ${v.n} topics, ${v.h}h`).join("\n");
+  const lines = rows.map((r, i) => `${i + 1}. [M${r[1]}] ${r[0]} :: ${r[2]} (${r[13]}h) - ${r[15]}`).join("\n");
   const skipped = rows.length - active.length;
-  return `THE FULL PLAN — all ${rows.length} topics, of which ${active.length} are active (${active.reduce((n, r) => n + Number(r[13] || 0), 0)}h across ${byTrack.size} tracks)`
-    + `${skipped ? ` and ${skipped} are marked Skipped — those are listed below too, with Skipped as their status` : ""}.`
+  return `THE FULL PLAN - all ${rows.length} topics, of which ${active.length} are active (${active.reduce((n, r) => n + Number(r[13] || 0), 0)}h across ${byTrack.size} tracks)`
+    + `${skipped ? ` and ${skipped} are marked Skipped - those are listed below too, with Skipped as their status` : ""}.`
     + `\nEvery topic in the plan is in this list; nothing is hidden from you.`
     + `\n\nTracks, counting active topics only:\n${tracks}`
     + `\n\nEvery topic. The number is the plan row number, the same numbering any market benchmark below uses:\n${lines}`;
@@ -92,8 +92,8 @@ function planMap() {
 /**
  * The market injection's own ceiling, the same 7000 `syllabusContext` uses.
  *
- * The two blocks are never both at their limit in practice — a syllabus is only built when a
- * topic filter is active — but the reason for the number is identical in both places: a
+ * The two blocks are never both at their limit in practice - a syllabus is only built when a
+ * topic filter is active - but the reason for the number is identical in both places: a
  * question arriving at the bottom of fifteen thousand characters of grounding is a question the
  * model reads last and weights least. The market is context for the question, never the subject
  * of it unless the learner made it so.
@@ -133,8 +133,8 @@ const WEB_ITEM_CAP = 5;
  * a bundled copy would pin every number Quaere quotes to whenever the dashboard was last
  * deployed and present a stale market as the live one.
  *
- * Both reads run in parallel against one budget rather than two, and every failure — no
- * GITHUB_TOKEN, a 404 before the first scan, an outage, the timeout — resolves to null and the
+ * Both reads run in parallel against one budget rather than two, and every failure - no
+ * GITHUB_TOKEN, a 404 before the first scan, an outage, the timeout - resolves to null and the
  * market block is simply absent. `readJson` catches its own errors and reports `synced: false`
  * for "we do not know", which is exactly the case where the honest move is to omit: a question
  * answered without market context is a far smaller loss than one answered from a report that
@@ -157,7 +157,7 @@ async function readMarket<T>(path: string): Promise<T | null> {
  *
  * Sections are laid down in priority order and coverage goes LAST, which is the opposite of how
  * a human would order them and is the point: coverage is the block that gets trimmed when the
- * budget runs out, and it is the one that degrades gracefully — eight most-asked skills instead
+ * budget runs out, and it is the one that degrades gracefully - eight most-asked skills instead
  * of ten still answers "what does the market want", whereas losing the segment ranking or the
  * reachability distribution loses a whole analysis. The trim is not hypothetical: on the first
  * real corpus the personal blocks alone come to 4,192 characters and the assembled digest
@@ -214,10 +214,10 @@ function marketContext(benchmark: Benchmark | null, insight: Insight | null) {
   const text = lines.join("\n");
   if (text.length <= MARKET_CAP) return text;
   // The last resort, and it drops whole lines rather than characters. Only the coverage block
-  // is fill-checked above, so the cap is reachable from in front of it — `insight.segments` is
+  // is fill-checked above, so the cap is reachable from in front of it - `insight.segments` is
   // mapped with no slice, and a sixth SEGMENT_LABEL would push the pre-coverage block towards
   // 7,000 on its own with `kept` already empty. A character slice there would bisect a
-  // statement — "189 distinct requisitions" ending as "18" — and a wrong measured number in the
+  // statement - "189 distinct requisitions" ending as "18" - and a wrong measured number in the
   // model's context is strictly worse than a shorter digest. Trimming by line keeps the
   // never-cut-mid-statement invariant whichever block grows, rather than depending on the
   // arithmetic in front of it staying true.
@@ -236,7 +236,7 @@ function marketContext(benchmark: Benchmark | null, insight: Insight | null) {
  *
  * Stated only when there is a block to state it about: telling the model to quote a benchmark
  * that failed to load is an invitation to reconstruct one. The separation it names is the whole
- * design — every number in the digest was counted by a scan, and a model-written number sitting
+ * design - every number in the digest was counted by a scan, and a model-written number sitting
  * among audited ones discredits the audited ones too, which is the same reasoning that makes
  * the weekly email drop any framing paragraph containing a digit.
  */
@@ -248,7 +248,7 @@ const MARKET_RULE =
   ` rounded whole numbers over a stated denominator, so quote the denominator with them.`;
 
 function cleanAnswer(value: string) {
-  return value.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/\*/g, "").replace(/[—–]/g, " - ").replace(/\n{3,}/g, "\n\n").trim();
+  return value.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/\*/g, "").replace(/[–—]/g, " - ").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 async function saveAskReport(prompt: string, context: string, answer: string) {
@@ -275,7 +275,7 @@ export async function POST(request: Request) {
      * What the companion already knows about this reader.
      *
      * `history` is the current conversation and dies with the panel; this is the part that
-     * survives it. Only two things are handed to the model — what it has already explained, so it
+     * survives it. Only two things are handed to the model - what it has already explained, so it
      * can stop re-teaching, and what keeps coming back, which is the signal worth acting on. Both
      * are short by construction (the digest is capped at 40 entries a list) so this cannot grow
      * into a context-window problem the way a transcript store would.
@@ -303,7 +303,7 @@ export async function POST(request: Request) {
      *
      * These four reads run together rather than in sequence: they are independent, they are all
      * network-bound, and the route already has a 55s ceiling it shares with the model call. Any
-     * one of them failing degrades that block to "unknown" rather than failing the question —
+     * one of them failing degrades that block to "unknown" rather than failing the question -
      * `Promise.allSettled`, not `all`, for exactly that reason.
      */
     const [artifactsR, sessionsR, reviewR] = await Promise.allSettled([
@@ -327,7 +327,7 @@ export async function POST(request: Request) {
      * Outside context, in two forms, and both of them cited.
      *
      * The stored brief is the default: fetched on a schedule, committed to the repo, identical
-     * for every reading until the next fetch — so an answer built on it is reproducible. Live
+     * for every reading until the next fetch - so an answer built on it is reproducible. Live
      * search is opt-in per question, for when currency matters more than reproducibility, and it
      * is disclosed in the block itself so the answer can say which it used.
      *
@@ -339,7 +339,7 @@ export async function POST(request: Request) {
       // Raced, for the same reason the two market reads above are raced: `readJson` passes no
       // AbortSignal to fetch, so on its own this inherits the platform default and can outlive the
       // whole function. It was added here unbounded, which put an unbounded GitHub read inside the
-      // ~5s this route has before the 55s model call — a slow contents API would have cost the
+      // ~5s this route has before the 55s model call - a slow contents API would have cost the
       // ANSWER, not just the brief. Losing the brief is cheap; losing the answer is the failure.
       const brief = await Promise.race([
         readLatestBrief().then((r) => r.brief),
@@ -351,7 +351,7 @@ export async function POST(request: Request) {
     /*
      * Live results, searched by `/api/external-brief` and handed here by the client.
      *
-     * This route does not fetch them itself, and the reason is the 60s ceiling above — the scrape
+     * This route does not fetch them itself, and the reason is the 60s ceiling above - the scrape
      * measures 27-39s and the model claims 55, so the two cannot share one function on this plan.
      * Splitting them gives each its own.
      *
@@ -370,14 +370,14 @@ export async function POST(request: Request) {
         .filter((i) => i.title && /^https?:\/\//i.test(i.url));
       if (live.length) {
         outside += `${outside ? "\n\n" : ""}LIVE WEB RESULTS, fetched just now for this question. Cite the URL for anything you take from them, and say that you searched the web:\n` +
-          live.map((i) => `- ${i.title} — ${i.url}${i.snippet ? `\n  ${i.snippet}` : ""}`).join("\n") +
+          live.map((i) => `- ${i.title} - ${i.url}${i.snippet ? `\n  ${i.snippet}` : ""}`).join("\n") +
           `\nThese are outside sources. They NEVER override a number measured in this repository.`;
       }
     } else if (body.web) {
-      // The toggle was on and the search came back with nothing — it timed out, it failed, or it
+      // The toggle was on and the search came back with nothing - it timed out, it failed, or it
       // genuinely found nothing. The model is told, because an answer that quietly omits the web
       // reads exactly like one that searched and found nothing worth saying.
-      outside += `${outside ? "\n\n" : ""}A live web search was requested for this question and returned no usable results. Answer from the plan and say the search did not come back — do not imply you searched.`;
+      outside += `${outside ? "\n\n" : ""}A live web search was requested for this question and returned no usable results. Answer from the plan and say the search did not come back - do not imply you searched.`;
     }
 
     const extra = [
@@ -389,7 +389,7 @@ export async function POST(request: Request) {
     ].filter(Boolean).join("\n\n");
 
     const messages = [
-      { role: "system", content: `You are Quaere, the study guide inside Lumen. Lumen is the dashboard; you are the guide within it. Explain every idea in fifth-grade reading language while keeping the technical meaning exact. Use short sentences, define jargon immediately, give one concrete technical example, connect it to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. The user message contains the COMPLETE plan — every topic across every track. Never tell the learner a subject is missing from the plan without checking that full list first. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. NEVER state how many recall cards are due, even if you can infer it: say whether recall is waiting. A backlog number is what makes people abandon a spaced-repetition system, and this learner has 23 months left. The learner's indexed learning map is:\n${JSON.stringify(library)}\n\nThe local source catalog (metadata and chapter map only) is:\n${JSON.stringify(sourceCatalog)}\n\nThe public repository map is:\n${JSON.stringify(repositories)}${market ? MARKET_RULE : ""}${memoryBlock}` },
+      { role: "system", content: `You are Quaere, the study guide inside Lumen. Lumen is the dashboard; you are the guide within it. Explain every idea in fifth-grade reading language while keeping the technical meaning exact. Use short sentences, define jargon immediately, give one concrete technical example, connect it to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. The user message contains the COMPLETE plan - every topic across every track. Never tell the learner a subject is missing from the plan without checking that full list first. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. NEVER state how many recall cards are due, even if you can infer it: say whether recall is waiting. A backlog number is what makes people abandon a spaced-repetition system, and this learner has 23 months left. The learner's indexed learning map is:\n${JSON.stringify(library)}\n\nThe local source catalog (metadata and chapter map only) is:\n${JSON.stringify(sourceCatalog)}\n\nThe public repository map is:\n${JSON.stringify(repositories)}${market ? MARKET_RULE : ""}${memoryBlock}` },
       // Picked field by field, not spread. The client stores an assistant turn as
       // `{role, content, reportUrl?}`, and forwarding a turn that saved a report shipped a
       // `reportUrl` key into an OpenAI-shaped messages array. The declared type hid it from
@@ -407,11 +407,11 @@ export async function POST(request: Request) {
     let reportUrl: string | null = null;
     try { reportUrl = await saveAskReport(body.prompt, body.context || "", answer); } catch (error) { console.error("[api/ask] GitHub report save exception", { error: String(error) }); }
     /**
-     * Remember the exchange — only now, and only because it succeeded.
+     * Remember the exchange - only now, and only because it succeeded.
      *
      * Recorded after the answer, never before: a question that errored was not explained, and a
      * digest that claims otherwise would make Quaere skip an explanation it never gave. What is
-     * stored is the question text, normalised and capped, and the topic when one is in view —
+     * stored is the question text, normalised and capped, and the topic when one is in view -
      * study facts, not the transcript. `applyMemory` returns the same object when nothing
      * changed, so a repeat within the same day costs no write.
      *

@@ -2,15 +2,15 @@
  * Motivation tests. Run with:  npx tsx lib/motivation.test.mts
  *
  * The market tests pin arithmetic. This file pins a PROPERTY OF THE OUTPUT: that on the worst
- * day — the one where the user opens the dashboard after a week away, in month 12 of 23 — the
+ * day - the one where the user opens the dashboard after a week away, in month 12 of 23 - the
  * page states a rate and a maximum and nothing that reads as a forfeit. That property has no
  * natural failure signal. A "current streak: 0" renders perfectly, throws nothing, and is
  * exactly as plausible as the correct output to anyone reading the code; it is only wrong
  * against the design constraint, which is why the assertions below read the rendered strings
  * and search them for the vocabulary of loss rather than checking a field is absent.
  *
- * So the fixtures are built around one scenario the design names explicitly — back after five
- * days, longest run twelve — and the assertions compare whole sentences, because the defect
+ * So the fixtures are built around one scenario the design names explicitly - back after five
+ * days, longest run twelve - and the assertions compare whole sentences, because the defect
  * being guarded against is a sentence.
  *
  * Two invariants carry the rest:
@@ -25,7 +25,7 @@
  * Nothing here pins a live value. Six assertions in this repo have pinned live scan output and
  * would have failed on a correct system the morning after a scan; the live section below reads
  * the real index and the real reports/progress and asserts only relationships that hold for
- * every possible corpus — printing the numbers instead of asserting them.
+ * every possible corpus - printing the numbers instead of asserting them.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { computeBenchmark, type SkillMap, type Workbook } from "./market/benchmark.ts";
@@ -65,7 +65,7 @@ const rendered = (s: { statement: string; rateStatement: string; runStatement: s
 
 /**
  * 2026-08-14 to 2026-08-25 is the twelve consecutive days. 08-28, 08-29 and 09-03 are ordinary
- * scattered days after it. Then nothing from 09-04 to 09-07, and an event today — which is
+ * scattered days after it. Then nothing from 09-04 to 09-07, and an event today - which is
  * "back after 5 days" measured 09-03 to 09-08, the exact shape the design writes out.
  *
  * Inside the 21-day window ending today (08-19 onward) that leaves 7 days of the run plus 08-28,
@@ -80,7 +80,7 @@ const WITH_GAP = [...RUN_12, ...SCATTER, "2026-09-08"];
 const back = computeStreak(progressOf(WITH_GAP), NOW);
 console.log(`\n  ${back.statement}`);
 
-ck("a five-day gap renders as a rate, a maximum and a return — the whole sentence",
+ck("a five-day gap renders as a rate, a maximum and a return - the whole sentence",
   back.statement === "STUDY - Studied 11 of the last 21 days (52%). Longest run 12 days, 2026-08-14 to 2026-08-25. Back after 5 days.",
   `(${back.statement})`);
 ck("the rate is days-in-window over the window, dipped but not reset",
@@ -90,7 +90,7 @@ ck("the longest run is the twelve consecutive days, dated", back.longestRunDays 
 ck("the gap is reported as the days it was", back.returnedAfterDays === 5 && back.daysSinceLast === 0);
 
 /**
- * The assertion this file exists for. Not "no broken-streak field" — no broken-streak SENTENCE,
+ * The assertion this file exists for. Not "no broken-streak field" - no broken-streak SENTENCE,
  * and no bare zero anywhere in the four strings the page renders. A zero here would have to be
  * a count of something the user did not do.
  */
@@ -101,7 +101,7 @@ for (const [i, line] of rendered(back).entries()) {
 
 /**
  * The same history, five days earlier in the return: he has not come back yet. The elapsed days
- * are stated with the date they are measured from and nothing is added — no consolation, which
+ * are stated with the date they are measured from and nothing is added - no consolation, which
  * is the same rule as no flattery. The rate has dipped by one day. The run has not moved.
  */
 const away = computeStreak(progressOf([...RUN_12, ...SCATTER]), NOW);
@@ -121,7 +121,7 @@ for (const [i, line] of rendered(away).entries()) {
 /**
  * One history, read on three progressively later days with no new events. This is exactly what
  * abandonment looks like from inside the data, and it is where a chain implementation produces
- * its zero. The rate is allowed — required — to fall. The run is a maximum over days already
+ * its zero. The rate is allowed - required - to fall. The run is a maximum over days already
  * recorded, so nothing about the passage of time may touch it.
  */
 const history = progressOf(WITH_GAP);
@@ -142,8 +142,8 @@ ck("...and the fact of the absence is stated plainly, in days, from a date",
 /**
  * The other direction of the same invariant: the history only ever grows, and a longer history
  * can only lengthen a run or start a new one. Asserted over every prefix of the fixture rather
- * than at one point, so an implementation that measured the run inside the window — which would
- * shrink it as August fell out — cannot pass.
+ * than at one point, so an implementation that measured the run inside the window - which would
+ * shrink it as August fell out - cannot pass.
  */
 let previousRun = 0;
 let monotone = true;
@@ -159,7 +159,7 @@ ck("appending events never shortens the longest run, at any prefix", monotone &&
 // ---------------------------------------------------------------------------
 
 const shuffled: Progress = { events: [...progressOf(WITH_GAP).events].reverse() };
-ck("event order is irrelevant — the route returns newest first, a human file is oldest first",
+ck("event order is irrelevant - the route returns newest first, a human file is oldest first",
   JSON.stringify(computeStreak(shuffled, NOW)) === JSON.stringify(back));
 
 const twice = computeStreak(progressOf([...WITH_GAP, "2026-09-08", "2026-09-08"]), NOW);
@@ -188,7 +188,7 @@ ck("the window is a parameter, and the rate is computed against the one passed",
 ck("...and the run, which is not a window quantity, is unchanged by it", windowed.longestRunDays === 12);
 
 // ---------------------------------------------------------------------------
-// Evidence, against the real corpus — relationships only, no pinned values.
+// Evidence, against the real corpus - relationships only, no pinned values.
 // ---------------------------------------------------------------------------
 
 console.log(`\n  evidence, against the live corpus and the live plan`);
@@ -216,8 +216,8 @@ ck("evidence consumes the marginal entry rather than recomputing it",
     && evidence.toPct === top.to && evidence.gainPoints === top.gainPoints);
 
 /**
- * The equivalence the design claims — "the marginal table is exactly this calculation run
- * forward" — asserted rather than believed. The readiness this row is PROMISED must equal the
+ * The equivalence the design claims - "the marginal table is exactly this calculation run
+ * forward" - asserted rather than believed. The readiness this row is PROMISED must equal the
  * readiness computed from scratch with a progress event marking it done. Two paths, one number.
  */
 const after = computeInsight(index, benchmark, { events: [{ topic: topRow.topic, status: "done", date: `${DAY}T09:00:00.000Z` }] }, workbook, trend, NOW);
@@ -238,7 +238,7 @@ ck("the named skill is the largest share the row clears, not the first one liste
 /**
  * The role, if one was named, must be a requisition that is BOTH reachable and asking for a
  * skill this row cleared. Asserted as membership in the two sets the insight already built,
- * never as a company name — the top reachable role changes every scan.
+ * never as a company name - the top reachable role changes every scan.
  */
 if (evidence.role) {
   const req = Object.values(index.reqs).find((r) => r.company === evidence.role!.company && r.title === evidence.role!.title && r.skills?.includes(evidence.roleSkill!.id));

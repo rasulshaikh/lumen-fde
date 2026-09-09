@@ -3,7 +3,7 @@
 The plan grew while keeping month numbers that meant "stage", not "calendar month":
 M4 held 104h (6.5 weeks at 16h/week) while M10 held 21h (1.3 weeks). This walks the
 topics in their EXISTING order and closes each month once it reaches the per-month
-budget, so nothing is reordered and every prerequisite chain survives — only the value in
+budget, so nothing is reordered and every prerequisite chain survives - only the value in
 the Month column changes.
 
 Run it again after any change to the Hours column. The month count follows from the
@@ -26,7 +26,7 @@ WEEKLY_HOURS = 16.0
 WEEKS_PER_MONTH = 52.0 / 12.0  # 4.333
 # The month count is derived, not declared. It was hardcoded to 13, which quietly
 # became a lie the moment the Hours column was re-baselined to fund building as
-# well as reading — the same class of stale number this script exists to remove.
+# well as reading - the same class of stale number this script exists to remove.
 
 MONTH_COL = 1
 HOURS_COL = 13
@@ -103,7 +103,7 @@ def main() -> None:
         WORKBOOK.write_text(json.dumps(wb, ensure_ascii=False, indent=2))
         # The per-topic files under data/curriculum/ are the SOURCE; data/curriculum.json
         # is built from them. Writing only the bundle desyncs all 119 and the next build
-        # reverts this renumber wholesale — build-curriculum.py has a hard drift check for
+        # reverts this renumber wholesale - build-curriculum.py has a hard drift check for
         # precisely this, so write the source and let the build regenerate the bundle.
         moved_files = 0
         for f in sorted((ROOT / "data" / "curriculum").glob("*.json")):
@@ -119,7 +119,7 @@ def main() -> None:
         print(f"\nwritten to data/workbook.json and {moved_files} files under data/curriculum/")
         print("Now run: python3 scripts/build-curriculum.py")
     else:
-        print("\n(dry run — pass --write to apply)")
+        print("\n(dry run - pass --write to apply)")
 
 
 if __name__ == "__main__":

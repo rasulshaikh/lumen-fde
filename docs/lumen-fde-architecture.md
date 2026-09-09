@@ -165,19 +165,19 @@ The Vercel Cron route is designed to run daily. It can call MiniMax for a short 
 
 The Render server exposes:
 
-1. `get_plan` — filter the plan by query, month, or track.
-2. `get_learning_context` — read book, repository, and lesson indexes.
-3. `ask_lumen` — request a fifth-grade-language technical explanation.
-4. `list_ask_reports` — list GitHub Markdown Ask reports.
-5. `read_ask_report` — read one saved report by path.
-6. `save_study_note` — explicitly save a durable note.
-7. `record_progress` — explicitly record a topic status event.
-8. `get_progress_history` — list progress events.
-9. `get_progress_analytics` — summarize history and recent events.
-10. `score_assessment` — score Quick Check or rubric assessments.
-11. `semantic_search` — SurfSense search or GitHub fallback.
-12. `get_audit_log` — inspect recent MCP actions.
-13. `get_connection_map` — return canonical service connections.
+1. `get_plan` - filter the plan by query, month, or track.
+2. `get_learning_context` - read book, repository, and lesson indexes.
+3. `ask_lumen` - request a fifth-grade-language technical explanation.
+4. `list_ask_reports` - list GitHub Markdown Ask reports.
+5. `read_ask_report` - read one saved report by path.
+6. `save_study_note` - explicitly save a durable note.
+7. `record_progress` - explicitly record a topic status event.
+8. `get_progress_history` - list progress events.
+9. `get_progress_analytics` - summarize history and recent events.
+10. `score_assessment` - score Quick Check or rubric assessments.
+11. `semantic_search` - SurfSense search or GitHub fallback.
+12. `get_audit_log` - inspect recent MCP actions.
+13. `get_connection_map` - return canonical service connections.
 
 Suggested MCP client configuration:
 

@@ -1,12 +1,12 @@
 /**
- * The three ATS adapters, normalised to one `Posting`. No classification happens here —
+ * The three ATS adapters, normalised to one `Posting`. No classification happens here -
  * this module only knows how to talk to Ashby, Greenhouse and Lever and how to make their
  * three different JSON shapes look the same. Title patterns, field guards and skill
  * extraction all live downstream, in `classify.ts` and `skills.ts`.
  *
  * Nothing in here throws. The scan runs `Promise.allSettled` over 27 boards and the
  * critical rule from the design is that the missing-sweep only runs for boards that
- * returned `ok` — a board that throws instead of returning `{ ok: false }` would either
+ * returned `ok` - a board that throws instead of returning `{ ok: false }` would either
  * reject the settled entry (losing the error string the tab prints) or, worse, let one
  * Ashby 500 be read as "all 55 Sierra reqs disappeared", which reports 55 phantom new
  * roles on the next successful run.
@@ -53,7 +53,7 @@ export type Posting = {
   ats: string;
   /** Ashby `job.id` | Greenhouse `job.id` | Lever `posting.id`. Half the seen-set key. */
   sourceId: string;
-  /** Trimmed. Case is preserved — `normalizeTitle` owns lowercasing. */
+  /** Trimmed. Case is preserved - `normalizeTitle` owns lowercasing. */
   title: string;
   /** The string exactly as the board shipped it, kept so a bad match can be diagnosed. */
   titleRaw: string;
@@ -69,7 +69,7 @@ export type Posting = {
    *
    * Not uniformly plain text: Greenhouse `content` is entity-escaped HTML, and Lever's
    * requirement bullets are `<li>` fragments (see the adapter). Run `htmlToText` over any
-   * `jd` before matching — it is a no-op on tag-free text.
+   * `jd` before matching - it is a no-op on tag-free text.
    */
   jd: string | null;
 };
@@ -78,7 +78,7 @@ export type BoardResult = { ok: boolean; postings: Posting[]; error: string | nu
 
 /** Section 1's per-board budget. Ashby's largest board is 12.9 MB and has to parse inside this. */
 const BOARD_TIMEOUT_MS = 45_000;
-/** Stage 2 is 0–15 requests in steady state, so a tighter deadline costs nothing. */
+/** Stage 2 is 0-15 requests in steady state, so a tighter deadline costs nothing. */
 const JD_TIMEOUT_MS = 20_000;
 const JD_CONCURRENCY = 4;
 
@@ -108,7 +108,7 @@ function describe(error: unknown, ms: number) {
  * Fetch a board's listing. One request, whatever the tier.
  *
  * `bytes` is the decompressed size. Node's `fetch` sends `Accept-Encoding` and inflates
- * transparently, so the wire cost is roughly 5–8x smaller and is not observable from here;
+ * transparently, so the wire cost is roughly 5-8x smaller and is not observable from here;
  * what this number is comparable to is `verifiedBytes` in the config (measured with curl,
  * which sends no `Accept-Encoding`) and to the parse-time and heap budget, which is the
  * figure that actually constrains the 300 s function.
@@ -159,7 +159,7 @@ export async function fetchBoard(source: Source): Promise<BoardResult> {
  * spending a request.
  *
  * Returns null on any failure. The req is then stored with `skills: null`, excluded from
- * every benchmark denominator, and retried next run — a failed fetch understates a count by
+ * every benchmark denominator, and retried next run - a failed fetch understates a count by
  * one rather than corrupting it.
  */
 export async function fetchJd(source: Source, sourceId: string): Promise<string | null> {
@@ -202,7 +202,7 @@ async function gate<T>(run: () => Promise<T>): Promise<T> {
 /**
  * The one normalisation that must happen before anything else: `title.trim()`.
  *
- * Verified live on 2026-09-07 — Anyscale ships `"Head of Customer Engineering "`, Sierra
+ * Verified live on 2026-09-07 - Anyscale ships `"Head of Customer Engineering "`, Sierra
  * ships `"Deployed Infrastructure Engineer "`, Databricks ships leading tabs and
  * dbt/Fivetran ships `" Staff Product Manager - dbt v2"`. Untrimmed, every one of those
  * silently misses an exact-prefix pattern and produces a false negative that looks like the
@@ -288,7 +288,7 @@ function fromLever(payload: unknown, source: Source): Posting[] {
   for (const job of rows(payload)) {
     const categories = (job.categories as Json | null) ?? {};
     // Measured against api.lever.co/v0/postings/palantir on 2026-09-07: `descriptionPlain`
-    // is only the company blurb plus the role narrative — every requirement and qualification
+    // is only the company blurb plus the role narrative - every requirement and qualification
     // bullet lives in `lists[].content`, and the string "What We Require" does not appear in
     // `descriptionPlain` at all. Dropping the lists would silently blank the requirements of
     // 110 reqs, which is the exact false-negative-that-looks-like-success this design is

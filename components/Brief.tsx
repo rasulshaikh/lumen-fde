@@ -10,7 +10,7 @@ import { SessionLoop } from "./Session";
  *
  * Everything rendered here comes from `buildBrief`, and every number is a field on that object
  * rather than a sentence someone wrote. The one free-text line is `opening()`, which is
- * hand-written per gap-length branch and asserted digit-free by the test suite — warmth in
+ * hand-written per gap-length branch and asserted digit-free by the test suite - warmth in
  * words, truth in numbers.
  *
  * The recall line says WHETHER something is waiting and never how much. That is not a styling

@@ -9,7 +9,7 @@ type Row = (string | number | null)[];
 type Topic = { subtopics?: unknown[]; interviewQuestions?: unknown[] };
 
 /**
- * A server component so the arithmetic below costs nothing in the client bundle —
+ * A server component so the arithmetic below costs nothing in the client bundle -
  * curriculum.json alone is 3.7MB. The form is the only client island.
  *
  * The page previously showed a 400px card alone on a very large dark field and said
@@ -48,8 +48,8 @@ export default function LoginPage() {
           <p className="login-kicker">Rasul&apos;s Senior FDE command center</p>
           <h1>Pick up where the work left off.</h1>
           <p className="login-copy">
-            One plan, its full syllabus, spaced recall, mock loops and a private study guide —
-            in a single place that tells the truth about how much is left.
+            One plan, its full syllabus, spaced recall, mock loops and a private study guide,
+            all in a single place that tells the truth about how much is left.
           </p>
           <dl className="login-stats">
             {stats.map(([value, label]) => (

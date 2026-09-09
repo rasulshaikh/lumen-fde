@@ -8,7 +8,7 @@ function fromBase64Url(value: string) { return atob(value.replace(/-/g, "+").rep
  * `===` on a secret returns as soon as two bytes differ, so how long it took is a measurement of
  * how much of the secret was right. mcp/server.js already decided that mattered and uses
  * `crypto.timingSafeEqual` for MCP_API_KEY; the session HMAC, LUMEN_INTERNAL_API_KEY and
- * CRON_SECRET guard the same trust boundary — the internal key unlocks Quaere *and*
+ * CRON_SECRET guard the same trust boundary - the internal key unlocks Quaere *and*
  * saveAskReport, which commits a file into the repo, and /api/ask has no rate limit of its own.
  * Node's timingSafeEqual is not available in the proxy's edge runtime, so this is the same
  * fold-and-compare over Web APIs. Length is folded in rather than short-circuited on.

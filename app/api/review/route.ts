@@ -17,7 +17,7 @@ function headers() {
  * Review scheduling state, as ONE file.
  *
  * Deliberately not routed through /api/progress. That endpoint appends a markdown file per
- * event and its GET then re-reads every file individually — an N+1 against the GitHub API,
+ * event and its GET then re-reads every file individually - an N+1 against the GitHub API,
  * capped at the newest 100. That shape is right for an append-only progress *history*; it
  * is wrong for a mutable schedule that is rewritten on every grade. One file, read whole,
  * written whole with its sha.

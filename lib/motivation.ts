@@ -4,9 +4,9 @@
  * The plan is 1,588 hours across 23 months and the failure mode over that horizon is quiet
  * abandonment, not missing information. So this module answers exactly two questions:
  *
- *  1. `computeStreak` — how often the work is actually happening, in a shape that CANNOT
+ *  1. `computeStreak` - how often the work is actually happening, in a shape that CANNOT
  *     report a loss.
- *  2. `computeEvidence` — what finishing one row bought, in market share, priced by numbers
+ *  2. `computeEvidence` - what finishing one row bought, in market share, priced by numbers
  *     the market modules already computed.
  *
  * Pure, for the same reason `lib/market/insight.ts` is: `now` is a parameter, there is no
@@ -22,7 +22,7 @@
  *     exists to prevent. What is reported instead is a RATE, which dips, and a LONGEST RUN,
  *     which is a maximum over an append-only history and therefore only ever increases.
  *  2. IT DOES NOT CONSOLE EITHER. The product never flatters; the same rule forbids softening.
- *     A five-day gap renders "Back after 5 days." — the fact, stated once, with no adverb and
+ *     A five-day gap renders "Back after 5 days." - the fact, stated once, with no adverb and
  *     no reassurance attached. "Only 5 days" and "don't worry" are the same defect as "great
  *     work": both are the module having an opinion about a number it measured.
  *  3. MARKET NUMBERS ARE CONSUMED, NEVER RECOMPUTED. `computeEvidence` reads
@@ -31,8 +31,8 @@
  *     arithmetic path to a readiness percentage would be a second number to keep in sync, and
  *     the two would disagree on the day it mattered.
  *
- * Everything is rendered here, as `statement` strings, because four consumers read this — the
- * homepage, the weekly email, /api/ask and the MCP tools — and a sentence assembled four times
+ * Everything is rendered here, as `statement` strings, because four consumers read this - the
+ * homepage, the weekly email, /api/ask and the MCP tools - and a sentence assembled four times
  * is a sentence that says four different things.
  */
 import type { Benchmark } from "./market/benchmark";
@@ -68,7 +68,7 @@ const signed = (n: number) => `${n > 0 ? "+" : ""}${n}`;
 const hrs = (n: number) => `${Number.isInteger(n) ? n : n.toFixed(1)}h`;
 
 /**
- * The denominator pair, always carried as a pair — the same rule `benchmark.ts` enforces and
+ * The denominator pair, always carried as a pair - the same rule `benchmark.ts` enforces and
  * the same helper, copied because it is not exported and this file may not edit that one.
  */
 const pair = (hits: number, reqs: number, companies: number, totalCompanies: number) =>
@@ -80,7 +80,7 @@ const citeRow = (ref: PlanRowRef) => `row ${ref.row}, "${ref.topic}" - ${hrs(ref
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 // ---------------------------------------------------------------------------
-// 1. Study rhythm — a rate and a maximum, and nothing that can be lost.
+// 1. Study rhythm - a rate and a maximum, and nothing that can be lost.
 // ---------------------------------------------------------------------------
 
 export type Streak = {
@@ -120,7 +120,7 @@ export type Streak = {
  * The distinct days on which something was recorded, newest-first input or oldest-first alike.
  *
  * Status is deliberately NOT filtered. A "not_started" event is still an interaction with the
- * plan on that day, and more importantly the store is append-only and carries corrections —
+ * plan on that day, and more importantly the store is append-only and carries corrections -
  * reports/progress currently holds an event that reverts a topic and a later one that undoes
  * it. Deciding which of those "counts as studying" is a judgement this module has no basis for,
  * and a rhythm that disagrees with the history the store kept is worse than a blunt one.
@@ -220,7 +220,7 @@ export function computeStreak(progress: Progress | null, now: Date, windowDays: 
 }
 
 // ---------------------------------------------------------------------------
-// 2. Evidence — what completing one row actually bought.
+// 2. Evidence - what completing one row actually bought.
 // ---------------------------------------------------------------------------
 
 /**
@@ -265,7 +265,7 @@ export type Evidence = {
  * company + title because that is where the roles came from: every entry in `roles` is a core
  * requisition of this index, and its `skills` are the fingerprint stored at scan time.
  *
- * `index` may be null — the weekly email has the insight without the 450 KB index — and then
+ * `index` may be null - the weekly email has the insight without the 450 KB index - and then
  * no role is named. Nothing is fabricated in its place and no sentence is emitted about it,
  * because "no matching role" is not a fact about the work that was just finished.
  */
@@ -291,14 +291,14 @@ function namedRole(insight: Insight, index: MarketIndex | null, skills: SkillWei
 /**
  * Price one completed row against the market.
  *
- * `insight` must be the one computed BEFORE the row moved to done — that is where the marginal
+ * `insight` must be the one computed BEFORE the row moved to done - that is where the marginal
  * table lives, and the marginal table is already exactly this calculation: `from` is readiness
  * today, `to` is readiness once this row's skills are evidenced. Running it forward is the
  * whole of the arithmetic here, which is why there is none. The test pins that equivalence by
  * recomputing the insight with the row marked done and asserting the two agree.
  *
- * `row` is passed by the caller rather than looked up because the caller — the plan table, or
- * the POST that recorded the event — already holds it, and `planRow` is private to benchmark.ts.
+ * `row` is passed by the caller rather than looked up because the caller - the plan table, or
+ * the POST that recorded the event - already holds it, and `planRow` is private to benchmark.ts.
  */
 export function computeEvidence(
   benchmark: Benchmark,
@@ -316,8 +316,8 @@ export function computeEvidence(
 
   /**
    * No marginal entry has two possible causes and they are different facts. Either the market
-   * map names this row as the primary row of a skill the market asks for — in which case the
-   * row was already evidenced by an earlier event and readiness cannot move again — or it does
+   * map names this row as the primary row of a skill the market asks for - in which case the
+   * row was already evidenced by an earlier event and readiness cannot move again - or it does
    * not, and there was never any share to clear. Collapsing them would report the second as the
    * first and quietly credit work the market does not pay for.
    */

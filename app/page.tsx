@@ -24,7 +24,7 @@ export const metadata: Metadata = {
  * this page is only ever rendered for someone who is not signed in.
  *
  * **Every number here is derived and none of them are personal.** That constraint is not
- * stylistic: /login already documents the rule this follows — scale, never state. Topic counts,
+ * stylistic: /login already documents the rule this follows - scale, never state. Topic counts,
  * hours and board counts describe how big the system is and are harmless on a public URL.
  * Progress, readiness, current focus, streaks and anything that says what Rasul has or has not
  * done stay behind the gate. If a number here ever needs `statuses` to compute, it does not
@@ -54,9 +54,9 @@ export default function LandingPage() {
 
   const what: [string, string][] = [
     ["The plan", `${active.length} topics across ${tracks} tracks and ${months} months. Every row carries its hours, the month it belongs to, and one thing it expects you to ship.`],
-    ["The syllabus", `${parts.toLocaleString()} parts. Each names what to learn and one public resource for it, and each topic carries the ways it fails in production and the questions an interviewer would ask — ${questions.toLocaleString()} of them.`],
-    ["Recall and practice", `Spaced repetition over the topics actually started, on a ${LADDER.length}-rung ladder widening from ${LADDER[0]} day to ${LADDER[LADDER.length - 1]}. Mock loops and written assessments sit on the same schedule.`],
-    ["The market benchmark", `${boards} job boards scanned and classified nightly, so the plan is ranked by measured requisition frequency rather than by opinion — including the parts of it the market is not asking for.`],
+    ["The syllabus", `${parts.toLocaleString()} parts. Each part names what to learn and one public resource for it. Every topic also carries the ways it fails in production and the questions an interviewer would ask, ${questions.toLocaleString()} of them.`],
+    ["Recall and practice", `Spaced repetition runs over the topics actually started, on a ${LADDER.length}-rung ladder that widens from ${LADDER[0]} day to ${LADDER[LADDER.length - 1]}. Mock loops and written assessments sit on the same schedule.`],
+    ["The market benchmark", `${boards} job boards scanned and classified nightly, so the plan is ranked by measured requisition frequency, including the parts of it the market is not asking for.`],
   ];
 
   return (
@@ -72,8 +72,7 @@ export default function LandingPage() {
         <p className="lp-lede">
           Lumen is the study system behind one Senior Forward Deployed Engineer plan. It holds the
           curriculum, schedules the recall, records what gets shipped, and every night it reads the
-          job market and re-ranks the plan against it. It is built to be honest about how much is
-          left rather than encouraging about how much is done.
+          job market and re-ranks the plan against it. It is honest about how much is left.
         </p>
       </section>
 
@@ -101,16 +100,16 @@ export default function LandingPage() {
       <section className="lp-block">
         <h2 className="lp-h2">How it is built</h2>
         <p className="lp-body">
-          A Next.js app on Vercel, a Node MCP server on Render so an AI assistant reads the same
-          plan the dashboard does, and GitHub as the database — every mutable artifact is a file in
-          one repository, read and written whole, diffable, and readable by a second process on a
-          different host. There is no database, no queue and no object store.
+          Lumen is a Next.js app on Vercel, with a Node MCP server on Render so an AI assistant
+          reads the same plan the dashboard does, and GitHub as the database: every mutable
+          artifact is a file in one repository, read and written whole, diffable, and readable by
+          a second process on a different host. There is no database, no queue and no object store.
         </p>
         <p className="lp-body">
           Two scheduled jobs run it: one scans the {boards} boards, classifies the requisitions and
           recomputes the benchmark; the other sends a morning digest with the day&apos;s topic, the
           recall due, and an alert if the scan went stale. The numbers on the dashboard and the
-          numbers an assistant quotes come from the same files, which is the point.
+          numbers an assistant quotes come from the same files.
         </p>
       </section>
 

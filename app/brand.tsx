@@ -1,5 +1,5 @@
 /**
- * The Ask Lumen mark — deliberately NOT the L, so the assistant reads as a distinct
+ * The Ask Lumen mark - deliberately NOT the L, so the assistant reads as a distinct
  * thing rather than a second logo. A six-armed printer's asterisk: it belongs to the
  * type family the brand is built on, and it avoids the four-point "AI sparkle" (✦) this
  * previously used, which is the single most overused generative-AI tell. Three crossed
@@ -27,7 +27,7 @@ export function AskMark({ size = 16, className }: { size?: number; className?: s
 }
 
 /**
- * The Lumen mark — an aperture, matching app/icon.svg exactly. Inlined so it paints with
+ * The Lumen mark - an aperture, matching app/icon.svg exactly. Inlined so it paints with
  * the first frame rather than arriving as a second request. app/icon.svg is the source of
  * truth: the favicon, the Apple icon and the link-preview card are all rasterised from it
  * by scripts/build-icons.mjs. If the path below changes, change it there too and re-run

@@ -23,14 +23,14 @@ function clean(value: string) {
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/<think>[\s\S]*$/i, "")
     .replace(/\*/g, "")
-    .replace(/[—–]/g, " - ")
+    .replace(/[–—]/g, " - ")
     .trim();
 }
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /**
- * A plan row is complete only on these — the four spellings lib/market/insight.ts accepts, and
+ * A plan row is complete only on these - the four spellings lib/market/insight.ts accepts, and
  * for its reasons: the dashboard POST writes `done`, a human or an MCP client types one of the
  * others, "in progress" is not evidence and "skipped" is a decision not to acquire the skill
  * rather than a claim to have it. Copied rather than imported because that module does not
@@ -44,7 +44,7 @@ const normStatus = (value: unknown) => norm(value).replace(/_/g, " ");
 
 /**
  * The one status that means a topic is being worked right now. Not in DONE_STATUSES, and it never
- * will be — it is not evidence of a skill — but it IS evidence of where the reader is, which is a
+ * will be - it is not evidence of a skill - but it IS evidence of where the reader is, which is a
  * different question and the one that picks today's topic.
  */
 const IN_PROGRESS = "in progress";
@@ -65,7 +65,7 @@ const STALE_TOPIC_DAYS = 2;
  * One topic's current standing: the newest status recorded against it, and the day that event
  * was recorded.
  *
- * The day is carried because two decisions below need it and neither may store anything new —
+ * The day is carried because two decisions below need it and neither may store anything new -
  * which of several in-progress topics is the freshest, and how long the chosen one has led.
  */
 type Standing = {
@@ -87,7 +87,7 @@ type Standing = {
 /**
  * Whole days from a recorded event to today, counting both ends: an event recorded today is day 1.
  *
- * Null when either day is unparseable, or when the event is dated in the future — a clock skew or
+ * Null when either day is unparseable, or when the event is dated in the future - a clock skew or
  * a hand-edited file must cost the line, not ship "Day -3 on this topic".
  */
 function daysLeading(day: string, today: string) {
@@ -101,17 +101,17 @@ function daysLeading(day: string, today: string) {
  * Everything below is derived from the plan, with no model involved.
  *
  * The digest used to be a single model paragraph, so when the model returned nothing the
- * email was empty — which is exactly what shipped. The substance is now deterministic and
+ * email was empty - which is exactly what shipped. The substance is now deterministic and
  * the model only writes one optional framing line on top. A bad model day now costs a
  * paragraph, not the whole email.
  *
  * `progress` is the recorded study history, matched to a row by topic string exactly as
- * app/page.tsx and lib/market/insight.ts match it — one matcher, or the email and the tab
+ * app/page.tsx and lib/market/insight.ts match it - one matcher, or the email and the tab
  * disagree about which row is next. It carries the same meaning it has there: null is "we do
  * not know", never "nothing is done".
  *
- * Workbook column 15 is the committed BASELINE — 117 "Not started", 2 "Skipped", no other value
- * ever written — so a digest that reads it alone picks plan row 0 every morning for the life of
+ * Workbook column 15 is the committed BASELINE - 117 "Not started", 2 "Skipped", no other value
+ * ever written - so a digest that reads it alone picks plan row 0 every morning for the life of
  * the plan, which is what this email did for months while only the recall question rotated.
  * The column survives as the per-row fallback: it is where "Skipped" lives, and where an
  * unreadable progress store lands, so a GitHub outage costs freshness and not the brief.
@@ -129,15 +129,15 @@ function digest(rows: Row[], progress: Map<string, Standing> | null) {
    * Today's topic: what is actually being worked, else the plan's own order.
    *
    * "First row not done" ignored `in progress` entirely, so a reader who had started row 5 while
-   * rows 0-4 sat untouched was sent row 0 every morning — plan order outranking the evidence the
+   * rows 0-4 sat untouched was sent row 0 every morning - plan order outranking the evidence the
    * reader had gone to the trouble of recording. Prefer the in-progress topic.
    *
    * Several at once resolves on the recorded day, newest first, because that is the one being
    * worked now. `>` and not `>=` on a stable filter order means a tie keeps the earlier plan row,
    * so two events recorded on the same day cannot make the email alternate between them.
    *
-   * The fallback is unchanged and has to stay that way: with nothing in progress — the cold
-   * start, and every morning the progress store is unreadable — this is still the first row that
+   * The fallback is unchanged and has to stay that way: with nothing in progress - the cold
+   * start, and every morning the progress store is unreadable - this is still the first row that
    * is not done, which is the order the plan itself prescribes.
    */
   const underway = active.filter((r) => status(r) === IN_PROGRESS);
@@ -149,8 +149,8 @@ function digest(rows: Row[], progress: Map<string, Standing> | null) {
   /**
    * How long this topic has led, and when it was last touched.
    *
-   * The email repeats a topic until progress moves it. That is correct for a study plan — a
-   * rotation through unstarted topics would scatter the focus the plan exists to hold — but it
+   * The email repeats a topic until progress moves it. That is correct for a study plan - a
+   * rotation through unstarted topics would scatter the focus the plan exists to hold - but it
    * reads as a stuck email, so the honest fix is to say the repetition out loud. Derived from the
    * events and today's date alone: a counter file would be new stored state to keep in sync with
    * a history that already carries the answer.
@@ -201,20 +201,20 @@ function digest(rows: Row[], progress: Map<string, Standing> | null) {
     // Divided by the declared weekly target, not by a literal. This line and the sentence that
     // renders it below each carried their own hand-written 16, so the pace could be changed in
     // one and not the other. AppState already records having fixed exactly this on the client
-    // ("was hardcoded 16h next to a separate hours/16, so the two could disagree") — the digest
+    // ("was hardcoded 16h next to a separate hours/16, so the two could disagree") - the digest
     // simply never got the same treatment.
     weeksLeft: (weeksAtPace(totalH - doneH) ?? 0).toFixed(1),
   };
 }
 
-/** GitHub read budget for the market index — see `newCoreReqs` for why it needs one at all. */
+/** GitHub read budget for the market index - see `newCoreReqs` for why it needs one at all. */
 const MARKET_READ_MS = 8_000;
 
 /**
  * The progress history's own budget, separate from the market's because the two reads are not
  * alike: this one is a directory listing plus a fetch per event file, up to a hundred requests
  * where the market makes a single GET, and it is the one read the digest cannot start early and
- * await later — the topic it chooses goes into the model prompt.
+ * await later - the topic it chooses goes into the model prompt.
  */
 const PROGRESS_READ_MS = 8_000;
 
@@ -223,7 +223,7 @@ const PROGRESS_READ_MS = 8_000;
  *
  * `readProgress` already absorbs a missing GITHUB_TOKEN, a 404 cold start (an empty history,
  * which is genuinely "nothing done" rather than unknown) and a transport error, and it is
- * all-or-nothing on purpose — a partial set would drop a `done` event and silently rewind the
+ * all-or-nothing on purpose - a partial set would drop a `done` event and silently rewind the
  * plan. What it has no defence against is an unanswered socket: without the race below, a hung
  * GitHub holds this function until the platform kills it and the brief never arrives at all.
  *
@@ -274,7 +274,7 @@ async function progressStatuses(): Promise<Map<string, Standing> | null> {
  * time it is read here, and one missed night makes it 24.5h. 26h is that cycle plus slack: a
  * single scan that failed, ran late, or was retried does not cry wolf, while two consecutive
  * misses do. Tightening this below ~25h would fire on the first bad night, and an alert that
- * fires on ordinary jitter is one the reader learns to skim past — which is the failure this
+ * fires on ordinary jitter is one the reader learns to skim past - which is the failure this
  * whole section exists to prevent.
  */
 const STALE_AFTER_MS = 26 * 60 * 60 * 1000;
@@ -302,7 +302,7 @@ type Alert = { label: string; line: string };
  *
  * This email is the detector because it already exists: it runs thirty minutes after the scan, it
  * already reads index.json for the market section, and it already reaches a reader every morning.
- * No new channel, no new service, and it degrades in the right direction — if the digest itself
+ * No new channel, no new service, and it degrades in the right direction - if the digest itself
  * stops arriving, the absence of the email is the signal.
  *
  * Deterministic on purpose. The model writes one framing paragraph and nothing else in this email;
@@ -342,7 +342,7 @@ function scanAlerts(index: MarketIndex, now: Date): Alert[] {
 
 type NewCoreReqs = { entries: NewReqEntry[]; total: number; overflow: number; alerts: Alert[] };
 /**
- * Every market failure lands here, and this renders as nothing at all — including no alert. A
+ * Every market failure lands here, and this renders as nothing at all - including no alert. A
  * file that could not be read is not evidence the scan is broken: GitHub may be down and the
  * scan fine, and a stale-scan line on an outage morning is a false alarm that teaches the reader
  * to distrust the real one. That failure belongs in the Vercel logs, and `newCoreReqs` puts it
@@ -355,7 +355,7 @@ const NO_MARKET: NewCoreReqs = { entries: [], total: 0, overflow: 0, alerts: [] 
  * the same file. The only part of this email that depends on anything outside the repo.
  *
  * The study brief is the product. A GitHub outage, a missing token, or a scan that has never
- * run must cost the reader three lines, never the email — so every path below returns
+ * run must cost the reader three lines, never the email - so every path below returns
  * NO_MARKET rather than propagating. `readJson` already absorbs a missing GITHUB_TOKEN, a 404
  * cold start and a transport error, but it has no deadline of its own: an unanswered socket
  * would hang here until the platform killed the function, and the digest would simply never
@@ -419,7 +419,7 @@ export async function GET(request: Request) {
   try {
     // Started here rather than after the digest is built: the progress read below must be
     // awaited before the model prompt can name a topic, and starting the market read first
-    // means the two GitHub reads overlap instead of adding up. Not awaited yet — it keeps
+    // means the two GitHub reads overlap instead of adding up. Not awaited yet - it keeps
     // running while the model thinks. Safe only because newCoreReqs cannot reject.
     const marketRead = newCoreReqs();
 
@@ -468,11 +468,11 @@ export async function GET(request: Request) {
       // on two blank lines instead of on TODAY.
       ...(market.alerts.length ? [`${market.alerts.map((a) => a.line).join("\n\n")}\n`] : []),
       // Above TODAY, not under SHIP THIS. This section orders itself: it is empty on almost every
-      // morning — 0 new core roles is the usual reading — so on a quiet day the study brief leads
+      // morning - 0 new core roles is the usual reading - so on a quiet day the study brief leads
       // with no special case anywhere in this array, and on the rare day a role appears it is the
       // first thing read, which is exactly when it is worth interrupting the brief for.
-      ...(market.entries.length ? [`NEW CORE REQS — ${market.total}\n${marketLines.join("\n")}\n`] : []),
-      `TODAY — ${topic}`, `Month ${d.next[1]} · ${d.next[13]}h · ${d.track}`,
+      ...(market.entries.length ? [`NEW CORE REQS - ${market.total}\n${marketLines.join("\n")}\n`] : []),
+      `TODAY - ${topic}`, `Month ${d.next[1]} · ${d.next[13]}h · ${d.track}`,
       // Directly under the header it qualifies, because it is a fact about this exact topic.
       ...(d.age ? [d.age] : []),
       ``,
@@ -496,7 +496,7 @@ export async function GET(request: Request) {
 <div style="color:#8a8f98;font-size:13px;margin-top:4px">Month ${d.next[1]} · ${d.next[13]}h · ${esc(d.track)}</div>
 ${d.age ? `<div style="color:#8a8f98;font-size:13px;margin-top:4px">${esc(d.age)}</div>` : ""}</td></tr>
 ${market.alerts.map((a) => row(a.label, esc(a.line))).join("")}
-${market.entries.length ? row(`New core reqs — ${market.total}`, `${market.entries.map((r) => `<a href="${esc(r.url)}" style="color:#828fff">${esc(r.statement)}</a>`).join("<br />")}${market.overflow > 0 ? `<br /><span style="color:#8a8f98">+${market.overflow} more</span>` : ""}`) : ""}
+${market.entries.length ? row(`New core reqs - ${market.total}`, `${market.entries.map((r) => `<a href="${esc(r.url)}" style="color:#828fff">${esc(r.statement)}</a>`).join("<br />")}${market.overflow > 0 ? `<br /><span style="color:#8a8f98">+${market.overflow} more</span>` : ""}`) : ""}
 ${framing ? row("Why it matters", esc(framing)) : ""}
 ${row("What it asks of you", esc(depth))}
 ${row("Ship this", esc(deliverable))}

@@ -5,7 +5,7 @@ import { roadmapRows } from "./shared";
  *
  * The Roadmaps grid used a raw `<a href={String(r[1])}>`, and one workbook row carries a null
  * URL (the uploaded skills matrix, which is a file rather than a link). `String(null)` is the
- * literal "null", so that card resolved to /null — a 404 in dev, and behind the password gate a
+ * literal "null", so that card resolved to /null - a 404 in dev, and behind the password gate a
  * 307 to the login screen in a fresh tab. `Link` above already refuses a non-http href for
  * exactly this reason; the grid needed the same refusal in card shape rather than a second
  * opinion about what a missing URL means.

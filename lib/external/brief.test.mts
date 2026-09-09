@@ -13,7 +13,7 @@
  *    the assertion here is what stops a future edit quietly dropping that sentence.
  *
  * The timeouts are asserted against the measured latency of the live endpoint (38.6s and 27.3s,
- * timed twice with curl) and against the 60s a Vercel Hobby function is allowed — never against
+ * timed twice with curl) and against the 60s a Vercel Hobby function is allowed - never against
  * themselves. Two earlier versions of this file died here: an 18s live budget that would have
  * aborted every real call, and a 120s function that the plan rejects outright. Both looked
  * reasonable, neither had been checked, and both would have failed in production while passing
@@ -54,9 +54,9 @@ console.log("timeouts are set from measured latency, inside what the plan allows
 
   // The arithmetic that forced the split. If someone puts the search back inside /api/ask beside
   // the 55s model call, this is what says it cannot fit.
-  ck("live + a 55s model call does NOT fit one function — the split is load-bearing", LIVE_TIMEOUT_MS + 55_000 > HOBBY_MAX_MS);
+  ck("live + a 55s model call does NOT fit one function - the split is load-bearing", LIVE_TIMEOUT_MS + 55_000 > HOBBY_MAX_MS);
   // The refresh runs three queries in parallel, so its wall clock is one call and not their sum.
-  ck("three sequential refreshes would NOT fit — parallelism is load-bearing", REFRESH_TIMEOUT_MS * 3 > HOBBY_MAX_MS);
+  ck("three sequential refreshes would NOT fit - parallelism is load-bearing", REFRESH_TIMEOUT_MS * 3 > HOBBY_MAX_MS);
 }
 
 console.log("an item without a citable URL never reaches the brief");
@@ -110,7 +110,7 @@ console.log("queries follow the market the scan measured");
   ck("a fourth skill is not queried", !q.some((s) => s.includes("Go")));
   // The first live brief searched "Customer-site travel expectation industry adoption news" and
   // stored four travel-industry market reports. Every query naming the role is what stops a
-  // coverage label — which is a requirement sentence, not a search term — dragging the brief into
+  // coverage label - which is a requirement sentence, not a search term - dragging the brief into
   // whatever sector the phrase happens to mention.
   ck("every query names the role", q.every((s) => /forward deployed engineer/i.test(s)), q.join(" | "));
   const drifty = briefQueries(["Customer-site travel expectation"]);
@@ -160,7 +160,7 @@ console.log("the prompt block states its own date, age and rank");
 
 console.log("a partial fetch says it is partial");
 {
-  // `note` was written on every partial fetch and read by nobody — not the UI, not the prompt.
+  // `note` was written on every partial fetch and read by nobody - not the UI, not the prompt.
   // A short brief that does not say it is short reads as a quiet market rather than a failed fetch.
   const item = (n: number): BriefItem => ({ title: `T${n}`, url: `https://x.test/${n}`, snippet: "", query: "q" });
   const partial = { ...emptyBrief("2026-09-09"), items: [item(1)], note: "2 of 3 queries failed: timeout" };

@@ -3,7 +3,7 @@
 Writes .tmp/url-check.tsv:  <status>\t<code>\t<url>\t<files>
   live       200 on a plain GET
   redirected 200 only after following redirects (fine, but the row could be updated)
-  blocked    403/429/999 — bot-gated, needs a human eyeball, NOT proof of death
+  blocked    403/429/999 - bot-gated, needs a human eyeball, NOT proof of death
   dead       404/410/451
   error      no response after retries
 

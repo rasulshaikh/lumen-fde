@@ -2,7 +2,7 @@
  * The four routes out of this plan, and what the data actually says about each.
  *
  * The plan answers "what should I study". It has never answered "what am I studying *toward*",
- * and that is the question with a deadline attached — a Pune-based reader can aim at a
+ * and that is the question with a deadline attached - a Pune-based reader can aim at a
  * dollar-linked remote role, a Gulf relocation, the US market, or their own thing, and those are
  * different bets with different odds, different evidence and different timelines.
  *
@@ -12,7 +12,7 @@
  *
  * ## The attribution problem, and why it is disclosed rather than solved
  *
- * A reach tier says what a requisition *demands* — `relocate-sponsor` means "on-site elsewhere,
+ * A reach tier says what a requisition *demands* - `relocate-sponsor` means "on-site elsewhere,
  * would need a move and a visa". It does not say **where**. So the honest count for the Gulf path
  * and the honest count for the US path are the same pool of requisitions seen from two angles,
  * and reporting "14 UAE openings" and "14 US openings" off one 14 would be inventing a split the
@@ -20,13 +20,13 @@
  *
  * Rather than fabricate the split or drop the number, every path carries an `attribution`:
  *
- *  - `exact` — the tiers map onto this path and nothing else. The count is this path's count.
- *  - `shared` — the tiers describe a demand, not a destination. **The UI must render no total for
+ *  - `exact` - the tiers map onto this path and nothing else. The count is this path's count.
+ *  - `shared` - the tiers describe a demand, not a destination. **The UI must render no total for
  *    these paths at all.** The first version summed the tiers and captioned the sum with a
- *    disclaimer, which produced "180 of 191 live requisitions" under "The US market" — and was
+ *    disclaimer, which produced "180 of 191 live requisitions" under "The US market" - and was
  *    doubly wrong, because the US tiers are the relocation pool PLUS `out-of-reach`, so the sum is
  *    not even the shared pool it claimed to be. Per-tier counts are each true; their total is not.
- *  - `none` — no requisition can evidence this path, because it is not a job market.
+ *  - `none` - no requisition can evidence this path, because it is not a job market.
  *
  * The third case is the entrepreneurial route, and it gets `none` rather than zero on purpose.
  * Zero openings reads as a market that rejected you; there is no market, which is the entire
@@ -88,10 +88,10 @@ export const PATHS: readonly PathDef[] = [
   {
     id: "own",
     label: "Your own thing",
-    premise: "Build the product instead of applying. No requisition can evidence this one — the plan's shipped deliverables are the only proof it has.",
+    premise: "Build the product instead of applying. No requisition can evidence this one - the plan's shipped deliverables are the only proof it has.",
     tiers: [],
     attribution: "none",
-    // `(?!)` — a negative lookahead on the empty pattern, which can never succeed. The previous
+    // `(?!)` - a negative lookahead on the empty pattern, which can never succeed. The previous
     // `/$^/` was wrong in a way that only a blank cell would expose: `/$^/.test("")` is TRUE, so a
     // CompReality row with an empty market column would have been claimed as a salary band by
     // "Your own thing" instead of surfacing through `unclaimedBands`. `(?!)` matches nothing at
@@ -125,7 +125,7 @@ export const toBand = (row: (string | number | null)[]): CompBand => ({
 /**
  * Join the sheet and the scan onto the four paths.
  *
- * `tiers` may be null — a scan that has not run yet, or a store that could not be read. Every
+ * `tiers` may be null - a scan that has not run yet, or a store that could not be read. Every
  * path then reports `openings: null`, and the caller says "not known" rather than "none". That
  * is the rule every reader in this codebase follows and the one that stops a GitHub outage from
  * rendering as a market with no jobs in it.
@@ -160,8 +160,8 @@ export function buildPaths(
 /**
  * The sheet rows no path claimed.
  *
- * There is exactly one today — "Your $250K target", which is not a market but the number the
- * other five are calibrated against — and it is the single most important row in the sheet. A
+ * There is exactly one today - "Your $250K target", which is not a market but the number the
+ * other five are calibrated against - and it is the single most important row in the sheet. A
  * `filter` per path would have dropped it on the floor with no trace, so this exists to make an
  * unclaimed row impossible to lose: whatever fails to match gets rendered anyway, and a row added
  * to the sheet next year appears on the page instead of disappearing into a regex that predates it.
@@ -174,8 +174,8 @@ export function unclaimedBands(compRows: (string | number | null)[][]): CompBand
  * Whether the sheet's odds column still describes the plan the reader is on.
  *
  * The CompReality header reads "Probability in 9 months (my read)", and the plan is 23 months
- * long. Every verdict under that column — "Low in 9 months without relocation", "Realistic in
- * 6-9 months" — was written against a horizon that no longer exists, and rendering them beside a
+ * long. Every verdict under that column - "Low in 9 months without relocation", "Realistic in
+ * 6-9 months" - was written against a horizon that no longer exists, and rendering them beside a
  * 23-month plan silently re-dates them. Deriving the mismatch rather than hardcoding it means
  * re-writing the sheet header clears this notice by itself.
  *
@@ -184,5 +184,5 @@ export function unclaimedBands(compRows: (string | number | null)[][]): CompBand
 export function horizonNote(header: string, planMonths: number): string | null {
   const stated = Number(header.match(/(\d+)\s*months?/i)?.[1]);
   if (!Number.isInteger(stated) || stated === planMonths) return null;
-  return `These verdicts were written against a ${stated}-month horizon. The plan is now ${planMonths} months, so read them as the odds at ${stated} months in — not as the odds at the end.`;
+  return `These verdicts were written against a ${stated}-month horizon. The plan is now ${planMonths} months, so read them as the odds at ${stated} months in - not as the odds at the end.`;
 }

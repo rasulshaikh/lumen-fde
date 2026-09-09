@@ -33,7 +33,7 @@ import {
  *
  * `maxDuration` is deliberately NOT declared. Hobby caps a function at 60 s and rejects a
  * build that asks for more, so hardcoding the 300 s the budget fits inside would make the
- * design plan-specific — and the whole point of the cursor below is that it is not. The knob
+ * design plan-specific - and the whole point of the cursor below is that it is not. The knob
  * is `SCAN_DEADLINE_MS`: leave it at 220_000 on a 300 s function, set it to 50_000 on a 60 s
  * one and the same code completes a cycle over 3-4 daily invocations instead of one.
  */
@@ -58,7 +58,7 @@ type BoardOutcome = { token: string; status: BoardStatus; reqs: { id: string; se
  * Scan one board: listing, title filter, selective JD fetch, skill fingerprints.
  *
  * Never throws and never touches the index. It returns what it found and the caller applies
- * it, so a board that blows up mid-classification cannot leave the seen-set half-written —
+ * it, so a board that blows up mid-classification cannot leave the seen-set half-written -
  * a partially applied board looks exactly like a board whose roles disappeared, which is the
  * failure the no-sweep-on-failure rule exists to prevent.
  */
@@ -74,7 +74,7 @@ async function scanBoard(source: Source, index: MarketIndex): Promise<BoardOutco
     return { token, status: { ok: false, total: 0, matched: 0, bytes: result.bytes, fetchedAt, error: result.error }, reqs: [] };
   }
 
-  // Stage 1.5. Per-company patterns, never a global list — `Applied AI` is core FDE at Mistral
+  // Stage 1.5. Per-company patterns, never a global list - `Applied AI` is core FDE at Mistral
   // and Anthropic and a false positive at Databricks and Perplexity.
   const matched: { posting: Posting; cls: RoleClass }[] = [];
   for (const posting of result.postings) {
@@ -132,14 +132,14 @@ async function scanBoard(source: Source, index: MarketIndex): Promise<BoardOutco
         // fingerprint" rather than "this req has no skills". Assigning it through would wipe
         // every known Greenhouse req's fingerprint and deflate every percentage each run.
         skills: text ? matchSkills(stripBoilerplate(text, source.company, corpus, source), skillMap) : null,
-        // The same body, in the same pass, before it is discarded — but the UNSTRIPPED text.
+        // The same body, in the same pass, before it is discarded - but the UNSTRIPPED text.
         // "We are unable to provide visa sponsorship", the ITAR paragraph and the clearance
         // clause are boilerplate in the literal sense: they repeat across a company's postings
         // and the 60%-frequency detector deletes them. Tiering the stripped text would move
         // every Palantir and Anduril req out of `out-of-reach` and into the reachable slice.
         //
-        // null carries the same meaning as it does for `skills` above — no body this run, keep
-        // the stored tier — which matters more here, because the location-only tier markSeen
+        // null carries the same meaning as it does for `skills` above - no body this run, keep
+        // the stored tier - which matters more here, because the location-only tier markSeen
         // would otherwise overwrite it with is an upper bound on reachability, never a fact.
         reach: text ? classifyReach(posting, text) : null,
       },
@@ -161,7 +161,7 @@ async function scanBoard(source: Source, index: MarketIndex): Promise<BoardOutco
  * NOT simply this run's seen ids. Under the cursor a cycle can span several invocations, so
  * the run that completes the cycle has only visited the boards after the cursor; passing its
  * own seen set alone would mark every requisition on every board visited by an *earlier* run
- * as missing and report them all as new the following day — the same bug the
+ * as missing and report them all as new the following day - the same bug the
  * no-sweep-on-failure rule prevents for failed boards, reintroduced for successful ones.
  *
  * So the answer is per board. A board this run visited is authoritative: the run's own seen
@@ -170,7 +170,7 @@ async function scanBoard(source: Source, index: MarketIndex): Promise<BoardOutco
  *
  * The two cannot be collapsed into the second rule alone. Both dates are days, so on a second
  * cycle in the same day every req still carries today's `lastSeen` from the first cycle and
- * every one of them reads as present — a role that closed between the two runs would never be
+ * every one of them reads as present - a role that closed between the two runs would never be
  * swept. Rare in production at one cycle a day, and silent when it happens.
  */
 function confirmedIds(index: MarketIndex, visited: Set<string>, seenThisRun: Set<string>): Set<string> {
@@ -194,7 +194,7 @@ function confirmedIds(index: MarketIndex, visited: Set<string>, seenThisRun: Set
  * second `export async function GET` into this file's module graph for the sake of six lines,
  * and Next has no guarantee about what it does with a route that another route imports. The
  * honest fix is a shared lib module, which is a change to a file this task does not own. The
- * two copies must stay identical — the reasoning below is why the shape is what it is.
+ * two copies must stay identical - the reasoning below is why the shape is what it is.
  *
  * MiniMax-M3 does not reliably honour thinking:disabled, so reasoning has to be stripped.
  * Two failure modes, both seen in a real delivered email:
@@ -208,7 +208,7 @@ function clean(value: string) {
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/<think>[\s\S]*$/i, "")
     .replace(/\*/g, "")
-    .replace(/[—–]/g, " - ")
+    .replace(/[–—]/g, " - ")
     .trim();
 }
 
@@ -216,18 +216,18 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 /** Every rendered statement is multi-line by construction; HTML would otherwise run them together. */
 const escLines = (s: string) => esc(s).replace(/\n/g, "<br />");
 
-/** Any run of digits, with an optional decimal tail — the token the post-check compares on. */
+/** Any run of digits, with an optional decimal tail - the token the post-check compares on. */
 const NUMBERS = /\d+(?:\.\d+)?/g;
 
 /**
  * One model paragraph, or nothing: the transport, the cleaning and the digit check.
  *
- * Shared by the two surfaces that ask for a paragraph, and shared for one reason — the
+ * Shared by the two surfaces that ask for a paragraph, and shared for one reason - the
  * post-check below is the entire safety property of both, and a second copy of it is a second
  * thing that has to stay at an empty allow-set forever. The prompt, and what its absence
  * costs, belong to the caller; everything from the socket to the digit check is one decision.
  *
- * Returns "" on every failure path — no key, non-200, timeout, empty after cleaning, or a
+ * Returns "" on every failure path - no key, non-200, timeout, empty after cleaning, or a
  * number the model invented.
  */
 async function modelParagraph(prompt: string, label: string): Promise<string> {
@@ -303,7 +303,7 @@ function weeklyFraming(facts: string): Promise<string> {
  * design rests on: Quaere may read every number and may write none. The tab renders this under
  * a heading that says so, below the measurements and never interleaved with them, so a reader
  * can always tell which sentences were computed. If it comes back empty the block is simply
- * absent — the paragraph is the only thing a model failure is allowed to cost.
+ * absent - the paragraph is the only thing a model failure is allowed to cost.
  */
 function quaereReading(facts: string): Promise<string> {
   return modelParagraph(
@@ -451,7 +451,7 @@ export async function GET(request: Request) {
      * The 60-second escape hatch.
      *
      * Workers pull boards in config order and stop pulling once the deadline passes, so `next`
-     * ends as the first board never dispatched — the resume point. A run that runs out of time
+     * ends as the first board never dispatched - the resume point. A run that runs out of time
      * therefore makes progress instead of restarting, and the boards it did not reach keep
      * yesterday's data untouched rather than looking closed.
      *
@@ -504,15 +504,15 @@ export async function GET(request: Request) {
       const swept = sweepMissing(index, confirmedIds(index, visited, seenThisRun), today);
       const evicted = capReqs(index);
 
-      // benchmark.json and insight.json are read only for their shas — the contents API rejects
+      // benchmark.json and insight.json are read only for their shas - the contents API rejects
       // an update without one, and both files are rewritten whole on every cycle regardless of
       // what they held. Concurrent here is safe and concurrent below is not: these are GETs and
       // there is no branch ref for them to race.
       //
       // The progress history is the one input that is allowed to be missing. `readProgress`
       // returns null on an unreadable directory and computeInsight then computes every other
-      // number with an empty progress set, so a study log that has not been written yet — or a
-      // GitHub hiccup on one of its files — costs the readiness figure and not the scan.
+      // number with an empty progress set, so a study log that has not been written yet - or a
+      // GitHub hiccup on one of its files - costs the readiness figure and not the scan.
       const [benchmarkFile, trendFile, insightFile, progress] = await Promise.all([
         readJson<unknown>(BENCHMARK_PATH),
         readJson<TrendPoint[]>(TREND_PATH),
@@ -558,7 +558,7 @@ export async function GET(request: Request) {
        */
       const wroteBenchmark = await writeJson(BENCHMARK_PATH, benchmark, benchmarkFile.sha);
       const wroteTrend = await writeJson(TREND_PATH, trend, trendFile.sha);
-      // The archive is write-only — nothing lists or reads that directory in a request path,
+      // The archive is write-only - nothing lists or reads that directory in a request path,
       // so a null sha is correct (the path is new every day) and a rejected same-day rewrite
       // is logged rather than failing a scan whose real output is already committed.
       const wroteHistory = await writeJson(historyPath(today), benchmark, null);
@@ -571,7 +571,7 @@ export async function GET(request: Request) {
       /**
        * The one place in this route where a model runs BEFORE a write, and it has to: the
        * paragraph is stored in insight.json precisely so the Market tab never calls a model at
-       * request time. The ordering is still the same ordering as everywhere else — index,
+       * request time. The ordering is still the same ordering as everywhere else - index,
        * benchmark and trend are committed above, so a MiniMax outage costs this paragraph and,
        * at worst, a day of freshness on one derived file.
        *
@@ -592,7 +592,7 @@ export async function GET(request: Request) {
       // `|| null`: modelParagraph returns "" on every failure path, and an empty string in the
       // file would render an empty Quaere block instead of no Quaere block.
       const wroteInsight = await writeJson(INSIGHT_PATH, { ...insight, quaere: reading || null }, insightFile.sha);
-      // Logged, not fatal — the same call the history archive makes. The insight is a pure
+      // Logged, not fatal - the same call the history archive makes. The insight is a pure
       // function of index.json, the benchmark and the progress history, all of which survive
       // this run, so it recomputes tomorrow. A 502 here would report a completed cycle as
       // failed, and Vercel would retry the cron and spend another 47 MB re-scanning a market
@@ -620,7 +620,7 @@ export async function GET(request: Request) {
        * The weekly email, Monday only, and last on purpose.
        *
        * Vercel Hobby caps at two crons, so this is folded in behind a day check rather than
-       * given its own entry — see spec section 6. It sits after all five writes and outside
+       * given its own entry - see spec section 6. It sits after all five writes and outside
        * the branches that return 502, so the ordering is: the index is committed, then the
        * benchmark and the trend, and only then does anything talk to Resend. That order is the
        * whole point. The scan's deliverable is the benchmark; an email is a notification about

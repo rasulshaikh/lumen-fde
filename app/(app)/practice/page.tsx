@@ -6,11 +6,11 @@ import { useAppState } from "@/components/AppState";
 import { planRows, topicKey, type Row } from "@/components/shared";
 
 /**
- * /practice — the two ways the plan tests you, in one place.
+ * /practice - the two ways the plan tests you, in one place.
  *
  * Mocks and Assessments were separate tabs rendering one panel each, sitting as peers to a
- * 387-line Market view. They answer the same question — how do you find out whether you actually
- * know this — and splitting them across two nav slots made the bar look full while making each
+ * 387-line Market view. They answer the same question - how do you find out whether you actually
+ * know this - and splitting them across two nav slots made the bar look full while making each
  * destination look empty.
  *
  * The scope derivation is unchanged and still lives here rather than in the panel, for the reason

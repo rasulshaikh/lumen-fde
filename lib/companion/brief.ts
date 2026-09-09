@@ -4,10 +4,10 @@
  * The home page's first four panels report PROGRESS, and at month one progress is zero, so the
  * first thing seen every morning is a wall of accurate zeros. The brief exists because the
  * platform is simultaneously sitting on a full plan, a full syllabus, a live recall schedule and
- * a scanned market — none of which needs anything to have been finished. There is always
+ * a scanned market - none of which needs anything to have been finished. There is always
  * something true and useful to say; the old panels just were not the ones that could say it.
  *
- * Pure, with `now` a parameter. No clock, no network, no filesystem — the same rule as
+ * Pure, with `now` a parameter. No clock, no network, no filesystem - the same rule as
  * `lib/motivation.ts` and `lib/market/insight.ts`, so every sentence here can be exercised
  * against a fixture, including the two that matter most: the day nothing has been done, and the
  * day someone comes back after a fortnight away.
@@ -23,7 +23,7 @@
  *
  * **2. Nothing here writes prose about numbers.** Every figure is rendered by the caller from a
  * value in this object. The warm sentence the companion adds is generated elsewhere, must
- * contain no digit, and is dropped if it does — the mechanism already shipped and tested for
+ * contain no digit, and is dropped if it does - the mechanism already shipped and tested for
  * Quaere's market reading. Warmth in words, truth in numbers.
  */
 import { PROFILE } from "@/lib/profile";
@@ -80,7 +80,7 @@ const dayOf = (now: Date) => now.toISOString().slice(0, 10);
  * Whole days between two UTC days.
  *
  * Returns null rather than a negative number when the event is in the future. A hand-edited file
- * or a skewed clock must cost the line, not render "back after -3 days" — the same guard
+ * or a skewed clock must cost the line, not render "back after -3 days" - the same guard
  * `daysLeading` uses in the digest, and for the same reason.
  */
 export function gapInDays(from: string, to: string): number | null {
@@ -112,7 +112,7 @@ export function recallState(review: { state: ReviewState; synced: boolean } | nu
  * duplicate what sits beside it.
  *
  * Stripping happens HERE and not in `motivation.ts`, because the label is right for the other
- * three consumers — this is a rendering decision belonging to the surface that renders, not a
+ * three consumers - this is a rendering decision belonging to the surface that renders, not a
  * change to the sentence everyone shares.
  */
 export function lead(statement: string): string {
@@ -127,7 +127,7 @@ export function buildBrief(input: BriefInput, now: Date): Brief {
     focus: input.focus,
     parts: input.parts ?? [],
     recall: recallState(input.review, now),
-    // Consumed, never recomputed — rule 3 of the motivation layer. `computeEvidence` owns every
+    // Consumed, never recomputed - rule 3 of the motivation layer. `computeEvidence` owns every
     // readiness figure and the two would disagree on the day it mattered. Only the LEAD line is
     // taken: the full statement repeats the market share that the Evidence panel next to this
     // one already prints, and the same number twice on one screen reads as two numbers.
@@ -147,7 +147,7 @@ export function buildBrief(input: BriefInput, now: Date): Brief {
  *
  * This is the one place the companion is allowed to be warm without a model, and it is
  * hand-written precisely so it cannot invent anything: each branch is chosen by a fact already
- * computed above. The long-gap branch is the reason the tone rule was changed — the product used
+ * computed above. The long-gap branch is the reason the tone rule was changed - the product used
  * to state "Back after 14 days." and stop, and the reader who most needed a reason to sit down
  * got a measurement. It still never says a number, and it never claims work that did not happen.
  */
@@ -156,7 +156,7 @@ export function opening(brief: Brief): string {
   if (gap === null) return `This is where it starts, ${brief.name}. Nothing is recorded yet, and the first row is the only one that has to happen today.`;
   if (gap === 0) return `You have already been here today, ${brief.name}.`;
   if (gap === 1) return `Picking up from yesterday.`;
-  if (gap <= 3) return `Welcome back, ${brief.name}. The thread is still warm — carry on where you left it.`;
+  if (gap <= 3) return `Welcome back, ${brief.name}. The thread is still warm - carry on where you left it.`;
   if (gap <= 14) return `Welcome back, ${brief.name}. A gap that size is nothing against a plan this long; the row below is exactly where you stopped.`;
-  return `Good to see you, ${brief.name}. However long it has been, none of the work you did went anywhere — it is all still here, and so is the next row.`;
+  return `Good to see you, ${brief.name}. However long it has been, none of the work you did went anywhere - it is all still here, and so is the next row.`;
 }

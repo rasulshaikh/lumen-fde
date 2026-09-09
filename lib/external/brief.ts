@@ -7,7 +7,7 @@
  *
  * ## Why a stored brief rather than live search by default
  *
- * A question answered from a live search is not reproducible — ask it twice and you can get two
+ * A question answered from a live search is not reproducible - ask it twice and you can get two
  * different answers with no way to tell which was right. A brief fetched on a schedule and
  * committed to the repo is a file, exactly like the market scan: diffable, dated, and the same
  * for every reader of it until the next fetch. Live search still exists for when currency matters
@@ -27,7 +27,7 @@ export const EXTERNAL_DIR = "reports/external";
 export const LATEST_PATH = `${EXTERNAL_DIR}/latest.json`;
 export const externalPath = (day: string) => `${EXTERNAL_DIR}/${day}.json`;
 
-/** Items kept per brief. Small on purpose — five cited lines beat forty diluted ones. */
+/** Items kept per brief. Small on purpose - five cited lines beat forty diluted ones. */
 export const MAX_ITEMS = 6;
 
 /** How old a brief may be before the UI must say so rather than presenting it as current. */
@@ -41,13 +41,13 @@ export const STALE_AFTER_DAYS = 3;
  * this file, which gave live search 18s and the scheduled fetch 45s. 18s would have aborted every
  * single live search; three *sequential* 45s calls could not fit a 120s function. Both constants
  * were written before the endpoint was timed and both would have failed in the only way that
- * matters — silently, while looking configured.
+ * matters - silently, while looking configured.
  *
  * The second constraint is the plan. Hobby caps a function at 60s, so 120s was never available
  * either, and both numbers below are subtraction from 60 rather than round figures:
  *
  *   45s  the slowest call plus margin, leaving ~15s for the GitHub reads and the two writes
- *   45s  the same, in a function that does nothing else — the search IS the request
+ *   45s  the same, in a function that does nothing else - the search IS the request
  *
  * They are equal today and kept separate anyway, because they are bounded by different things:
  * one shares its function with two commits, the other does not. Collapsing them into one constant
@@ -58,7 +58,7 @@ export const REFRESH_TIMEOUT_MS = 45_000;
 
 export type BriefItem = {
   title: string;
-  /** Absolute URL. An item without one is dropped — an uncited claim is worse than no claim. */
+  /** Absolute URL. An item without one is dropped - an uncited claim is worse than no claim. */
   url: string;
   /** The engine's snippet, trimmed. Never rewritten by a model before storage. */
   snippet: string;
@@ -84,7 +84,7 @@ const clean = (v: unknown, max: number) => String(v ?? "").replace(/\s+/g, " ").
  * One SurfSense Google-Search call.
  *
  * The path carries `/api/v1`, which `mcp/server.js` omitted. That omission made every SurfSense
- * search 404 and fall through to a GitHub code search of this repo — so `semantic_search` has
+ * search 404 and fall through to a GitHub code search of this repo - so `semantic_search` has
  * been answering web questions with repository matches since it shipped, and saying so only in an
  * audit line nobody reads. Verified against the live spec: the endpoint is
  * /api/v1/workspaces/{id}/scrapers/google_search/scrape, and it returns 200. Throws rather than
@@ -145,13 +145,13 @@ export function extractItems(payload: unknown, query: string): BriefItem[] {
  * list someone wrote once. `skills` are the highest-share skill names from the benchmark.
  */
 export function briefQueries(skills: string[]): string[] {
-  // Trimmed before the truthiness test, because `Boolean("  ")` is true and a whitespace label —
-  // which the benchmark's coverage rows can carry — would otherwise spend one of three queries on
+  // Trimmed before the truthiness test, because `Boolean("  ")` is true and a whitespace label -
+  // which the benchmark's coverage rows can carry - would otherwise spend one of three queries on
   // a string of adjectives with no subject.
   const top = skills.map((s) => String(s ?? "").trim()).filter(Boolean).slice(0, 2);
   // EVERY query names the role, and that is the fix for what the first real brief returned.
   //
-  // Coverage labels are requirement sentences, not search terms — "Customer-site travel
+  // Coverage labels are requirement sentences, not search terms - "Customer-site travel
   // expectation", "Prototype to production". The first version appended "industry adoption news"
   // to them, so the live brief searched "Customer-site travel expectation industry adoption news"
   // and came back with travel-industry market reports: "Travel Market Size, Share, Trends & Growth
@@ -159,7 +159,7 @@ export function briefQueries(skills: string[]): string[] {
   // query had drifted into whatever industry the phrase happened to name.
   //
   // Anchoring on the role keeps every result in the market this brief is actually about. It also
-  // keeps the queries DERIVED — the labels still come from what the scan measured, which is the
+  // keeps the queries DERIVED - the labels still come from what the scan measured, which is the
   // property that stops this list becoming three sentences someone typed once.
   return [
     "forward deployed engineer hiring trends",
@@ -200,9 +200,9 @@ export function externalContext(brief: ExternalBrief | null, now: Date): string 
   if (!brief || !brief.items.length) return "";
   const age = briefAgeDays(brief.day, now);
   const stale = age !== null && age > STALE_AFTER_DAYS;
-  const head = `OUTSIDE CONTEXT — a stored web brief fetched on ${brief.day}${age !== null ? ` (${age} day${age === 1 ? "" : "s"} old)` : ""}${stale ? ", WHICH IS STALE — say so if you use it" : ""}.`;
-  const lines = brief.items.slice(0, MAX_ITEMS).map((i) => `- ${i.title} — ${i.url}${i.snippet ? `\n  ${i.snippet}` : ""}`);
-  // `note` records that some queries failed, and until now nothing ever read it — the field was
+  const head = `OUTSIDE CONTEXT - a stored web brief fetched on ${brief.day}${age !== null ? ` (${age} day${age === 1 ? "" : "s"} old)` : ""}${stale ? ", WHICH IS STALE - say so if you use it" : ""}.`;
+  const lines = brief.items.slice(0, MAX_ITEMS).map((i) => `- ${i.title} - ${i.url}${i.snippet ? `\n  ${i.snippet}` : ""}`);
+  // `note` records that some queries failed, and until now nothing ever read it - the field was
   // written on every partial fetch and surfaced to no one, human or model. A short brief that does
   // not say it is short reads as a quiet market rather than a failed fetch.
   const note = brief.note ? [`This brief is INCOMPLETE: ${brief.note}. Treat it as a partial view, and say so if you lean on it.`] : [];

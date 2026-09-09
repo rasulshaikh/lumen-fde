@@ -13,14 +13,14 @@ const LOCAL = "lumen-review";
  *
  * A drill's `p` is a `curriculum.failureModes` entry verbatim, and those are written as complete
  * accounts of a failure: what breaks, the mechanism, and how long it hides. The card asked "What
- * goes wrong, and how would you catch it? — {p}", which handed over the whole answer inside the
+ * goes wrong, and how would you catch it? - {p}", which handed over the whole answer inside the
  * question, and 43 of the 875 drills start lowercase so it was also a sentence fragment. That
- * defeated rule 1 above on a third of the schedule — invisibly, because until eligible() started
+ * defeated rule 1 above on a third of the schedule - invisibly, because until eligible() started
  * interleaving kinds no drill had ever reached this component.
  *
  * So the narrative moves to the reveal, where a reference belongs, and the question asks for the
  * one thing the card is not showing. eligible() takes at most one drill per topic, so no two
- * scheduled drills ever ask this about the same topic — the topic name above the prompt is what
+ * scheduled drills ever ask this about the same topic - the topic name above the prompt is what
  * makes it specific.
  */
 const DRILL_PROMPT = "Name a way this topic fails in production, how it hides, and what you would watch to catch it.";
@@ -118,7 +118,7 @@ export function RecallStrip({ startedTopics }: { startedTopics: number[] }) {
       <section className="quiz-strip recall-strip" aria-label="Recall">
         <div className="quiz-copy">
           <span className="quiz-label">Recall</span>
-          <strong>{doneToday ? `${doneToday} reviewed — done for today` : "Nothing due today"}</strong>
+          <strong>{doneToday ? `${doneToday} reviewed, done for today` : "Nothing due today"}</strong>
           <span>{stats.seen} of {stats.total} prompts in the schedule · {stats.matured} held at 60 days or longer</span>
         </div>
       </section>
@@ -139,7 +139,7 @@ export function RecallStrip({ startedTopics }: { startedTopics: number[] }) {
             className="recall-answer"
             value={answer}
             onChange={(e) => setAnswer(e.target.value)}
-            placeholder="Answer from memory first — the reveal unlocks once you have written something."
+            placeholder="Answer from memory first. The reveal unlocks once you have written something."
             aria-label="Your answer"
             rows={3}
           />
@@ -152,7 +152,7 @@ export function RecallStrip({ startedTopics }: { startedTopics: number[] }) {
       ) : (
         <>
           {/* A drill's reference is the failure it drills. It used to be `meta.outcomes`, which
-              is the topic's three closed-book outcomes — so a drill about an isolation forest's
+              is the topic's three closed-book outcomes - so a drill about an isolation forest's
               default contamination flooding an alert queue revealed the same three lines as
               every recall card on that topic, and the two kinds were indistinguishable once
               answered. `meta` carries nothing per drill, but the drill's own prompt text is the

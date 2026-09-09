@@ -6,7 +6,7 @@
  * untouched, because reviews and new material competed for the same five slots. Splitting
  * them (reviews first, then NEW_PER_DAY of new) and trimming to PER_TOPIC cards is what
  * makes it converge. Re-run this before changing LADDER, DAILY_CAP, NEW_PER_DAY or
- * PER_TOPIC — the failure mode is invisible in unit tests.
+ * PER_TOPIC - the failure mode is invisible in unit tests.
  */
 import { readFile } from "node:fs/promises";
 import { grade, isDue, nextDue, eligible, retention, PER_TOPIC, type ReviewState } from "./review.ts";
@@ -25,7 +25,7 @@ ck(`per-topic trim to ${PER_TOPIC}`, eligible(seven).length === 119*PER_TOPIC, `
 
 /**
  * The kind mix. `eligible` used to keep the first PER_TOPIC prompts in array order, and the
- * bank lists a topic's recall prompts (7+ of them) before its drills — so every one of the
+ * bank lists a topic's recall prompts (7+ of them) before its drills - so every one of the
  * 875 drills was cut and the drill branches in app/recall.tsx could never render. These pin
  * the round robin that fixes it. A shape change in the bank that reintroduced the ordering
  * dependency would show up here as "drills reachable at all" going to zero.

@@ -3,14 +3,14 @@ import { isValidSession, sessionCookie, timingSafeEqual } from "@/lib/auth";
 
 // App Router serves metadata files (app/icon.svg, app/apple-icon.png, opengraph-image)
 // as real routes, and the gate was catching them: /icon.svg 307'd to /login, so the tab
-// icon resolved to a login page instead of an image. These are branding, not secrets —
-// the login screen itself needs the favicon — so they stay public. Matches the optional
+// icon resolved to a login page instead of an image. These are branding, not secrets -
+// the login screen itself needs the favicon - so they stay public. Matches the optional
 // content hash Next appends to generated variants (/apple-icon-a1b2c3.png).
 const publicAsset = /^\/(favicon\.ico|icon[\w-]*\.(svg|png|ico)|apple-icon[\w-]*\.png|(opengraph|twitter)-image[\w-]*(\.\w+)?|manifest\.webmanifest|robots\.txt|sitemap\.xml)$/;
 
 export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
-  // Cron cannot present a session cookie, so it is exempt from the cookie gate — but exempt is
+  // Cron cannot present a session cookie, so it is exempt from the cookie gate - but exempt is
   // not public, and this used to be a bare `startsWith("/api/cron")` that let the request
   // through unchecked and left the whole trust boundary to two copy-pasted `Bearer CRON_SECRET`
   // checks inside the two route bodies. A third route under app/api/cron/ would have been open
@@ -27,8 +27,8 @@ export async function proxy(request: NextRequest) {
   // gets the landing page, a request carrying a valid session is sent to /overview. Both halves
   // of that decision live here rather than in the page, because a page that reads the session
   // cookie itself is a second place to get authentication wrong, and this file is supposed to be
-  // the only one. The landing renders from bundled JSON only — no progress, no current focus,
-  // nothing personal — which is the same rule /login already documents and follows.
+  // the only one. The landing renders from bundled JSON only - no progress, no current focus,
+  // nothing personal - which is the same rule /login already documents and follows.
   if (path === "/") {
     if (!process.env.LUMEN_PASSWORD) return NextResponse.next();
     if (await isValidSession(request.cookies.get(sessionCookie)?.value, process.env.LUMEN_USERNAME || "rasul", process.env.LUMEN_PASSWORD)) {

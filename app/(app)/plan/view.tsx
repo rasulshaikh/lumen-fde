@@ -6,7 +6,7 @@ import { planRows, topicKey } from "@/components/shared";
 import { useAppState } from "@/components/AppState";
 
 /**
- * The Plan explorer's own state — four filters and one expanded row — which is all local
+ * The Plan explorer's own state - four filters and one expanded row - which is all local
  * because it is this page's view of the data and means nothing anywhere else. It resets when
  * you leave, and that is correct: arriving at /plan from /market with a stale "Month 7" filter
  * hiding the row you were sent to look at is the failure this avoids.
@@ -28,7 +28,7 @@ export function PlanView({ initialTrack, initialExpanded }: { initialTrack: stri
   /**
    * Land on the cited row.
    *
-   * Everything about `/plan?row=13` already worked — the parameter parsed, the row expanded —
+   * Everything about `/plan?row=13` already worked - the parameter parsed, the row expanded -
    * and it still read as a dead link, because row 13 opened at y=2265 of a 21,461px table while
    * the viewport stayed at 0. Nothing visibly happened, so the honest conclusion from the
    * outside was that the link was broken.

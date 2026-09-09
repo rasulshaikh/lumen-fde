@@ -1,4 +1,4 @@
-# Market insight, and Quaere reading it — design
+# Market insight, and Quaere reading it - design
 
 Date: 2026-09-07
 Status: approved, ready for implementation
@@ -6,7 +6,7 @@ Status: approved, ready for implementation
 ## The problem
 
 The Market tab answers *"what does the market ask for?"* It does not answer *"so what?"*.
-189 core requisitions across 23 companies is accurate and impersonal — the same number for any
+189 core requisitions across 23 companies is accurate and impersonal - the same number for any
 candidate. Nothing on the tab is about Rasul: not his progress, not his location, not which
 slice of the market he should aim at. And Quaere, the study guide, cannot see any of it except
 one 60-word paragraph in the weekly email.
@@ -28,7 +28,7 @@ reports/market/trend.json ─┘                                          ↓
 Different inputs, different audiences, different blast radius if wrong. Hence two files rather
 than a 700-line `benchmark.ts`.
 
-`insight.ts` is pure — `now` is a parameter, no network, no filesystem — so its arithmetic is
+`insight.ts` is pure - `now` is a parameter, no network, no filesystem - so its arithmetic is
 testable without a 47 MB scan, exactly as `benchmark.ts` is.
 
 It runs in the existing cron immediately after `computeBenchmark`, and writes
@@ -37,7 +37,7 @@ race the branch ref; the first real scan lost `benchmark.json` to precisely that
 
 ## Analyses
 
-### 1. Readiness — market-weighted, against real progress
+### 1. Readiness - market-weighted, against real progress
 
 **Progress does not come from the workbook.** `workbook.json` column 15 is a stale baseline:
 117 `Not started`, 2 `Skipped`, no other value. Real progress lives in `reports/progress/*.json`
@@ -45,7 +45,7 @@ race the branch ref; the first real scan lost `benchmark.json` to precisely that
 workbook column would peg readiness at 0% forever and look like a bug.
 
 A skill counts as evidenced when its `primaryRow` is complete. Readiness is weighted by market
-share, not by row count — clearing a 67% skill is worth more than clearing a 4% one:
+share, not by row count - clearing a 67% skill is worth more than clearing a 4% one:
 
 ```
 readiness = Σ(pct of evidenced skills) / Σ(pct of all skills)
@@ -61,7 +61,7 @@ finishing it, and rank. That answers "what do I do next" from the first run:
 
 State the absolute number honestly and lead with the ranked table.
 
-### 2. Reachability — five tiers, not a boolean
+### 2. Reachability - five tiers, not a boolean
 
 `location` is already stored, free text, 253 distinct values (`Washington, DC`, `Europe`,
 `United Kingdom`, `Tokyo`, `United States`). Three tiers fall out of it with no new extraction.
@@ -71,7 +71,7 @@ That keeps the never-store-JD-text rule intact.
 
 | tier | meaning |
 |---|---|
-| `india-remote` | employable from Pune today — remote-global, or explicit India remote |
+| `india-remote` | employable from Pune today - remote-global, or explicit India remote |
 | `emea-apac-remote` | remote with a stated region that overlaps IST |
 | `india-office` | an Indian city in `location` |
 | `relocate-sponsor` | on-site elsewhere at a company that sponsors |
@@ -81,13 +81,13 @@ Report as a distribution over the core count, and recompute every headline perce
 `india-remote + emea-apac-remote` as a second column. "Evals is 42% of the market" and "evals is
 55% of the market you can actually take" are different facts and both belong on the tab.
 
-### 3. Segments — the market is five markets
+### 3. Segments - the market is five markets
 
 Assigned from `company` + title family, both already stored.
 
 | segment | companies |
 |---|---|
-| `deployment-strategist` | Palantir, Scale GPS, (Anduril, Vannevar — disabled) |
+| `deployment-strategist` | Palantir, Scale GPS, (Anduril, Vannevar - disabled) |
 | `agent-engineer` | Sierra, Decagon, Cresta, Observe AI |
 | `frontier-lab-applied` | OpenAI, Anthropic, Cohere, Mistral |
 | `data-platform` | Databricks, Snowflake, dbt/Fivetran, Sigma, Datadog |
@@ -95,10 +95,10 @@ Assigned from `company` + title family, both already stored.
 
 Per segment: requisition count, top five skills by share, reachability mix, and readiness
 computed against that segment's demand rather than the whole market. The output is a ranked fit
-list — a segment that is 60% reachable and 30% covered beats one that is 5% reachable and 50%
+list - a segment that is 60% reachable and 30% covered beats one that is 5% reachable and 50%
 covered, and the tab should say which and why.
 
-### 4. Velocity — honest about having one data point
+### 4. Velocity - honest about having one data point
 
 From `trend.json`. Requires at least two points spanning seven days; reuse `MOVE_MIN_POINTS = 3`
 so a skill must move three points or cross a 25/50/75 band to be reported. With one point,
@@ -112,13 +112,13 @@ Three surfaces, one rule: **Quaere may read every number and may write none.**
 curriculum, workbook, library and repository context. Cap the injection the way
 `syllabusContext` already caps at 7000 chars, so market data cannot crowd out the question.
 Reach: the dashboard chat and the `ask_lumen` MCP tool, so the same answer is available from
-Claude Code. This is the highest-value surface and the lowest-risk one — Quaere quotes computed
+Claude Code. This is the highest-value surface and the lowest-risk one - Quaere quotes computed
 numbers rather than producing them.
 
 **b. Market tab reading.** One paragraph, ≤80 words, generated by the cron and stored in
 `insight.json` so the tab stays model-free at request time. Same digit ban and the same
 post-check as the weekly email: any digit drops the paragraph. Rendered in a visually distinct
-block labelled *"Quaere's reading — interpretation, not measurement"*, below the numbers, never
+block labelled *"Quaere's reading - interpretation, not measurement"*, below the numbers, never
 interleaved. If the model fails, the block is absent and nothing else changes.
 
 **c. Proactive flags.** Deterministic, no model. Emit a flag when readiness changes by ≥3

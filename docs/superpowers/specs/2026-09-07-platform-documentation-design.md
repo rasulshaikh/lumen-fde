@@ -1,4 +1,4 @@
-# Platform documentation — design
+# Platform documentation - design
 
 Date: 2026-09-07
 Status: approved, ready for implementation
@@ -22,7 +22,7 @@ the other three are lenses that cite it. A number appears in exactly one place.
 | `docs/platform/architecture.md` | someone who needs to understand the system | **every fact**: components, data flow, file formats, env vars, the source-vs-built distinction |
 | `docs/platform/operating.md` | Rasul, studying | how to use it: the 14 MCP tools, 10 tabs, 2 crons |
 | `docs/platform/runbook.md` | Rasul at 3am, or whoever inherits it | what breaks, blast radius, how to fix |
-| `docs/platform/talk-track.md` | Rasul in an interview | the decisions, the tradeoffs, the bugs found — and the plan rows each maps to |
+| `docs/platform/talk-track.md` | Rasul in an interview | the decisions, the tradeoffs, the bugs found - and the plan rows each maps to |
 
 Interview evidence and study companion merge deliberately: *"the market subsystem is row 20's
 CI/CD and row 63's drift detection, built for real"* is the same sentence in both jobs.
@@ -32,7 +32,7 @@ names the anchor it came from so the verify script can check it.
 
 ## Making the docs testable
 
-`scripts/verify-docs.py` — greps every numeric claim in `docs/platform/*.md` and asserts it
+`scripts/verify-docs.py` - greps every numeric claim in `docs/platform/*.md` and asserts it
 against source data. Non-zero exit on any drift, listing file, line, claimed value, actual value.
 
 Anchors, and where truth lives:
@@ -63,7 +63,7 @@ this backwards will cause it again.
 **operating.md.** Every one of the 14 MCP tools: what it answers, its inputs, when to reach for
 it. This is the half Rasul uses daily with Claude Code beside him.
 
-**runbook.md.** Grounded in failures that actually happened, not hypotheticals — the concurrent
+**runbook.md.** Grounded in failures that actually happened, not hypotheticals - the concurrent
 GitHub writes that raced the branch ref and lost `benchmark.json`; the truncation guard that
 checked a match count instead of a board total; `SCAN_DEADLINE_MS` assuming a 300s function.
 
@@ -76,7 +76,7 @@ per-match verdicts, gap claims that dissolved under adversarial review. An FDE i
 
 `docs/lumen-fde-architecture.md` is superseded by `docs/platform/architecture.md`. Its rendered
 siblings (`.html`, `.pdf`, `.svg`, `.css`, and the mindmap PNG) are artifacts of a superseded
-source. **Do not delete them in this change** — a PDF may have been shared externally. Mark the
+source. **Do not delete them in this change** - a PDF may have been shared externally. Mark the
 `.md` as superseded with a pointer to the new location, and leave the binaries for a separate
 decision.
 
@@ -90,6 +90,6 @@ decision.
 ## Not doing
 
 - No generated HTML/PDF pipeline. Markdown only; the old set proved rendered artifacts rot.
-- No doc for the study curriculum itself — that is `data/`, and the app renders it.
+- No doc for the study curriculum itself - that is `data/`, and the app renders it.
 - No API reference for the 10 HTTP routes beyond what `operating.md` needs. They are internal to
   the app and behind a password gate; the MCP surface is the one a human drives.

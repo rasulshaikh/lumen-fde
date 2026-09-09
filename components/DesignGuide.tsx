@@ -4,13 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppState } from "@/components/AppState";
 
 /**
- * /design — the living style guide.
+ * /design - the living style guide.
  *
  * THE ONE RULE OF THIS FILE: it may not contain a colour, a size or a ratio. Everything printed
  * below is read out of the running document with `getComputedStyle` at the moment you look at it.
  *
  * That rule is not fussiness. This project has been bitten three times by a document that
- * described the code instead of reading it — a doc that claimed 13 MCP tools while the server
+ * described the code instead of reading it - a doc that claimed 13 MCP tools while the server
  * served 18, a checker that read a file the routing migration had deleted, a sidebar that said 34
  * workflows next to 41. A style guide with `#b89435` typed into it is the same failure with a
  * swatch on it: the moment `globals.css` is re-solved, this page starts lying, and it lies
@@ -19,7 +19,7 @@ import { useAppState } from "@/components/AppState";
  * So the swatches are painted with `var(--token)` and the hex beside them is what the browser
  * says it painted. The type specimens are real elements carrying the app's real classes, and
  * their sizes are measured off the boxes. The five floors are measured between real rendered
- * panels, chips and controls further down this same page — not between two constants.
+ * panels, chips and controls further down this same page - not between two constants.
  *
  * The consequence worth stating: if someone breaks the palette, this page goes red on its own.
  */
@@ -46,7 +46,7 @@ const contrast = (a: RGB, b: RGB) => {
  *
  * Chrome returns `rgb(32, 24, 16)` / `rgba(12, 7, 2, 0.55)` for the hex and rgba() values this
  * app declares; `color(srgb 0.12 0.09 0.06)` is handled too because a future re-solve in OKLCH
- * would serialise that way, and a style guide that silently prints "—" for the whole palette the
+ * would serialise that way, and a style guide that silently prints "-" for the whole palette the
  * day the palette moves to a wider gamut would be worse than useless.
  */
 function parseColor(css: string): { rgb: RGB; alpha: number } | null {
@@ -66,7 +66,7 @@ const hex = ([r, g, b]: RGB) => "#" + [r, g, b].map((n) => n.toString(16).padSta
 const ratio = (n: number) => `${n.toFixed(2)}:1`;
 
 /* ------------------------------------------------------------------------------------------
-   The catalogue. Token names and the surfaces each one is ACTUALLY used on — which is the part
+   The catalogue. Token names and the surfaces each one is ACTUALLY used on - which is the part
    worth writing down, because it is the part `globals.css` cannot tell you. No values here.
    ------------------------------------------------------------------------------------------ */
 
@@ -91,7 +91,7 @@ const GROUPS: Group[] = [
   {
     title: "Grounds",
     note:
-      "Four surfaces. A panel is identified by the ruling stopping, not by a shadow, so the step from canvas to card is load-bearing — it is floor 1 below. The tint is the only coloured ground in the app.",
+      "Four surfaces. A panel is identified by the ruling stopping, not by a shadow, so the step from canvas to card is load-bearing - it is floor 1 below. The tint is the only coloured ground in the app.",
     rows: [
       { token: "--bg", role: "The ruled canvas. Nothing is painted under it.", on: [] },
       { token: "--surface", role: "Panel, metric, book row, the Quaere dock, an input.", on: [on(CANVAS, null)] },
@@ -116,7 +116,7 @@ const GROUPS: Group[] = [
   {
     title: "Structure",
     note:
-      "Lines. The hairline is the second limb of floor 1 — where the fill step is small, the edge is what says panel. The two rulings are texture and are measured against the ground below, under the contract.",
+      "Lines. The hairline is the second limb of floor 1 - where the fill step is small, the edge is what says panel. The two rulings are texture and are measured against the ground below, under the contract.",
     rows: [
       { token: "--line", role: "Panel hairline, table rule, the divider between two entries.", on: [on(CANVAS, null), on(CARD, null)] },
       { token: "--line-strong", role: "Control boundary and focus ring. Floor 5.", on: [on(CARD, LARGE), on(CANVAS, LARGE)] },
@@ -127,7 +127,7 @@ const GROUPS: Group[] = [
   {
     title: "Accent",
     note:
-      "One accent, ochre, reserved for what was earned: a readiness gain, a shipped artifact, a cleared skill, and the single CTA per view. Never chrome, never decoration. As a fill it carries 3.00; as text below 24px it is not used at all — that is what --accent-text is for.",
+      "One accent, ochre, reserved for what was earned: a readiness gain, a shipped artifact, a cleared skill, and the single CTA per view. Never chrome, never decoration. As a fill it carries 3.00; as text below 24px it is not used at all - that is what --accent-text is for.",
     rows: [
       { token: "--accent", role: "Progress fill, CTA ground, the metric numeral at 28px.", on: [on(CARD, LARGE), on(CANVAS, LARGE)] },
     ],
@@ -165,23 +165,23 @@ type Specimen = {
 };
 
 const SCALE: Specimen[] = [
-  { key: "hero", role: "Hero title — fluid, clamped. Measured off the live header above.", sample: "" },
+  { key: "hero", role: "Hero title - fluid, clamped. Measured off the live header above.", sample: "" },
   { key: "h1", role: "Page title", sample: "Build proof, not just knowledge." },
   { key: "h2", role: "Panel title", sample: "Target calibration" },
   { key: "h3", role: "Row title, section head", sample: "Retrieval-augmented generation" },
-  { key: "body", role: "Body copy. 16 at 1.5 — a 24px line box, which is the ruling.", sample: "" },
-  { key: "lead", role: "Lead line — the first sentence of a block", sample: "Twenty-seven rows clear a skill the market asked for this week." },
-  { key: "detail", role: "Detail line — the sentence under it", sample: "Measured against 412 requisitions scanned in the last seven days." },
+  { key: "body", role: "Body copy. 16 at 1.5 - a 24px line box, which is the ruling.", sample: "" },
+  { key: "lead", role: "Lead line - the first sentence of a block", sample: "Twenty-seven rows clear a skill the market asked for this week." },
+  { key: "detail", role: "Detail line - the sentence under it", sample: "Measured against 412 requisitions scanned in the last seven days." },
   { key: "meta", role: "Meta, caption, panel head right-hand side", sample: "2,236 syllabus parts" },
-  { key: "eyebrow", role: "Eyebrow — mono, uppercase, the label above a block", sample: "Private study context" },
-  { key: "data", role: "A measured value — mono, tabular", sample: "" },
-  { key: "code", role: "A command or a key — mono", sample: "" },
+  { key: "eyebrow", role: "Eyebrow - mono, uppercase, the label above a block", sample: "Private study context" },
+  { key: "data", role: "A measured value - mono, tabular", sample: "" },
+  { key: "code", role: "A command or a key - mono", sample: "" },
 ];
 
 const FACES = [
-  { token: "--font-display", role: "Display — headings and the brand. Intentionally irregular; made from what is at hand." },
-  { token: "--font-body", role: "Body and UI — drawn to disambiguate every letterform, for a wall of dense rows." },
-  { token: "--font-data", role: "Data only — numerals, row references, keys, shell output. Nothing else." },
+  { token: "--font-display", role: "Display - headings and the brand. Intentionally irregular; made from what is at hand." },
+  { token: "--font-body", role: "Body and UI - drawn to disambiguate every letterform, for a wall of dense rows." },
+  { token: "--font-data", role: "Data only - numerals, row references, keys, shell output. Nothing else." },
 ];
 
 /* ------------------------------------------------------------------------------------------
@@ -211,7 +211,7 @@ export function DesignGuide() {
   const { theme, toggleTheme } = useAppState();
   const [snap, setSnap] = useState<Snapshot | null>(null);
   // The tables below are the only new layout on this page, and their column widths live here
-  // rather than in globals.css because this component owns them — so the breakpoint has to live
+  // rather than in globals.css because this component owns them - so the breakpoint has to live
   // here too. Below 700px every table collapses to a stack; a 108px value column beside two
   // fluid ones is unreadable on a phone.
   const [narrow, setNarrow] = useState(false);
@@ -238,7 +238,7 @@ export function DesignGuide() {
       const resolved = !!parsed && raw.replace(/\s+/g, " ") !== SENTINEL;
       return parsed
         ? { hex: hex(parsed.rgb), rgb: parsed.rgb, alpha: parsed.alpha, resolved }
-        : { hex: "—", rgb: [0, 0, 0], alpha: 1, resolved: false };
+        : { hex: "-", rgb: [0, 0, 0], alpha: 1, resolved: false };
     };
     const tokens: Record<string, Reading> = {};
     const want = new Set<string>();
@@ -268,8 +268,8 @@ export function DesignGuide() {
     const edge = colourOf(panel, "border-top-color", tokens["--line"].rgb);
 
     // Floor 5 is WCAG 1.4.11: a boundary must clear 3.00 against every colour adjacent to it.
-    // Two controls, because they do not share a fill — the text input is on the card, the recall
-    // textarea is on the canvas colour — and the floor is the worse of the four comparisons.
+    // Two controls, because they do not share a fill - the text input is on the card, the recall
+    // textarea is on the canvas colour - and the floor is the worse of the four comparisons.
     const controls = [el(".rig-input"), el(".rig-textarea")].filter(Boolean) as HTMLElement[];
     const boundaries = controls.flatMap((c) => {
       const border = colourOf(c, "border-top-color", tokens["--line-strong"].rgb);
@@ -291,7 +291,7 @@ export function DesignGuide() {
         pass: fillStep >= 1.25 || (edgeWidth > 0 && edgeStep >= 1.4),
       },
       { step: "card → chip", floor: "≥ 1.20", measured: ratio(contrast(card, chip)), detail: "a chip, an input, a nested row against the panel it sits in", pass: contrast(card, chip) >= 1.2 },
-      { step: "ink vs muted on card", floor: "≥ 1.70", measured: ratio(contrast(ink, muted)), detail: "a lead line against the detail line under it — the two must not read as one", pass: contrast(ink, muted) >= 1.7 },
+      { step: "ink vs muted on card", floor: "≥ 1.70", measured: ratio(contrast(ink, muted)), detail: "a lead line against the detail line under it - the two must not read as one", pass: contrast(ink, muted) >= 1.7 },
       { step: "muted on card", floor: "≥ 4.50 (AA body)", measured: ratio(contrast(muted, card)), detail: "the quietest text in the app, on the surface it is quietest on", pass: contrast(muted, card) >= 4.5 },
       { step: "control boundary", floor: "≥ 3.00", measured: ratio(boundary), detail: "worst of two controls against both their own fill and the panel behind them", pass: boundary >= 3 },
     ];
@@ -307,7 +307,7 @@ export function DesignGuide() {
 
     /* --- faces: does the browser actually have them? ------------------------------------ */
     // `document.fonts.check()` cannot answer this. It returns true when no matching @font-face
-    // exists at all, because the system fallback is "available" — which is precisely how Geist
+    // exists at all, because the system fallback is "available" - which is precisely how Geist
     // rendered as ui-sans-serif here for months without anyone noticing. So measure an advance
     // width against a family that cannot exist: if the two widths agree, the face is not loading.
     pen.style.color = "";
@@ -323,7 +323,7 @@ export function DesignGuide() {
       const stack = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
       const first = (stack.split(",")[0] || "").replace(/['"]/g, "").trim();
       const w = widthIn(`"${first}", ${ABSENT}, monospace`);
-      return { token, role, family: first || "—", loaded: Math.abs(w - baseline) > 0.5 };
+      return { token, role, family: first || "-", loaded: Math.abs(w - baseline) > 0.5 };
     });
     pen.textContent = "";
     pen.style.fontFamily = "";
@@ -352,7 +352,7 @@ export function DesignGuide() {
   }, []);
 
   // Re-measure on the two things that change what would be measured: the theme, and the fonts
-  // arriving. Both matter — a snapshot taken before the webfonts land reports the fallback's
+  // arriving. Both matter - a snapshot taken before the webfonts land reports the fallback's
   // metrics, and reporting the dark floors while the light palette is on screen is the drift
   // this page exists to prevent.
   useEffect(() => {
@@ -405,7 +405,7 @@ export function DesignGuide() {
                   <b style={m.floor === null ? undefined : { color: contrast(fg.rgb, bg.rgb) >= m.floor ? "var(--teal)" : "var(--danger)" }}>
                     {ratio(contrast(fg.rgb, bg.rgb))}
                   </b>
-                ) : <b>—</b>}
+                ) : <b>-</b>}
               </span>
             );
           })}
@@ -439,7 +439,7 @@ export function DesignGuide() {
           Every swatch below is painted with <code className="home-code">var(--token)</code> and every value beside it is
           what the browser says it painted. Nothing on this page is typed. Values were solved, not picked: the ground is
           anchored, the accent hue is the measured hue of yellow-ochre pigment, and each remaining token is the luminance
-          the floor above it demands. If one needs to move, move it in the solve and re-derive the chain — do not nudge
+          the floor above it demands. If one needs to move, move it in the solve and re-derive the chain - do not nudge
           it here and do not nudge it there.
         </p>
         <p className="mkt-note">
@@ -485,9 +485,9 @@ export function DesignGuide() {
               return (
                 <div className="mkt-cols-row" style={cols.alias} key={a.token}>
                   <span><code className="home-code">{a.token}</code><span className="mkt-sub">points at {a.target}</span></span>
-                  <b>{from ? from.hex : "—"}</b>
+                  <b>{from ? from.hex : "-"}</b>
                   <span style={{ color: same ? "var(--teal)" : "var(--danger)", fontFamily: "var(--font-data)", fontSize: 11.5 }}>
-                    {snap ? (same ? "identical" : `differs — ${to?.hex}`) : "…"}
+                    {snap ? (same ? "identical" : `differs - ${to?.hex}`) : "…"}
                   </span>
                 </div>
               );
@@ -505,11 +505,11 @@ export function DesignGuide() {
             {!narrow && <div className="mkt-cols-head" style={cols.alias}><span>Token</span><span>Computed</span><span>Over the canvas</span></div>}
             {ALPHA_TOKENS.map((a) => {
               const t = snap?.tokens[a.token];
-              const over = t && snap ? hex(composite(t.rgb, t.alpha, snap.tokens["--bg"].rgb)) : "—";
+              const over = t && snap ? hex(composite(t.rgb, t.alpha, snap.tokens["--bg"].rgb)) : "-";
               return (
                 <div className="mkt-cols-row" style={cols.alias} key={a.token}>
                   <span><code className="home-code">{a.token}</code><span className="mkt-sub">{a.role}</span></span>
-                  <b>{t ? `${t.hex} · α ${t.alpha}` : "—"}</b>
+                  <b>{t ? `${t.hex} · α ${t.alpha}` : "-"}</b>
                   <span style={{ fontFamily: "var(--font-data)", fontSize: 11.5 }}>{over}</span>
                 </div>
               );
@@ -531,7 +531,7 @@ export function DesignGuide() {
         <p className="mkt-note">
           Three faces, three jobs. The family names below are read out of the font tokens, and
           &ldquo;loaded&rdquo; is not a guess: <code className="home-code">document.fonts.check()</code> returns true when
-          no matching face exists at all, because the system fallback counts as available — which is exactly how the
+          no matching face exists at all, because the system fallback counts as available - which is exactly how the
           previous face rendered as <code className="home-code">ui-sans-serif</code> here for months. So each face is set
           against a family that cannot exist and the advance width is compared. Same width, not loading.
         </p>
@@ -550,7 +550,7 @@ export function DesignGuide() {
                   Handgloves 0123 · Il1 O0
                 </span>
                 <span style={{ fontFamily: "var(--font-data)", fontSize: 11.5, color: reading?.loaded ? "var(--teal)" : "var(--danger)" }}>
-                  {snap ? (reading?.loaded ? "yes" : "NO — falling back") : "…"}
+                  {snap ? (reading?.loaded ? "yes" : "NO - falling back") : "…"}
                 </span>
               </div>
             );
@@ -607,10 +607,10 @@ export function DesignGuide() {
           })}
         </div>
 
-        {/* The body specimen, unclassed, inheriting from <body> exactly as the app's prose does —
+        {/* The body specimen, unclassed, inheriting from <body> exactly as the app's prose does -
             and measured there rather than inside the table above. */}
         <p ref={setSpecimen("body")} style={{ maxWidth: "66ch", marginTop: 20 }}>
-          Body sits at 16 on a 1.5 leading, so a line box is exactly 24px — the same 24px as the minor ruling under the
+          Body sits at 16 on a 1.5 leading, so a line box is exactly 24px - the same 24px as the minor ruling under the
           whole page. That is the reason the substrate reads as paper rather than as a pattern: a line of copy sits on a
           rule instead of across one. This paragraph is that step; the numbers for it are in the table above.
         </p>
@@ -627,7 +627,7 @@ export function DesignGuide() {
         </div>
         <p className="mkt-note">
           Nothing here is a picture of a component. Each one carries the class the app gives it, so hover it, tab to it,
-          and it behaves exactly as it does on the tab it came from. Muting is always a colour and never an opacity —
+          and it behaves exactly as it does on the tab it came from. Muting is always a colour and never an opacity -
           a control that looks half-erased reads as a rendering bug rather than a disabled state.
         </p>
 
@@ -681,7 +681,7 @@ export function DesignGuide() {
         <div className="mkt-section">
           <div className="mkt-section-head"><h3>Controls</h3></div>
           <p className="mkt-note">
-            The boundary is what makes a control a control — it is floor 5, and it is measured on these very elements in
+            The boundary is what makes a control a control - it is floor 5, and it is measured on these very elements in
             the next section. Focus is a ring at the same weight; tab through them.
           </p>
           <div className="filters" style={{ alignItems: "center" }}>
@@ -721,7 +721,7 @@ export function DesignGuide() {
 
         <div className="mkt-section">
           <div className="mkt-section-head"><h3>Links and rows</h3></div>
-          <p className="mkt-note">A resource with no URL is not a dead link — it is muted text that never claimed to be one.</p>
+          <p className="mkt-note">A resource with no URL is not a dead link - it is muted text that never claimed to be one.</p>
           <div style={ROW}>
             <a className="resource-link" href="/plan">Read<span aria-hidden="true">↗</span></a>
             <span className="resource-link no-link">Watch</span>
@@ -750,7 +750,7 @@ export function DesignGuide() {
           <div className="mkt-section-head"><h3>Surfaces</h3></div>
           <p className="mkt-note">
             A panel is a panel because the ruling stops at it. Scroll this page and watch the paper stay still under the
-            layout — it is fixed to the viewport, which is why it never tiles against an edge.
+            layout - it is fixed to the viewport, which is why it never tiles against an edge.
           </p>
           <div className="mkt-quaere">
             <p className="eyebrow">Quaere&apos;s reading</p>
@@ -770,7 +770,7 @@ export function DesignGuide() {
           <span className="panel-meta">{snap ? `${snap.theme} theme · live` : "measuring…"}</span>
         </div>
         <p className="mkt-note">
-          Five floors. They are not measured between two constants — they are measured between this panel, the canvas
+          Five floors. They are not measured between two constants - they are measured between this panel, the canvas
           behind it, and the chip, the lead line, the detail line and the two controls immediately below, which are real
           elements carrying the app&apos;s real classes. Break the palette and this table goes red without anyone editing
           it.
@@ -778,8 +778,8 @@ export function DesignGuide() {
 
         {/* The rig. Also the demonstration: these are the elements the numbers come from. */}
         <div className="home-block" style={{ marginTop: 4 }}>
-          <p className="home-line rig-ink">Ink on the card — a lead line.</p>
-          <p className="home-sub rig-muted">Muted on the card — the detail line under it, and the quietest text in the app.</p>
+          <p className="home-line rig-ink">Ink on the card - a lead line.</p>
+          <p className="home-sub rig-muted">Muted on the card - the detail line under it, and the quietest text in the app.</p>
           {/* `.filters` and `.recall-answer` rather than inline styling: the floor has to be
               measured on the boundary the app actually draws, not on one this page draws for it. */}
           <div className="filters" style={{ marginTop: 12, alignItems: "center" }}>
@@ -803,7 +803,7 @@ export function DesignGuide() {
               </span>
             </div>
           ))}
-          {!snap && <div className="mkt-cols-row" style={cols.floor}><span>measuring…</span><span /><b>—</b><span /></div>}
+          {!snap && <div className="mkt-cols-row" style={cols.floor}><span>measuring…</span><span /><b>-</b><span /></div>}
         </div>
 
         <div className="mkt-section">
@@ -811,12 +811,12 @@ export function DesignGuide() {
           <p className="mkt-note">
             The graph paper is part of the design, so it gets its own condition rather than a floor: it must be visible
             against the ground and it must not compete with body text. Both numbers are stated, and the second is what
-            keeps the substrate a substrate — the ruling sits far below the text set on top of it.
+            keeps the substrate a substrate - the ruling sits far below the text set on top of it.
           </p>
           <div className="mkt-tiers">
-            <div className="mkt-tierline"><span>Minor rule · 24px cell</span><span className="mkt-bar"><span style={{ width: `${Math.min(100, ((snap?.ruling.minor ?? 1) / (snap?.ruling.body ?? 1)) * 100)}%` }} /></span><b>{snap ? snap.ruling.minor.toFixed(2) : "—"}</b><span /></div>
-            <div className="mkt-tierline"><span>Major rule · every 4th</span><span className="mkt-bar"><span style={{ width: `${Math.min(100, ((snap?.ruling.major ?? 1) / (snap?.ruling.body ?? 1)) * 100)}%` }} /></span><b>{snap ? snap.ruling.major.toFixed(2) : "—"}</b><span /></div>
-            <div className="mkt-tierline"><span>Body text, for scale</span><span className="mkt-bar"><span style={{ width: "100%" }} /></span><b>{snap ? snap.ruling.body.toFixed(2) : "—"}</b><span /></div>
+            <div className="mkt-tierline"><span>Minor rule · 24px cell</span><span className="mkt-bar"><span style={{ width: `${Math.min(100, ((snap?.ruling.minor ?? 1) / (snap?.ruling.body ?? 1)) * 100)}%` }} /></span><b>{snap ? snap.ruling.minor.toFixed(2) : "-"}</b><span /></div>
+            <div className="mkt-tierline"><span>Major rule · every 4th</span><span className="mkt-bar"><span style={{ width: `${Math.min(100, ((snap?.ruling.major ?? 1) / (snap?.ruling.body ?? 1)) * 100)}%` }} /></span><b>{snap ? snap.ruling.major.toFixed(2) : "-"}</b><span /></div>
+            <div className="mkt-tierline"><span>Body text, for scale</span><span className="mkt-bar"><span style={{ width: "100%" }} /></span><b>{snap ? snap.ruling.body.toFixed(2) : "-"}</b><span /></div>
           </div>
           <p className="mkt-caveat mkt-note">
             The ruling is texture, not structure: it is removed under forced colours, where it would be redrawn as a
@@ -826,7 +826,7 @@ export function DesignGuide() {
 
         <p className="mkt-note" style={{ marginTop: 24 }}>
           Floors 1 and 2 are the separation floors, 3 and 4 are the reading floors, 5 is the operable floor. A palette
-          that clears all five is not automatically good — it is merely honest, which is the only part a page can check.
+          that clears all five is not automatically good - it is merely honest, which is the only part a page can check.
           The rest is the judgement in the solve, and that is written down in the spec, not here.
         </p>
       </section>
@@ -845,7 +845,7 @@ const COLS = {
   floor: { gridTemplateColumns: "minmax(0,1.4fr) minmax(0,1fr) 84px 78px" } as const,
 };
 
-/* Under 700px each shape stacks. The swatch keeps its column — a colour beside its name is the
+/* Under 700px each shape stacks. The swatch keeps its column - a colour beside its name is the
    one pairing on this page that is worth a phone's width. */
 const NARROW = {
   token: { gridTemplateColumns: "26px minmax(0,1fr)" } as const,

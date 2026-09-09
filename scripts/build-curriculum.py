@@ -35,7 +35,7 @@ def main() -> None:
             problems.append(f"{path.name}: index {i} out of range")
             continue
         if str(plan_rows[i][2]).strip() != str(d["topic"]).strip():
-            problems.append(f"{path.name}: topic mismatch — plan has {plan_rows[i][2]!r}, file has {d['topic']!r}")
+            problems.append(f"{path.name}: topic mismatch - plan has {plan_rows[i][2]!r}, file has {d['topic']!r}")
         # month/track/hours are duplicated here for the UI; the plan is authoritative. A
         # renumber silently desynced 90 files once, so drift is now a hard error.
         for key, col, cast in (("track", 0, str), ("month", 1, float), ("hours", 13, float)):
@@ -45,11 +45,11 @@ def main() -> None:
 
     OUT.write_text(json.dumps({"topics": topics}, ensure_ascii=False, indent=1))
 
-    # The recall strip needs prompts on first paint, and curriculum.json is 3.7MB — far too
+    # The recall strip needs prompts on first paint, and curriculum.json is 3.7MB - far too
     # large to import into the client bundle. Emit a slim bank instead.
     #
     # Shape matters: the reveal text is stored ONCE PER TOPIC, not per prompt. Storing it
-    # per prompt made a 2.6MB file for 1710 prompts — bigger than the problem it solved.
+    # per prompt made a 2.6MB file for 1710 prompts - bigger than the problem it solved.
     #
     # Two corpora, deliberately. interviewQuestions are scenario-shaped and answerable aloud
     # in ~90s, which is what retrieval practice needs. outcomes[] are NOT usable as prompts:

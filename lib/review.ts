@@ -1,5 +1,5 @@
 /**
- * Spaced-retrieval scheduling. Pure functions, no React, no storage — so the interval
+ * Spaced-retrieval scheduling. Pure functions, no React, no storage - so the interval
  * behaviour can be reasoned about and tested without a browser.
  */
 
@@ -14,7 +14,7 @@ export type ReviewState = Record<string, Card>;
  * The tail is deliberately long: the plan runs well over a year, and something learned in
  * month 1 needs to still be there at the interview, not be re-drilled weekly for a year.
  * The top rung repeats rather than growing further, so a month-1 topic is still checked
- * roughly annually however long the plan runs — no ladder change is needed when the
+ * roughly annually however long the plan runs - no ladder change is needed when the
  * calendar moves.
  */
 export const LADDER = [1, 7, 21, 60, 150, 240, 330];
@@ -23,7 +23,7 @@ export const LADDER = [1, 7, 21, 60, 150, 240, 330];
  * Two separate limits, and the split is the whole design.
  *
  * A single combined cap fails: simulated over 400 days with every prompt eligible, the cap
- * binds on 386 days and 547 of 700 prompts are still untouched at the end — the queue never
+ * binds on 386 days and 547 of 700 prompts are still untouched at the end - the queue never
  * drains and reviews compete with an endless intake. Reviews therefore run first and new
  * cards only fill what is left, which is the behaviour that makes the schedule converge.
  */
@@ -35,7 +35,7 @@ export const NEW_PER_DAY = 2;
  * 875 failure modes is 1,710 cards; at any sane daily rate that is not coverable in 13
  * months, so scheduling all of it guarantees most of it is never seen and the rest is
  * starved. Three per topic is ~357 cards, which does converge. The remaining questions are
- * not lost — they are still in the syllabus, where they read as an interview-prep list.
+ * not lost - they are still in the syllabus, where they read as an interview-prep list.
  */
 export const PER_TOPIC = 3;
 
@@ -51,7 +51,7 @@ const addDays = (iso: string, days: number) => {
  * Grade a card and return its next state.
  *
  * fluent  advances one rung
- * halting repeats the current rung — you got there, but not cleanly
+ * halting repeats the current rung - you got there, but not cleanly
  * gone    drops two rungs, not to zero: a lapse is not amnesia, and resetting to day 1
  *         every time is what makes these systems feel punitive and get abandoned.
  */
@@ -72,7 +72,7 @@ export function isDue(card: Card | undefined, now: Date) {
  *
  * Taking the first `perTopic` in array order silently deleted a whole kind: the bank lists a
  * topic's recall prompts before its drills and no topic has fewer than 7 recall prompts, so
- * all 875 drills — 51% of the bank — lost the cut and the drill branches in the recall UI
+ * all 875 drills - 51% of the bank - lost the cut and the drill branches in the recall UI
  * were unreachable. The scheduler owns which cards you see, so it must not inherit that
  * choice from the order a build script happened to concatenate its lists in; the round robin
  * makes a reorder of that script a no-op here. A topic with a single kind still fills its
@@ -113,7 +113,7 @@ export function eligible<T extends { i: number; kind?: string }>(prompts: T[], p
 /**
  * Choose today's cards: due reviews first, then a trickle of new material.
  *
- * The cap is what stops this becoming the Anki death spiral — miss a week, open it to
+ * The cap is what stops this becoming the Anki death spiral - miss a week, open it to
  * "37 due", close it forever. Overdue items are taken first so nothing starves, anything
  * that does not fit is simply still due tomorrow, and the count is never surfaced.
  */
@@ -136,7 +136,7 @@ export function nextDue<T extends { k: string; i: number }>(
   const picked: T[] = [];
   const perTopic = new Map<number, number>();
   const take = (list: T[], limit: number) => {
-    // two passes: one per topic first, then fill — interleaving without starving a topic
+    // two passes: one per topic first, then fill - interleaving without starving a topic
     for (const pass of [1, Infinity]) {
       for (const p of list) {
         if (picked.length >= cap || picked.length >= limit) return;
@@ -153,7 +153,7 @@ export function nextDue<T extends { k: string; i: number }>(
   return picked;
 }
 
-/** How far through the ladder the started material is — for an honest, non-gamified read. */
+/** How far through the ladder the started material is - for an honest, non-gamified read. */
 export function retention(prompts: { k: string }[], state: ReviewState) {
   if (!prompts.length) return { seen: 0, total: 0, matured: 0 };
   let seen = 0;

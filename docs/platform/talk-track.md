@@ -1,4 +1,4 @@
-# Lumen FDE — talk track
+# Lumen FDE - talk track
 
 How I talk about this system, and how the system maps back onto the plan it was built to run.
 
@@ -9,8 +9,8 @@ stated once.
 
 Two audiences, one document. In an interview it is the evidence file: the decisions, the ones
 that were wrong, and how they got caught. Studying, it is the map: which of the
-119 <!-- verify:rows=119 --> plan rows each piece of this work is evidence for, and — more
-usefully — which rows it does *not* discharge.
+119 <!-- verify:rows=119 --> plan rows each piece of this work is evidence for, and - more
+usefully - which rows it does *not* discharge.
 
 ---
 
@@ -38,21 +38,21 @@ whether the documentation still describes the code.
 ## 2. Decisions I can defend
 
 Each of these has an alternative I rejected, a piece of evidence that decided it, and a plan row
-it is partial evidence for. "Partial" is doing real work in that sentence — see §5.
+it is partial evidence for. "Partial" is doing real work in that sentence - see §5.
 
 ### 2.1 The sandbox is a microVM in a different account, not a PTY on the box with the keys
 
-**The decision.** The Sandbox tab runs against one named Vercel Sandbox — a Firecracker microVM,
+**The decision.** The Sandbox tab runs against one named Vercel Sandbox - a Firecracker microVM,
 `env: {}` at create, `lumen-study`, 1 vCPU (`architecture.md` §3.5).
 
 **The alternative.** `node-pty` on the Render host that already runs the MCP server. It is less
 code, it has no cold start, and it gives a real PTY instead of a line-based shell.
 
-**Why not.** That box holds `GITHUB_TOKEN` — which has write access to this repo, which *is* the
-study plan — plus every other secret `mcp/server.js` reads: `MCP_API_KEY`,
+**Why not.** That box holds `GITHUB_TOKEN` - which has write access to this repo, which *is* the
+study plan - plus every other secret `mcp/server.js` reads: `MCP_API_KEY`,
 `LUMEN_INTERNAL_API_KEY`, `MINIMAX_API_KEY`, `SURFSENSE_API_KEY`. That list is the `process.env`
 reads in that one file rather than a copy of `architecture.md` §8's table, because a hand-copied
-blast radius drifts the moment a secret changes host — this one carried `RESEND_API_KEY` until a
+blast radius drifts the moment a secret changes host - this one carried `RESEND_API_KEY` until a
 fact-check found only the Vercel crons read it. A single auth bug in a shell endpoint there is a
 full credential compromise and write access to the plan in the same step. In the microVM the
 isolation is structural rather than earned: `env: {}` means no Lumen secret exists inside it even
@@ -68,47 +68,47 @@ streamed NDJSON response. `python3 x.py` and `pytest` work; `vim` and `top` do n
 say so rather than pretending (`architecture.md` §3.5).
 
 **Rows this is evidence for:** 68 (Threat modelling and secrets lifecycle, M16), 6 (Docker
-internals — its depth target is literally "explain a container without the word 'lightweight
+internals - its depth target is literally "explain a container without the word 'lightweight
 VM'", and choosing a microVM over a container over a process is that same distinction with money
-on it, M2), 30 (Auth: OAuth2, OIDC, JWT — the sandbox authenticates by OIDC, M7).
+on it, M2), 30 (Auth: OAuth2, OIDC, JWT - the sandbox authenticates by OIDC, M7).
 
 ### 2.2 Skill extraction is a deterministic matcher, not a model
 
 **The decision.** `lib/market/skills.ts` matches include/exclude phrases with an optional
-proximity window against `data/market-skill-map.json` — 34 skills <!-- verify:skills=34 -->,
+proximity window against `data/market-skill-map.json` - 34 skills <!-- verify:skills=34 -->,
 hand-authored, boolean per requisition (`architecture.md` §4.5).
 
 **The alternative.** Send the JD bodies to a model and ask which skills each requires. That is
 the obvious v1 and it would have been a day's work instead of a week's.
 
-**Why not.** The benchmark's whole purpose is week-over-week movement — is evals rising, is
+**Why not.** The benchmark's whole purpose is week-over-week movement - is evals rising, is
 Python still 67%. A non-deterministic extractor makes that movement uninterpretable: you cannot
 tell a market that moved from a sampler that moved. It also costs money daily, and it would
 silently reintroduce every false positive the taxonomy work eliminated
 (`docs/research/2026-09-07-job-market-benchmark-spec.md`, "Model-written skill extraction",
 rejected).
 
-**The corollary I like better than the decision.** The model is not banned from the subsystem —
-it is confined to interpretation. Two calls exist inside the scan — the email's framing line at
-≤60 words and Quaere's reading of the tab at ≤80 — both framing rather than measurement, and both
+**The corollary I like better than the decision.** The model is not banned from the subsystem -
+it is confined to interpretation. Two calls exist inside the scan - the email's framing line at
+≤60 words and Quaere's reading of the tab at ≤80 - both framing rather than measurement, and both
 dropped entirely if the returned paragraph contains a digit (`architecture.md` §5.6). The 60 is
 load-bearing two sections later; see §3.4. The Market tab calls no model at request time at all.
 A market benchmark whose numbers came from a model is not a benchmark.
 
-**Rows:** 59 (Evals as infrastructure — "answer 'how do you know it works?' with numbers, per
+**Rows:** 59 (Evals as infrastructure - "answer 'how do you know it works?' with numbers, per
 class, over time", M14), 63 (Drift, feedback loops, registries, rollout, M15), 51 (Prompt
 engineering as code: versioning, regression sets, M12).
 
 ### 2.3 CORE and ADJACENT are counted separately, and adjacent is the bigger number
 
-**The decision.** The headline denominator is core only. Adjacent — pre-sales SE/SA,
-implementation, engagement — is counted, reported, and excluded from every percentage
+**The decision.** The headline denominator is core only. Adjacent - pre-sales SE/SA,
+implementation, engagement - is counted, reported, and excluded from every percentage
 (`architecture.md` §5.3).
 
 **Why it matters here specifically.** On the 2026-09-08 scan, `reports/market/benchmark.json`
 holds 189 distinct core requisitions across 23 companies and **206 adjacent across 17
 companies**, plus 21 leadership. Those counts are rewritten by the 03:00 cron and are quoted with
-a scan date for that reason; the claim that survives every scan is the ordering — adjacent
+a scan date for that reason; the claim that survives every scan is the ordering - adjacent
 outnumbers core. Fold them together and "the FDE market" becomes Databricks Solutions Architects
 and Datadog Sales Engineers, and every readiness number I compute is then a readiness for
 pre-sales.
@@ -117,18 +117,18 @@ The first live probe made the same point louder: Databricks alone returned 105 c
 adjacent before dedupe (commit `355fede`). One board could have set the entire denominator.
 
 **The related discipline.** Dedupe runs *before* counting, on `dedupeKey(company, title)` with
-the location suffix stripped — on that same scan Palantir's 63 postings are 26 requisitions, and
+the location suffix stripped - on that same scan Palantir's 63 postings are 26 requisitions, and
 LangChain's city clones of one Deployed Engineer role are one key. The clone counts move with the
 boards, which is why I cite the mechanism (`lib/market/classify.ts`) and not the tally: what does
 not move is that uncollapsed, two boards' cloning habits decide every percentage. Seniority
 tokens survive normalization, because "Senior" is signal; only location suffixes are stripped.
 
-**Rows:** 104 (Model evaluation, M20 — the denominator you compute a rate over is the half of
-that row this exercises), 38 (Entity resolution and record linkage, M9 — the clone collapse is
-exactly this), 91 (Target list: 40 companies, referrals, warm intros, M9 — the scan mechanizes
+**Rows:** 104 (Model evaluation, M20 - the denominator you compute a rate over is the half of
+that row this exercises), 38 (Entity resolution and record linkage, M9 - the clone collapse is
+exactly this), 91 (Target list: 40 companies, referrals, warm intros, M9 - the scan mechanizes
 the target-list half of that deliverable and touches neither referrals nor warm intros).
 
-### 2.4 One rendered sentence per fact — which was right for the email and wrong for the tab
+### 2.4 One rendered sentence per fact - which was right for the email and wrong for the tab
 
 **The decision.** `lib/market/benchmark.ts` and `insight.ts` emit a rendered `statement` string
 per entry alongside the structured fields, so the weekly email and the Market tab say the
@@ -140,7 +140,7 @@ blocks at identical visual weight, 2 of them at 0%, 133 plan-row chips *all* rea
 started", 9,025 characters in one list, and all 34 sentences containing the phrase "of core FDE
 requisitions". The structured fields were there the whole time and unused.
 
-**The fix, and the shape of it.** The tab was rebuilt into three zones — Decide, Reach, Market —
+**The fix, and the shape of it.** The tab was rebuilt into three zones - Decide, Reach, Market -
 using `pct`/`hits`/`reqs`/`companies`/`rows` directly. The email still renders `statement`.
 Nothing in `benchmark.ts` or `insight.ts` changed, so the "one place to fix a sentence"
 guarantee survives for the surface it was actually written for (commit `ab9920c`).
@@ -165,16 +165,16 @@ file is empty". A benchmark computed from a failed read would reset the seen-set
 every live requisition as new the following morning (`architecture.md` §4.6).
 
 **Why sequential.** Each write is a commit on the same branch, so concurrent writes race the
-branch ref. See §3.2 — this is one of the ones I got wrong first.
+branch ref. See §3.2 - this is one of the ones I got wrong first.
 
-**Rows:** 44 (Designing Data-Intensive Applications — lost updates and compare-and-set are the
-whole `sha` story, M10), 34 (Redis: idempotency, M8 — with the caveat in §5), 5 (Git at depth,
+**Rows:** 44 (Designing Data-Intensive Applications - lost updates and compare-and-set are the
+whole `sha` story, M10), 34 (Redis: idempotency, M8 - with the caveat in §5), 5 (Git at depth,
 M1).
 
 ### 2.6 The documentation is checked by a script, not by an editor's memory
 
 **The decision.** `scripts/verify-docs.py` reads every `verify:<anchor>=<value>` HTML comment in
-`docs/platform/*.md` and asserts it against source data — `data/workbook.json`, `mcp/server.js`,
+`docs/platform/*.md` and asserts it against source data - `data/workbook.json`, `mcp/server.js`,
 `components/Nav.tsx`, `vercel.json`. Unknown anchor names are a hard error, so a typo cannot pass by
 matching nothing.
 
@@ -185,17 +185,17 @@ version numbers, and a checker that reports three false alarms gets muted inside
 served 14, and nothing caught it because nothing read the document. It serves
 18 <!-- verify:mcp_tools=18 --> today, and the anchor is the reason that sentence cannot rot the
 same way twice.
-Live scan output is deliberately *not* anchorable — the 03:00 cron rewrites those numbers, so
+Live scan output is deliberately *not* anchorable - the 03:00 cron rewrites those numbers, so
 anchoring them would fail most mornings for no defect. Those are cited by report file and scan
 date instead, which is what §2.3 above does.
 
 **The precedent.** This is the same guard `scripts/build-curriculum.py` already runs against the
 data: a file's `topic`, `track`, `month` and `hours` must equal the plan's, and its comment
-records why — a renumber once silently desynced 90 files (`architecture.md` §4.2). Same idea,
+records why - a renumber once silently desynced 90 files (`architecture.md` §4.2). Same idea,
 pointed at prose.
 
-**Rows:** 20 (CI/CD and supply chain — its depth target is "A failing test or a HIGH CVE blocks
-the deploy; ArgoCD syncs on green", M5), 40 (Testing and contracts — "A failing contract breaks
+**Rows:** 20 (CI/CD and supply chain - its depth target is "A failing test or a HIGH CVE blocks
+the deploy; ArgoCD syncs on green", M5), 40 (Testing and contracts - "A failing contract breaks
 the build; coverage published", M10), 74 (runbooks and design docs, M17).
 
 ### 2.7 The MCP server is a narrow, audited tool surface
@@ -205,7 +205,7 @@ an audit trail split deliberately: `get_audit_log` is in-memory and lossy, the d
 `reports/audit/*.json` written by the two tools that mutate anything (`architecture.md` §3.6).
 
 Two things I would raise before an interviewer does. `read_ask_report` validated its argument
-with `startsWith("reports/asks/")` and then interpolated that same string into a GitHub URL — and
+with `startsWith("reports/asks/")` and then interpolated that same string into a GitHub URL - and
 WHATWG URL parsing collapses `..` before the request leaves the process, so
 `reports/asks/../../data/workbook.json` passed the prefix check and resolved to the plan. The
 general shape is the lesson: a check on a value that a *later* stage will still rewrite is not a
@@ -218,24 +218,24 @@ And `mcp/render.yaml`'s `buildFilter` has to include `data/**` as well as `mcp/*
 `server.js` reads `../data/*.json` from outside its `rootDir`; without it, plan edits never reach
 the live MCP and it serves stale rows silently.
 
-**Rows:** 52 (Tool use, structured outputs and MCP servers — its depth target is "Build an MCP
+**Rows:** 52 (Tool use, structured outputs and MCP servers - its depth target is "Build an MCP
 server with auth and narrow tools; explain the trust boundary", M12), 30 (Auth, M7), 56
-(Guardrails, prompt injection, red-teaming — the traversal is the injection case, M13).
+(Guardrails, prompt injection, red-teaming - the traversal is the injection case, M13).
 
 ### 2.8 The review scheduler has two caps, and never shows a backlog
 
-`lib/review.ts`: `LADDER = [1, 7, 21, 60, 150, 240, 330]` — 7 rungs
-<!-- verify:ladder_rungs=7 --> — over 1,710 <!-- verify:prompts=1710 --> prompts
+`lib/review.ts`: `LADDER = [1, 7, 21, 60, 150, 240, 330]` - 7 rungs
+<!-- verify:ladder_rungs=7 --> - over 1,710 <!-- verify:prompts=1710 --> prompts
 (`architecture.md` §7).
 
 Three choices that are all the same choice. Reviews and new cards get separate caps, because
 simulated over 400 days a single combined cap bound on 386 of them and left 547 of 700 prompts
-untouched — reviews compete with an endless intake and the queue never drains. `gone` drops two
+untouched - reviews compete with an endless intake and the queue never drains. `gone` drops two
 rungs, not to zero, because a lapse is not amnesia and resetting to day 1 is what makes these
 systems feel punitive. And the backlog count is never rendered, because seeing "37 due" is what
 kills them.
 
-**Rows:** 40 (Testing and contracts: pytest, property tests, OpenAPI contract tests, M10 —
+**Rows:** 40 (Testing and contracts: pytest, property tests, OpenAPI contract tests, M10 -
 `lib/review.test.mts` is that 400-day simulation, and `.github/workflows/ci.yml` runs it with the
 other three suites and `verify-docs.py`, so the simulation blocks a deploy rather than waiting to
 be remembered).
@@ -257,7 +257,7 @@ very next build regenerated the bundle *from the untouched sources* and reverted
 still said M13/12h against M23/17.0.
 
 **How it was caught.** Not by the guard that existed. `build-curriculum.py` already had a hard
-drift check for exactly this, and it never fired, because nothing had asked it to run — the
+drift check for exactly this, and it never fired, because nothing had asked it to run - the
 scripts were routing around the guard, not defeating it. It was found by an adversarial review
 agent verifying something else, and I reproduced the revert deliberately before fixing it
 (commit `aa18478`).
@@ -272,7 +272,7 @@ a scheduling question. This is the reason `verify-docs.py` exists at all (§2.6)
 ### 3.2 Three concurrent writes raced the branch ref and lost the one file the tab reads
 
 The first real scan fetched all 27 boards, computed the benchmark, and returned 502 having
-written `index.json`, `trend.json` and `history/2026-09-07.json` — and lost `benchmark.json`.
+written `index.json`, `trend.json` and `history/2026-09-07.json` - and lost `benchmark.json`.
 `Promise.all` over three `writeJson` calls made them race the branch ref; GitHub took whichever
 arrived first and rejected the rest with "is at &lt;sha&gt; but expected &lt;sha&gt;". Both shas
 in the error resolved to commits rather than blobs, which is what named the cause.
@@ -282,7 +282,7 @@ and therefore cannot race itself. The shape was safe in its original context and
 one.
 
 **The fix and its price.** Sequential writes, `index.json` first and alone because it is the only
-file that cannot be recomputed — benchmark, trend and insight are pure functions of it. A round
+file that cannot be recomputed - benchmark, trend and insight are pure functions of it. A round
 trip per file instead of one for all of them costs about a second on a scan that already spends a
 minute fetching boards. I quote it as a rate rather than a count because the file set grows:
 `insight.json` joined after this fix and made four writes five (commit `b6c1ef7`,
@@ -302,21 +302,21 @@ count: Databricks matches 97 of 870, giving a floor of 58, and a truncated fetch
 870 would have sailed through as healthy and been written to the index as truth.
 
 **How it was caught.** A spec-conformance pass that read the built code against the spec clause
-by clause — not a test, not a run. The same pass also found the entire output half of spec
+by clause - not a test, not a run. The same pass also found the entire output half of spec
 section 5 missing.
 
 **The fix.** `verifiedTotal` is stored on all 32 <!-- verify:boards=32 --> boards and the floor
 comes from it (`lib/market/fetch.ts:144`). Databricks' floor moves 58 → 522. The Decagon case
-that motivated the guard — 10 of 139 — now fails a floor of 83 by design rather than clearing 20
+that motivated the guard - 10 of 139 - now fails a floor of 83 by design rather than clearing 20
 by luck (commit `a9f082c`, `architecture.md` §5.2 rule 2).
 
 ### 3.4 The model quoted a plan row back as a percentage, and it shipped
 
 The Monday email's framing paragraph is forbidden from containing a number. The post-check built
-its allow-set from the prompt — and the prompt says "In 60 words or fewer", so `60` was
+its allow-set from the prompt - and the prompt says "In 60 words or fewer", so `60` was
 whitelisted forever. Narrowing the allow-set to the facts block was not enough either: coverage
-statements cite plan rows and hours (`row 59, "…" — 18h, month 14`), so every row number the
-block cites is a whitelisted token — 58 among them — and a row number reads as a percentage the
+statements cite plan rows and hours (`row 59, "…" - 18h, month 14`), so every row number the
+block cites is a whitelisted token - 58 among them - and a row number reads as a percentage the
 moment the model puts a `%` after it. **"Coverage sits at 58% this week" shipped under both
 versions.**
 
@@ -331,7 +331,7 @@ to flip when fixed. They flipped, and they are the regression guard now (commit 
 ### 3.5 I shipped a gap registry that was wrong about my own curriculum
 
 The Market tab's gap list came from three JD taxonomies I had written. Every claim was then
-challenged on three independent lenses — find-the-coverage, jd-evidence, worth-closing. **All 18
+challenged on three independent lenses - find-the-coverage, jd-evidence, worth-closing. **All 18
 claims were refuted.** No lens was the sole executioner: worth-closing refuted 18 of 18,
 find-the-coverage 13 of 18, jd-evidence 9 of 18, and five claims lost on all three
 (`docs/research/2026-09-07-gap-claims-challenge.md`).
@@ -340,10 +340,10 @@ The failure mode was uniform: the taxonomies grepped subtopic *names* and `learn
 of them read `subtopics[].resource`. So the plan taught the concept under different words and the
 audit could not see it.
 
-- My own strongest claim — "codify patterns and feed them back to Product/Research, 12 of 15 JDs,
-  weakest plan match" — is refuted by row 27 `subtopics[19]`, which runs the loop as a measured
+- My own strongest claim - "codify patterns and feed them back to Product/Research, 12 of 15 JDs,
+  weakest plan match" - is refuted by row 27 `subtopics[19]`, which runs the loop as a measured
   practice, plus row 59 and row 63 `subtopics[9]`, which gives the literal event schema.
-- Six claims asserted a zero that is not a zero — the same six `benchmark.ts` had been printing
+- Six claims asserted a zero that is not a zero - the same six `benchmark.ts` had been printing
   "No plan row covers this" about. "Distillation is not covered" against row 99 `subtopics[16]`,
   a named 15-minute subtopic with the full soft-teacher objective and a `KLDivLoss` resource.
 - Three frequencies were inflated by clones: knowledge-graphs 3/95 collapses to one distinct JD
@@ -352,7 +352,7 @@ audit could not see it.
 **What I did not do.** I did not manufacture a survivor to justify the exercise, and I changed no
 curriculum: no subtopic added, none evicted, no hours moved. Four registry entries were deleted
 as factually false, three rewritten from "absent" to "partial", three frequencies corrected, and
-13 <!-- verify:gaps=13 --> remain — kept as market signal, explicitly not as instructions to
+13 <!-- verify:gaps=13 --> remain - kept as market signal, explicitly not as instructions to
 change the plan (`data/market-skill-map.json` `_gapsNote`). `benchmark.ts` also stopped printing
 "No plan row covers this" unconditionally, because for six entries that string was a lie the tab
 was telling me.
@@ -380,7 +380,7 @@ the live corpus, reachable went 5 → 7 across 1 → 3 companies, in-India 7 →
 segments with reachable roles 1 → 3 (commit `155e26a`).
 
 **Bug two, which I introduced in that fix.** The tier came from the winning clone and the
-*location* came from the representative. So the tab rendered "Anthropic — Applied AI Architect,
+*location* came from the representative. So the tab rendered "Anthropic - Applied AI Architect,
 Tokyo, Japan" under `india-office`. The number was right and the evidence beside it was from a
 different posting.
 
@@ -391,21 +391,21 @@ location is not in India".
 
 **The general lesson, which I believe more than any of the specifics.** Bugs 3.2, 3.6-two and the
 CSS specificity defect in the same commit were all invisible to reading and obvious to running.
-The three that reading *did* catch — 3.3, 3.5 and 3.7 below — were each caught by an adversarial
+The three that reading *did* catch - 3.3, 3.5 and 3.7 below - were each caught by an adversarial
 pass with an explicit contract ("check the code against the spec clause by clause", "try to
 refute each claim", "audit this tool surface"), never by a general review.
 
 ### 3.7 The seam in §4's header, shipped as a silent off-by-one
 
 `get_syllabus` took only a 0-based `index`. Every market statement this system emits cites a
-1-based plan row — "NEXT - row 28, 'Production Python architecture…'". So a caller who followed
+1-based plan row - "NEXT - row 28, 'Production Python architecture…'". So a caller who followed
 its own recommendation into the syllabus got row 29's content: FastAPI in production, not
 production Python architecture. No error, no empty result, no way to notice from the response.
 
 **Why it is the worst kind.** The two numbers are both small integers naming a plan topic, and
 the wrong one returns a plausible topic. Nothing about the output says which base it assumed.
 
-**The fix.** Both parameters are explicit — `row` (1-based) and `index` (row − 1) — and every
+**The fix.** Both parameters are explicit - `row` (1-based) and `index` (row − 1) - and every
 market tool returns `row` and `syllabus_index` together, so the caller never has to infer a base
 (commit `88a619c`). §4's header exists to state the same seam in prose.
 
@@ -414,7 +414,7 @@ market tool returns `row` and `syllabus_index` together, so the caller never has
 - **I invented a failure mode the SDK did not have.** `app/api/sandbox/route.ts` pre-flighted
   `VERCEL_OIDC_TOKEN || VERCEL_TOKEN` and 503'd if neither was set. The docs promise only that
   OIDC is handled automatically in production, not that it surfaces under that variable name, and
-  the SDK also accepts team/project/token credentials — so the guard could have 503'd a
+  the SDK also accepts team/project/token credentials - so the guard could have 503'd a
   deployment that would have authenticated fine. Removed; the SDK's own error surfaces, with a
   hint appended when it looks auth-shaped (commit `20d75b7`).
 - **A `git add -A` swept 283 lines of unrelated work into a commit whose message describes only
@@ -427,7 +427,7 @@ market tool returns `row` and `syllabus_index` together, so the caller never has
 
 Which rows this platform is evidence for. Row numbers and titles are 1-based `Plan` rows from
 `data/workbook.json`; row N is `Plan[N]` and curriculum topic `N-1` (`architecture.md` §4.1).
-That seam is not decorative — getting it wrong is §3.7.
+That seam is not decorative - getting it wrong is §3.7.
 
 Titles and months here are copied verbatim from `Plan[N][2]` and `Plan[N][1]`, not paraphrased,
 because this is the table I read a row number off before saying it out loud. The abbreviated
@@ -441,13 +441,13 @@ glosses in §2 are abbreviations of these.
 | 25 | M6 | Incident response and postmortems | the lost-`benchmark.json` write race, diagnosed from the sha in the error (§3.2) |
 | 27 | M6 | Supporting a deployment you cannot log into: preflight checks, support bundles, remote diagnosis | per-board failure isolation, `ok:false` rather than skip; the truncation guard (§3.3) |
 | 30 | M7 | Auth: OAuth2, OIDC, JWT, RBAC, multi-tenant claims | the sandbox authenticating by OIDC; the MCP bearer check, timing-safe and fail-closed (§2.1, §2.7) |
-| 34 | M8 | Redis: caching, rate limiting, idempotency, streams | the login limiter and the MCP limiter — see the caveat in §5 |
-| 35 | M8 | Real-time transports: SSE, WebSockets, streaming at scale | the sandbox's NDJSON stream — partial, see §5 |
+| 34 | M8 | Redis: caching, rate limiting, idempotency, streams | the login limiter and the MCP limiter - see the caveat in §5 |
+| 35 | M8 | Real-time transports: SSE, WebSockets, streaming at scale | the sandbox's NDJSON stream - partial, see §5 |
 | 38 | M9 | Entity resolution and record linkage: blocking, fuzzy and probabilistic matching, survivorship | `dedupeKey` and clone groups; 750 stored records → 189 core on the 2026-09-08 scan (§2.3, §3.6) |
 | 40 | M10 | Testing and contracts: pytest, property tests, OpenAPI contract tests | 4 test files, 3 <!-- verify:market_tests=3 --> of them under `lib/market/`, all four run by CI; the 400-day scheduler simulation (§2.8) |
 | 44 | M10 | Designing Data-Intensive Applications and Kleppmann's lectures | read-whole/write-whole with a sha; lost updates; `synced:false` ≠ empty (§2.5) |
 | 51 | M12 | Prompt engineering as code: versioning, regression sets, structured outputs | the digit post-check, written as characterization tests (§3.4) |
-| 52 | M12 | Tool use, structured outputs and MCP servers | `mcp/server.js` — 18 tools, bearer auth, narrow schemas, audit trail (§2.7); the `get_syllabus` base error (§3.7) |
+| 52 | M12 | Tool use, structured outputs and MCP servers | `mcp/server.js` - 18 tools, bearer auth, narrow schemas, audit trail (§2.7); the `get_syllabus` base error (§3.7) |
 | 56 | M13 | Guardrails, prompt injection, red-teaming | confining the model to interpretation; dropping any paragraph containing a digit; the `read_ask_report` traversal (§2.2, §2.7, §3.4) |
 | 59 | M14 | Evals as infrastructure: eval sets, LLM-as-judge, human review, CI gates | `benchmark.ts` and `insight.ts` as pure functions, exercised by tests instead of by a 47 MB live scan (§2.2) |
 | 63 | M15 | Drift, feedback loops, registries, rollout | week-over-week movement as the reason extraction must be deterministic; `trend.json`; the drift checks in build and docs (§2.2, §2.6) |
@@ -455,9 +455,9 @@ glosses in §2 are abbreviations of these.
 | 74 | M17 | Engagement documents: site survey, PRD-lite, SOW, ADRs, design docs, runbooks | this four-document set, and the checker that keeps it true (§2.6) |
 | 75 | M17 | Demos, executive communication, defending trade-offs | this file; the statement-vs-table scope error is the clearest trade-off story in it (§2.4) |
 | 76 | M17 | Technical writing and public write-ups | `docs/research/` and the commit messages that carry the reasoning (§3 throughout) |
-| 82 | M19 | Resume defence: every line | §3 is the rehearsal — "what broke, what you changed, what you'd do differently" |
-| 91 | M9 | Target list: 40 companies, referrals, warm intros | the scan mechanizes the target-list half — 23 companies with core reqs on the 2026-09-08 scan — and nothing of the referral half (§2.3) |
-| 92 | M19 | Application pipeline: apply in waves, run three or four loops in parallel | the five reach tiers, and the roles takeable without leaving India — 11 on the 2026-09-08 scan (§3.6) |
+| 82 | M19 | Resume defence: every line | §3 is the rehearsal - "what broke, what you changed, what you'd do differently" |
+| 91 | M9 | Target list: 40 companies, referrals, warm intros | the scan mechanizes the target-list half - 23 companies with core reqs on the 2026-09-08 scan - and nothing of the referral half (§2.3) |
+| 92 | M19 | Application pipeline: apply in waves, run three or four loops in parallel | the five reach tiers, and the roles takeable without leaving India - 11 on the 2026-09-08 scan (§3.6) |
 | 104 | M20 | Model evaluation: cross-validation, data leakage, metric choice, calibration | core-vs-adjacent denominators; both reachability denominators reported, never one (§2.3) |
 
 ---
@@ -468,7 +468,7 @@ The honest half, and the reason the platform computes readiness the way it does.
 
 **None of these rows are done.** Column 15 of `data/workbook.json` holds
 117 <!-- verify:active_rows=117 --> `Not started` and 2 <!-- verify:skipped_rows=2 --> `Skipped`
-(`architecture.md` §4.1). Readiness on the 2026-09-08 scan is **0%** — 0 of 490 share points, 0 of
+(`architecture.md` §4.1). Readiness on the 2026-09-08 scan is **0%** - 0 of 490 share points, 0 of
 34 skills cleared, from 2 matched progress events (`reports/market/insight.json`). That is the
 expected reading at month one of 23, not a failure, and it is why the Decide zone leads with the
 ranked marginal table rather than with the headline percentage.
@@ -480,7 +480,7 @@ I built the thing that measures me; it still says zero. That is the design worki
 Three rows in the map above are only partially evidenced, and I would say so before being asked:
 
 - **Row 34 (Redis).** The login limiter is a `Map` in one serverless instance's memory and resets
-  on cold start — best-effort by construction (`architecture.md` §3.1). The MCP limiter is
+  on cold start - best-effort by construction (`architecture.md` §3.1). The MCP limiter is
   in-process too. The row's deliverable is a token-bucket limiter with idempotency keys and a
   stated position on eviction and persistence. This system has the *problem*; it does not have
   the row's answer to it.
@@ -491,8 +491,8 @@ Three rows in the map above are only partially evidenced, and I would say so bef
   The row asks for 200 labelled examples, per-class accuracy and a CI gate. The habit is right;
   the artifact is not built.
 
-And one thing the whole platform does not touch: tracks M, N and O — 26 rows of mathematics, ML
-systems and deep learning — are 335h and 21% of the 1,588 <!-- verify:hours=1,588 --> active
+And one thing the whole platform does not touch: tracks M, N and O - 26 rows of mathematics, ML
+systems and deep learning - are 335h and 21% of the 1,588 <!-- verify:hours=1,588 --> active
 hours, and the benchmark's own over-investment section flags them against measured JD frequency
 (`reports/market/benchmark.json`, 2026-09-08 scan). Those three figures come from the workbook
 rather than the scan, so unlike the market counts they move only when I re-baseline the plan. The
@@ -512,21 +512,21 @@ total is `ok:false`, not a small week. A digit in a model paragraph drops the pa
 never enters a core percentage. And a number in these docs that stops matching its source fails
 `verify-docs.py`.
 
-**"Tell me about something you got wrong."** §3.5 — I shipped a gap registry that was confidently
+**"Tell me about something you got wrong."** §3.5 - I shipped a gap registry that was confidently
 wrong about my own curriculum, and the cost was not a bad pixel, it was a bad study decision. It
 was caught by an adversarial pass with an explicit contract to refute each claim, and the fix
 deleted my own strongest finding.
 
 **"Why is there no database?"** Because the state is small, must survive a redeploy, must be
 readable by a second process on a different host, and benefits enormously from being diffable in
-review — every scan's numbers arrive as a commit I can read. The cost is real and named: writes
+review - every scan's numbers arrive as a commit I can read. The cost is real and named: writes
 are commits on one branch, so they must be sequential (§3.2), and `reports/progress` GET is an
 N+1 by design (`architecture.md` §4.6).
 
 **"What breaks first if this grows?"** The read-whole/write-whole shape. `reports/market/index.json`
 is 439 KB at 750 stored requisition records on the 2026-09-08 scan; `MAX_REQS` is 3,000
 (`lib/market/store.ts`, `architecture.md` §5.1). The JD body is never stored, which is what keeps
-that file near 500 KB instead of ~40 MB — and that decision is load-bearing, not incidental
+that file near 500 KB instead of ~40 MB - and that decision is load-bearing, not incidental
 (`architecture.md` §5.2 rule 5).
 
 ---

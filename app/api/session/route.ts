@@ -3,7 +3,7 @@ import { applyMemory, readMemory, writeMemory } from "@/lib/companion/memory";
 import { validateSession, writeSession } from "@/lib/companion/session";
 
 /**
- * POST /api/session — record that a study session happened.
+ * POST /api/session - record that a study session happened.
  *
  * Deliberately narrow. It writes a session file and updates the companion's digest, and it does
  * NOT touch progress: marking a row goes through /api/progress, which already has the validation
@@ -12,7 +12,7 @@ import { validateSession, writeSession } from "@/lib/companion/session";
  * that wrong, and the second is the one nobody re-reads.
  *
  * The gate in `proxy.ts` covers this path like every other /api/ route: no session cookie, 401
- * JSON. Nothing extra is needed here and nothing extra should be added — an auth check in a
+ * JSON. Nothing extra is needed here and nothing extra should be added - an auth check in a
  * route body is a second answer to a question this app answers in one file.
  */
 export async function POST(request: Request) {

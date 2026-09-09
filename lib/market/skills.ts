@@ -1,5 +1,5 @@
 /**
- * Job-description text to skill ids. Pure — no network, no filesystem, no clock. The same
+ * Job-description text to skill ids. Pure - no network, no filesystem, no clock. The same
  * text and the same config always produce the same ids.
  *
  * The determinism is the feature, not an implementation detail. The spec rejects
@@ -72,7 +72,7 @@ function wordEnd(body: string, from: number) {
  * term `capabilit` are deliberate stems, and the `evals` exclude list ("performance
  * evaluation", "candidate evaluation", "annual evaluation", "evaluation period") only guards
  * anything at all if the include "eval" reaches into "evaluation". Requiring a trailing word
- * boundary would silently disable both halves of that design — the stems would never fire and
+ * boundary would silently disable both halves of that design - the stems would never fire and
  * the exclusions would have nothing to exclude.
  */
 function hits(body: string, phrase: string): number[] {
@@ -100,7 +100,7 @@ function unescapeEntities(html: string) {
       const hex = body[1] === "x" || body[1] === "X";
       const code = hex ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
       // Lone surrogates make String.fromCodePoint throw, and this function is on the path of
-      // every Greenhouse body in the corpus — one malformed entity must not fail a board.
+      // every Greenhouse body in the corpus - one malformed entity must not fail a board.
       if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return whole;
       return String.fromCodePoint(code);
     }
@@ -150,7 +150,7 @@ const AUTO_SHARE = 0.6;
 const MIN_CORPUS_FOR_AUTO = 5;
 /**
  * If the automatic rule wants to remove more than this share of one posting's long lines, the
- * corpus is near-identical rather than boilerplate-heavy — LangChain ships 15 "Deployed
+ * corpus is near-identical rather than boilerplate-heavy - LangChain ships 15 "Deployed
  * Engineer (City)" clones with the same body. The caller is supposed to hand over the
  * dedupe-collapsed corpus; if it did not, dropping the static blocks only understates that
  * company's skills, whereas dropping the shared body zeroes them.
@@ -169,7 +169,7 @@ function frequentLines(corpus: readonly string[]): Set<string> {
   if (cached) return cached;
   const counts = new Map<string, number>();
   for (const doc of corpus) {
-    // per posting, presence not occurrence — a line repeated twice in one JD is not evidence
+    // per posting, presence not occurrence - a line repeated twice in one JD is not evidence
     const seen = new Set<string>();
     for (const line of doc.split("\n")) {
       const key = normalize(line);
@@ -190,7 +190,7 @@ function frequentLines(corpus: readonly string[]): Set<string> {
  *  1. The per-company blocks in market-sources.json (Anthropic's "reliable, interpretable,
  *     and steerable AI systems", Applied Intuition's "is powering the future of physical AI",
  *     the EEO paragraphs). The taxonomy work verified that leaving Anthropic's mission
- *     sentence in corrupts naive term counts — it puts "reliable" and "AI systems" into every
+ *     sentence in corrupts naive term counts - it puts "reliable" and "AI systems" into every
  *     one of that company's reqs.
  *  2. Automatic: any normalized line of >= 40 chars present in >= 60% of that company's
  *     matched postings. This is what keeps the stripper working when a company rewrites its
@@ -200,7 +200,7 @@ function frequentLines(corpus: readonly string[]): Set<string> {
  * leaving the remainder of an EEO paragraph leaves the noise it was there to remove.
  *
  * `corpus` must be that company's matched postings in the same plain-text form as `text` (i.e.
- * already through htmlToText), deduped, and must not contain another company's postings — a
+ * already through htmlToText), deduped, and must not contain another company's postings - a
  * shared EEO paragraph counted across companies would be dropped from all of them at once.
  * `company` is carried for symmetry with the rest of lib/market and for call-site legibility;
  * the corpus, not the name, is what scopes the rule.
@@ -225,12 +225,12 @@ export function stripBoilerplate(text: string, company: string, corpus: string[]
 }
 
 const HEAD_MARKERS = ["what you'll do", "responsibilities", "you may be a good fit", "requirements", "qualifications", "about the role"].map(normalize);
-/** Boilerplate wherever it appears, heading-shaped or not — the EEO and comp blocks are long paragraphs, not headings. */
+/** Boilerplate wherever it appears, heading-shaped or not - the EEO and comp blocks are long paragraphs, not headings. */
 const TAIL_ANYWHERE = ["salary range", "equal opportunity", "we are an equal"].map(normalize);
 /**
  * Only when the line is heading-shaped. "benefits" and "compensation" appear inside real
  * requirement sentences, and cutting the body at the first one would silently drop everything
- * after it — an understated skill count that looks exactly like a successful parse.
+ * after it - an understated skill count that looks exactly like a successful parse.
  */
 const TAIL_HEADINGS = ["benefits", "compensation", "how we're different"].map(normalize);
 const HEADING_MAX = 80;
@@ -277,7 +277,7 @@ function excludedRanges(body: string, phrases: string[]): [number, number][] {
 }
 
 /**
- * Text in, skill ids out. Boolean per requisition — presence, not occurrence count, because
+ * Text in, skill ids out. Boolean per requisition - presence, not occurrence count, because
  * a JD that says "agent" nine times is not nine times more an agent job.
  *
  * The exclusion is per hit, not per document: "performance evaluation" voids the hit inside
@@ -302,7 +302,7 @@ export function matchSkills(text: string, skillMap: { skills: SkillDef[] }): str
 
     // Distinct SURFACE forms, not distinct include entries. Counting entries would let one
     // occurrence of "agents" satisfy minDistinctForms: 2 by matching both "agent" and
-    // "agents" — precisely the lone-mention case the guard exists to reject.
+    // "agents" - precisely the lone-mention case the guard exists to reject.
     const forms = new Set<string>();
     for (const raw of skill.include) {
       const phrase = normalize(raw);

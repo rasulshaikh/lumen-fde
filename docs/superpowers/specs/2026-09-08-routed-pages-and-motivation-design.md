@@ -1,4 +1,4 @@
-# Routed pages, Quaere everywhere, and a motivation layer — design
+# Routed pages, Quaere everywhere, and a motivation layer - design
 
 Date: 2026-09-08
 Status: approved, ready for implementation
@@ -6,7 +6,7 @@ Status: approved, ready for implementation
 ## The problem
 
 `app/page.tsx` is 699 lines holding all ten sections in one route, with **zero routing hooks**.
-Every section mounts in the same component, so the page grows downward without end — which is
+Every section mounts in the same component, so the page grows downward without end - which is
 what "the pages are getting truncated" describes. Nothing is linkable: there is no URL for the
 Market tab, no bookmark for Curriculum, and Quaere cannot point at a view.
 
@@ -16,24 +16,24 @@ abandonment rather than lack of information.
 
 ## Scope: three projects, in this order
 
-1. **Routing** — mechanical, high certainty, unblocks the rest.
-2. **Quaere everywhere** — needs the shared layout from 1.
-3. **Motivation layer** — needs somewhere to live, and benefits from 1 and 2.
+1. **Routing** - mechanical, high certainty, unblocks the rest.
+2. **Quaere everywhere** - needs the shared layout from 1.
+3. **Motivation layer** - needs somewhere to live, and benefits from 1 and 2.
 
 Single user. But per the "don't paint into a corner" decision, everything user-specific moves into
 one config file rather than staying scattered: the GitHub repo, the location used for reachability,
 the name, the weekly-hours target. This is not multi-user and does not pretend to be; it just
 means the day it might be, the values are in one place.
 
-## 1. Routing — extract, then route
+## 1. Routing - extract, then route
 
 **Two mechanical steps, each independently verifiable.** Not a big-bang split: 699 lines moving at
 once with no UI tests is how a regression ships, and this repo's tests cover only the data layer.
 
-**Step 1 — extract.** Each section's component moves out of `page.tsx` into `components/`, a pure
+**Step 1 - extract.** Each section's component moves out of `page.tsx` into `components/`, a pure
 move with no behaviour change. Verifiable because the rendered output must be byte-identical.
 
-**Step 2 — route.** A route per section importing its component, under a shared layout:
+**Step 2 - route.** A route per section importing its component, under a shared layout:
 
 ```
 app/(app)/layout.tsx     nav + Quaere dock, present on every route
@@ -47,7 +47,7 @@ data/profile.json        repo, location, name, weekly target
 Ten routes, each deep-linkable, each small enough to hold in your head. The secondary benefit is
 real: `Market` alone is a few hundred lines inside a file that also renders nine other things.
 
-**Constraints.** `proxy.ts` gates `/api/cron/` and password-gates everything else — the new routes
+**Constraints.** `proxy.ts` gates `/api/cron/` and password-gates everything else - the new routes
 inherit that unchanged. Client state that currently lives in `page.tsx` (`statuses`, hydration
 state) moves to the layout or a provider, because the progress write-guard depends on knowing
 whether hydration has settled, and that guard must survive the migration intact.
@@ -71,13 +71,13 @@ beside prose.
 Four mechanics, each grounded in data that already exists. Nothing here invents a metric.
 
 **Evidence.** Completing a row reports what it bought, not that it was completed: readiness before
-and after, the skill it cleared, that skill's share of core requisitions, and — when one exists — a
+and after, the skill it cleared, that skill's share of core requisitions, and - when one exists - a
 named reachable role that asks for it. Every part is already computed by `lib/market/insight.ts`;
 the marginal table is exactly this calculation run forward.
 
 **Streaks, built for recovery.** No chain, and no broken-streak state anywhere in the UI.
 
-- "Studied 14 of the last 21 days" — a rate that dips rather than resetting.
+- "Studied 14 of the last 21 days" - a rate that dips rather than resetting.
 - Longest run, which only ever increases.
 - Returning after a gap reads "back after 5 days; longest run 12", never a zero.
 
@@ -86,7 +86,7 @@ displayed as broken is a plausible quit trigger on a 23-month plan, which is the
 layer exists to prevent.
 
 **Shipped artifacts.** The curriculum carries 119 `proofOfWork` deliverables and **nothing records
-them** — the system cannot currently answer "what have I built." Add recording (what, when, a URL)
+them** - the system cannot currently answer "what have I built." Add recording (what, when, a URL)
 and a wall that displays them. This is the closest thing here to a real product feature, and it
 compounds into the portfolio used at interview.
 

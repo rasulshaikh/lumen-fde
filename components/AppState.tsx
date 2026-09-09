@@ -8,7 +8,7 @@ import { SyllabusView } from "./SyllabusView";
  * The state that outlives a route change.
  *
  * Before the split every one of these lived in `app/page.tsx`, which was the only mounted
- * component — so "survives navigation" was free. It is not free any more, and the split is only
+ * component - so "survives navigation" was free. It is not free any more, and the split is only
  * safe because this provider sits in `app/(app)/layout.tsx`, above the route slot: React keeps a
  * layout mounted while the segment below it changes, so nothing here remounts or refetches when
  * you move between the ten pages.
@@ -49,7 +49,7 @@ type AppState = {
    * The cached syllabus for one row, or null if it has not been fetched yet.
    *
    * `renderSyllabus` returns JSX, which is the wrong shape for a caller that needs the part
-   * NAMES as data — the daily brief lists what today's topic is actually made of. Reading the
+   * NAMES as data - the daily brief lists what today's topic is actually made of. Reading the
    * same cache rather than adding a second one is the point: the merged syllabus is ~3.7MB and
    * is deliberately fetched per topic and kept, so /plan, /curriculum and the brief share one
    * copy and one request.
@@ -97,13 +97,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // statuses starts empty and hydrates asynchronously below, so between first paint and
   // hydration every select shows the workbook baseline ("Not started" on 117 rows) rather
   // than recorded state. Touching one in that window used to POST a durable commit that
-  // reverted real progress — that is how a not_started event landed on "Shell mastery and
+  // reverted real progress - that is how a not_started event landed on "Shell mastery and
   // scripting" two days after it was marked in progress. No write is allowed until the
   // fetch settles, and on failure it stays blocked: the baseline is known-possibly-stale,
   // and a read-only dashboard is recoverable by refreshing, while a wrong commit is not.
   //
   // Routing makes this stricter, not looser. If this pair lived in a route page it would
-  // return to "loading" on every navigation, and — far worse — the fetch would re-run per
+  // return to "loading" on every navigation, and - far worse - the fetch would re-run per
   // route, reopening the un-hydrated write window each time. It lives above the route slot
   // for that reason: one fetch per session, one settle, and the guard is never re-armed.
   const [statuses, setStatuses] = useState<Record<string, string>>({});
@@ -121,7 +121,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // Every POST here is a permanent commit in the user's repo, so it has to be a deliberate
   // change: refuse while the sync is unsettled or failed (the select is disabled then, but a
   // stale event handler or an autofill must not slip through), and skip a re-select of the
-  // value already shown — a no-op should write nothing, not another commit for readiness to
+  // value already shown - a no-op should write nothing, not another commit for readiness to
   // replay. Local state is only written on a real change, for the same reason.
   // The POST stays outside the state updater on purpose: React StrictMode invokes an updater
   // twice, and a durable commit is not something to run twice.
@@ -139,7 +139,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const setWeekly = useCallback((value: number) => { const v = Math.min(80, Math.max(1, Math.round(value) || 1)); setWeeklyHours(v); localStorage.setItem("lumen-weekly-hours", String(v)); }, []);
 
   // The applied theme is set by an inline script in layout.tsx before first paint, so this
-  // only mirrors it into React state for the button label — reading it here rather than
+  // only mirrors it into React state for the button label - reading it here rather than
   // recomputing avoids a flash of the wrong icon on hydration. It is provider state because a
   // per-route copy would re-read the DOM on every navigation for no gain.
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -156,7 +156,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   // The merged syllabus is ~3.7MB, so never fetch it whole: pull a tiny summary to label
   // collapsed rows, then one topic at a time as it is opened. Both caches are provider state
-  // because /plan and /curriculum render the same syllabus — refetching a topic because you
+  // because /plan and /curriculum render the same syllabus - refetching a topic because you
   // walked from one page to the other is exactly the regression routing invites.
   const [curriculum, setCurriculum] = useState<Record<string, Syllabus>>({});
   const [curriculumState, setCurriculumState] = useState<"idle" | "loading" | "error">("idle");
@@ -212,7 +212,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   // What the page you are standing on contributes to a question. /plan sets its visible rows
   // and its expanded topic here; every other route contributes nothing, and /api/ask falls back
-  // to "No topic filter is active." — which is honest, since the route already builds the
+  // to "No topic filter is active." - which is honest, since the route already builds the
   // complete 119-topic plan server-side and never trusts this for grounding.
   const pageContext = useRef<{ context: string; topicIndex: number | null }>({ context: "", topicIndex: null });
   const setPageContext = useCallback((context: string, topicIndex: number | null) => { pageContext.current = { context, topicIndex }; }, []);
@@ -223,7 +223,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
    * Two requests when `web` is on, and that is a platform constraint rather than a preference:
    * the search measures 27-39s, the model claims up to 55, and a Hobby function stops at 60. Run
    * as two calls each gets its own budget. `/api/external-brief` never throws for a failed
-   * search — it answers `{ok:false, items:[]}` — so a search that times out costs the results and
+   * search - it answers `{ok:false, items:[]}` - so a search that times out costs the results and
    * not the question, and `web:true` still reaches the route, which is what makes the answer say
    * the search did not come back rather than quietly answering without it.
    */
@@ -259,7 +259,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const done = planRows.filter((r) => of(r) === "Done").length;
     const skipped = planRows.filter((r) => of(r) === "Skipped").length;
     // Progress counted non-skipped topics (117 of 119) while every hours figure counted all
-    // 119, so the plan advertised 916h that included 26h you had already decided to skip —
+    // 119, so the plan advertised 916h that included 26h you had already decided to skip -
     // and inflated the timeline by 1.6 weeks. Scope is now one definition: active = not
     // skipped. The skipped amount is disclosed rather than silently dropped.
     const activeRows = planRows.filter((r) => of(r) !== "Skipped");
@@ -280,10 +280,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       // A track every one of whose topics is skipped is not a track with no work left; it is a
       // track that is not in the plan, and "0 topics 0h" reads as the former.
       .filter((t) => t.count > 0);
-    // The first topic that is neither done nor skipped, in plan order — the real "you are here".
+    // The first topic that is neither done nor skipped, in plan order - the real "you are here".
     const nextIndex = planRows.findIndex((x) => { const st = of(x); return st !== "Done" && st !== "Skipped"; });
     const nextRow = nextIndex >= 0 ? planRows[nextIndex] : null;
-    // Only topics actually in play enter the review schedule — drilling something never
+    // Only topics actually in play enter the review schedule - drilling something never
     // opened is noise. Indices are curriculum keys, which are plan-row indices.
     const startedTopics = planRows.map((r, i) => [i, of(r)] as const).filter(([, s]) => s === "In progress" || s === "Done").map(([i]) => i);
     return {
@@ -296,7 +296,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   // The Target calibration panel sat as one paragraph beside a 15-row track list, leaving
   // most of its column empty. The CompReality sheet already answers the question the panel
-  // asks — which markets are actually reachable, and when — so it carries a ranked digest
+  // asks - which markets are actually reachable, and when - so it carries a ranked digest
   // instead of blank space. Tier is read off the probability prose, so it stays in sync
   // with the sheet rather than being a second hardcoded opinion.
   const marketTiers = useMemo(() => compRows

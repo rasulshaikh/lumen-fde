@@ -5,7 +5,7 @@ import { PLAN_ROWS, readArtifacts, validateArtifact, writeArtifact } from "@/lib
  * The shipped-artifact endpoint: what has actually been built, against which plan row.
  *
  * Two methods and no others. There is no PUT, no PATCH and no DELETE, and their absence is the
- * contract rather than an omission — an artifact records that something happened on a date, so
+ * contract rather than an omission - an artifact records that something happened on a date, so
  * it is not a thing that can later be edited into having happened differently. Next answers
  * 405 for the rest, and `writeArtifact` sends no `sha`, so GitHub itself refuses an overwrite.
  *
@@ -21,7 +21,7 @@ import { PLAN_ROWS, readArtifacts, validateArtifact, writeArtifact } from "@/lib
  *   - GitHub did not answer  -> synced false, error set,  empty list
  *   - nothing built yet      -> synced true,  error null, empty list
  * The last is the honest cold start and it is a 200. An empty list on `synced: false` means
- * "we do not know", never "nothing has been built" — a UI that renders the two the same way is
+ * "we do not know", never "nothing has been built" - a UI that renders the two the same way is
  * reporting a network blip as an empty portfolio.
  *
  * `unreadable` is surfaced rather than swallowed: files sitting in reports/artifacts that do

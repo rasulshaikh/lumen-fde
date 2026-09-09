@@ -3,21 +3,21 @@
  *
  * Consistency over 23 months does not come from a reminder; it comes from a loop that closes.
  * A session that starts and ends with no trace leaves the reader relying on memory for the one
- * question the system should be able to answer — did I actually sit down this week, and what
+ * question the system should be able to answer - did I actually sit down this week, and what
  * came of it.
  *
  * ## Two decisions carried from the design, both with teeth
  *
  * **This module never writes progress.** It records a session and nothing else. Marking a row
  * happens through the existing `/api/progress` path the dashboard already uses, with its own
- * validation and its own hydration write-guard — the guard that exists because a browser session
+ * validation and its own hydration write-guard - the guard that exists because a browser session
  * once wrote `not_started` over `in_progress` on a real row. A second server-side writer to the
  * same append-only store would be a second place to get that wrong, and the second place is
  * always the one nobody re-reads.
  *
  * **The row is the join key, validated against the workbook, and the topic is derived.** Straight
  * from `lib/artifacts.ts`, which records why: `/api/progress` once accepted any `topic` string,
- * so a typo committed a permanent file that matched no plan row and was silently skipped — the
+ * so a typo committed a permanent file that matched no plan row and was silently skipped - the
  * event looked recorded and counted toward nothing. A session keyed on free text would fail the
  * same way and be just as invisible.
  *
@@ -58,7 +58,7 @@ export type SessionRecord = {
   topic: string;
   /** What the reader said they were going to do. May be empty. */
   intention: string;
-  /** What they said they learned. May be empty — a session that happened still counts. */
+  /** What they said they learned. May be empty - a session that happened still counts. */
   learned: string;
   /** Whole minutes, 0..MAX_MINUTES. */
   minutes: number;
@@ -79,7 +79,7 @@ const text = (value: unknown) => String(value ?? "").trim().slice(0, MAX_TEXT);
 
 export function validateSession(input: SessionInput, now: Date = new Date()): Validated {
   // Digits-only. `Number("")` is 0 and `Number(" ")` is 0, so a missing row would otherwise
-  // validate as row 0 and fail the range check for the wrong reason — or, one refactor later,
+  // validate as row 0 and fail the range check for the wrong reason - or, one refactor later,
   // pass it. The same parse artifacts.ts uses, for the same reason.
   const raw = String(input.row ?? "").trim();
   if (!/^\d+$/.test(raw)) return { ok: false, error: "row must be a plan row number." };
@@ -155,7 +155,7 @@ export async function writeSession(
       // No `sha`. Without it the contents API refuses to overwrite an existing path, which is
       // what makes this store append-only by protocol rather than by convention.
       body: JSON.stringify({
-        message: `session: row ${record.row} — ${record.topic}`,
+        message: `session: row ${record.row} - ${record.topic}`,
         content: Buffer.from(renderSession(record)).toString("base64"),
         branch,
       }),
@@ -175,7 +175,7 @@ export async function writeSession(
  * and how recently; the session bodies are the reader's own notes and pushing twenty of them into
  * a prompt would crowd out the plan without answering a question anyone asks.
  *
- * `synced: false` means "we do not know" — never "no sessions" — which is the rule every reader
+ * `synced: false` means "we do not know" - never "no sessions" - which is the rule every reader
  * in this codebase follows and the one that stops a GitHub outage becoming "you have not studied".
  */
 export async function readSessionSummary(): Promise<{ count: number; latest: string | null; synced: boolean }> {

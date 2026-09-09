@@ -7,7 +7,7 @@ const assessmentSets = [
 ];
 /**
  * `scope` replaces what used to be a literal on each set, and the worst of them was
- * "Current plan topics · shell · networking · systems" — a string that says *current*, is frozen,
+ * "Current plan topics · shell · networking · systems" - a string that says *current*, is frozen,
  * and would still have named shell and networking in month 20. That is the same defect as the
  * digest pinned to plan row 1 and the "9-month operating view" header: prose claiming to be
  * derived. This component read nothing at all before; it now takes what it asserts.

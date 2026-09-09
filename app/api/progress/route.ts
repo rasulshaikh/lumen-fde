@@ -6,7 +6,7 @@ function headers() { return { Authorization: `Bearer ${process.env.GITHUB_TOKEN}
 function slug(value: string) { return value.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase().slice(0, 60) || "topic"; }
 // The only four statuses the UI and readiness understand. POST used to accept any string, so a
 // typo from mcp/server.js's record_progress ("complete", "In Progres") committed a permanent
-// file that readiness silently skips — the event looks recorded and counts toward nothing.
+// file that readiness silently skips - the event looks recorded and counts toward nothing.
 // Both wire forms are accepted because the dashboard sends "in_progress" and callers hand-write
 // "in progress"; the body is stored verbatim so the file format and GET are unchanged.
 const STATUSES = new Set(["not_started", "in_progress", "done", "skipped"]);
@@ -17,7 +17,7 @@ export async function GET() {
     let files: { name: string; path: string; html_url?: string }[] = [];
     try { files = await github("reports/progress"); } catch (error) { if (!String(error).includes("Not Found")) throw error; }
     // Filenames start with an ISO stamp, so name order is chronological. GitHub returns
-    // them ascending, and slicing that kept the OLDEST 100 — meaning a topic's status
+    // them ascending, and slicing that kept the OLDEST 100 - meaning a topic's status
     // could never advance once it had 100 events. Take the newest, and return newest-first
     // so every consumer sees the current status before any older one.
     files.sort((a, b) => b.name.localeCompare(a.name));

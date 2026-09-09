@@ -1,4 +1,4 @@
-# Field notebook — a visual identity of Lumen's own
+# Field notebook - a visual identity of Lumen's own
 
 Date: 2026-09-08
 Status: approved, ready for implementation
@@ -8,7 +8,7 @@ Status: approved, ready for implementation
 `.impeccable.md` records the aesthetic as **Linear**, chosen from 74 candidates because Linear's
 system is built for dense planning tools. That was a defensible decision and it is why the app
 works. It is also why it does not feel like anything: it is a faithful implementation of someone
-else's system, down to Geist standing in for Linear's private faces — and Geist is one of the most
+else's system, down to Geist standing in for Linear's private faces - and Geist is one of the most
 recognisable "shipped in 2025" tells in circulation.
 
 Rasul asked for something distinctive, was shown the trade (Linear's density is genuinely
@@ -17,7 +17,7 @@ dense-data-proven; leaving it is real risk), and chose to leave it.
 ## The direction
 
 A **field notebook**: gridded, annotated, worked-in, honest about wear. This is not a metaphor
-bolted on — it is the direct expression of the brand line already in `.impeccable.md`:
+bolted on - it is the direct expression of the brand line already in `.impeccable.md`:
 
 > A well-made field notebook rather than an analytics product: warm, worked-in, honest about the
 > size of the task. **It never flatters.**
@@ -26,24 +26,24 @@ bolted on — it is the direct expression of the brand line already in `.impecca
 
 The single differentiating idea, and it earns its place by solving a real problem. Lumen shows 119
 rows and 2,236 subtopics, and Design Principle 4 says density is a feature. Ruled paper is
-*natively* dense — it is the one ground on which tight packing reads as correct rather than
+*natively* dense - it is the one ground on which tight packing reads as correct rather than
 cramped.
 
 It also resolves the surface-separation problem cleanly. On a ruled ground a panel is identified by
-**the grid interrupting**, exactly as Linear identifies one by its hairline — the same mechanism,
+**the grid interrupting**, exactly as Linear identifies one by its hairline - the same mechanism,
 differently expressed. That satisfies the disjunctive floor `.impeccable.md` already states:
 luminance ≥ 1.25 **or** a visibly present edge on every panel.
 
 ### Type
 
 Chosen by Impeccable's selection procedure, not by reflex. Brand words: **worked-in, exacting,
-unsentimental**. The reflex picks — Fraunces, IBM Plex Mono, Space Grotesk — are all on the banned
+unsentimental**. The reflex picks - Fraunces, IBM Plex Mono, Space Grotesk - are all on the banned
 list precisely because they are everyone's reflex, and were rejected.
 
 | role | face | why |
 |---|---|---|
 | display | **Bricolage Grotesque** | designed with intentional irregularity; *bricolage* means made from what is at hand, which is the field-notebook idea rendered as a typeface |
-| body / UI | **Atkinson Hyperlegible** | drawn for low-vision readers, so every letterform is disambiguated — the right instinct for a wall of dense rows |
+| body / UI | **Atkinson Hyperlegible** | drawn for low-vision readers, so every letterform is disambiguated - the right instinct for a wall of dense rows |
 | data | **Martian Mono** | a technical mono with actual character, for numbers and row references only |
 
 Mono is confined to data. Setting 2,236 subtopics in mono would be both fatiguing and, per
@@ -51,7 +51,7 @@ Impeccable, an AI tell in itself.
 
 ### Colour
 
-Warm near-black ground, warm off-white ink, and **one** accent — ochre — reserved for numbers that
+Warm near-black ground, warm off-white ink, and **one** accent - ochre - reserved for numbers that
 were *earned*: a readiness gain, a shipped artifact, a cleared skill. Never for chrome, never for
 decoration. Principle 3 already says colour encodes state; this narrows it further, so seeing ochre
 means something happened.
@@ -78,7 +78,7 @@ against the ground and must not compete with body text.** State the measured val
 
 ## The companion: `/design`
 
-A living style guide inside Lumen. Not a static page — it reads the same tokens the app uses, so
+A living style guide inside Lumen. Not a static page - it reads the same tokens the app uses, so
 it cannot drift:
 
 - every colour token with its measured contrast against the surfaces it is used on
@@ -94,7 +94,7 @@ It is a route like any other, under `app/(app)/design/`, and appears in `NAV`.
 
 ## Migration
 
-The visual language is centralised — `app/globals.css` holds the tokens and nearly all component
+The visual language is centralised - `app/globals.css` holds the tokens and nearly all component
 styles, and the ten sections are now separate components. So this is a token-and-type change plus a
 substrate, not a rewrite of every view.
 

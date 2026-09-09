@@ -4,7 +4,7 @@
  * benchmark.test.mts pins what the market asks for. This file pins what that is claimed to mean
  * for one candidate, and the failure mode is the same one and worse: every number here is a
  * *decision aid*. "You are 83% ready", "40% of this market is reachable from Pune", "aim at the
- * data-platform segment" — each is a sentence somebody acts on for a month, none of them throws
+ * data-platform segment" - each is a sentence somebody acts on for a month, none of them throws
  * when it is wrong, and all of them look identical whether the arithmetic underneath is right or
  * inverted. A readiness weighted by row count instead of market share still renders a tidy
  * percentage. An out-of-reach requisition leaking into the reachable denominator still renders a
@@ -17,14 +17,14 @@
  * two out-of-reach reqs, so if the reachable slice ever admits one of them the skill stops
  * reading 0% there. Neither guard can be satisfied by accident.
  *
- * Half the assertions run against the fixtures and half against the first real scan —
+ * Half the assertions run against the fixtures and half against the first real scan -
  * reports/market/{index,benchmark,trend}.json, 745 stored reqs, 189 distinct core across 23
- * companies — because "the tiers sum to the core count" is a claim about a corpus with 253
+ * companies - because "the tiers sum to the core count" is a claim about a corpus with 253
  * distinct location strings in it, not about eight strings a test author chose.
  *
  * The last section drives app/api/cron/market-scan/route.ts end to end through `GET`, because
- * the two properties the spec asks for there — the digit ban on Quaere's paragraph, and
- * insight.json being written LAST and sequentially — exist only in the route and are observable
+ * the two properties the spec asks for there - the digit ban on Quaere's paragraph, and
+ * insight.json being written LAST and sequentially - exist only in the route and are observable
  * only in the bytes handed to GitHub.
  */
 import { readFileSync } from "node:fs";
@@ -62,8 +62,8 @@ const EARLIER = "2026-09-01";
 /**
  * The two plan rows the readiness assertions turn on, verbatim from data/workbook.json.
  *
- * Both carry exactly one skill in data/market-skill-map.json — row 28 carries `python` and row
- * 65 carries `latency-cost` — which is what makes them the pair that separates the two possible
+ * Both carry exactly one skill in data/market-skill-map.json - row 28 carries `python` and row
+ * 65 carries `latency-cost` - which is what makes them the pair that separates the two possible
  * readiness formulas. Rows 52, 53, 54 and 59 each carry two to four skills and would blur it.
  */
 const ROW_PYTHON = { row: 28, topic: "Production Python architecture: domain models, repositories, DI, packaging" };
@@ -91,7 +91,7 @@ const FIXTURES: Fix[] = [
   { company: "Cohere", title: "Forward Deployed Engineer", location: "Remote - Singapore", skills: ["python"], tier: "emea-apac-remote", why: "APAC city, remote" },
 
   // --- takeable, but not today: a domestic move. Deliberately outside REACHABLE_TIERS.
-  { company: "Databricks", title: "Delivery Solutions Architect", location: "Bengaluru, India", skills: ["python"], tier: "india-office", why: "an Indian city, on-site — reachable this quarter, not today" },
+  { company: "Databricks", title: "Delivery Solutions Architect", location: "Bengaluru, India", skills: ["python"], tier: "india-office", why: "an Indian city, on-site - reachable this quarter, not today" },
 
   // --- the residual: on-site elsewhere, nothing stated either way. 94% of the live corpus.
   { company: "Anthropic", title: "Applied AI Architect", location: "San Francisco, CA", skills: ["python"], tier: "relocate-sponsor", why: "on-site, no blocker in the body" },
@@ -99,11 +99,11 @@ const FIXTURES: Fix[] = [
   { company: "Newco", title: "Forward Deployed Engineer", location: "London", skills: ["python"], tier: "relocate-sponsor", why: "absent from SEGMENT_BY_COMPANY: must land in `other`, not vanish" },
 
   // --- out of reach, by the two different routes, and the ONLY two reqs carrying latency-cost.
-  { company: "Baseten", title: "Customer Engineer", location: "Remote - Texas", skills: ["python", "latency-cost"], tier: "out-of-reach", why: "remote with a region that excludes India — decided by location alone" },
+  { company: "Baseten", title: "Customer Engineer", location: "Remote - Texas", skills: ["python", "latency-cost"], tier: "out-of-reach", why: "remote with a region that excludes India - decided by location alone" },
   {
     company: "Palantir", title: "Forward Deployed Software Engineer", location: "Remote - India",
     skills: ["python", "latency-cost"], reach: "out-of-reach", firstSeen: DAY, tier: "out-of-reach",
-    why: "THE guard: the location says India and the stored scan-time tier says the body carried a US-person clause. The stored tier is the only one that ever read the body, so it must win — and this req must not flag as a new India-remote role either",
+    why: "THE guard: the location says India and the stored scan-time tier says the body carried a US-person clause. The stored tier is the only one that ever read the body, so it must win - and this req must not flag as a new India-remote role either",
   },
 ];
 
@@ -118,7 +118,7 @@ const EXCLUDED: Fix[] = [
   // req would silently drop out of the reachable slice. That is the failure this pair caught.
   { company: "Sierra", title: "Agent Deployment Engineer (London)", location: "London", skills: ["python"], firstSeen: DAY, tier: "relocate-sponsor", why: "city clone: same dedupeKey as the Sierra req above, later firstSeen, so it collapses into it" },
   { company: "Sierra", title: "Agent Deployment Engineer (Berlin)", location: "Berlin", skills: ["python"], firstSeen: DAY, tier: "relocate-sponsor", why: "second clone of the same requisition" },
-  { company: "Snowflake", title: "Forward Deployed Engineer, Pending", location: "Remote - India", skills: null, tier: "india-remote", why: "failed stage-2 JD fetch, retried next run — counting it would deflate every skill" },
+  { company: "Snowflake", title: "Forward Deployed Engineer, Pending", location: "Remote - India", skills: null, tier: "india-remote", why: "failed stage-2 JD fetch, retried next run - counting it would deflate every skill" },
   { company: "Snowflake", title: "Forward Deployed Engineer, Closed", location: "Remote - India", skills: ["python"], missingSince: "2026-09-05", tier: "india-remote", why: "closed, inside its 14-day decay window" },
 ];
 
@@ -158,7 +158,7 @@ const insightOf = (progress: Progress | null, trend: TrendPoint[] | null, wb: Wo
 const noProgress = insightOf(null, null);
 
 // ---------------------------------------------------------------------------
-console.log("\n  readiness — weighted by market share, and read from progress events");
+console.log("\n  readiness - weighted by market share, and read from progress events");
 // ---------------------------------------------------------------------------
 
 console.log(`\n  ${noProgress.readiness.statement.split("\n")[0]}`);
@@ -173,7 +173,7 @@ ck("python is on every fixture req and latency-cost on two", share("python") ===
   `(python ${share("python")}%, latency-cost ${share("latency-cost")}%)`);
 // The count beside the denominator is the skills with DEMAND, not the size of the skill map:
 // only `python` and `latency-cost` are on a fixture req, so the other 32 mapped skills sit at 0%
-// share and are no part of what "ready" means. Both halves matter — 120 share points is the
+// share and are no part of what "ready" means. Both halves matter - 120 share points is the
 // weighted denominator, 2 is the goal it is spread across.
 ck("the denominator is the summed market share, not the skill count",
   noProgress.readiness.totalWeight === 120 && noProgress.readiness.skillCount === 2 && skillMap.skills.length > 2,
@@ -183,7 +183,7 @@ ck("the denominator is the summed market share, not the skill count",
  * The one assertion this whole file is built around.
  *
  * Both runs clear exactly ONE plan row and exactly ONE skill. A readiness counted by rows, or by
- * skills, reports the identical number for the two — and it would be a plausible number, which
+ * skills, reports the identical number for the two - and it would be a plausible number, which
  * is why nothing downstream would ever catch it. Weighted by market share they are 83% and 17%,
  * because clearing the skill 10 of 10 reqs ask for is not the same achievement as clearing the
  * one 2 of them ask for.
@@ -194,7 +194,7 @@ ck("clearing the 100% skill reads 83%", clearedPython.readiness.pct === 83 && cl
   `(${clearedPython.readiness.evidencedWeight} of 120 share points)`);
 ck("clearing the 20% skill reads 17%", clearedLatency.readiness.pct === 17 && clearedLatency.readiness.evidencedWeight === 20,
   `(${clearedLatency.readiness.evidencedWeight} of 120 share points)`);
-ck("one row cleared is not one row cleared — the weight is the whole point",
+ck("one row cleared is not one row cleared - the weight is the whole point",
   clearedPython.readiness.pct !== clearedLatency.readiness.pct
     && clearedPython.readiness.evidenced.length === clearedLatency.readiness.evidenced.length,
   `(${clearedPython.readiness.pct}% vs ${clearedLatency.readiness.pct}%, one skill each)`);
@@ -202,7 +202,7 @@ ck("one row cleared is not one row cleared — the weight is the whole point",
 /**
  * Progress, not the workbook column.
  *
- * data/workbook.json column 15 holds 117 "Not started" and 2 "Skipped" and no other value — it
+ * data/workbook.json column 15 holds 117 "Not started" and 2 "Skipped" and no other value - it
  * is the committed baseline and nothing ever writes to it. A readiness derived from it is
  * therefore pinned at 0% for the life of the plan and reads as a bug rather than as month one.
  * Both directions are pinned: a real event moves readiness off zero against that baseline, and a
@@ -226,7 +226,7 @@ ck("...nor is 'skipped', which is a decision not to acquire the skill",
   insightOf(progressOf(event(ROW_PYTHON.topic, "skipped", "2026-09-05")), null).readiness.pct === 0);
 
 // ---------------------------------------------------------------------------
-console.log("\n  the marginal table — ranked by gain, and a cleared row leaves it");
+console.log("\n  the marginal table - ranked by gain, and a cleared row leaves it");
 // ---------------------------------------------------------------------------
 
 console.log(`    ${noProgress.readiness.marginal[0].statement.split("\n")[0]}`);
@@ -252,8 +252,8 @@ ck("every marginal row resolves to a real workbook topic",
  *
  * This is the defect the fixtures reproduce exactly: on the live corpus `async-comms` (row 80)
  * and `llm-as-judge` (row 59) both sit at 0% share, so row 80 was emitted as a ranked next move
- * whose only skill was one no requisition mentions and whose gain was +0 — a "study this" row
- * made entirely of absent demand — while row 59 listed llm-as-judge beside evals and implied it
+ * whose only skill was one no requisition mentions and whose gain was +0 - a "study this" row
+ * made entirely of absent demand - while row 59 listed llm-as-judge beside evals and implied it
  * clears two things the market pays for. Here 32 of the 34 mapped skills are at 0%, so the same
  * two failures are available on every one of them and the assertions below are not narrow.
  *
@@ -302,7 +302,7 @@ ck("...and it is not credited as a skill cleared either",
   "(a 0% skill in `evidenced` would inflate the cleared count and could raise a readiness flag worth 0 points)");
 
 // ---------------------------------------------------------------------------
-console.log("\n  reachability — five exclusive tiers, and what an out-of-reach req may not touch");
+console.log("\n  reachability - five exclusive tiers, and what an out-of-reach req may not touch");
 // ---------------------------------------------------------------------------
 
 console.log(`    ${noProgress.reachability.statement.split("\n")[0]}`);
@@ -336,7 +336,7 @@ ck("an Indian office is NOT counted as employable today",
  *
  * `latency-cost` is carried by exactly the two out-of-reach requisitions and by nothing else. It
  * is 20% of the whole core market and must be 0% of the reachable slice. If either req entered
- * the reachable denominator or the reachable numerator, this number stops being 0 — and 20% of
+ * the reachable denominator or the reachable numerator, this number stops being 0 - and 20% of
  * a market you cannot take, printed under a column headed "the market you can take", is the
  * single most expensive wrong number this file can produce, because it is what a study decision
  * is made from.
@@ -367,8 +367,8 @@ ck("both columns are always reported, and their difference with them",
  *
  * Palantir's second fixture req is posted to "Remote - India" and its stored `reach` says the
  * body carried a US-person clause. reach.ts's body pass only ever moves a req INTO
- * `out-of-reach`, so re-deriving the tier here from `location` — which is what the tab would do
- * if `tierOf` preferred the cheap answer — promotes it straight back into the reachable slice.
+ * `out-of-reach`, so re-deriving the tier here from `location` - which is what the tab would do
+ * if `tierOf` preferred the cheap answer - promotes it straight back into the reachable slice.
  */
 ck("a scan-time tier overrides the location it contradicts",
   tier("india-remote").count === 2 && !tier("india-remote").statement.includes("3 of 10"),
@@ -378,7 +378,7 @@ ck("...and the tab says how much of the corpus was tiered without a body",
   `(${noProgress.reachability.derivedCount} of 10 derived)`);
 
 // ---------------------------------------------------------------------------
-console.log("\n  segments — assignment is total, and the fit ranking is a measurement");
+console.log("\n  segments - assignment is total, and the fit ranking is a measurement");
 // ---------------------------------------------------------------------------
 
 const segSum = noProgress.segments.reduce((n, s) => n + s.count, 0);
@@ -406,7 +406,7 @@ ck("a segment's reachable count is a subset of its own count",
   noProgress.segments.every((s) => s.reachableCount <= s.count && s.reach.reduce((n, t) => n + t.count, 0) === s.count));
 
 // ---------------------------------------------------------------------------
-console.log("\n  velocity — one point is one point, and it says so");
+console.log("\n  velocity - one point is one point, and it says so");
 // ---------------------------------------------------------------------------
 
 const TODAY_POINT: TrendPoint = { d: DAY, core: 10, companies: 8, s: benchmark.skillShares };
@@ -441,7 +441,7 @@ ck("a flat skill is not reported", !moved.velocity.skills.some((s) => s.id === "
 ck("the movement threshold is benchmark.ts's, imported rather than re-declared", MOVE_MIN_POINTS === 3);
 
 // ---------------------------------------------------------------------------
-console.log("\n  flags — deterministic, and never manufactured out of a missing field");
+console.log("\n  flags - deterministic, and never manufactured out of a missing field");
 // ---------------------------------------------------------------------------
 
 ck("a readiness move raises a flag", clearedPython.flags.some((f) => f.kind === "readiness")
@@ -459,7 +459,7 @@ ck("...and the one whose body ruled it out is not",
   "(both were first seen today and both are posted to Remote - India)");
 
 // ---------------------------------------------------------------------------
-console.log("\n  the live corpus — 745 stored reqs, 189 distinct core across 23 companies");
+console.log("\n  the live corpus - 745 stored reqs, 189 distinct core across 23 companies");
 // ---------------------------------------------------------------------------
 
 /**
@@ -479,7 +479,7 @@ console.log(`    ${live.readiness.marginal[0].statement.split("\n")[0]}`);
 console.log(`    ${live.segments.map((s) => `${s.rank}. ${s.id} ${s.count}/${s.reachableCount}`).join("  ")}`);
 
 // Everything below reads reports/market/*.json, which the nightly scan REWRITES. A count pinned
-// here fails CI the first morning a board posts one requisition — a green suite is supposed to
+// here fails CI the first morning a board posts one requisition - a green suite is supposed to
 // mean the arithmetic holds, not that the market stood still. So each of these asserts the rule
 // and prints the number: the diagnostic still shows today's 189, the assertion does not depend
 // on it. `> 0` is carried alongside the equalities because 0 === 0 satisfies every partition
@@ -494,12 +494,12 @@ ck("every live core req lands in exactly one segment",
   live.segments.reduce((n, s) => n + s.count, 0) === live.reachability.coreCount,
   `(${live.segments.map((s) => `${s.id} ${s.count}`).join(", ")} = ${live.reachability.coreCount})`);
 ck("no live company falls through SEGMENT_BY_COMPANY", !live.segments.some((s) => s.id === "other"),
-  "(23 core companies, all mapped — an unmapped board would show here as an unassigned count)");
+  "(23 core companies, all mapped - an unmapped board would show here as an unassigned count)");
 ck("the reachable slice excludes every out-of-reach req",
   live.reachability.reachableCount ===
     live.reachability.tiers.filter((t) => t.tier === "india-remote" || t.tier === "emea-apac-remote").reduce((n, t) => n + t.count, 0));
 // The denominator is not 490; it is whatever the coverage rows sum to, and 490 is what that is
-// this week. Summing the rows the readiness is built FROM is the claim worth making — it fails
+// this week. Summing the rows the readiness is built FROM is the claim worth making - it fails
 // the moment a skill is dropped from the numerator's denominator or double-counted, and it
 // survives the market adding a skill.
 // Summed over ALL coverage rows, 0%-share ones included, which is also the proof that dropping
@@ -509,7 +509,7 @@ const liveAsked = liveBenchmark.coverage.filter((c) => c.pct > 0);
 ck("the live readiness denominator is the summed market share of the coverage rows",
   live.readiness.totalWeight === liveTotalShare && live.readiness.skillCount === liveAsked.length,
   `(${live.readiness.totalWeight} share points across ${live.readiness.skillCount} asked-for of ${liveBenchmark.coverage.length} mapped skills)`);
-// `live` is computed with progress null, so the 0% is not a fact about the corpus — it is what
+// `live` is computed with progress null, so the 0% is not a fact about the corpus - it is what
 // "nothing evidenced" MUST read as. That is the invariant; the number it produces today is not.
 // pctOf's rounding is reproduced rather than imported because insight.ts does not export it.
 ck("live readiness is the evidenced share over the total share, and null progress evidences nothing",
@@ -550,12 +550,12 @@ ck("the module never writes a Quaere paragraph", live.quaere === null && noProgr
   "(it is filled by the cron after this returns; this module never calls a model)");
 
 // ---------------------------------------------------------------------------
-console.log("\n  the cron — Quaere's paragraph, and the write order that lost benchmark.json");
+console.log("\n  the cron - Quaere's paragraph, and the write order that lost benchmark.json");
 // ---------------------------------------------------------------------------
 
 /**
  * The last two properties live in the route, not in the pure module, and neither has a return
- * value anybody inspects — they are observable only in the bytes handed to GitHub. So the
+ * value anybody inspects - they are observable only in the bytes handed to GitHub. So the
  * handler is driven end to end through `GET` with `globalThis.fetch` replaced by a stub that
  * answers GitHub and MiniMax and CAPTURES every PUT. The stub 502s every job board, which is the
  * cheapest complete cycle: the cursor still wraps, so the route runs all five writes.
@@ -619,11 +619,11 @@ ck("a digit-free paragraph is stored", clean.body.reading === true && clean.writ
 
 /**
  * The digit ban. The prompt says "Write no numbers at all", so there is no allow-set to be
- * absent from — which is the whole point, because every weaker version leaked. A whitelist built
+ * absent from - which is the whole point, because every weaker version leaked. A whitelist built
  * from text the model can see is a whitelist the model can quote from: deriving it from the
  * prompt whitelisted `60` forever ("In 80 words or fewer" has the same shape), and deriving it
  * from the facts whitelisted `58`, because the marginal statements this reading is prompted with
- * cite plan rows and hours — `row 28, "Production Python architecture" - 14.5h, month 7` — and a
+ * cite plan rows and hours - `row 28, "Production Python architecture" - 14.5h, month 7` - and a
  * row number reads as a percentage the moment the model puts a % after it.
  *
  * An invented number sitting among audited ones discredits the audited ones too, and the tab
@@ -642,7 +642,7 @@ ck("a decimal is a token of its own", decimal.body.reading === false && decimal.
 const thinking = await scan("<think>The user wants a reading of this market.");
 ck("an unterminated reasoning block leaves no paragraph rather than an empty one",
   thinking.body.reading === false && thinking.written?.quaere === null && !JSON.stringify(thinking.written).includes("<think>"),
-  "(null, not \"\" — an empty string would render an empty Quaere block instead of no block)");
+  "(null, not \"\" - an empty string would render an empty Quaere block instead of no block)");
 
 /**
  * The write order, which is not a style preference.

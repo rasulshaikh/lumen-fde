@@ -32,7 +32,7 @@ literal, including the one visible on screen:
 
 That says *current* and it is frozen. In month 20 it will still say shell, networking, systems.
 This is the same defect as the daily digest pinned to plan row 1, the "9-month operating view"
-header, the hardcoded "16 books · 2 repos", and the Ask panel's CSS `:after` counters — a string
+header, the hardcoded "16 books · 2 repos", and the Ask panel's CSS `:after` counters - a string
 that claims to be derived and is not.
 
 Fix: derive it from the same `useAppState()` values every other view reads. Where a line cannot
@@ -48,7 +48,7 @@ One hardcoded headline and one hardcoded sentence on all ten routes.
 
 The approved field-notebook spec says: *"No motion beyond what exists. A study tool opened daily
 for two years should not animate."* A marketing carousel is precisely what that was written
-against. Rasul was shown that tension and chose rotation anyway, so this is built — but built so
+against. Rasul was shown that tension and chose rotation anyway, so this is built - but built so
 that what rotates is **measured fact, not slogan**. That is the difference between a carousel and
 a status line.
 
@@ -57,9 +57,9 @@ a status line.
   month and track, topics recorded against hours remaining, syllabus parts, peak month. Every one
   is arithmetic over data already on screen elsewhere.
 - Crossfade only. No slide, no scale, no bounce.
-- Pauses on hover and on keyboard focus, and while the tab is hidden — a timer that runs in a
+- Pauses on hover and on keyboard focus, and while the tab is hidden - a timer that runs in a
   background tab is a wasted wake and a surprise on return.
-- `prefers-reduced-motion: reduce` renders one line, no timer, no dots. Not a faster animation —
+- `prefers-reduced-motion: reduce` renders one line, no timer, no dots. Not a faster animation -
   none.
 - The lines are stacked in one grid cell so the tallest sets the height. A hero that changes
   height every 7s would push the entire page down under the reader.
@@ -69,7 +69,7 @@ a status line.
 
 - `/plan?row=N` for a low, middle and high N: the row is in the viewport after arrival and the
   mark clears. A row cited from /market lands the same way as one pasted into the address bar.
-- The assessments string changes when progress changes — verified by moving progress, not by
+- The assessments string changes when progress changes - verified by moving progress, not by
   reading the code.
 - The hero: no layout shift across a full cycle (measured, not eyeballed), the timer stops on
   hover, and under reduced motion there is exactly one line and no interval.

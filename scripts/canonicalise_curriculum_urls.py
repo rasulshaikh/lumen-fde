@@ -97,7 +97,7 @@ def main() -> None:
         for url, code, final in problems:
             print(f"  {code}  {url}")
     if not write:
-        print("\n(dry run — pass --write to apply)")
+        print("\n(dry run - pass --write to apply)")
 
 
 if __name__ == "__main__":

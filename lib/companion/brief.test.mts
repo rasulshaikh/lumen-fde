@@ -10,7 +10,7 @@
  *
  * And one property with no natural failure signal, asserted directly because it renders
  * perfectly when wrong: the brief must never expose a recall backlog COUNT. `lib/review.ts` and
- * `app/recall.tsx` both state the rule — "'37 due', close it forever… the count is never
+ * `app/recall.tsx` both state the rule - "'37 due', close it forever… the count is never
  * surfaced". A number there would look completely normal and would quietly undo the scheduler's
  * one deliberate protection, so the test reads the whole object and asserts no field can hold it.
  */
@@ -29,7 +29,7 @@ ck("counts whole days", gapInDays("2026-09-01", "2026-09-09") === 8);
 ck("a future event costs the line rather than going negative", gapInDays("2026-10-01", "2026-09-09") === null);
 ck("unparseable costs the line", gapInDays("nonsense", "2026-09-09") === null);
 
-console.log("recallState — three states, because two would lie");
+console.log("recallState - three states, because two would lie");
 {
   const due: ReviewState = { a: { rung: 0, due: "2026-09-01", seen: 1 } };
   const later: ReviewState = { a: { rung: 0, due: "2026-12-01", seen: 1 } };
@@ -52,7 +52,7 @@ console.log("the brief never carries a backlog count");
   ck("no field holds a due count", !Object.keys(brief).some((k) => /due|backlog|overdue/i.test(k)), Object.keys(brief).join(","));
 }
 
-console.log("case 1 — nothing recorded, which is today");
+console.log("case 1 - nothing recorded, which is today");
 {
   const brief = buildBrief({ focus: FOCUS }, T("2026-09-09"));
   ck("still names the focus row", brief.focus?.topic === "Shell mastery and scripting");
@@ -64,7 +64,7 @@ console.log("case 1 — nothing recorded, which is today");
   ck("it says what to do rather than what is missing", /starts|first row/i.test(line), line);
 }
 
-console.log("case 2 — back after a fortnight in month 12");
+console.log("case 2 - back after a fortnight in month 12");
 {
   const brief = buildBrief({ focus: FOCUS, lastEventDay: "2026-08-26" }, T("2026-09-09"));
   ck("the gap is measured", brief.gapDays === 14, String(brief.gapDays));
@@ -84,7 +84,7 @@ console.log("the opening is warm at every gap, and never numeric");
   }
 }
 
-console.log("lead — strips the transport label, keeps the sentence");
+console.log("lead - strips the transport label, keeps the sentence");
 ck("drops the EVIDENCE prefix", lead("EVIDENCE - row 28, readiness 0% to 14%.") === "row 28, readiness 0% to 14%.");
 ck("drops the STUDY prefix", lead("STUDY - Studied 3 of the last 21 days.") === "Studied 3 of the last 21 days.");
 ck("keeps only the lead line", lead("EVIDENCE - first line.\nsecond line.\nthird.") === "first line.");

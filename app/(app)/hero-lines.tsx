@@ -11,7 +11,7 @@ const INTERVAL_MS = 7000;
  * that is the right instinct about *decoration*. What rotates here is not decoration: every line
  * is arithmetic over the same `useAppState()` values the footer and Overview read, so this is a
  * status line that happens to cycle rather than a carousel that happens to contain words. If a
- * line ever cannot be derived, it is not shown — an undated placeholder in a rotation is worse
+ * line ever cannot be derived, it is not shown - an undated placeholder in a rotation is worse
  * than a shorter rotation.
  *
  * Three things here are not preferences:
@@ -22,7 +22,7 @@ const INTERVAL_MS = 7000;
  * - The timer stops while the tab is hidden. An interval left running in a background tab wakes
  *   the machine to advance something nobody is looking at, and then the line has jumped several
  *   places by the time you come back.
- * - `prefers-reduced-motion: reduce` gets one line and no interval at all. Not a slower fade —
+ * - `prefers-reduced-motion: reduce` gets one line and no interval at all. Not a slower fade -
  *   no rotation. The reduced-motion contract is about vestibular safety, not about taste, and a
  *   thing that changes under you while you read is exactly what it covers.
  */
@@ -33,7 +33,7 @@ export function HeroLines({ lines }: { lines: string[] }) {
 
   // Read the media query in an effect, not during render: the server has no matchMedia, and
   // deciding this during the first client render would disagree with the server's HTML and
-  // hydrate into a mismatch. Starting "still" and relaxing after mount is the safe direction —
+  // hydrate into a mismatch. Starting "still" and relaxing after mount is the safe direction -
   // it errs toward not moving.
   useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");

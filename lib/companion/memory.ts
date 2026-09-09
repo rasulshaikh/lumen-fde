@@ -8,7 +8,7 @@
  *
  * **Scope was decided explicitly: study facts, not transcripts.** Whole conversations would put
  * every question ever asked into git history and grow the repo without bound for a marginal gain
- * over the digest below. What is kept is the shape of the studying — which topics keep coming
+ * over the digest below. What is kept is the shape of the studying - which topics keep coming
  * back, what has already been explained, and how many sessions have closed.
  *
  * Two storage shapes, and the difference is not incidental:
@@ -17,7 +17,7 @@
  *     its `sha`, exactly like `reports/review/state.json`. Sending a stale sha is how two writers
  *     silently clobber each other, which is why `writeJson` refuses without one.
  *   - `sessions/` is a HISTORY. One file per closed session, never edited, never deleted, and
- *     written with no `sha` so the contents API itself refuses an overwrite — append-only
+ *     written with no `sha` so the contents API itself refuses an overwrite - append-only
  *     enforced by the protocol rather than by everyone remembering, the same discipline
  *     `lib/artifacts.ts` uses and for the same reason.
  *
@@ -34,7 +34,7 @@ export const SESSIONS_DIR = "reports/companion/sessions";
  * How many entries each list keeps.
  *
  * Bounded on purpose. An unbounded digest is a file that grows every time the companion is used
- * and is read whole on every request that wants it — it would degrade quietly for months before
+ * and is read whole on every request that wants it - it would degrade quietly for months before
  * anyone noticed, which is the worst failure shape available. 40 is comfortably more than the
  * plan's 15 tracks and enough to hold a long tail of recurring confusions.
  */
@@ -62,7 +62,7 @@ export type Memory = {
   explained: Note[];
   /** Questions asked more than once. A `count` of 1 is not interesting and is not kept. */
   asked: Note[];
-  /** Closed sessions ever recorded. A count, not a list — the list is `sessions/`. */
+  /** Closed sessions ever recorded. A count, not a list - the list is `sessions/`. */
   sessions: number;
 };
 
@@ -83,7 +83,7 @@ export const day = (now: Date) => now.toISOString().slice(0, 10);
  *
  * Case and whitespace are collapsed so "K8s probes" and "k8s  probes" are one memory rather than
  * two half-remembered ones. Returns "" for anything that normalises to nothing, and every caller
- * treats "" as "do not remember this" — an empty key would otherwise occupy a slot in a bounded
+ * treats "" as "do not remember this" - an empty key would otherwise occupy a slot in a bounded
  * list forever.
  */
 export function normalise(value: string): string {
@@ -94,7 +94,7 @@ export function normalise(value: string): string {
  * Record one occurrence, newest first.
  *
  * Moves the entry to the front so the cap drops what has been quiet longest rather than what was
- * added longest ago — a confusion that recurred yesterday must outrank one that recurred once in
+ * added longest ago - a confusion that recurred yesterday must outrank one that recurred once in
  * March, or the cap would evict exactly the memories worth having.
  */
 export function note(list: Note[], value: string, now: Date, cap = MAX_ENTRIES): Note[] {

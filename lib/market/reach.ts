@@ -1,7 +1,7 @@
 /**
  * Reachability: one requisition in, one of five tiers out. Design section 2.
  *
- * Pure. No network, no filesystem, no `Date.now()` — same contract as benchmark.ts and for the
+ * Pure. No network, no filesystem, no `Date.now()` - same contract as benchmark.ts and for the
  * same reason: this decides whether a role counts toward "the market you can actually take",
  * and a rule that can only be exercised by running a 47 MB scan against 27 live boards is a
  * rule nobody ever checks.
@@ -11,7 +11,7 @@
  *  - `location` is ALREADY STORED on every ReqRecord, so three of the five tiers are a pure
  *    function of data the index already holds and can be recomputed with no re-scan, exactly
  *    like the skill fingerprint. All 745 stored reqs carry a non-empty `location`; none is
- *    blank, which is why `title` is deliberately not read here — its region suffix is a clone
+ *    blank, which is why `title` is deliberately not read here - its region suffix is a clone
  *    marker classify.ts already strips, and it never carries a location the field does not.
  *  - Visa, sponsorship and clearance language exists ONLY in the JD body, which store.ts
  *    deliberately discards (47 MB/day, 38 MB of it Ashby descriptions). So it has to be reduced
@@ -21,7 +21,7 @@
  * `jdText` must be the `htmlToText` output and NOT the `stripBoilerplate` output. The 60%-
  * frequency detector removes lines that appear in most of a company's postings, and "we are
  * unable to provide visa sponsorship", the ITAR paragraph and the clearance clause are exactly
- * such lines — they are boilerplate in the literal sense and load-bearing here. Stripping first
+ * such lines - they are boilerplate in the literal sense and load-bearing here. Stripping first
  * would silently reclassify every Palantir and Anduril req out of `out-of-reach`.
  *
  * The conservative direction is asymmetric on purpose. Over-reporting `out-of-reach` costs a
@@ -36,7 +36,7 @@ export type ReachTier = "india-remote" | "emea-apac-remote" | "india-office" | "
  * Ordered by how directly employable the tier is from Pune, best first.
  *
  * This is the merge order for a multi-location posting AND a total order the consumer can
- * iterate to render a distribution in a stable sequence. It is NOT the reachable set — the
+ * iterate to render a distribution in a stable sequence. It is NOT the reachable set - the
  * design defines that as `india-remote + emea-apac-remote`, and which tiers a headline
  * percentage is recomputed within belongs to the tab, not here.
  *
@@ -65,7 +65,7 @@ export const REACH_LABELS: Record<ReachTier, string> = {
 /**
  * The subset of a posting this reads. `Posting` (scan time, `location: string | null`) and
  * `ReqRecord` (recompute, `location: string`) both satisfy it structurally, so neither module
- * has to be imported — fetch.ts talks to the network and store.ts talks to GitHub, and either
+ * has to be imported - fetch.ts talks to the network and store.ts talks to GitHub, and either
  * import would put a network module in this file's graph for the sake of one field.
  */
 export type ReachPosting = { location: string | null };
@@ -98,7 +98,7 @@ const INDIA = vocab([
   "hyderabad", "chennai", "kolkata", "ahmedabad", "jaipur",
 ]);
 
-/** A location that names no region at all. "Remote" alone is NOT here — see `segmentTier`. */
+/** A location that names no region at all. "Remote" alone is NOT here - see `segmentTier`. */
 const GLOBAL = vocab(["global", "globally", "worldwide", "anywhere"]);
 
 /**
@@ -138,7 +138,7 @@ const IST_OVERLAP = vocab([
  * The Americas anchor: a segment naming the country, not a place inside it.
  *
  * Tested before `IST_OVERLAP` because these strings are unambiguous, and the corpus builds its
- * remote regions out of them — `Remote, Washington, United States, AMER`,
+ * remote regions out of them - `Remote, Washington, United States, AMER`,
  * `Remote-Friendly, United States`, `United States (Remote)`, `California, USA, Remote`.
  */
 const AMERICAS_ANCHOR = vocab(["united states", "usa", "u s a", "us", "amer", "amers", "americas", "namer", "usca"]);
@@ -187,10 +187,10 @@ const AMERICAS = vocab([
 /**
  * `XX-` prefixes, read off the raw segment before flattening.
  *
- * The corpus carries a Workday-style code family — `IN-Delhi-Remote`, `US-IN-Remote`,
+ * The corpus carries a Workday-style code family - `IN-Delhi-Remote`, `US-IN-Remote`,
  * `GB-London`, `IL-Israel-Remote`, `NO-Oslo-MSO`. Flattening destroys the distinction that
  * matters most: both `IN-Delhi-Remote` (India) and `US-IN-Remote` (Indiana) reduce to a token
- * `in`, and a vocabulary test cannot tell them apart. Anchoring on the raw prefix can — the
+ * `in`, and a vocabulary test cannot tell them apart. Anchoring on the raw prefix can - the
  * Indiana string leads with `US-`.
  *
  * `il` is Israel here and not Illinois for the same anchoring reason: the corpus's Illinois
@@ -205,7 +205,7 @@ const IST_CODES = new Set([
 /**
  * One location segment to a tier.
  *
- * Segments are split on `;` and `|` and never on `,` — a comma joins the parts of one location
+ * Segments are split on `;` and `|` and never on `,` - a comma joins the parts of one location
  * ("San Francisco, CA"), while both of the others separate distinct ones
  * ("San Francisco, CA | New York City, NY", "Bengaluru, India; Delhi, India; India").
  *
@@ -220,7 +220,7 @@ const IST_CODES = new Set([
  *  4. Remote with a stated region is where the two remote tiers separate. A remote requisition
  *     whose region excludes India is `out-of-reach` and NOT `relocate-sponsor`: an on-site req
  *     comes with an office to relocate into and a visa to go with it, and a US-remote req comes
- *     with neither — it requires you to already be there.
+ *     with neither - it requires you to already be there.
  *  5. Remote with NO recognizable region falls to `relocate-sponsor`, not to `india-remote`.
  *     One core requisition in the corpus has a bare `Remote` location, and most US companies
  *     mean "remote within the US" when they write it. Reading it as global would be the single
@@ -253,7 +253,7 @@ function locationTier(location: string | null): ReachTier {
 }
 
 /**
- * Clearance. `clearance` alone is not enough — "clearance" appears in benign compliance prose —
+ * Clearance. `clearance` alone is not enough - "clearance" appears in benign compliance prose -
  * so every alternative names the programme, the state, or the requirement.
  */
 const CLEARANCE =
@@ -285,7 +285,7 @@ const NO_SPONSORSHIP =
   /\b(?:not?|unable|cannot|can not|does not|do not|will not|won t|without|ineligible for)\b[^.]{0,40}\bsponsor(?:ship|ing|ed)?\b/;
 
 /**
- * "You must already live in the US" — a region that excludes India, stated in the body rather
+ * "You must already live in the US" - a region that excludes India, stated in the body rather
  * than in the location.
  *
  * A modal is required before the verb on purpose. "Our headquarters is based in the United
@@ -294,7 +294,7 @@ const NO_SPONSORSHIP =
  *
  * Deliberately NOT here: "must be legally authorized to work in the United States". It is
  * standard on essentially every US requisition including the ones that do sponsor, so it
- * separates nothing — adding it collapses the whole `relocate-sponsor` tier into
+ * separates nothing - adding it collapses the whole `relocate-sponsor` tier into
  * `out-of-reach` and erases the distinction the tier exists to draw. The discriminating signal
  * is the explicit refusal above, not the boilerplate authorization line. That exclusion is
  * enforced by the verb list: residence verbs only, and `work` is not one of them.
@@ -305,8 +305,8 @@ const US_ONLY_REGION =
 /**
  * The positive signals, and they are narrow on purpose.
  *
- * `\bglobal\b` on its own is worthless in a JD body — every one of these companies calls itself
- * global — so each alternative below ties the word to where the work happens. Same for India:
+ * `\bglobal\b` on its own is worthless in a JD body - every one of these companies calls itself
+ * global - so each alternative below ties the word to where the work happens. Same for India:
  * "our customers in India" is not an offer to employ you there, so only phrasings about hiring,
  * residence or an entity count.
  */
@@ -321,7 +321,7 @@ const INDIA_JD =
  *
  * `jdText` is nullable because it genuinely is: a Greenhouse stage-2 fetch can fail, and the
  * three location-only tiers still resolve without it. A null body never upgrades and never
- * blocks — it just leaves the location's own answer standing, which is the same understate-
+ * blocks - it just leaves the location's own answer standing, which is the same understate-
  * rather-than-corrupt behaviour `skills: null` already has.
  *
  * Precedence:
@@ -333,7 +333,7 @@ const INDIA_JD =
  *  2. Otherwise the location decides, because it is the field the company filled in to say
  *     where the job is.
  *  3. A JD positive signal is allowed to resolve `relocate-sponsor` and nothing else.
- *     `relocate-sponsor` is this file's residual — "nothing stated either way" — so promoting
+ *     `relocate-sponsor` is this file's residual - "nothing stated either way" - so promoting
  *     out of it adds information. Promoting out of `out-of-reach` or across an explicit
  *     `Remote - US` would be the model of the JD overruling the company's own location field,
  *     and the location field is the more reliable of the two.
@@ -358,7 +358,7 @@ export function classifyReach(posting: ReachPosting, jdText: string | null): Rea
  * location strings, deduped by `dedupeKey` exactly as benchmark.ts does it). Counts are distinct
  * reqs; strings are verbatim.
  *
- * `jdText` is null in this table, because the stored index holds no bodies — that is the point
+ * `jdText` is null in this table, because the stored index holds no bodies - that is the point
  * of the design. So this is the location-only half. The JD pass only ever moves reqs INTO
  * `out-of-reach` and out of `relocate-sponsor`, never the other way, so every number below is
  * an upper bound on its tier except the last.
@@ -368,7 +368,7 @@ export function classifyReach(posting: ReachPosting, jdText: string | null): Rea
  *   india-remote      4    2    "Remote - India" (x4). Nothing else. No board in the corpus
  *                               writes a global-remote location.
  *   india-office      2    1    "Bengaluru, India", "Bengaluru"
- *   emea-apac-remote  1    1    "Finland; Remote - Denmark; Stockholm, Sweden" — one req, and
+ *   emea-apac-remote  1    1    "Finland; Remote - Denmark; Stockholm, Sweden" - one req, and
  *                               it only qualifies because one of its three segments is remote.
  *   relocate-sponsor 178   94   61 distinct strings, all on-site: "San Francisco, CA" (14),
  *                               "Washington, D.C." (12), "London" (11), "Singapore" (9),
@@ -377,7 +377,7 @@ export function classifyReach(posting: ReachPosting, jdText: string | null): Rea
  *                               "US-CA-Menlo Park" (3), "Ottawa", "Montréal", "Abu Dhabi",
  *                               "PL-Warsaw-Lixa C", "Redwood City, CA (Hybrid)",
  *                               "Denver, Colorado; West Coast - United States" (a remote US
- *                               region, but it also names a Denver office to move to) — and
+ *                               region, but it also names a Denver office to move to) - and
  *                               the single bare "Remote", which is here rather than in
  *                               india-remote for the reason `segmentTier` step 5 gives.
  *   out-of-reach      4    2    remote with a region that excludes India, and only that:
@@ -388,7 +388,7 @@ export function classifyReach(posting: ReachPosting, jdText: string | null): Rea
  *                               Remote - Texas; Remote - Washington"
  *
  * The shape to take from it: this market posts offices, not regions. 94% of core reqs name a
- * city and nothing else, which is why `relocate-sponsor` is a residual rather than a finding —
+ * city and nothing else, which is why `relocate-sponsor` is a residual rather than a finding -
  * and why the JD pass is the half that does the real work. 22 of those 178 are in the US
  * clearance belt and will land in `out-of-reach` the first time this runs with bodies attached.
  */

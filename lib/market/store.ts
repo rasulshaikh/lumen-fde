@@ -5,19 +5,19 @@
  * The same rationale applies here as there, for the same reason: this is mutable state
  * rewritten on every scan, not an append-only history. It is deliberately NOT modelled on
  * `app/api/progress/route.ts`, which lists a directory and then re-fetches every file
- * individually — an N+1 against the GitHub API, capped at the newest 100. That shape is
+ * individually - an N+1 against the GitHub API, capped at the newest 100. That shape is
  * right for a history; it would be ruinous for an inventory the cron rewrites daily.
  *
  * Nothing in here throws on a GitHub failure and nothing here is fatal. A missing
  * GITHUB_TOKEN degrades to `synced: false` with null data, so the cron can still run a scan
  * and the digest can still send its study brief. The one rule the callers must honour is
- * that `synced: false` means "we do not know", never "the file is empty" — writing a
+ * that `synced: false` means "we do not know", never "the file is empty" - writing a
  * benchmark computed from a failed read would silently reset the seen-set and report every
  * requisition in the corpus as new the following day.
  */
 
 // Type-only: reach.ts is pure and importing it for a value would be harmless, but nothing in
-// this file classifies anything — the scan hands the tier in already computed.
+// this file classifies anything - the scan hands the tier in already computed.
 import type { ReachTier } from "./reach";
 
 const repo = process.env.GITHUB_REPO || "rasulshaikh/lumen-fde";
@@ -28,7 +28,7 @@ export const BENCHMARK_PATH = "reports/market/benchmark.json";
 export const TREND_PATH = "reports/market/trend.json";
 /**
  * The personal reading of the benchmark. Separate file, not a key inside benchmark.json,
- * because benchmark.json is impersonal and publishable and this one is neither — and because
+ * because benchmark.json is impersonal and publishable and this one is neither - and because
  * a scan that fails to write this one must still leave a correct benchmark behind.
  */
 export const INSIGHT_PATH = "reports/market/insight.json";
@@ -45,7 +45,7 @@ export type BoardStatus = {
   error: string | null;
 };
 
-/** Only these three classes are ever persisted — see `markSeen`. */
+/** Only these three classes are ever persisted - see `markSeen`. */
 export type ReqClass = "core" | "adjacent" | "leadership";
 
 export type ReqRecord = {
@@ -79,7 +79,7 @@ export type ReqRecord = {
    *
    * `location` alone gets three of the five tiers, so this field exists only for the two it
    * cannot: the US-person clause and the active-clearance clause live in the JD body and
-   * nowhere else. Same treatment as `skills` for the same reason — the body is matched to a
+   * nowhere else. Same treatment as `skills` for the same reason - the body is matched to a
    * small value in memory and never stored.
    *
    * Optional, and absent on every requisition scanned before the field existed. A missing
@@ -87,7 +87,7 @@ export type ReqRecord = {
    * and the next scan of that board fills it in. Making it required would mean re-scanning
    * 47 MB to backfill a field that arrives free on the next cycle.
    *
-   * `null` means "no body this run" — see `markSeen`, which keeps the stored tier instead.
+   * `null` means "no body this run" - see `markSeen`, which keeps the stored tier instead.
    */
   reach?: ReachTier | null;
 };
@@ -100,7 +100,7 @@ export type MarketIndex = {
   boardsOk: number;
   /** Keyed by the board token, which is also the prefix of every req id from that board. */
   boards: Record<string, BoardStatus>;
-  /** Keyed by `${token}::${sourceId}`. Presence here — not `updated_at` — defines "new". */
+  /** Keyed by `${token}::${sourceId}`. Presence here - not `updated_at` - defines "new". */
   reqs: Record<string, ReqRecord>;
 };
 
@@ -128,7 +128,7 @@ function headers() {
 /**
  * Read one file whole.
  *
- * A 404 is not an error — it is the cold start, and every one of these files is absent on
+ * A 404 is not an error - it is the cold start, and every one of these files is absent on
  * the first run. It returns `synced: true` with null data so the caller can tell "the file
  * does not exist yet" (safe to create) apart from "GitHub did not answer" (never overwrite).
  */
@@ -150,7 +150,7 @@ export async function readJson<T>(path: string): Promise<{ data: T | null; sha: 
  *
  * Serialized with indent 1, as the review route does: diffable in GitHub's UI without
  * paying pretty-print bytes on a file that is already the largest thing this repo commits.
- * index.json is ~500 KB, roughly 700 KB once base64'd — inside the contents API's practical
+ * index.json is ~500 KB, roughly 700 KB once base64'd - inside the contents API's practical
  * ceiling, which is the other reason JD text is never stored.
  */
 export async function writeJson(path: string, data: unknown, sha: string | null, message?: string): Promise<{ ok: boolean; sha: string | null; synced: boolean; error: string | null }> {
@@ -159,7 +159,7 @@ export async function writeJson(path: string, data: unknown, sha: string | null,
     const payload: Record<string, unknown> = {
       // Optional, defaulting to the market wording every existing caller relies on. The commit
       // message is the only thing in git history explaining why a file moved, and a companion
-      // write landing as "market: update ..." would misattribute it to the nightly scan — the
+      // write landing as "market: update ..." would misattribute it to the nightly scan - the
       // one place someone looks first when the market numbers are wrong.
       message: message ?? `market: update ${path}`,
       content: Buffer.from(JSON.stringify(data, null, 1)).toString("base64"),
@@ -198,7 +198,7 @@ export type ProgressEntry = { topic: string; status: string; date: string };
  * Read the study-progress history: list the directory, then fetch every file.
  *
  * This is the N+1 the header above refuses for the index, and it is right here for the reason
- * stated there — an append-only history of small markdown files is exactly the shape that
+ * stated there - an append-only history of small markdown files is exactly the shape that
  * listing suits. It is deliberately the same listing, the same newest-100 slice and the same
  * three regexes as GET /api/progress: readiness matches events to plan rows by topic string,
  * and a second parser would let the tab and the tab's own readiness number disagree about
@@ -208,7 +208,7 @@ export type ProgressEntry = { topic: string; status: string; date: string };
  * the route: past a hundred events a topic's status could never advance again.
  *
  * `null` means "we do not know", never "no progress", and it is all-or-nothing on purpose. A
- * partial set — one file's fetch failing inside a Promise.all that kept the rest — would drop
+ * partial set - one file's fetch failing inside a Promise.all that kept the rest - would drop
  * a `done` event, lower readiness by that skill's whole market share and raise a readiness
  * flag out of a network blip. With null, the insight reports zero matched events in its own
  * statement, which reads as missing data instead of as regression.
@@ -253,7 +253,7 @@ export async function readProgress(): Promise<{ events: ProgressEntry[] } | null
 export const MISSING_DAYS = 14;
 /** Hard ceiling on stored requisitions, evicting oldest `lastSeen` first. */
 export const MAX_REQS = 3000;
-/** Trend points kept, one per full cycle — about six months, ~40 KB at cap. */
+/** Trend points kept, one per full cycle - about six months, ~40 KB at cap. */
 export const TREND_POINTS = 180;
 
 const daysBetween = (from: string, to: string) =>
@@ -269,7 +269,7 @@ export type SeenReq = Omit<ReqRecord, "firstSeen" | "lastSeen" | "missingSince" 
 /**
  * Record a requisition seen on this run. Returns false when it was deliberately not stored.
  *
- * Junior and unmatched postings are never written at all — that is the first of the three
+ * Junior and unmatched postings are never written at all - that is the first of the three
  * bounding mechanisms, and it is the cheapest: Palantir alone ships 34 Intern / New Grad /
  * "Year at Palantir" variants that would otherwise decay through the seen-set for a
  * fortnight each and never contribute to a number.
@@ -294,13 +294,13 @@ export function markSeen(index: MarketIndex, id: string, seen: SeenReq, day: str
     // Stage 2 only fetches a JD for a req that is new or whose skills are null, so on every
     // other run `seen.skills` is null for Greenhouse. Assigning it straight through would
     // wipe the fingerprint of every already-known Greenhouse req and drop it out of the
-    // denominators — the counts would fall each run for no reason in the market.
+    // denominators - the counts would fall each run for no reason in the market.
     skills: seen.skills ?? previous?.skills ?? null,
     // Same rule as `skills`, and here it is not merely a lost value but a wrong one. Without a
     // body the scan can only tier from `location`, and that pass is an upper bound: the body is
     // the only thing that ever moves a req INTO `out-of-reach`. Assigning a bodyless tier
     // through would quietly promote every cleared Palantir and Anduril req back into the
-    // reachable slice on the second run — the denominator of "the market you can actually
+    // reachable slice on the second run - the denominator of "the market you can actually
     // take" would grow while the market did nothing.
     reach: seen.reach ?? previous?.reach ?? null,
     // Seen again clears the decay clock; a req that flickers must not accumulate absence.
@@ -329,7 +329,7 @@ export function sweepMissing(index: MarketIndex, seenIds: Set<string>, day: stri
     if (!index.boards[boardOf(id)]?.ok) continue;
     const since = req.missingSince ?? day;
     // Board absence means the req closed. 14 days is slack for a board that briefly serves a
-    // truncated list without failing outright — the truncation guard catches the big cases,
+    // truncated list without failing outright - the truncation guard catches the big cases,
     // this catches the small ones without resurrecting a role as "new" the next morning.
     if (daysBetween(since, day) >= MISSING_DAYS) {
       delete index.reqs[id];

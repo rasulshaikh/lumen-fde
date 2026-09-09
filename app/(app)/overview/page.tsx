@@ -18,8 +18,8 @@ import type { StoredArtifact } from "@/lib/artifacts";
  * needs.
  *
  * Everything imported from lib/ here is either a type (erased) or a pure function. `computeStreak`
- * and `computeEvidence` touch no network, no filesystem and no `Date.now()` — `now` is a
- * parameter — which is exactly why they can run in the browser against three JSON responses
+ * and `computeEvidence` touch no network, no filesystem and no `Date.now()` - `now` is a
+ * parameter - which is exactly why they can run in the browser against three JSON responses
  * instead of needing a fourth endpoint that would compute them a second way.
  */
 
@@ -45,7 +45,7 @@ const json = async (url: string) => {
  * expensive read in the app. The provider already pays for it once on mount; this page must not
  * pay for it again on every return to `/`. A module-level promise is the smallest thing that
  * makes a client component's fetch survive its own unmount, and a failed load stays cached
- * deliberately — the three panels below all render "unknown" honestly, and a retry storm behind
+ * deliberately - the three panels below all render "unknown" honestly, and a retry storm behind
  * a rate-limited API would turn a blip into an outage.
  */
 let loading: Promise<Loaded> | null = null;
@@ -82,12 +82,21 @@ function loadHome(): Promise<Loaded> {
   return loading;
 }
 
-/*
- * The brief's refresh used to be fired from here and its response thrown away, which is why an
- * unconfigured SurfSense key produced a 503 that nobody saw for a day. `OutsidePanel` now makes
- * that same GET and renders what came back, so the request has exactly one caller and its result
- * has a place to be read.
+/**
+ * The external brief's daily refresh.
+ *
+ * Nothing on this page shows the brief. Quaere reads it when you ask a question, and this is the
+ * only thing that keeps it current, so removing the trigger with the panel would have left the
+ * brief frozen on whatever day it was last written.
+ *
+ * Fired once per session and never awaited. The route is a cheap no-op when today's brief already
+ * exists, so only the first visit of a day pays for the fetch, and making the home page wait
+ * 30-40 seconds on a web scrape would trade the whole paint for something it does not render.
  */
+let briefRefresh: Promise<unknown> | null = null;
+function refreshBrief() {
+  briefRefresh ??= fetch("/api/external-brief").catch(() => null);
+}
 
 
 const norm = (value: unknown) => String(value ?? "").trim().toLowerCase();
@@ -95,7 +104,7 @@ const norm = (value: unknown) => String(value ?? "").trim().toLowerCase();
 /**
  * The newest progress event that marks a plan row done, and what that row covers.
  *
- * Matched by topic string exactly as AppState and lib/market/insight.ts match it — one matcher,
+ * Matched by topic string exactly as AppState and lib/market/insight.ts match it - one matcher,
  * or this panel and the readiness number beside it disagree about which rows are done. The row
  * number is 1-based over `workbook.Plan`, which is how the market modules, lib/artifacts.ts and
  * every citation in the app number a row.
@@ -142,7 +151,7 @@ export default function OverviewPage() {
   const router = useRouter();
   const state = useAppState();
   const [feed, setFeed] = useState<HomeFeed>(EMPTY);
-  // The review schedule, read for one bit of information: is anything waiting. Never a count —
+  // The review schedule, read for one bit of information: is anything waiting. Never a count -
   // lib/review.ts and app/recall.tsx both record why ("'37 due', close it forever").
   const [review, setReview] = useState<{ state: ReviewState; synced: boolean } | null>(null);
   const [brief, setBrief] = useState<Brief | null>(null);
@@ -152,12 +161,13 @@ export default function OverviewPage() {
   // one page load that straddles midnight.
   useEffect(() => {
     let live = true;
+    refreshBrief();
     loadHome().then((data) => {
       if (!live) return;
       const now = new Date();
       const { benchmark, insight } = data;
       const top = insight?.readiness.marginal[0] ?? null;
-      // The row is not done — that is what put it in the marginal table — so the insight in
+      // The row is not done - that is what put it in the marginal table - so the insight in
       // hand is the "before" insight computeEvidence documents. `index` is null: the 450 KB
       // market index is not served to the browser, so no role is named and none is invented.
       const next = benchmark && insight && top
@@ -195,7 +205,7 @@ export default function OverviewPage() {
   }, []);
 
   // Same shape the recall strip uses. A failure leaves `review` null, which `recallState` reads
-  // as "unknown" rather than "nothing due" — telling a returning reader nothing is waiting when
+  // as "unknown" rather than "nothing due" - telling a returning reader nothing is waiting when
   // the store was simply unreadable is the one sentence this panel must never produce.
   useEffect(() => {
     let live = true;
