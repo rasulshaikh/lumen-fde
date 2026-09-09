@@ -504,7 +504,7 @@ th{padding:0 12px 10px}
    which only walked the dashboard tabs - so it went unnoticed.
    ============================================================ */
 .login-shell{min-height:100svh;display:grid;grid-template-rows:1fr auto;place-items:center;
-  padding:24px;position:relative;overflow:hidden;background:var(--bg)}
+  padding:24px;position:relative;overflow:hidden;}
 
 /* The orbit div already exists in the markup, so reuse it as the anchor rather than
    adding an element: one soft accent wash so the card is not a rectangle alone in a
@@ -981,7 +981,7 @@ th{padding:0 12px 10px}
    4.64 on the flat ground but 3.09 where a major rule crosses the glyphs. They paint --bg,
    the canvas colour, so nothing reads as a panel - the ruling just stops behind the words.
    ============================================================ */
-.login-shell{background:var(--bg)}
+.login-shell{background:transparent}
 .login-intro{padding:0}
 .login-shell:after{padding:7px 0}
 
@@ -1119,14 +1119,14 @@ th{padding:0 12px 10px}
 .lp{max-width:1080px;margin:0 auto;padding:0 44px 90px;min-height:100svh}
 
 .lp-top{display:flex;align-items:center;justify-content:space-between;gap:20px;
-  background:var(--bg);padding:26px 0 22px}
+  padding:26px 0 22px}
 .lp-brand{display:flex;align-items:center;gap:11px;font-family:var(--font-display);
   font-size:17px;font-weight:700;letter-spacing:-.01em}
 .lp-signin{color:var(--accent-text);font-size:13px;font-weight:700;text-decoration:none;
   padding:9px 2px;min-height:44px;display:inline-flex;align-items:center}
 .lp-signin:hover{text-decoration:underline}
 
-.lp-hero{background:var(--bg);padding:56px 0 44px}
+.lp-hero{padding:56px 0 44px}
 .lp-kicker{font-family:var(--font-data);font-size:11px;letter-spacing:.03em;
   text-transform:uppercase;color:var(--accent-text);margin:0 0 20px}
 .lp-hero h1{font-family:var(--font-display);font-size:clamp(34px,4.6vw,58px);line-height:1.04;
@@ -1135,7 +1135,7 @@ th{padding:0 12px 10px}
 
 /* A rule between sections rather than a card around each one. The panel treatment belongs to the
    dashboard, where a panel means "a view of data"; here it would be eight boxes in a column. */
-.lp-scale,.lp-block{background:var(--bg);padding:38px 0;border-top:1px solid var(--line)}
+.lp-scale,.lp-block{padding:38px 0;border-top:1px solid var(--line)}
 .lp-h2{font-family:var(--font-data);font-size:11px;letter-spacing:.03em;
   text-transform:uppercase;color:var(--muted);font-weight:400;margin:0 0 26px}
 
@@ -1155,7 +1155,7 @@ th{padding:0 12px 10px}
 .lp-body:last-child{margin-bottom:0}
 
 .lp-foot{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;
-  background:var(--bg);border-top:1px solid var(--line);padding:26px 0 0;margin-top:38px;
+  border-top:1px solid var(--line);padding:26px 0 0;margin-top:38px;
   font-family:var(--font-data);font-size:10.5px;letter-spacing:.02em;
   text-transform:uppercase;color:var(--muted)}
 .lp-foot a{color:var(--accent-text);text-decoration:none;min-height:44px;display:inline-flex;align-items:center}
@@ -1567,3 +1567,8 @@ th{padding:0 12px 10px}
    and a background on body paints over anything behind it in the same stacking context, so the
    canvas would have been invisible on every page while still burning a frame budget drawing it. */
 html{background:var(--bg)}
+
+/* Nothing but `html` may paint the page colour. Every one of these was an element repainting the
+   exact background it already sat on, which is invisible until a canvas sits behind it: .lp-hero,
+   .lp-scale, .lp-block and .login-shell each covered the backdrop with a rectangle of the colour
+   it was drawing against. Asserted in lib/backdrop.test.mts. */

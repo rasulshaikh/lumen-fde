@@ -114,6 +114,24 @@ console.log("nothing paints over the canvas");
   // And the colour has to live somewhere, or the page renders on white.
   ck("html carries the page colour instead", /html\s*\{[^}]*background\s*:\s*var\(--bg\)/.test(css));
 
+  /*
+   * The second half of the same bug, found the same way. Body was fixed and the field was still
+   * invisible on the landing page, because `.lp-hero`, `.lp-scale`, `.lp-block` and `.login-shell`
+   * each painted `background:var(--bg)` over it: a rectangle of the exact colour it was already
+   * sitting on, which is a no-op until something is drawn behind it.
+   *
+   * So the invariant is simple and checkable: only `html` may paint the page colour.
+   */
+  // Form controls legitimately use the page colour as a fill: they are small, inside panels, and
+  // sit nowhere near the gutter the field shows in. Everything else painting --bg is a full-bleed
+  // rectangle over the canvas, which is what this catches.
+  const ALLOWED = new Set(["html", ".login-form input", ".recall-answer"]);
+  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const painters = [...withoutComments.matchAll(/([^{}]*)\{([^}]*background(?:-color)?\s*:\s*var\(--bg\)[^}]*)\}/g)]
+    .map((m) => m[1].trim().split("\n").pop()!.trim())
+    .filter((sel) => !ALLOWED.has(sel));
+  ck("no full-bleed element repaints the page colour over the canvas", painters.length === 0, painters.join(" || "));
+
   // The canvas must stay behind the page and out of the way of clicks.
   ck("the canvas is fixed, behind, and non-interactive", /\.backdrop\{[^}]*position:fixed[^}]*z-index:-1[^}]*pointer-events:none/.test(css.replace(/\s+/g, "")) || /\.backdrop\{[^}]*\}/.test(css), "");
 }
