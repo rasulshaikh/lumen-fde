@@ -126,6 +126,25 @@ const MARKET_READ_MS = 4000;
 const WEB_ITEM_CAP = 5;
 
 /**
+ * How long an answer may be, and why this moved.
+ *
+ * It was 1,600, chosen when Quaere could see the plan, the library and a readiness slice. It now
+ * also carries the compensation sheet, the audited gaps, the over-investment analysis, the
+ * shipped artifacts, the session history, the recall state and an outside brief, and it answers
+ * questions like "build a practical study sequence connecting AI Engineering to my plan". A real
+ * answer to that is longer than 1,600 tokens, and the cap did not shorten it: the model wrote a
+ * five-part answer and the response was cut mid-heading, ending at a bare "## 5.".
+ *
+ * 3,600 is bounded by the clock rather than by taste. The model call has 55s inside a 60s
+ * function, and generation is the slow part of that; doubling the cap again would start trading
+ * truncation for timeouts, which is the same failure wearing a different message.
+ *
+ * The prompt is told this number in words as well, so the model can size its plan to it instead
+ * of starting a section it has no budget to finish.
+ */
+const MAX_ANSWER_TOKENS = 3600;
+
+/**
  * benchmark.json and insight.json, read from the repo at request time.
  *
  * Deliberately not `import`ed the way curriculum.json and workbook.json are. Those are
@@ -394,15 +413,31 @@ export async function POST(request: Request) {
       // `{role, content, reportUrl?}`, and forwarding a turn that saved a report shipped a
       // `reportUrl` key into an OpenAI-shaped messages array. The declared type hid it from
       // tsc, so only the wire showed it.
+      // The budget, in the model's own terms. Without it the model plans an answer it cannot
+      // finish, which is how a five-part reply ended on an empty "## 5." heading.
+      { role: "system", content: `LENGTH: you have about ${MAX_ANSWER_TOKENS} tokens, roughly ${Math.round(MAX_ANSWER_TOKENS * 0.7)} words. Plan the answer to fit. Cover fewer things completely rather than starting a section you cannot finish, and never end on a heading with nothing under it. If the question is bigger than the budget, say what you are leaving out and offer to continue.` },
       ...(body.history || []).slice(-8).map((m) => ({ role: m.role, content: m.content })),
       { role: "user", content: `${planMap()}\n\nCurrently visible in the dashboard:\n${body.context || "No topic filter is active."}${deep ? `\n\n${deep}` : ""}${market ? `\n\n${market}` : ""}${extra ? `\n\n${extra}` : ""}\n\nQuestion:\n${body.prompt}` },
     ];
-    const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, messages, temperature: 0.4, max_completion_tokens: 1600, stream: false }), signal: AbortSignal.timeout(55000) });
+    const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, messages, temperature: 0.4, max_completion_tokens: MAX_ANSWER_TOKENS, stream: false }), signal: AbortSignal.timeout(55000) });
     const raw = await response.text();
-    let data: { choices?: { message?: { content?: string } }[]; base_resp?: { status_msg?: string } } = {};
+    let data: { choices?: { message?: { content?: string }; finish_reason?: string }[]; base_resp?: { status_msg?: string } } = {};
     try { data = JSON.parse(raw); } catch { console.error("[api/ask] MiniMax returned non-JSON", { status: response.status }); }
     if (!response.ok) { console.error("[api/ask] MiniMax rejected request", { status: response.status, message: data.base_resp?.status_msg }); return NextResponse.json({ error: "The learning guide is temporarily unavailable. Try again in a moment." }, { status: 502 }); }
-    const answer = cleanAnswer(data.choices?.[0]?.message?.content || "");
+    /*
+     * `finish_reason: "length"` means the cap stopped it, not the model. Nothing read this before,
+     * so a truncated answer was returned to the reader and committed to reports/asks/ as though it
+     * were complete: one of them ends on a bare "## 5." heading with no section under it.
+     *
+     * The answer is still shown, because most of it is useful and discarding it would waste the
+     * whole request. It is labelled instead, so the reader knows to ask for the rest rather than
+     * assuming the guide had nothing more to say.
+     */
+    const cut = data.choices?.[0]?.finish_reason === "length";
+    let answer = cleanAnswer(data.choices?.[0]?.message?.content || "");
+    if (answer && cut) {
+      answer += "\n\n---\n\n**This answer hit the length limit and stops here.** Ask me to continue from where it broke off and I will pick up from that point.";
+    }
     if (!answer) { console.error("[api/ask] MiniMax returned an empty answer", { status: response.status }); return NextResponse.json({ error: "The learning guide returned an empty answer. Try asking again." }, { status: 502 }); }
     let reportUrl: string | null = null;
     try { reportUrl = await saveAskReport(body.prompt, body.context || "", answer); } catch (error) { console.error("[api/ask] GitHub report save exception", { error: String(error) }); }
