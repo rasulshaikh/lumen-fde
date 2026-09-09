@@ -146,12 +146,24 @@ export function extractItems(payload: unknown, query: string): BriefItem[] {
  */
 export function briefQueries(skills: string[]): string[] {
   // Trimmed before the truthiness test, because `Boolean("  ")` is true and a whitespace label —
-  // which the benchmark's coverage rows can carry — would otherwise spend one of three nightly
-  // queries on the string " industry adoption news".
+  // which the benchmark's coverage rows can carry — would otherwise spend one of three queries on
+  // a string of adjectives with no subject.
   const top = skills.map((s) => String(s ?? "").trim()).filter(Boolean).slice(0, 2);
+  // EVERY query names the role, and that is the fix for what the first real brief returned.
+  //
+  // Coverage labels are requirement sentences, not search terms — "Customer-site travel
+  // expectation", "Prototype to production". The first version appended "industry adoption news"
+  // to them, so the live brief searched "Customer-site travel expectation industry adoption news"
+  // and came back with travel-industry market reports: "Travel Market Size, Share, Trends & Growth
+  // Report, 2034". Four of six stored items were about the travel and hospitality sector. The
+  // query had drifted into whatever industry the phrase happened to name.
+  //
+  // Anchoring on the role keeps every result in the market this brief is actually about. It also
+  // keeps the queries DERIVED — the labels still come from what the scan measured, which is the
+  // property that stops this list becoming three sentences someone typed once.
   return [
     "forward deployed engineer hiring trends",
-    ...top.map((s) => `${s} industry adoption news`),
+    ...top.map((s) => `forward deployed engineer ${s}`),
   ].slice(0, 3);
 }
 

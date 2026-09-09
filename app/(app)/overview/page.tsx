@@ -82,24 +82,13 @@ function loadHome(): Promise<Loaded> {
   return loading;
 }
 
-/**
- * The external brief's refresh, fired once per session and never awaited.
- *
- * This is the "nightly" in "nightly external brief", and it is not a cron because it cannot be:
- * Vercel Hobby allows two cron jobs per project and both are spent, at 03:00 and 03:30. The route
- * itself is a no-op when today's brief already exists, so the cost of firing it on every session
- * is one cheap GitHub read; only the first visit of a day pays for the scrape.
- *
- * Deliberately outside `loadHome`: nothing on this page renders the brief — Quaere reads it on
- * the next question — so making the home feed wait 30-40 s on a web scrape would trade the whole
- * page's paint for a panel that does not exist. Errors are swallowed for the same reason, and the
- * failure is visible where it matters: `externalContext` states the brief's own date and says
- * when it has gone stale.
+/*
+ * The brief's refresh used to be fired from here and its response thrown away, which is why an
+ * unconfigured SurfSense key produced a 503 that nobody saw for a day. `OutsidePanel` now makes
+ * that same GET and renders what came back, so the request has exactly one caller and its result
+ * has a place to be read.
  */
-let briefRefresh: Promise<unknown> | null = null;
-function refreshBrief() {
-  briefRefresh ??= fetch("/api/external-brief").catch(() => null);
-}
+
 
 const norm = (value: unknown) => String(value ?? "").trim().toLowerCase();
 
@@ -163,7 +152,6 @@ export default function OverviewPage() {
   // one page load that straddles midnight.
   useEffect(() => {
     let live = true;
-    refreshBrief();
     loadHome().then((data) => {
       if (!live) return;
       const now = new Date();

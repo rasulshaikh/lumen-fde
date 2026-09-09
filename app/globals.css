@@ -1254,8 +1254,8 @@ th{padding:0 12px 10px}
   .home-main,.home-rail{display:contents}
   .slot-today{order:1}.slot-evidence{order:2}
   .slot-wall{order:3}.slot-standing{order:4}
-  .slot-pace{order:5}.slot-reality{order:6}
-  .slot-track{order:7}
+  .slot-pace{order:5}.slot-reality{order:6}.slot-paths{order:7}.slot-outside{order:8}
+  .slot-track{order:9}
 }
 
 /* Reality check, collapsed. Native <details> so it needs no state, is keyboard-operable without
@@ -1416,3 +1416,34 @@ th{padding:0 12px 10px}
    Deliberately NOT styled as a hero: the thing being communicated is that no total exists, and a
    19px accent figure saying so would be a contradiction in type. */
 .path-pool{margin:0 0 8px;font-size:13px;line-height:1.6;color:var(--ink-2)}
+
+/* ── Overview rail: Four routes + From outside ────────────────────────────────
+   Added because the rail bottomed out beside the pace map — three short panels
+   against a shipped-wall and a 23-bar chart left ~650px of empty column, which
+   `align-content:start` correctly packs to the top and cannot fill by itself. */
+.paths-rail h2,.outside-panel h2{margin:2px 0 8px;font-size:17px;font-weight:700;color:var(--ink);line-height:1.35}
+.paths-rail-lead{margin:0 0 12px;font-size:12.5px;line-height:1.6;color:var(--muted)}
+.paths-rail-list{list-style:none;margin:0 0 12px;padding:0;display:flex;flex-direction:column;gap:9px}
+.paths-rail-list li{display:grid;grid-template-columns:1fr auto;gap:4px 8px;align-items:baseline;
+  padding-bottom:9px;border-bottom:1px solid var(--line)}
+.paths-rail-list li:last-child{border-bottom:0;padding-bottom:0}
+.paths-rail-name{font-size:13.5px;font-weight:600;color:var(--ink);min-width:0}
+.paths-rail-list .prob{grid-column:2;padding:2px 7px;font-size:9.5px;font-family:var(--font-data);
+  letter-spacing:.06em;text-transform:uppercase;background:var(--surface-strong);border-radius:var(--r-sm)}
+.paths-rail-band{grid-column:1/-1;font-size:11.5px;line-height:1.55;color:var(--muted)}
+
+.outside-when{margin:0 0 9px;font-family:var(--font-data);font-size:10.5px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.outside-stale{padding:2px 6px;border-radius:var(--r-sm);background:var(--surface-strong);color:var(--warn)}
+.outside-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.outside-list li{display:flex;flex-direction:column;gap:2px;min-width:0}
+.outside-list a{font-size:13px;line-height:1.5;color:var(--ink);text-decoration:none;
+  overflow-wrap:anywhere}
+.outside-list a:hover{color:var(--accent-text);text-decoration:underline}
+.outside-list span{font-size:11px;color:var(--muted)}
+/* Four different absences, four different fixes — none of them styled as an error. */
+.outside-quiet{margin:0;font-size:12.5px;line-height:1.6;color:var(--muted)}
+.outside-why{margin:8px 0 0;font-size:11.5px;line-height:1.55;color:var(--muted);
+  padding-top:8px;border-top:1px solid var(--line)}
+.outside-foot{margin:12px 0 0;padding-top:10px;border-top:1px solid var(--line);
+  font-size:11px;line-height:1.55;color:var(--muted)}

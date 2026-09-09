@@ -2,6 +2,8 @@ import type { Evidence, Streak } from "@/lib/motivation";
 import { Link, mockRows, pct, planRows, tracks, type Row } from "./shared";
 import { ShippedWall, type ArtifactsFeed } from "./ShippedWall";
 import { BriefPanel } from "./Brief";
+import { PathsRail } from "./Paths";
+import { OutsidePanel } from "./OutsidePanel";
 import type { Brief } from "@/lib/companion/brief";
 
 /**
@@ -228,6 +230,14 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
           <div className="home-slot slot-evidence"><EvidencePanel feed={feed} openMarket={() => setView("Market")} /></div>
           <div className="home-slot slot-standing"><StandingPanel streak={feed.streak} loading={feed.loading} openPlan={() => setView("Plan")} /></div>
           <div className="home-slot slot-reality"><div className="panel reality"><p className="eyebrow">Reality check</p><h2>Target calibration</h2><p>“$250K” is a 2–3 year target from Pune, not something this plan promises on its own. The nearer proof point is a strong global-remote India role.</p><details className="reality-more"><summary>Show the five markets</summary><ul className="market-list">{marketTiers.map((m) => <li key={m.market}><span className={`market-tier ${m.tone}`}>{m.label}</span><span className="market-name">{m.market}</span><span className="market-window">{m.window}</span></li>)}</ul></details><button className="text-button" onClick={() => setView("Market")}>Read the assumptions →</button></div></div>
+          {/* The rail ran out of content well before the main column did — it holds three short
+              panels beside a shipped-wall and a 23-bar chart, so `align-content:start` packed it
+              to the top and left roughly 650px of empty column beside the pace map. These two
+              close it with the questions the panels above them raise: "Reality check" says $250K
+              is not what this plan promises, so the next thing to say is what you ARE aiming at;
+              and the outside brief had no on-screen presence anywhere in the product. */}
+          <div className="home-slot slot-paths"><PathsRail open={() => setView("Paths")} /></div>
+          <div className="home-slot slot-outside"><OutsidePanel /></div>
         </div>
       </div>
 

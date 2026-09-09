@@ -102,6 +102,36 @@ export function Openings({ path, core, state, synced }: { path: PathView; core: 
 }
 
 /**
+ * The four routes, compact, for the Overview rail.
+ *
+ * It sits directly under "Reality check", and that placement is the whole argument for it: that
+ * panel says "$250K is a 2-3 year target, not something this plan promises", which raises the
+ * obvious question — then what am I aiming at — and until now the page had no answer to it. This
+ * is the answer, and the link to the full view.
+ *
+ * Bands only, no requisition counts. Everything here comes from the bundled CompReality sheet, so
+ * the panel costs no request and cannot be the reason the home page waits. The measured openings,
+ * and the disclosures they need, live on /paths where there is room to state them properly — a
+ * rail is not the place to explain why two cards share one pool.
+ */
+export function PathsRail({ open }: { open: () => void }) {
+  const views = buildPaths(compRows, null);
+  return <div className="panel paths-rail">
+    <p className="eyebrow">Four routes</p>
+    <h2>Which way out</h2>
+    <p className="paths-rail-lead">Same plan either way — what changes is what counts as done.</p>
+    <ul className="paths-rail-list">
+      {views.map((p) => <li key={p.id}>
+        <span className="paths-rail-name">{p.label}</span>
+        <Verdict bands={p.bands} />
+        <span className="paths-rail-band">{p.bands[0]?.band || "No salary band describes this one."}</span>
+      </li>)}
+    </ul>
+    <button className="text-button" onClick={open}>Compare the four →</button>
+  </div>;
+}
+
+/**
  * One card. Exported and pure for the same reason `Openings` is.
  *
  * Every populated state of this page — a card with its openings filled in, its bands, its odds chip —

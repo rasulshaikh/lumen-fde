@@ -108,6 +108,13 @@ console.log("queries follow the market the scan measured");
   ck("the standing FDE query is always first", q[0].includes("forward deployed engineer"));
   ck("the top skills drive the rest", q[1].includes("Kubernetes") && q[2].includes("Python"));
   ck("a fourth skill is not queried", !q.some((s) => s.includes("Go")));
+  // The first live brief searched "Customer-site travel expectation industry adoption news" and
+  // stored four travel-industry market reports. Every query naming the role is what stops a
+  // coverage label — which is a requirement sentence, not a search term — dragging the brief into
+  // whatever sector the phrase happens to mention.
+  ck("every query names the role", q.every((s) => /forward deployed engineer/i.test(s)), q.join(" | "));
+  const drifty = briefQueries(["Customer-site travel expectation"]);
+  ck("a label that names an industry stays anchored to the role", drifty[1] === "forward deployed engineer Customer-site travel expectation", drifty.join(" | "));
 
   // A missing benchmark costs the skill queries, not the run.
   ck("no skills still yields the standing query", briefQueries([]).length === 1);
