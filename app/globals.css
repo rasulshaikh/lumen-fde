@@ -1572,3 +1572,41 @@ html{background:var(--bg)}
    exact background it already sat on, which is invisible until a canvas sits behind it: .lp-hero,
    .lp-scale, .lp-block and .login-shell each covered the backdrop with a rectangle of the colour
    it was drawing against. Asserted in lib/backdrop.test.mts. */
+
+/* ── Current focus: the card the reader looks at first ────────────────────────
+   It was 320px carrying four short lines, which is orientation without a next
+   step. Wider now, with the month's own progress, a row that opens the plan,
+   and what comes after it. */
+.hero-focus{min-width:380px;max-width:440px}
+.hero-focus-where{font-size:34px}
+.hero-focus-where span{font-size:17px}
+.hero-focus-track{font-size:14px;margin-top:4px}
+.hero-focus-month{margin-top:18px;display:grid;gap:7px}
+.hero-focus-meter{height:4px;border-radius:99px;background:var(--surface-strong);overflow:hidden}
+.hero-focus-meter span{display:block;height:100%;background:var(--teal);border-radius:99px;
+  transition:width .3s ease}
+.hero-focus-month p{margin:0;font-size:12px;color:var(--muted)}
+/* A button, because it navigates. It was a div that named a plan row and did nothing. */
+.hero-focus-row{width:100%;display:flex;gap:12px;align-items:flex-start;text-align:left;
+  border:0;background:none;padding:14px 0 0;margin-top:16px;border-top:1px solid var(--line);
+  color:inherit;font:inherit;cursor:pointer}
+.hero-focus-body{flex:1;min-width:0}
+.hero-focus-row strong{font-size:15px}
+.hero-focus-go{color:var(--accent-text);font-size:15px;flex:none;transition:transform .15s ease}
+.hero-focus-row:hover strong{color:var(--accent-text)}
+.hero-focus-row:hover .hero-focus-go{transform:translateX(3px)}
+.hero-focus-row:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:var(--r-md)}
+.hero-focus-then{margin:12px 0 0;font-size:12px;color:var(--muted);line-height:1.5;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:900px){.hero-focus{min-width:0;max-width:none}}
+
+/* What the reader had highlighted, shown so they can see it was picked up. */
+.ask-selection{display:grid;gap:10px;padding:11px 12px;margin-bottom:10px;
+  background:var(--accent-soft);border-radius:var(--r-md)}
+.ask-selection .eyebrow{margin:0 0 4px}
+.ask-selection-text{margin:0;font-size:12px;line-height:1.55;color:var(--ink-2);
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.ask-selection-actions{display:flex;gap:10px;align-items:center}
+.ask-selection-actions button:first-child{border:1px solid var(--line-strong);background:var(--surface);
+  color:var(--ink);border-radius:var(--r-md);padding:6px 10px;font-size:11px;font-weight:700}
+.ask-selection-actions button:first-child:hover{border-color:var(--accent);color:var(--accent-text)}

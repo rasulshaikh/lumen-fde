@@ -118,6 +118,9 @@ const ROUTE_CONTEXT: Record<string, string> = {
  */
 const PAGE_OWNED = new Set(["/plan"]);
 
+/** Longest selection carried into a question. A page is not a question. */
+const SELECTION_CAP = 2000;
+
 const LABELS = Object.fromEntries(NAV.map((item) => [item.href, item.label]));
 
 export function QuaereDock() {
@@ -148,6 +151,36 @@ export function QuaereDock() {
    * it is a decision per question rather than a mode you can forget you left on.
    */
   const [web, setWeb] = useState(false);
+
+  /**
+   * Whatever you have highlighted, carried into the question.
+   *
+   * Double-click a term in a syllabus, select a paragraph of a market statement, then open Quaere:
+   * the selection comes with you. Without this the reader has to retype or describe the thing they
+   * are literally pointing at, which is the most common reason a question comes out vague.
+   *
+   * Captured on `selectionchange` rather than read when the panel opens, because opening the panel
+   * is a click, and a click collapses the selection. By the time anything could read it, it is
+   * gone. So the last real selection is held instead.
+   *
+   * Selections inside the dock are ignored. Highlighting your own typed question, or a line of
+   * Quaere's answer to copy it, is not you asking about that text.
+   */
+  const [selected, setSelected] = useState("");
+  const panel = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const capture = () => {
+      const sel = window.getSelection();
+      const text = sel?.toString().replace(/\s+/g, " ").trim() ?? "";
+      // Two characters filters out the empty selection a plain click produces.
+      if (text.length < 2) return;
+      const node = sel?.anchorNode;
+      if (node && panel.current?.contains(node.nodeType === 1 ? (node as Element) : node.parentElement)) return;
+      setSelected(text.slice(0, SELECTION_CAP));
+    };
+    document.addEventListener("selectionchange", capture);
+    return () => document.removeEventListener("selectionchange", capture);
+  }, []);
   /**
    * Ask, then put the switch back down.
    *
@@ -158,7 +191,7 @@ export function QuaereDock() {
    * rather than inside `askLumen` keeps the provider unaware of the dock's controls, which is the
    * split this file already maintains.
    */
-  const ask = (prompt?: string) => { askLumen(prompt, { web }); setWeb(false); };
+  const ask = (prompt?: string) => { askLumen(prompt, { web, selection: selected }); setWeb(false); setSelected(""); };
   useEffect(() => {
     const brief = buildBrief({
       focus: nextRow ? {
@@ -259,7 +292,7 @@ export function QuaereDock() {
 
   return <>
     {!askOpen && <button className="ask-fab" onClick={() => { setAskTopic(null); setAskOpen(true); }} aria-label="Open Quaere" aria-keyshortcuts="Meta+K Control+K"><AskMark size={16} /> Quaere</button>}
-    {askOpen && <aside className="ask-panel" aria-label="Quaere"><div className="ask-head"><div className="ask-title"><AskMark size={20} className="ask-head-mark" /><div><p className="eyebrow">Lumen study guide</p><h2>Quaere</h2></div></div><button className="close-button" onClick={() => setAskOpen(false)} aria-label="Close Quaere (Escape)">×</button></div><p className="ask-intro">Latin for “seek”. Ask for a plain-English explanation, a session recap, or the next hands-on step. Quaere sees your whole plan and the indexed study library.</p><p className="ask-scope"><span>Reading</span><b>{scope || "Lumen"}</b>{keyHint && <kbd className="ask-kbd">{keyHint}</kbd>}</p><div className="context-status"><span className="sync-dot" /><span>Plan snapshot · {library.length} books · {repositories.length} repos · read-only</span></div><div className="suggestions"><button onClick={() => ask(`Explain what I am looking at in ${here} as if I am preparing for a senior FDE interview.`)}>Explain this</button><button onClick={() => ask(`Turn what is in front of me in ${here} into a 20-minute hands-on exercise.`)}>Give me a lab</button><button onClick={() => ask(`After working through ${here}, what should I be able to say or build?`)}>Check grasp</button></div><div className="messages">{messages.length === 0 && <div className="empty-chat"><AskMark size={22} className="empty-chat-mark" /><strong>{greeting}</strong><span>{standing}</span><span>Quaere reads your whole plan (all {planRows.length} topics across {tracks.length} tracks) plus the {library.length} indexed books, your market scan, your compensation sheet, what you have shipped and whichever view you are on. A dated web brief sits in your repo, refreshed on your first visit each day, so an answer built on it is the same one you would get twice. It searches the web live only when you switch it on below, and it never changes your progress.</span>{facts.length > 0 && <dl className="ask-facts">{facts.map((f) => <div key={f.k}><dt>{f.k}</dt><dd>{f.v}</dd></div>)}</dl>}{FAQ_GROUPS.map((g) => <div className="faq-group" key={g.group}><p className="faq-group-title">{g.group}</p><ul className="faq-list">{g.questions.map((q) => <li key={q}><button onClick={() => ask(q)}>{q}</button></li>)}</ul></div>)}</div>}{messages.map((m, i) => <div className={`message ${m.role}`} key={i}><span>{m.role === "user" ? "You" : "Lumen"}</span><p>{m.content}</p>{m.reportUrl && <a className="report-link" href={m.reportUrl} target="_blank" rel="noreferrer">Open saved report ↗</a>}</div>)}{asking && <div className="message assistant"><span>Lumen</span><p>Working through the plan context…</p></div>}</div><label className="ask-web"><input type="checkbox" checked={web} onChange={(e) => setWeb(e.target.checked)} /><span>Search the web for this question<b>{web ? "on" : "off"}</b></span></label><form className="ask-form" onSubmit={(e) => { e.preventDefault(); ask(); }}><input ref={inputRef} value={askText} onChange={(e) => setAskText(e.target.value)} placeholder={scope ? `Ask about ${scope}…` : "Ask about what you are learning…"} /><button aria-label="Send question" disabled={asking || !askText.trim()}>→</button></form><div className="ask-foot">{web ? "Study guide · searches first, so this answer takes about half a minute longer" : "Study guide · your repo and a stored web brief"}</div></aside>}
+    {askOpen && <aside className="ask-panel" aria-label="Quaere" ref={panel}><div className="ask-head"><div className="ask-title"><AskMark size={20} className="ask-head-mark" /><div><p className="eyebrow">Lumen study guide</p><h2>Quaere</h2></div></div><button className="close-button" onClick={() => setAskOpen(false)} aria-label="Close Quaere (Escape)">×</button></div><p className="ask-intro">Latin for “seek”. Ask for a plain-English explanation, a session recap, or the next hands-on step. Quaere sees your whole plan and the indexed study library.</p><p className="ask-scope"><span>Reading</span><b>{scope || "Lumen"}</b>{keyHint && <kbd className="ask-kbd">{keyHint}</kbd>}</p><div className="context-status"><span className="sync-dot" /><span>Plan snapshot · {library.length} books · {repositories.length} repos · read-only</span></div>{selected && <div className="ask-selection"><div><p className="eyebrow">From the page</p><p className="ask-selection-text">{selected}</p></div><div className="ask-selection-actions"><button onClick={() => ask("Explain what I have highlighted, in the context of my plan and where it fits.")}>Explain this</button><button className="text-button" onClick={() => setSelected("")} aria-label="Drop the selection">Drop</button></div></div>}<div className="suggestions"><button onClick={() => ask(`Explain what I am looking at in ${here} as if I am preparing for a senior FDE interview.`)}>Explain this</button><button onClick={() => ask(`Turn what is in front of me in ${here} into a 20-minute hands-on exercise.`)}>Give me a lab</button><button onClick={() => ask(`After working through ${here}, what should I be able to say or build?`)}>Check grasp</button></div><div className="messages">{messages.length === 0 && <div className="empty-chat"><AskMark size={22} className="empty-chat-mark" /><strong>{greeting}</strong><span>{standing}</span><span>Quaere reads your whole plan (all {planRows.length} topics across {tracks.length} tracks) plus the {library.length} indexed books, your market scan, your compensation sheet, what you have shipped and whichever view you are on. A dated web brief sits in your repo, refreshed on your first visit each day, so an answer built on it is the same one you would get twice. It searches the web live only when you switch it on below, and it never changes your progress.</span>{facts.length > 0 && <dl className="ask-facts">{facts.map((f) => <div key={f.k}><dt>{f.k}</dt><dd>{f.v}</dd></div>)}</dl>}{FAQ_GROUPS.map((g) => <div className="faq-group" key={g.group}><p className="faq-group-title">{g.group}</p><ul className="faq-list">{g.questions.map((q) => <li key={q}><button onClick={() => ask(q)}>{q}</button></li>)}</ul></div>)}</div>}{messages.map((m, i) => <div className={`message ${m.role}`} key={i}><span>{m.role === "user" ? "You" : "Lumen"}</span><p>{m.content}</p>{m.reportUrl && <a className="report-link" href={m.reportUrl} target="_blank" rel="noreferrer">Open saved report ↗</a>}</div>)}{asking && <div className="message assistant"><span>Lumen</span><p>Working through the plan context…</p></div>}</div><label className="ask-web"><input type="checkbox" checked={web} onChange={(e) => setWeb(e.target.checked)} /><span>Search the web for this question<b>{web ? "on" : "off"}</b></span></label><form className="ask-form" onSubmit={(e) => { e.preventDefault(); ask(); }}><input ref={inputRef} value={askText} onChange={(e) => setAskText(e.target.value)} placeholder={scope ? `Ask about ${scope}…` : "Ask about what you are learning…"} /><button aria-label="Send question" disabled={asking || !askText.trim()}>→</button></form><div className="ask-foot">{web ? "Study guide · searches first, so this answer takes about half a minute longer" : "Study guide · your repo and a stored web brief"}</div></aside>}
   </>;
 }
 

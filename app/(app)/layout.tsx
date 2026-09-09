@@ -4,6 +4,8 @@ import { useState } from "react";
 import { AskMark, LogoMark } from "@/app/brand";
 import { RecallStrip } from "@/app/recall";
 import { AppStateProvider, useAppState } from "@/components/AppState";
+import { planRows } from "@/components/shared";
+import { useRouter } from "next/navigation";
 import { NAV, Nav } from "@/components/Nav";
 import { AskDock } from "./dock";
 import { HeroLines } from "./hero-lines";
@@ -27,8 +29,26 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 }
 
 function Chrome({ children }: { children: React.ReactNode }) {
-  const { askOpen, setAskOpen, setAskTopic, theme, toggleTheme, hours, focus, activeRows, curParts, startedTopics, done, doneHours, peakMonth, monthHours, nextRow, nextIndex, weeklyHours, trackTotals, skipped, skippedHours } = useAppState();
+  const { askOpen, setAskOpen, setAskTopic, theme, toggleTheme, hours, focus, activeRows, curParts, startedTopics, done, doneHours, peakMonth, monthHours, nextRow, nextIndex, weeklyHours, trackTotals, skipped, skippedHours, statusOf } = useAppState();
   const [shared, setShared] = useState(false);
+  const router = useRouter();
+
+  /*
+   * What the focus card knows.
+   *
+   * It carried four lines: the month, the track, the row and its hours. That is orientation
+   * without a next step, on the one panel a reader looks at first every morning. These add the
+   * two things the four lines implied but never answered: how far through the month you are, and
+   * what comes after the row you are on.
+   *
+   * All of it is derived from state this component already holds, so the card costs no request.
+   */
+  const monthRows = focus ? activeRows.filter((r) => Number(r[1]) === focus.month) : [];
+  const monthDone = monthRows.filter((r) => statusOf(r) === "Done").length;
+  const monthLoad = monthRows.reduce((n, r) => n + Number(r[13] || 0), 0);
+  const afterNext = nextIndex >= 0
+    ? planRows.slice(nextIndex + 1).find((r) => { const st = statusOf(r); return st !== "Done" && st !== "Skipped"; }) ?? null
+    : null;
 
   // What the hero rotates through. Built by lib/hero.ts from values this component already holds,
   // so there is no new fetch and nothing here can say something the footer would contradict.
@@ -77,13 +97,26 @@ function Chrome({ children }: { children: React.ReactNode }) {
         {focus ? <>
           <p className="hero-focus-where">Month {focus.month} <span>of {monthHours.length}</span></p>
           <p className="hero-focus-track">{focus.track}</p>
-          {nextRow && <div className="hero-focus-row">
-            <span className="hero-focus-num">{String(nextIndex + 1).padStart(2, "0")}</span>
-            <div>
-              <strong>{String(nextRow[2])}</strong>
-              <span>{Number(nextRow[13] || 0)}h · {activeRows.length - done} topics left</span>
+
+          {monthRows.length > 0 && <div className="hero-focus-month">
+            <div className="hero-focus-meter" role="presentation">
+              <span style={{ width: `${Math.round((monthDone / monthRows.length) * 100)}%` }} />
             </div>
+            <p>{monthDone} of {monthRows.length} topics this month · {monthLoad}h</p>
           </div>}
+
+          {nextRow && <button className="hero-focus-row" onClick={() => router.push(`/plan?row=${nextIndex + 1}`)}>
+            <span className="hero-focus-num">{String(nextIndex + 1).padStart(2, "0")}</span>
+            <span className="hero-focus-body">
+              <strong>{String(nextRow[2])}</strong>
+              <span>{Number(nextRow[13] || 0)}h · {activeRows.length - done} topics left in the plan</span>
+            </span>
+            <span className="hero-focus-go" aria-hidden="true">→</span>
+          </button>}
+
+          {/* The row after the one you are on. Small, because it is not today's problem, and
+              present, because "what is coming" is the question the card kept raising. */}
+          {afterNext && <p className="hero-focus-then">Then: {String(afterNext[2])}</p>}
         </> : <p className="hero-focus-where">Plan complete</p>}
       </aside></section>
     <Nav /><RecallStrip startedTopics={startedTopics} />

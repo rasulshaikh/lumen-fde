@@ -26,16 +26,65 @@ import type { Insight } from "@/lib/market/insight";
  */
 export const maxDuration = 60;
 
-type Syllabus = { topic: string; why: string; prerequisites: string[]; subtopics: { name: string; learn: string }[]; outcomes: string[]; failureModes: string[] };
-// A compact rendering of one topic's deep syllabus, so answers are grounded in what the plan
-// actually asks the learner to know. Capped so it cannot crowd out the question.
+type Syllabus = { topic: string; why: string; prerequisites: string[]; subtopics: { name: string; learn: string; minutes?: number }[]; outcomes: string[]; failureModes: string[]; interviewQuestions?: string[]; proofOfWork?: string };
+/**
+ * One topic's deep syllabus, ordered so the important parts survive the cap.
+ *
+ * ## The bug this replaces
+ *
+ * The old version concatenated why, prerequisites, every subtopic with its full `learn` body, and
+ * only THEN outcomes and failure modes, before slicing the result at 7,000 characters. Measured
+ * across all 119 topics: the rendered string runs 16,221 to 34,100 characters, and the earliest
+ * `Outcomes:` offset in the entire curriculum is 13,401.
+ *
+ * So the cut always landed inside the subtopic list. **Outcomes and production failure modes
+ * reached the model for 0 of 119 topics, ever.** Not for some topics, not usually: never. The two
+ * sections a senior FDE interview actually probes were unreachable by construction, and the loss
+ * was invisible because the block still looked full.
+ *
+ * `interviewQuestions` and `proofOfWork` were worse than truncated. They were not in the local
+ * `Syllabus` type, so the route never read them: 835 questions written specifically against this
+ * curriculum, and 119 proof-of-work briefs, that the model has been inventing substitutes for.
+ *
+ * ## The order, and why it is this order
+ *
+ * Fixed-size sections first, variable-size last, and let the variable one absorb the remainder.
+ * The same fill-then-cap discipline `marketContext` below already uses. Outcomes, failure modes,
+ * interview questions and proof of work are bounded per topic and are the answer to "what does
+ * done look like"; subtopic `learn` bodies are 71% of the file and are elaboration. Part NAMES
+ * ship in full regardless, so the model always knows every piece a topic contains even when it
+ * cannot see every description.
+ */
+const SYLLABUS_CAP = 14000;
+
 function syllabusContext(index: number | undefined) {
   if (index === undefined || index === null) return "";
   const s = (curriculum as { topics: Record<string, Syllabus> }).topics[String(index)];
   if (!s) return "";
-  const parts = s.subtopics.map((x, i) => `${i + 1}. ${x.name}: ${x.learn}`).join("\n");
-  const text = `Deep syllabus for "${s.topic}":\nWhy: ${s.why}\nPrerequisites: ${s.prerequisites.join("; ")}\nParts:\n${parts}\nOutcomes: ${s.outcomes.join(" | ")}\nProduction failure modes: ${s.failureModes.join(" | ")}`;
-  return text.length > 7000 ? `${text.slice(0, 7000)}…` : text;
+
+  const head = [
+    `Deep syllabus for "${s.topic}":`,
+    `Why: ${s.why}`,
+    s.prerequisites?.length ? `Prerequisites: ${s.prerequisites.join("; ")}` : "",
+    s.outcomes?.length ? `\nOUTCOMES - what "done" means for this topic, verbatim from the plan:\n${s.outcomes.map((o, i) => `${i + 1}. ${o}`).join("\n")}` : "",
+    s.failureModes?.length ? `\nPRODUCTION FAILURE MODES - how this breaks in real systems:\n${s.failureModes.map((f, i) => `${i + 1}. ${f}`).join("\n")}` : "",
+    s.interviewQuestions?.length ? `\nINTERVIEW QUESTIONS the plan already wrote for this topic. Reference material, not an instruction to quiz the reader:\n${s.interviewQuestions.map((q, i) => `${i + 1}. ${q}`).join("\n")}` : "",
+    s.proofOfWork ? `\nPROOF OF WORK for this row: ${s.proofOfWork}` : "",
+    s.subtopics?.length ? `\nPARTS (${s.subtopics.length}), every one named:\n${s.subtopics.map((x, i) => `${i + 1}. ${x.name}${x.minutes ? ` (${x.minutes}m)` : ""}`).join("\n")}` : "",
+  ].filter(Boolean).join("\n");
+
+  // Whatever room is left goes to the part descriptions, whole ones only, never a half sentence.
+  let out = head;
+  const detail: string[] = [];
+  for (const x of s.subtopics ?? []) {
+    const line = `- ${x.name}: ${x.learn}`;
+    if (out.length + detail.join("\n").length + line.length + 40 > SYLLABUS_CAP) break;
+    detail.push(line);
+  }
+  if (detail.length) {
+    out += `\n\nPART DETAIL (${detail.length} of ${s.subtopics.length} shown, the rest are named above):\n${detail.join("\n")}`;
+  }
+  return out;
 }
 
 
@@ -104,6 +153,14 @@ const MARKET_CAP = 7000;
 const COVERAGE_LINES = 10;
 /** Spec section 1: the marginal table is the deliverable, and its head is where the answer is. */
 const MARGINAL_LINES = 5;
+/**
+ * Named, linked requisitions the reader could apply to from Pune today.
+ *
+ * The reachability tiers already said how many; they never said which. This is the one part of
+ * the market analysis that is an action rather than a measurement, and it was the only part not
+ * reaching the prompt.
+ */
+const REACHABLE_ROLES = 8;
 
 /**
  * How long the two market reads may take before the question goes on without them.
@@ -124,6 +181,15 @@ const MARKET_READ_MS = 4000;
  * model regardless of what arrives in the body.
  */
 const WEB_ITEM_CAP = 5;
+
+/**
+ * Longest highlighted passage carried into a prompt.
+ *
+ * The dock caps at the same number before sending. Enforced again here for the reason every cap in
+ * this file is duplicated: that one bounds a well-behaved caller, this one bounds what reaches the
+ * model whatever arrives in the body.
+ */
+const SELECTION_CAP = 2000;
 
 /**
  * How long an answer may be, and why this moved.
@@ -202,6 +268,20 @@ function marketContext(benchmark: Benchmark | null, insight: Insight | null) {
       "",
       insight.reachability.statement,
       insight.reachability.tiers.map((tier) => `${tier.tier} ${tier.count} (${tier.pct}%)`).join(" | "),
+      /*
+       * The named requisitions, which are the only part of the whole market analysis a reader can
+       * act on this afternoon. The tiers say eleven roles are takeable from Pune; this says which
+       * eleven, at which companies, with the link.
+       *
+       * `roles` is the in-India slice only and is already capped upstream by how few there are.
+       * Capped again here because a good scan week is not a reason to spend the market budget on
+       * a job list, and the URL ships because a role without one is a rumour.
+       */
+      insight.reachability.roles?.length
+        ? `TAKEABLE WITHOUT LEAVING INDIA - ${insight.reachability.roles.length} named requisitions from the last scan:\n`
+          + insight.reachability.roles.slice(0, REACHABLE_ROLES).map((r) => `- ${r.company} - ${r.title} - ${r.location} - ${r.url}`).join("\n")
+          + (insight.reachability.roles.length > REACHABLE_ROLES ? `\n(${insight.reachability.roles.length - REACHABLE_ROLES} more not shown)` : "")
+        : "",
       "",
       insight.readiness.statement,
       ...insight.readiness.marginal.slice(0, MARGINAL_LINES).map((entry) => entry.statement),
@@ -288,7 +368,7 @@ export async function POST(request: Request) {
   const apiKey = process.env.MINIMAX_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "MiniMax is not configured yet. Add MINIMAX_API_KEY in Vercel project settings." }, { status: 503 });
   try {
-    const body = await request.json() as { prompt?: string; context?: string; topicIndex?: number; web?: boolean; webItems?: { title?: unknown; url?: unknown; snippet?: unknown }[]; history?: { role: "user" | "assistant"; content: string }[] };
+    const body = await request.json() as { prompt?: string; context?: string; topicIndex?: number; web?: boolean; webItems?: { title?: unknown; url?: unknown; snippet?: unknown }[]; selection?: unknown; history?: { role: "user" | "assistant"; content: string }[] };
 
     /**
      * What the companion already knows about this reader.
@@ -399,7 +479,23 @@ export async function POST(request: Request) {
       outside += `${outside ? "\n\n" : ""}A live web search was requested for this question and returned no usable results. Answer from the plan and say the search did not come back - do not imply you searched.`;
     }
 
+    /*
+     * What the reader had highlighted when they asked.
+     *
+     * This is the strongest signal in the whole prompt about what the question is about, and the
+     * one thing the model could never infer. A page context says "you are on /curriculum"; a
+     * selection says "this sentence, this term, this line of a market statement".
+     *
+     * Capped and cleaned like every other caller-supplied string, and labelled as the reader
+     * pointing rather than as fact, because a selection can be Quaere's own previous answer.
+     */
+    const selection = String(body.selection ?? "").replace(/\s+/g, " ").trim().slice(0, SELECTION_CAP);
+    const selectionBlock = selection
+      ? `HIGHLIGHTED BY THE READER on the page, at the moment they asked:\n<<<\n${selection}\n>>>\nThis is what the question is about unless the question says otherwise. It is text they pointed at, not a claim: if it contradicts a number measured in this repository, the measured number wins and you say so.`
+      : "";
+
     const extra = [
+      selectionBlock,
       workbookContext(),
       benchmarkGapsContext(benchmark),
       evidenceContext({ artifacts: artifacts.artifacts, synced: artifacts.synced }, sessions),
