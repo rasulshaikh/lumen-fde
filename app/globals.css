@@ -208,7 +208,12 @@ td .topic-toggle{margin-bottom:6px}
    fatiguing to read and is an AI tell in its own right. */
 :root{
   --font-display:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;
-  --font-body:'Atkinson Hyperlegible',ui-sans-serif,system-ui,sans-serif;
+  /* Next, not the original: the original family ships 400 and 700 ONLY, so every one of
+     the 19 `font-weight:500` declarations below rendered at 400 — measured identical, 276.88px
+     for both. The active tab was the same weight as body text. Google silently drops weights a
+     family does not have, so requesting 500 returned 400 with no error anywhere. `Next` is the
+     same typeface with a real 300..800 variable axis. */
+  --font-body:'Atkinson Hyperlegible Next','Atkinson Hyperlegible',ui-sans-serif,system-ui,sans-serif;
   --font-data:'Martian Mono',ui-monospace,SFMono-Regular,monospace;
 }
 
@@ -293,7 +298,11 @@ code,.mono{font-family:var(--font-data);font-size:12px;font-stretch:87.5%}
 .prob,.answer-key,.empty-chat,.topic-chips span,.status{background:var(--surface-strong)}
 .cur-topic:has(.syllabus),.syllabus-row td{background:var(--surface-strong)}
 .cur-topic:has(.syllabus){border-color:var(--line-strong)}
-.book-row:hover,.cur-topic:hover,.resource-card:hover{background:var(--surface-strong);border-color:var(--line-strong);transform:none}
+/* Hover was --surface -> --surface-strong, a measured 1.228:1 step, with `transform:none`
+   written in to forbid a lift. That is the card->chip FLOOR: the minimum at which two surfaces
+   are distinguishable at all, used as a hover signal. It now also moves the border to the strong
+   line and lifts by 1px, so the pointer produces a response you can actually see. */
+.book-row:hover,.cur-topic:hover,.resource-card:hover{background:var(--surface-strong);border-color:var(--line-strong);transform:translateY(-1px)}
 .panel,.metric,.book-row,.cur-topic,.resource-card,.tab,.primary-button,.quiz-option,.quiz-action,.ask-trigger{
   transition:background-color 120ms ease,border-color 120ms ease,color 120ms ease}
 
@@ -326,12 +335,17 @@ code,.mono{font-family:var(--font-data);font-size:12px;font-stretch:87.5%}
 .tabs{border-bottom:1px solid var(--line);gap:22px}
 .tab{color:var(--muted);font-weight:500;font-size:14px;padding:0 2px 12px;border-radius:0;white-space:nowrap}
 .tab:hover{background:none;color:var(--ink)}
-.tab.active{color:var(--ink);font-weight:500}
+/* 700, not 500. An earlier rule already said 700; this later one silently flattened it, so the
+   active tab was the same weight as an inactive one and the only active signal was the 2px
+   underline. That was invisible anyway while the family shipped no 500 — both rendered at 400. */
+.tab.active{color:var(--ink);font-weight:700}
 .tab.active:after{background:var(--primary);height:2px}
 
 /* --- Data: the accent carries progress, nothing else is coloured --- */
 .bar-fill,.track-progress span,.mock-bar span{background:var(--primary);border-radius:var(--r-sm)}
-.bar-item:nth-child(3n+1) .bar-fill,.bar-item:nth-child(3n+2) .bar-fill,.bar-item:nth-child(3n) .bar-fill{background:var(--primary)}
+/* The rule that used to live here forced nth-child(3n+1), (3n+2) and (3n) — i.e. every bar —
+   to the same fill, which is a rule whose only possible purpose is to UNDO variation. It
+   guaranteed a monochrome chart and it is gone. Bar colour is now free for the redesign to use. */
 .bar-item:hover .bar-fill{background:var(--primary-hover)}
 .bar-track{background:var(--surface-strong);border-radius:var(--r-sm) var(--r-sm) 0 0}
 .track-progress,.mock-bar{background:var(--surface-strong);border-radius:var(--r-pill);height:4px}
