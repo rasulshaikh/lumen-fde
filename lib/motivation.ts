@@ -274,13 +274,13 @@ function namedRole(insight: Insight, index: MarketIndex | null, skills: SkillWei
   const asks = new Map<string, Set<string>>();
   for (const req of Object.values(index.reqs)) {
     if (!req.skills) continue;
-    const key = `${req.company} ${req.title}`;
+    const key = `${req.company}\u0000${req.title}`;
     const held = asks.get(key) ?? new Set<string>();
     for (const id of req.skills) held.add(id);
     asks.set(key, held);
   }
   for (const role of insight.reachability.roles) {
-    const held = asks.get(`${role.company} ${role.title}`);
+    const held = asks.get(`${role.company}\u0000${role.title}`);
     if (!held) continue;
     const hit = skills.find((s) => held.has(s.id));
     if (hit) return { role, skill: hit };
