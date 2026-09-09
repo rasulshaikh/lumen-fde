@@ -103,27 +103,48 @@ export function Backdrop() {
 
     const loop = (t: number) => { draw(t); raf = window.requestAnimationFrame(loop); };
 
+    /*
+     * `size()` runs on every start, and that is a fix rather than belt-and-braces.
+     *
+     * A canvas laid out in a hidden tab, or measured before layout settles, reports clientWidth 0.
+     * The first version measured once on mount and never again except on window resize, so a page
+     * opened in a background tab got a zero-sized canvas and kept it forever: becoming visible
+     * fired visibilitychange, which called start(), which did not re-measure. Observed live, as a
+     * canvas with zero painted pixels and nothing covering it.
+     */
     const start = () => {
       window.cancelAnimationFrame(raf);
+      size();
+      // Nothing to draw into yet. The next start re-measures, so this recovers by itself.
+      if (!width || !height) return;
       // One frame and stop, for reduced motion or a hidden tab. Not a slower animation.
       if (still.matches || document.hidden) { draw(0); return; }
       raf = window.requestAnimationFrame(loop);
     };
 
-    const onResize = () => { size(); if (still.matches || document.hidden) draw(0); };
+    const onResize = () => start();
+
+    /*
+     * A ResizeObserver as well as the window listener. The canvas is `position:fixed` with
+     * `inset:0`, so it tracks the viewport rather than a parent, but the window event does not
+     * fire when a hidden tab is finally laid out, which is exactly the case that produced a
+     * zero-sized canvas.
+     */
+    const observer = new ResizeObserver(() => start());
+    observer.observe(canvas);
 
     // The two palettes want different backdrop colours, and the toggle flips an attribute rather
     // than remounting, so nothing else would tell this canvas to change.
     const themed = new MutationObserver(() => { readColour(); if (still.matches || document.hidden) draw(0); });
     themed.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class"] });
 
-    size();
     start();
     window.addEventListener("resize", onResize);
     document.addEventListener("visibilitychange", start);
     still.addEventListener("change", start);
     return () => {
       window.cancelAnimationFrame(raf);
+      observer.disconnect();
       themed.disconnect();
       window.removeEventListener("resize", onResize);
       document.removeEventListener("visibilitychange", start);
