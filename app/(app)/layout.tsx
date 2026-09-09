@@ -26,7 +26,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 }
 
 function Chrome({ children }: { children: React.ReactNode }) {
-  const { askOpen, setAskOpen, setAskTopic, theme, toggleTheme, hours, focus, activeRows, curParts, startedTopics, done, doneHours, peakMonth, monthHours, nextRow, nextIndex, weeklyHours, trackTotals } = useAppState();
+  const { askOpen, setAskOpen, setAskTopic, theme, toggleTheme, hours, focus, activeRows, curParts, startedTopics, done, doneHours, peakMonth, monthHours, nextRow, nextIndex, weeklyHours, trackTotals, skipped, skippedHours } = useAppState();
   const [shared, setShared] = useState(false);
 
   // What the hero rotates through. Built by lib/hero.ts from values this component already holds,
@@ -51,6 +51,8 @@ function Chrome({ children }: { children: React.ReactNode }) {
     tracks: trackTotals.length,
     weeklyHours,
     peak: peakMonth ?? null,
+    skipped,
+    skippedHours,
   });
 
   const share = async () => {

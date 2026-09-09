@@ -1,15 +1,29 @@
 /**
  * What the hero says to you, and why it is different every time you open it.
  *
- * The hero used to hold five lines built inline in the layout. Five, fixed, in the same order,
- * for 23 months. By week two you stop reading a line you have already read a hundred times, and a
- * status line nobody reads is decoration.
+ * ## What went wrong the first time
  *
- * So this builds a pool instead of a list, and the pool is arithmetic over your own numbers. Every
- * line names something measured: the month you are in, the row you are on, the hours behind and
- * ahead, the pace you set, the shape of the plan. Nothing here is a slogan with a number dropped
- * into it, and nothing is invented. A line whose inputs are missing is dropped rather than filled
- * in, which is why this is a filter and not a fixed array.
+ * The first version of this rotated eight lines of arithmetic, and six of them restated something
+ * already on the screen. "Month 1 of 23, on Linux, Networking, Shell" is the Current focus card
+ * beside it, word for word. "0 of 117 topics recorded, that is 0% of the plan" is the Plan
+ * progress metric below it. "1588h left, at 16h a week that is 99 weeks" is the Hours remaining
+ * card and the Weekly commitment card, added together.
+ *
+ * The homepage already carries a focus card and four metrics. It does not need a ninth readout at
+ * the top in a bigger font. The reader asked for something that motivates, and got a duplicate
+ * dashboard.
+ *
+ * ## What these lines do instead
+ *
+ * They REFRAME a number rather than report it. 1,588 hours is a wall; ninety-nine Saturdays is a
+ * distance you can picture. The heaviest month is a fact in the pace chart; "it is never this
+ * steep again after month 2" is a reason to keep going. Every line is still arithmetic over the
+ * reader's own files, still dropped when its inputs are missing, and still incapable of saying
+ * something the footer would contradict. Nothing here is a slogan with a number dropped into it,
+ * and nothing is invented.
+ *
+ * The test enforces the anti-duplication rule directly: no line may reproduce the phrasing the
+ * focus card or the metric cards already use.
  *
  * ## The rule that shapes the encouraging lines
  *
@@ -18,14 +32,8 @@
  * On day one every "done" number is zero. "0% of the plan is behind you" is true, useless and
  * bleak, and a tool that greets you that way on the morning you start is a tool you stop opening.
  * So the lines that count completed work are only built once there IS completed work, and the
- * early pool leans on scale and what is ahead, which are just as true and are the things actually
- * worth knowing at the start.
- *
- * Late in the plan the opposite risk applies: "1,400 hours ahead" stops being useful once most of
- * them are behind you. Those lines drop out as their numbers stop being the interesting ones.
- *
- * The result is a hero that says different true things at different points in the plan, rather
- * than the same five things for two years.
+ * early pool leans on scale and distance, which are just as true and are the things actually worth
+ * knowing at the start.
  *
  * ## Ordering
  *
@@ -61,6 +69,9 @@ export type HeroState = {
   weeklyHours: number;
   /** Heaviest month by hours. */
   peak: { month: number; hours: number } | null;
+  /** Topics deliberately skipped, and the hours they carried. */
+  skipped: number;
+  skippedHours: number;
 };
 
 const round = (n: number) => Math.max(1, Math.round(n));
@@ -77,45 +88,56 @@ export function pool(s: HeroState): string[] {
   const lines: string[] = [];
   const remaining = Math.max(0, s.hours - s.doneHours);
   const started = s.done > 0 || s.doneHours > 0;
-  // No weeks line when there are no hours left. `round` has a floor of 1, so a finished plan
-  // would otherwise announce "0h left, that is 1 week", which is both wrong and the last thing
-  // you want to read on the morning you finish.
   const weeks = s.weeklyHours > 0 && remaining > 0 ? round(remaining / s.weeklyHours) : null;
 
-  // Where you are. The most useful thing the hero can say, so it is always first in the pool.
-  if (s.month && s.months) {
-    lines.push(`Month ${s.month} of ${s.months}${s.track ? `, on ${s.track}` : ""}.`);
+  // Distance, reframed. The Hours remaining card already says the number; a week has one Saturday
+  // in it, and ninety-nine of those is a thing you can actually picture.
+  if (weeks) {
+    // A week holds one Saturday, so the same number said twice lands differently: "99 weeks" is a
+    // sentence, "99 Saturdays" is a picture of one.
+    lines.push(`${weeksWord(weeks)} of work left at your own pace. That is ${weeks} Saturday${weeks === 1 ? "" : "s"}.`);
   }
-  if (s.nextTopic) {
-    lines.push(s.nextHours
-      ? `Next: ${s.nextTopic}. ${s.nextHours}h.`
-      : `Next: ${s.nextTopic}.`);
+  if (s.months) lines.push(`${s.months} months is a long time to keep a promise to yourself. That is the whole difficulty, and it is the only one.`);
+
+  // The next row, sized against the pace rather than named. The focus card already names it.
+  if (s.nextHours && s.weeklyHours > 0) {
+    const share = s.nextHours / s.weeklyHours;
+    lines.push(share <= 1
+      ? `The row in front of you is ${s.nextHours}h. Less than one week of your ${s.weeklyHours}.`
+      : `The row in front of you is ${s.nextHours}h. About ${weeksWord(round(share))} at your pace, and then it is done for good.`);
   }
 
-  // What is ahead. True on day one, and the thing worth knowing then.
-  lines.push(`${s.total} topics, ${s.hours}h, ${s.tracks} tracks. All of it planned.`);
-  if (weeks) lines.push(`${remaining}h left. At ${s.weeklyHours}h a week, that is ${weeksWord(weeks)}.`);
-  if (remaining === 0 && s.hours > 0) lines.push(`Every planned hour is behind you. ${s.hours}h.`);
-  if (s.parts > 0) lines.push(`${s.parts.toLocaleString()} syllabus parts, each naming one public resource.`);
+  // The heaviest month, as a reason rather than a statistic.
   if (s.peak) {
     lines.push(s.month && s.month > s.peak.month
-      ? `Month ${s.peak.month} was the heaviest at ${s.peak.hours}h. It is behind you.`
-      : `Month ${s.peak.month} is the heaviest at ${s.peak.hours}h.`);
+      ? `The steepest month was ${s.peak.month}, at ${s.peak.hours}h. You already went through it.`
+      : `Month ${s.peak.month} is the steepest in the plan at ${s.peak.hours}h. After that it never gets harder than it has already been.`);
   }
 
-  // What is behind you. Only once there is any, because "0 of 117" as encouragement is a joke you
-  // are not in the mood for on the first morning.
+  // Scale, as permission rather than a target.
+  if (s.parts > 0) lines.push(`${s.parts.toLocaleString()} syllabus parts sit behind this plan. You do not have to hold them all, only the one in front of you.`);
+  if (s.tracks > 1) lines.push(`${s.tracks} tracks, and none of them need finishing today.`);
+
+  // A skip is a judgement call and deserves to be named as one, since the metric card reports it
+  // as a subtraction and nothing else says it was deliberate.
+  if (s.skipped > 0 && s.skippedHours > 0) {
+    lines.push(`You cut ${s.skipped} topic${s.skipped === 1 ? "" : "s"} and ${s.skippedHours}h from this plan. Deciding what not to study is the same skill as studying.`);
+  }
+
+  // Behind you. Only once there is any, because zero as encouragement is a joke you are not in
+  // the mood for on the first morning.
   if (started) {
-    if (s.doneHours > 0) lines.push(`${s.doneHours}h done. Nobody can take those back.`);
-    if (s.done > 0) lines.push(`${s.done} of ${s.total} topics recorded. That is ${Math.round((s.done / s.total) * 100)}% of the plan.`);
-    if (s.doneHours > 0 && s.weeklyHours > 0) {
-      lines.push(`${weeksWord(round(s.doneHours / s.weeklyHours))} of work already sat through.`);
-    }
+    if (s.doneHours > 0) lines.push(`${s.doneHours}h are already behind you. Nobody can take those back, and nothing about a bad week undoes them.`);
+    if (s.doneHours > 0 && s.weeklyHours > 0) lines.push(`You have already sat through ${weeksWord(round(s.doneHours / s.weeklyHours))} of this. The hard part was starting and it is finished.`);
+    if (s.done > 1) lines.push(`${s.done} topics answered for. Each one is a thing you could be asked about tomorrow and would not flinch.`);
+  } else {
+    lines.push("Nothing recorded yet, which is exactly what day one looks like for everybody who finished.");
   }
 
-  // The plan's own terms, which are the point of the product.
-  lines.push("A row marked done is study. An artifact is a URL somebody else can open.");
-  lines.push("Every number here is read from your own files. None of it is inferred.");
+  // The method, which is the argument the whole product makes.
+  lines.push("A row marked done is study. An artifact is a URL somebody else can open. Only one of those survives an interview.");
+  lines.push("Retrieval beats rereading, which is why the box below asks you before it tells you.");
+  lines.push("Every number here is read from your own files. If it looks bad, it is bad, and that is the point of it.");
 
   return lines;
 }

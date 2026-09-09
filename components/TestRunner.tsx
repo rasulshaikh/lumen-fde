@@ -96,7 +96,7 @@ export function TestRunner({ scope, onExit }: { scope: Scope; onExit: () => void
   // The paper. `drawPaper` balances across the topics in scope; see lib/paper.ts for why that
   // matters and what a plain shuffle does instead. The seed is drawn once on mount, so the paper
   // is stable while you sit it and different the next time.
-  const seed = useMemo(() => Math.floor(Math.random() * 0xffffffff), []);
+  const [seed, setSeed] = useState(() => Math.floor(Math.random() * 0xffffffff));
   const paper = useMemo(() => (bank ? drawPaper(bank.prompts, scope.questions, seed) : []), [bank, seed, scope.questions]);
 
   const current = paper[at];
@@ -113,6 +113,20 @@ export function TestRunner({ scope, onExit }: { scope: Scope; onExit: () => void
 
   // Focus the box on each new question so answering does not need a click first.
   useEffect(() => { box.current?.focus(); }, [at]);
+
+  /**
+   * Draw a fresh paper without leaving the page.
+   *
+   * Six questions is a 30-minute checkpoint, not the limit of what you can be asked: the bank
+   * holds every prompt these topics own, and the reader should be able to keep going rather than
+   * be told the test is over. A new seed means a genuinely different draw, and the answers are
+   * cleared because keeping them would carry a graded question into an ungraded paper.
+   */
+  const again = useCallback(() => {
+    setSeed(Math.floor(Math.random() * 0xffffffff));
+    setAnswers({}); setGrades({}); setRevealed({}); setAt(0);
+    started.current = Date.now(); setElapsed(0);
+  }, []);
 
   if (failed) {
     return <div className="test-shell">
@@ -156,15 +170,21 @@ export function TestRunner({ scope, onExit }: { scope: Scope; onExit: () => void
         Nothing here was saved. This does not touch your recall schedule or your progress, because a
         practice run moving twenty scheduled cards is how a schedule stops being trustworthy.
       </p>
+      <p className="test-note">
+        This paper was {paper.length} of the {bank.prompts.length} questions your scope owns, drawn
+        balanced across {topics.length} topic{topics.length === 1 ? "" : "s"}. Another draw asks
+        different ones.
+      </p>
       <div className="test-actions">
-        <button className="quiz-action" onClick={onExit}>Done</button>
+        <button className="quiz-action" onClick={again}>Draw another {scope.questions} →</button>
+        <button className="text-button" onClick={onExit}>Done</button>
       </div>
     </div>;
   }
 
   return <div className="test-shell">
     <div className="test-bar">
-      <span className="test-count">Question {at + 1} of {paper.length}</span>
+      <span className="test-count">Question {at + 1} of {paper.length}<span className="test-of-bank"> · {bank.prompts.length} available on these topics</span></span>
       <span className="test-clock">{mmss(elapsed)} of {scope.minutes} min</span>
     </div>
     <div className="test-progress" role="presentation">
