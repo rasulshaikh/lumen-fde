@@ -21,12 +21,16 @@ import { drawPaper } from "@/lib/paper";
  * reason it uses them: Fluent, Halting, Gone describe what happened when you tried to remember,
  * which is the thing spaced repetition actually needs.
  *
- * ## What this does not do
+ * ## What it records, and what it still refuses to touch
  *
- * It writes nothing. Not to the review schedule, not to progress, not to the repo. A test session
- * is you checking yourself, and quietly moving 20 cards in the spaced-repetition ladder because
- * you did a practice run is the kind of side effect that makes a schedule untrustworthy. The
- * summary is on screen, and the panel says so rather than implying a save happened.
+ * A finished paper can be recorded to `reports/papers/`, on a button, never automatically. That
+ * store is separate and append-only, and the reason the runner originally saved nothing still
+ * holds in full: **it does not touch the spaced-repetition schedule.** A practice run quietly
+ * advancing twenty scheduled cards is what would make that schedule untrustworthy, and
+ * `lib/papers.ts` imports nothing that could write it.
+ *
+ * Recording is a button rather than a side effect because an unrecorded practice run is a
+ * legitimate thing to want. Nothing is stored until you say so, and the summary says which it is.
  */
 
 export type Scope = {
@@ -64,6 +68,7 @@ export function TestRunner({ scope, onExit }: { scope: Scope; onExit: () => void
   const [grades, setGrades] = useState<Record<string, Grade>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [elapsed, setElapsed] = useState(0);
+  const [saved, setSaved] = useState<"no" | "saving" | "yes" | "failed">("no");
   const started = useRef<number | null>(null);
   const box = useRef<HTMLTextAreaElement | null>(null);
 

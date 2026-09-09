@@ -3,6 +3,7 @@ import library from "@/data/library-context.json";
 import { applyMemory, readMemory, recurring, writeMemory } from "@/lib/companion/memory";
 import { benchmarkGapsContext, evidenceContext, recallContext, workbookContext } from "@/lib/companion/context";
 import { readSessionSummary } from "@/lib/companion/session";
+import { papersContext, readPapers } from "@/lib/papers";
 import { readArtifacts } from "@/lib/artifacts";
 import type { ReviewState } from "@/lib/review";
 import { externalContext, readLatestBrief } from "@/lib/external/brief";
@@ -137,6 +138,82 @@ function planMap() {
     + `\n\nTracks, counting active topics only:\n${tracks}`
     + `\n\nEvery topic. The number is the plan row number, the same numbering any market benchmark below uses:\n${lines}`;
 }
+
+/**
+ * The plan at part resolution, matched to the question.
+ *
+ * `syllabusContext` only builds when a topic filter is active, so on Overview, Market, Paths or an
+ * unexpanded Plan the model's entire view of the curriculum is `planMap`: one line per topic, 119
+ * lines, titles only. The 2,236 subtopic names underneath those titles never ship.
+ *
+ * That is the same failure `planMap`'s own header describes and only half-fixed. The plan was once
+ * truncated to 8 of 119 topics, so the model answered "there is no ML topic in the visible plan"
+ * about a plan containing 192 hours of it. The fix raised the resolution from 8 topics to 119
+ * titles, and stopped one level above where answers actually live: the topic is called "Kafka and
+ * event-driven design", and the part called "Idempotent consumers: dedupe keys and the
+ * processed-events table" is invisible.
+ *
+ * The whole index is 152,960 characters, so it cannot ship. This selects instead: a plain
+ * lowercase term match over the names, ranked by how many of the question's terms each hit, ties
+ * broken by plan row so the output is stable. No scoring model, no embedding, nothing invented.
+ *
+ * The header states how many of the 2,236 are shown, and the block says a miss is not proof of
+ * absence, so an empty result cannot become "your plan does not cover that".
+ */
+const PARTS_LINES = 30;
+const PARTS_CAP = 6000;
+
+function partsIndexContext(question: string) {
+  const terms = question.toLowerCase().match(/[a-z0-9+#.]{3,}/g)?.filter((t) => !STOP.has(t)) ?? [];
+  if (!terms.length) return "";
+
+  const topics = (curriculum as { topics: Record<string, Syllabus> }).topics;
+  const hits: { row: number; topic: string; part: string; minutes: number; score: number }[] = [];
+  for (const [key, topic] of Object.entries(topics)) {
+    const row = Number(key) + 1;
+    for (const part of topic.subtopics ?? []) {
+      const name = part.name.toLowerCase();
+      const score = terms.reduce((n, t) => (name.includes(t) ? n + 1 : n), 0);
+      if (score > 0) hits.push({ row, topic: topic.topic, part: part.name, minutes: part.minutes ?? 0, score });
+    }
+  }
+  if (!hits.length) return "";
+
+  hits.sort((a, b) => b.score - a.score || a.row - b.row);
+  const lines: string[] = [];
+  let used = 0;
+  for (const h of hits.slice(0, PARTS_LINES)) {
+    const line = `- row ${h.row}. ${h.topic} / ${h.part}${h.minutes ? ` (${h.minutes}m)` : ""}`;
+    // Whole lines only. A half-named part is worse than one fewer.
+    if (used + line.length > PARTS_CAP) break;
+    used += line.length;
+    lines.push(line);
+  }
+  return `PARTS OF THE PLAN MATCHING THIS QUESTION - ${lines.length} of 2,236 subtopics, selected by keyword:\n${lines.join("\n")}\nThese are plan rows at part resolution. A part not listed here was not matched by these words; that is NOT evidence the plan omits it, and you must not say the plan lacks something on the strength of this list alone.`;
+}
+
+/**
+ * Words that match everything and therefore select nothing.
+ *
+ * Tuned against real output rather than copied from a list. "Does my plan cover idempotent
+ * consumers" correctly returned row 36's "Idempotent consumers: dedupe keys and the
+ * processed-events table"; but "something entirely unrelated like knitting" returned 11 parts,
+ * because `like` matched "read like a reviewer" and `something` matched "Health endpoints that
+ * mean something". Filler words in a question produce confident-looking irrelevance, which is
+ * worse here than returning nothing.
+ */
+const STOP = new Set([
+  "the", "and", "for", "with", "how", "what", "why", "should", "does", "did", "are", "was", "were",
+  "can", "you", "your", "his", "her", "its", "this", "that", "these", "those", "from", "into",
+  "about", "when", "where", "which", "who", "will", "would", "could", "have", "has", "had", "not",
+  "but", "all", "any", "get", "got", "make", "made", "need", "want", "plan", "topic", "learn",
+  "study", "like", "something", "anything", "nothing", "really", "actually", "just", "also",
+  "more", "most", "some", "other", "than", "then", "them", "there", "their", "here", "well",
+  "good", "best", "help", "please", "give", "tell", "show", "know", "think", "mean", "means",
+  "thing", "things", "stuff", "way", "ways", "much", "many", "look", "looks", "see", "seen",
+  "entirely", "completely", "unrelated", "related", "does", "doing", "done", "next", "first",
+  "last", "new", "old", "own", "out", "off", "over", "under", "again", "still", "even", "ever",
+]);
 
 /**
  * The market injection's own ceiling, the same 7000 `syllabusContext` uses.
@@ -405,10 +482,11 @@ export async function POST(request: Request) {
      * one of them failing degrades that block to "unknown" rather than failing the question -
      * `Promise.allSettled`, not `all`, for exactly that reason.
      */
-    const [artifactsR, sessionsR, reviewR] = await Promise.allSettled([
+    const [artifactsR, sessionsR, reviewR, papersR] = await Promise.allSettled([
       readArtifacts(),
       readSessionSummary(),
       readJson<ReviewState>("reports/review/state.json"),
+      readPapers(),
     ]);
     const artifacts = artifactsR.status === "fulfilled" ? artifactsR.value : { artifacts: [], unreadable: 0, synced: false, error: null };
     const sessions = sessionsR.status === "fulfilled" ? sessionsR.value : { count: 0, latest: null, synced: false };
@@ -494,17 +572,25 @@ export async function POST(request: Request) {
       ? `HIGHLIGHTED BY THE READER on the page, at the moment they asked:\n<<<\n${selection}\n>>>\nThis is what the question is about unless the question says otherwise. It is text they pointed at, not a claim: if it contradicts a number measured in this repository, the measured number wins and you say so.`
       : "";
 
+    // Occupies the slot the syllabus vacates rather than competing with it.
+    const partsBlock = deep ? "" : partsIndexContext(String(body.prompt ?? ""));
+
     const extra = [
       selectionBlock,
+      partsBlock,
       workbookContext(),
       benchmarkGapsContext(benchmark),
       evidenceContext({ artifacts: artifacts.artifacts, synced: artifacts.synced }, sessions),
       recallContext(review, new Date()),
+      papersContext(
+        papersR.status === "fulfilled" ? papersR.value : { papers: [], synced: false },
+        (row) => String((workbook.Plan as PlanRow[])[row + 1]?.[2] ?? `row ${row + 1}`),
+      ),
       outside,
     ].filter(Boolean).join("\n\n");
 
     const messages = [
-      { role: "system", content: `You are Quaere, the study guide inside Lumen. Lumen is the dashboard; you are the guide within it. Explain every idea in fifth-grade reading language while keeping the technical meaning exact. Use short sentences, define jargon immediately, give one concrete technical example, connect it to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. The user message contains the COMPLETE plan - every topic across every track. Never tell the learner a subject is missing from the plan without checking that full list first. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. NEVER state how many recall cards are due, even if you can infer it: say whether recall is waiting. A backlog number is what makes people abandon a spaced-repetition system, and this learner has 23 months left. The learner's indexed learning map is:\n${JSON.stringify(library)}\n\nThe local source catalog (metadata and chapter map only) is:\n${JSON.stringify(sourceCatalog)}\n\nThe public repository map is:\n${JSON.stringify(repositories)}${market ? MARKET_RULE : ""}${memoryBlock}` },
+      { role: "system", content: `You are Quaere, the study guide inside Lumen. Lumen is the dashboard; you are the guide within it. Explain every idea in fifth-grade reading language while keeping the technical meaning exact. Use short sentences, define jargon immediately, give one concrete technical example, connect it to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. The user message contains the COMPLETE plan - every topic across every track. Never tell the learner a subject is missing from the plan without checking that full list first. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. NEVER state how many recall cards are due, even if you can infer it: say whether recall is waiting. A backlog number is what makes people abandon a spaced-repetition system, and this learner has 23 months left. The learner's indexed learning map is:\n${JSON.stringify(library)}\n\nThe local source catalog (metadata and chapter map only) is:\n${JSON.stringify(sourceCatalog)}\n\nBOOKS RULE: you have titles, page counts and chapter names for these books. You do NOT have their text. Nothing in this repository holds a single page of any of them; the files live on the learner's own machine. Never quote, summarise or paraphrase a passage as though you had read their copy, and never attribute a claim to a specific page. Name the book and the chapter and say what to look for in it. This is the same rule the market numbers follow: cite what is in a file, invent nothing.\n\nThe public repository map is:\n${JSON.stringify(repositories)}${market ? MARKET_RULE : ""}${memoryBlock}` },
       // Picked field by field, not spread. The client stores an assistant turn as
       // `{role, content, reportUrl?}`, and forwarding a turn that saved a report shipped a
       // `reportUrl` key into an OpenAI-shaped messages array. The declared type hid it from
