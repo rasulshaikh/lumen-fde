@@ -80,7 +80,7 @@ const LABELS = Object.fromEntries(NAV.map((item) => [item.href, item.label]));
 
 export function QuaereDock() {
   // Read-only slice of the provider, by design. See the header note: no `setStatus` here.
-  const { askOpen, setAskOpen, setAskTopic, askText, setAskText, messages, asking, askLumen, setPageContext, lastEventDay, nextRow, nextIndex } = useAppState();
+  const { askOpen, setAskOpen, setAskTopic, askText, setAskText, messages, asking, askLumen, setPageContext, lastEventDay, nextRow, nextIndex, done, activeRows, hours, doneHours, focus, curParts, startedTopics } = useAppState();
   const pathname = usePathname();
 
   /**
@@ -97,6 +97,7 @@ export function QuaereDock() {
    */
   const [greeting, setGreeting] = useState("Ready when you are.");
   const [standing, setStanding] = useState("");
+  const [facts, setFacts] = useState<{ k: string; v: string }[]>([]);
   useEffect(() => {
     const brief = buildBrief({
       focus: nextRow ? {
@@ -111,7 +112,23 @@ export function QuaereDock() {
     }, new Date());
     setGreeting(opening(brief));
     setStanding(brief.focus ? `You are on row ${brief.focus.row}, ${brief.focus.topic}.` : "Every topic is done or skipped.");
-  }, [lastEventDay, nextRow, nextIndex]);
+
+    /**
+     * What it knows about you, stated before you ask.
+     *
+     * The panel used to open on one line, which is barely more useful than the blank box it
+     * replaced. Every figure below is already in the provider — no fetch is added by this — and
+     * each is dropped rather than guessed at when it cannot be derived, which is why this is
+     * built by filtering rather than as a fixed list.
+     */
+    setFacts([
+      focus ? { k: "Where you are", v: `Month ${focus.month} · ${focus.track}` } : null,
+      nextRow ? { k: "Open row", v: `${String(nextRow[2])} · ${Number(nextRow[13] || 0)}h` } : null,
+      { k: "Recorded", v: `${done} of ${activeRows.length} topics · ${hours - doneHours}h still ahead` },
+      startedTopics.length ? { k: "In the recall schedule", v: `${startedTopics.length} topic${startedTopics.length === 1 ? "" : "s"} you have actually opened` } : null,
+      curParts ? { k: "Syllabus it can read", v: `${curParts.toLocaleString()} parts across ${planRows.length} topics` } : null,
+    ].filter((f): f is { k: string; v: string } => Boolean(f)));
+  }, [lastEventDay, nextRow, nextIndex, done, activeRows, hours, doneHours, focus, curParts, startedTopics]);
   const scope = LABELS[pathname];
   const inputRef = useRef<HTMLInputElement>(null);
   // Set by the shortcut only, so a keyboard open focuses the field even on a touch device while a
@@ -181,7 +198,7 @@ export function QuaereDock() {
 
   return <>
     {!askOpen && <button className="ask-fab" onClick={() => { setAskTopic(null); setAskOpen(true); }} aria-label="Open Quaere" aria-keyshortcuts="Meta+K Control+K"><AskMark size={16} /> Quaere</button>}
-    {askOpen && <aside className="ask-panel" aria-label="Quaere"><div className="ask-head"><div className="ask-title"><AskMark size={20} className="ask-head-mark" /><div><p className="eyebrow">Lumen study guide</p><h2>Quaere</h2></div></div><button className="close-button" onClick={() => setAskOpen(false)} aria-label="Close Quaere (Escape)">×</button></div><p className="ask-intro">Latin for “seek”. Ask for a plain-English explanation, a session recap, or the next hands-on step. Quaere sees your whole plan and the indexed study library.</p><p className="ask-scope"><span>Reading</span><b>{scope || "Lumen"}</b>{keyHint && <kbd className="ask-kbd">{keyHint}</kbd>}</p><div className="context-status"><span className="sync-dot" /><span>Plan snapshot · {library.length} books · {repositories.length} repos · read-only</span></div><div className="suggestions"><button onClick={() => askLumen(`Explain what I am looking at in ${here} as if I am preparing for a senior FDE interview.`)}>Explain this</button><button onClick={() => askLumen(`Turn what is in front of me in ${here} into a 20-minute hands-on exercise.`)}>Give me a lab</button><button onClick={() => askLumen(`After working through ${here}, what should I be able to say or build?`)}>Check grasp</button></div><div className="messages">{messages.length === 0 && <div className="empty-chat"><AskMark size={22} className="empty-chat-mark" /><strong>{greeting}</strong><span>{standing}</span><span>Quaere reads your whole plan — all {planRows.length} topics across {tracks.length} tracks — plus the {library.length} indexed books, and whichever view you are on. Not the open web. It never changes your progress.</span><ul className="faq-list">{FAQS.map((q) => <li key={q}><button onClick={() => askLumen(q)}>{q}</button></li>)}</ul></div>}{messages.map((m, i) => <div className={`message ${m.role}`} key={i}><span>{m.role === "user" ? "You" : "Lumen"}</span><p>{m.content}</p>{m.reportUrl && <a className="report-link" href={m.reportUrl} target="_blank" rel="noreferrer">Open saved report ↗</a>}</div>)}{asking && <div className="message assistant"><span>Lumen</span><p>Working through the plan context…</p></div>}</div><form className="ask-form" onSubmit={(e) => { e.preventDefault(); askLumen(); }}><input ref={inputRef} value={askText} onChange={(e) => setAskText(e.target.value)} placeholder={scope ? `Ask about ${scope}…` : "Ask about what you are learning…"} /><button aria-label="Send question" disabled={asking || !askText.trim()}>→</button></form><div className="ask-foot">Study guide · private context</div></aside>}
+    {askOpen && <aside className="ask-panel" aria-label="Quaere"><div className="ask-head"><div className="ask-title"><AskMark size={20} className="ask-head-mark" /><div><p className="eyebrow">Lumen study guide</p><h2>Quaere</h2></div></div><button className="close-button" onClick={() => setAskOpen(false)} aria-label="Close Quaere (Escape)">×</button></div><p className="ask-intro">Latin for “seek”. Ask for a plain-English explanation, a session recap, or the next hands-on step. Quaere sees your whole plan and the indexed study library.</p><p className="ask-scope"><span>Reading</span><b>{scope || "Lumen"}</b>{keyHint && <kbd className="ask-kbd">{keyHint}</kbd>}</p><div className="context-status"><span className="sync-dot" /><span>Plan snapshot · {library.length} books · {repositories.length} repos · read-only</span></div><div className="suggestions"><button onClick={() => askLumen(`Explain what I am looking at in ${here} as if I am preparing for a senior FDE interview.`)}>Explain this</button><button onClick={() => askLumen(`Turn what is in front of me in ${here} into a 20-minute hands-on exercise.`)}>Give me a lab</button><button onClick={() => askLumen(`After working through ${here}, what should I be able to say or build?`)}>Check grasp</button></div><div className="messages">{messages.length === 0 && <div className="empty-chat"><AskMark size={22} className="empty-chat-mark" /><strong>{greeting}</strong><span>{standing}</span><span>Quaere reads your whole plan — all {planRows.length} topics across {tracks.length} tracks — plus the {library.length} indexed books, and whichever view you are on. Not the open web. It never changes your progress.</span>{facts.length > 0 && <dl className="ask-facts">{facts.map((f) => <div key={f.k}><dt>{f.k}</dt><dd>{f.v}</dd></div>)}</dl>}<ul className="faq-list">{FAQS.map((q) => <li key={q}><button onClick={() => askLumen(q)}>{q}</button></li>)}</ul></div>}{messages.map((m, i) => <div className={`message ${m.role}`} key={i}><span>{m.role === "user" ? "You" : "Lumen"}</span><p>{m.content}</p>{m.reportUrl && <a className="report-link" href={m.reportUrl} target="_blank" rel="noreferrer">Open saved report ↗</a>}</div>)}{asking && <div className="message assistant"><span>Lumen</span><p>Working through the plan context…</p></div>}</div><form className="ask-form" onSubmit={(e) => { e.preventDefault(); askLumen(); }}><input ref={inputRef} value={askText} onChange={(e) => setAskText(e.target.value)} placeholder={scope ? `Ask about ${scope}…` : "Ask about what you are learning…"} /><button aria-label="Send question" disabled={asking || !askText.trim()}>→</button></form><div className="ask-foot">Study guide · private context</div></aside>}
   </>;
 }
 

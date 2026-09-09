@@ -25,7 +25,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 }
 
 function Chrome({ children }: { children: React.ReactNode }) {
-  const { askOpen, setAskOpen, setAskTopic, theme, toggleTheme, hours, focus, activeRows, curParts, startedTopics, done, doneHours, peakMonth, monthHours } = useAppState();
+  const { askOpen, setAskOpen, setAskTopic, theme, toggleTheme, hours, focus, activeRows, curParts, startedTopics, done, doneHours, peakMonth, monthHours, nextRow, nextIndex } = useAppState();
   const [shared, setShared] = useState(false);
 
   // What the hero rotates through. Every line is arithmetic over values this component already
@@ -51,7 +51,24 @@ function Chrome({ children }: { children: React.ReactNode }) {
 
   return <main className={askOpen ? "shell ask-open" : "shell"}>
     <header className="topbar"><a className="brand brand-link" href="/overview" aria-label="Return to Lumen home"><LogoMark className="brand-mark" /><div><div className="brand-name">Lumen</div><div className="brand-sub">by Rasul</div></div></a><div className="top-actions"><button className="ask-trigger" onClick={() => { setAskTopic(null); setAskOpen(true); }}><AskMark size={14} /> Quaere</button><button className="ghost-button" onClick={share} aria-live="polite">{shared ? "✓ Link copied" : "↗ Share"}</button><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`} title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>{theme === "dark" ? "☀" : "☾"}</button></div></header>
-    <section className="hero"><div><p className="kicker">Preparation command center</p><h1>Build proof, not just knowledge.</h1><HeroLines lines={heroLines} /></div><div className="hero-note"><span className="note-pin">●</span><div><strong>Current focus</strong><p>{focus ? `Month ${focus.month} · ${focus.track}` : "Plan complete"}</p></div></div></section>
+    <section className="hero"><div><p className="kicker">Preparation command center</p><h1>Build proof, not just knowledge.</h1><HeroLines lines={heroLines} /></div>{/* Current focus was a 300x73 chip in a 306px hero — about 7% of it — carrying one line.
+        It is the only thing on the hero that changes as the plan moves, so it now says what it
+        knows: where you are in the 23 months, the row you are actually on, and what that row
+        costs. Every figure is read from the provider; nothing here is typed. */}
+      <aside className="hero-focus">
+        <p className="eyebrow">Current focus</p>
+        {focus ? <>
+          <p className="hero-focus-where">Month {focus.month} <span>of {monthHours.length}</span></p>
+          <p className="hero-focus-track">{focus.track}</p>
+          {nextRow && <div className="hero-focus-row">
+            <span className="hero-focus-num">{String(nextIndex + 1).padStart(2, "0")}</span>
+            <div>
+              <strong>{String(nextRow[2])}</strong>
+              <span>{Number(nextRow[13] || 0)}h · {activeRows.length - done} topics left</span>
+            </div>
+          </div>}
+        </> : <p className="hero-focus-where">Plan complete</p>}
+      </aside></section>
     <Nav /><RecallStrip startedTopics={startedTopics} />
     {children}
     {/* The dock slot. Everything Quaere needs is already in the provider above, so this is a

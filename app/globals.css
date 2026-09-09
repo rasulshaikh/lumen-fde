@@ -1237,3 +1237,72 @@ th{padding:0 12px 10px}
   .session-start{flex-direction:column;align-items:stretch}
   .session-actions{flex-direction:column;align-items:stretch;gap:10px}
 }
+
+/* ============================================================
+   The home page: two columns that flow independently.
+   ============================================================ */
+.home-cols{display:grid;grid-template-columns:1.35fr .65fr;gap:12px;align-items:start;margin-bottom:12px}
+.home-main,.home-rail{display:grid;gap:12px;align-content:start;min-width:0}
+.home-slot{min-width:0}
+
+/* Under 1024 the wrappers vanish from the box tree, every panel becomes a direct child of the
+   single column, and `order` puts each one back beside the panel it belongs with. Without
+   `display:contents` the phone would read all four main panels and then all three rail panels,
+   which separates Evidence from the brief it is evidence for. */
+@media(max-width:1024px){
+  .home-cols{grid-template-columns:minmax(0,1fr)}
+  .home-main,.home-rail{display:contents}
+  .slot-today{order:1}.slot-evidence{order:2}
+  .slot-wall{order:3}.slot-standing{order:4}
+  .slot-pace{order:5}.slot-reality{order:6}
+  .slot-track{order:7}
+}
+
+/* Reality check, collapsed. Native <details> so it needs no state, is keyboard-operable without
+   help, and — the reason that matters here — the browser's own find-in-page can still reach the
+   tiers while it is shut. */
+.reality-more{margin:0 0 14px}
+.reality-more>summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:7px;
+  min-height:44px;color:var(--accent-text);font-size:13px;font-weight:600}
+.reality-more>summary::-webkit-details-marker{display:none}
+.reality-more>summary:before{content:'▸';font-size:11px;transition:transform .15s ease}
+.reality-more[open]>summary:before{transform:rotate(90deg)}
+.reality-more>summary:focus-visible{outline:2px solid var(--accent-text);outline-offset:3px;border-radius:var(--r-sm)}
+.reality-more .market-list{margin-top:10px}
+@media(prefers-reduced-motion:reduce){.reality-more>summary:before{transition:none}}
+
+/* By track spans the page rather than the main column: it is a 15-row list that reads better
+   wide, and leaving it in the main column left the rail ending 1255px short of the fold. */
+.slot-full{margin-bottom:12px}
+
+/* ============================================================
+   Current focus — a panel, not a chip.
+   ============================================================ */
+.hero-focus{align-self:stretch;min-width:320px;max-width:380px;display:flex;flex-direction:column;
+  gap:2px;padding:20px 22px;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--r-lg);box-shadow:var(--elev-1)}
+.hero-focus .eyebrow{margin:0 0 12px}
+.hero-focus-where{margin:0;font-family:var(--font-display);font-size:26px;font-weight:700;
+  letter-spacing:-.02em;color:var(--ink);line-height:1.1}
+.hero-focus-where span{font-size:15px;font-weight:500;color:var(--muted);letter-spacing:0}
+.hero-focus-track{margin:2px 0 0;font-size:13px;color:var(--muted);line-height:1.45}
+.hero-focus-row{display:flex;gap:12px;align-items:flex-start;margin-top:16px;padding-top:14px;
+  border-top:1px solid var(--line)}
+.hero-focus-num{font-family:var(--font-data);font-size:12px;font-weight:700;color:var(--accent-text);
+  padding-top:2px}
+.hero-focus-row strong{display:block;font-size:13.5px;font-weight:700;color:var(--ink);line-height:1.4}
+.hero-focus-row span{display:block;margin-top:4px;font-size:12px;color:var(--muted);
+  font-variant-numeric:tabular-nums}
+
+@media(max-width:850px){
+  .hero-focus{max-width:none;min-width:0;margin-top:22px}
+}
+
+/* What Quaere knows about you, before you ask it anything. */
+.ask-facts{display:grid;gap:0;margin:14px 0 4px;padding:0;border-top:1px solid var(--line)}
+.ask-facts>div{display:flex;justify-content:space-between;gap:14px;align-items:baseline;
+  padding:9px 0;border-bottom:1px solid var(--line)}
+.ask-facts dt{flex:0 0 auto;font-family:var(--font-data);font-size:10px;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--muted)}
+.ask-facts dd{margin:0;text-align:right;font-size:12.5px;color:var(--ink);line-height:1.45;
+  font-variant-numeric:tabular-nums;min-width:0}

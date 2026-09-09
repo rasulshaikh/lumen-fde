@@ -193,47 +193,48 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
   readingUrl: string | null;
 }) {
   return <>
-      {/* 1 + 2. Evidence, and the next action beside it. The old "Start here" panel moves up
-          from under the pace map to sit here: it is the row he actually opens this morning,
-          and the panel to its left is why that row is worth opening. */}
-      <section className="content-grid">
-        {/* Start here leads, and takes the wide column.
-            This page is opened every morning for roughly two years, so the first thing on it
-            should be what to do today rather than what has not happened yet. At month 1 three of
-            the first four panels are honest zeros, and the widest of them — the slot the eye
-            lands on — was one of those. Evidence keeps everything it says, one column over.
+      {/*
+        TWO FLOWING COLUMNS, not a stack of two-column rows.
 
-            The description is no longer cut at 118 characters. That cap existed only because this
-            was the narrow panel: 38 of the 119 rows are longer than it, up to 662 characters, so
-            a third of the plan showed its instruction with the end sliced off, in the panel whose
-            whole job is saying what the work actually is. */}
-        {/* The brief supersedes the old "Start here" panel rather than sitting next to it. It
-            carries everything that panel did — the row, its description, both actions — and adds
-            what the reader actually needs first: how long it has been, what the topic is made of,
-            whether recall is waiting, and what finishing it buys. Two panels saying the same
-            thing differently is how a page stops being read.
+        Measured on the page this replaces, at 1728px: Today 806 beside Evidence 504, The Wall 463
+        beside Standing 280, Pace map 356 beside Reality check 691 — three holes of 302, 183 and
+        335px, roughly 820px of dead space on one screen. All three had one cause: a grid row is
+        as tall as its taller child, so the shorter panel leaves a gap beneath it. An earlier
+        `align-items:start` stopped the shorter panel STRETCHING, which is a different bug, and
+        could not stop the gap.
 
-            Until the first effect runs there is no brief, and the old panel renders in its place
-            so the page is never headless. */}
-        {brief
-          ? <BriefPanel brief={brief} readingUrl={readingUrl} onOpenPlan={() => setView("Plan")} setStatus={setFocusStatus} />
-          : <div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Next action</p><h2>Start here</h2></div><span className="priority">P1</span></div><div className="next-action"><div className="action-index">{nextRow ? String(nextIndex + 1).padStart(2, "0") : "—"}</div><div><h3>{nextRow ? String(nextRow[2]) : "Plan complete"}</h3><p>{nextRow ? String(nextRow[3]) : "Every topic is done or skipped."}</p>{nextRow && <Link href={String(nextRow[5])}>Open reading</Link>}</div></div><button className="primary-button" onClick={() => setView("Plan")}>Open the plan <span>→</span></button></div>}
-        <EvidencePanel feed={feed} openMarket={() => setView("Market")} />
-      </section>
+        Re-pairing panels of similar height would hold only until the data moved. Two columns that
+        flow independently make the gap structurally impossible, which is the only kind of fix
+        worth making on a page whose panel heights change with progress.
 
-      {/* 3. The wall, with the rhythm beside it: the two records of accumulation, one of what
-          was built and one of how often the building happens. */}
-      <section className="content-grid">
-        <ShippedWall feed={feed.artifacts} planCount={planRows.length} nextRow={nextRow} nextIndex={nextIndex} openPlan={() => setView("Plan")} />
-        <StandingPanel streak={feed.streak} loading={feed.loading} openPlan={() => setView("Plan")} />
-      </section>
-
-      {/* 4. What is true today. Unchanged, and it stays above the fold of the lower half: the
-          honest reading of a 1,588-hour plan is the half of this page that never flatters. */}
+        Under 1024px the two wrappers become `display:contents`, so every panel becomes a direct
+        child of one column and `order` interleaves them back into their original pairs. That is
+        what lets the wrappers exist without costing the phone's reading order.
+      */}
       <section className="metric-grid"><Metric label="Plan progress" value={`${pct(done, activeRows.length)}%`} detail={`${done} of ${activeRows.length} active${skipped ? ` · ${skipped} of ${planRows.length} skipped` : ""}`} tone="rose" /><Metric label="Hours remaining" value={`${Math.max(hours - doneHours, 0)}`} detail={`of ${hours} active hours${skippedHours ? ` · ${skippedHours}h skipped` : ""}`} tone="teal" /><div className="metric brass"><span className="metric-label">Weekly commitment</span><strong><input className="weekly-input" type="number" min={1} max={80} value={weeklyHours} aria-label="Hours you study each week" onChange={(e) => setWeekly(Number(e.target.value))} />h</strong><span className="metric-detail">{(hours / weeklyHours).toFixed(1)} weeks · {(hours / weeklyHours / 4.333).toFixed(1)} months</span></div><Metric label="Mocks" value={`${mockRows.reduce((n, r) => n + Number(r[6] || 0), 0)} / ${mockRows.reduce((n, r) => n + Number(r[1] || 0), 0)}`} detail="completed / target" tone="ink" /></section>
-      <section className="content-grid"><div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Pace map</p><h2>Where the hours go</h2></div><span className="panel-meta">{hours}h · {tracks.length} tracks</span></div><div className="bar-chart">{monthHours.map((item) => <div className="bar-item" key={item.month}><div className="bar-value">{item.hours}h</div><div className="bar-track"><div className="bar-fill" style={{ height: `${Math.max(12, item.hours / maxMonthHours * 100)}%` }} /></div><div className="bar-label">M{item.month}</div></div>)}</div><div className="chart-foot"><span><i className="legend-dot rose" /> planned hours</span><span>Peak: Month {peakMonth.month} · {peakMonth.hours}h</span></div></div><div className="panel reality"><p className="eyebrow">Reality check</p><h2>Target calibration</h2><p>“$250K” is a 2–3 year target from Pune, not something this plan promises on its own. The nearer proof point is a strong global-remote India role.</p><ul className="market-list">{marketTiers.map((m) => <li key={m.market}><span className={`market-tier ${m.tone}`}>{m.label}</span><span className="market-name">{m.market}</span><span className="market-window">{m.window}</span></li>)}</ul><button className="text-button" onClick={() => setView("Market")}>Read the assumptions →</button></div></section>
-      {/* Reality check moved up beside the pace map, so this row carries one panel and must
-          not keep the two-column template — a .65fr of empty canvas beside it. */}
-      <section className="content-grid single"><div className="panel wide"><div className="panel-head"><div><p className="eyebrow">By track</p><h2>Coverage at a glance</h2></div><button className="text-button" onClick={() => setView("Plan")}>View all →</button></div><div className="track-list">{trackTotals.map(({ name, count, hours: h, done: trackDone }) => <button className="track-row" key={name} onClick={() => { setTrack(name); setView("Plan"); }}><span className="track-name">{name}</span><span className="track-count">{count} topics</span><span className="track-progress"><span style={{ width: `${pct(trackDone, count)}%` }} /></span><span className="track-hours">{h}h</span></button>)}</div></div></section>
-    </>;
+
+      <div className="home-cols">
+        <div className="home-main">
+          <div className="home-slot slot-today">
+            {brief
+              ? <BriefPanel brief={brief} readingUrl={readingUrl} onOpenPlan={() => setView("Plan")} setStatus={setFocusStatus} />
+              : <div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Next action</p><h2>Start here</h2></div><span className="priority">P1</span></div><div className="next-action"><div className="action-index">{nextRow ? String(nextIndex + 1).padStart(2, "0") : "—"}</div><div><h3>{nextRow ? String(nextRow[2]) : "Plan complete"}</h3><p>{nextRow ? String(nextRow[3]) : "Every topic is done or skipped."}</p>{nextRow && <Link href={String(nextRow[5])}>Open reading</Link>}</div></div><button className="primary-button" onClick={() => setView("Plan")}>Open the plan <span>→</span></button></div>}
+          </div>
+          <div className="home-slot slot-wall"><ShippedWall feed={feed.artifacts} planCount={planRows.length} nextRow={nextRow} nextIndex={nextIndex} openPlan={() => setView("Plan")} /></div>
+          <div className="home-slot slot-pace"><div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Pace map</p><h2>Where the hours go</h2></div><span className="panel-meta">{hours}h · {tracks.length} tracks</span></div><div className="bar-chart">{monthHours.map((item) => <div className="bar-item" key={item.month}><div className="bar-value">{item.hours}h</div><div className="bar-track"><div className="bar-fill" style={{ height: `${Math.max(12, item.hours / maxMonthHours * 100)}%` }} /></div><div className="bar-label">M{item.month}</div></div>)}</div><div className="chart-foot"><span><i className="legend-dot rose" /> planned hours</span><span>Peak: Month {peakMonth.month} · {peakMonth.hours}h</span></div></div></div>
+        </div>
+
+        <div className="home-rail">
+          <div className="home-slot slot-evidence"><EvidencePanel feed={feed} openMarket={() => setView("Market")} /></div>
+          <div className="home-slot slot-standing"><StandingPanel streak={feed.streak} loading={feed.loading} openPlan={() => setView("Plan")} /></div>
+          <div className="home-slot slot-reality"><div className="panel reality"><p className="eyebrow">Reality check</p><h2>Target calibration</h2><p>“$250K” is a 2–3 year target from Pune, not something this plan promises on its own. The nearer proof point is a strong global-remote India role.</p><details className="reality-more"><summary>Read the assumptions</summary><ul className="market-list">{marketTiers.map((m) => <li key={m.market}><span className={`market-tier ${m.tone}`}>{m.label}</span><span className="market-name">{m.market}</span><span className="market-window">{m.window}</span></li>)}</ul></details><button className="text-button" onClick={() => setView("Market")}>Read the assumptions →</button></div></div>
+        </div>
+      </div>
+
+      {/* By track spans both columns rather than sitting at the foot of the main one.
+          With it in the main column the two ran 2365 against 1110 — the rail ended barely
+          halfway down and left 1255px of empty right-hand side. Full width closes most of that
+          and gives the 15-track list the room it actually wants. */}
+      <div className="home-slot slot-track slot-full"><div className="panel wide"><div className="panel-head"><div><p className="eyebrow">By track</p><h2>Coverage at a glance</h2></div><button className="text-button" onClick={() => setView("Plan")}>View all →</button></div><div className="track-list">{trackTotals.map(({ name, count, hours: h, done: trackDone }) => <button className="track-row" key={name} onClick={() => { setTrack(name); setView("Plan"); }}><span className="track-name">{name}</span><span className="track-count">{count} topics</span><span className="track-progress"><span style={{ width: `${pct(trackDone, count)}%` }} /></span><span className="track-hours">{h}h</span></button>)}</div></div></div>
+  </>;
 }
