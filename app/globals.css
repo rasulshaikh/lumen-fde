@@ -1447,3 +1447,14 @@ th{padding:0 12px 10px}
   padding-top:8px;border-top:1px solid var(--line)}
 .outside-foot{margin:12px 0 0;padding-top:10px;border-top:1px solid var(--line);
   font-size:11px;line-height:1.55;color:var(--muted)}
+
+/* Pace map bars are buttons now: each one opens /plan filtered to its month.
+   Appended at the end of the file on purpose. `.bar-item` is declared twice above
+   (once for layout, once inside the <=1024px scroller) and a reset placed next to
+   the first would be undone by the second. */
+.bar-chart .bar-item{border:0;background:none;padding:0;margin:0;color:inherit;font:inherit;
+  cursor:pointer;border-radius:6px 6px 0 0;transition:background .12s ease}
+.bar-chart .bar-item:hover{background:var(--surface-strong)}
+.bar-chart .bar-item:hover .bar-fill{filter:brightness(1.12)}
+.bar-chart .bar-item:hover .bar-label,.bar-chart .bar-item:hover .bar-value{color:var(--ink)}
+.bar-chart .bar-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}

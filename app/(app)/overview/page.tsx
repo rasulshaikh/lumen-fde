@@ -255,6 +255,9 @@ export default function OverviewPage() {
   // that follows it. Holding the track until setView runs keeps both halves of that click.
   const pendingTrack = useRef<string | null>(null);
   const setTrack = (name: string) => { pendingTrack.current = name; };
+  // The pace map's 23 bars each open their own month. No pending-ref dance like `setTrack` needs,
+  // because a bar carries everything the jump requires in one click.
+  const openMonth = (month: number) => router.push(`/plan?month=${month}`);
   const setView = (name: string) => {
     const href = NAV.find((item) => item.label === name)?.href ?? "/";
     const track = pendingTrack.current;
@@ -287,6 +290,7 @@ export default function OverviewPage() {
     nextRow={state.nextRow}
     nextIndex={state.nextIndex}
     setView={setView}
+    openMonth={openMonth}
     trackTotals={state.trackTotals}
     setTrack={setTrack}
     marketTiers={state.marketTiers}

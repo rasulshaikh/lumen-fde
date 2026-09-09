@@ -162,7 +162,7 @@ function StandingPanel({ streak, loading, openPlan }: { streak: Streak | null; l
   </div>;
 }
 
-export function Overview({ done, activeRows, skipped, hours, doneHours, skippedHours, weeklyHours, setWeekly, monthHours, maxMonthHours, peakMonth, nextRow, nextIndex, setView, trackTotals, setTrack, marketTiers, feed, brief, readingUrl, setFocusStatus }: {
+export function Overview({ done, activeRows, skipped, hours, doneHours, skippedHours, weeklyHours, setWeekly, monthHours, maxMonthHours, peakMonth, nextRow, nextIndex, setView, trackTotals, setTrack, marketTiers, feed, brief, readingUrl, setFocusStatus, openMonth }: {
   done: number;
   activeRows: Row[];
   skipped: number;
@@ -177,6 +177,8 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
   nextRow: Row | null;
   nextIndex: number;
   setView: (name: string) => void;
+  /** Opens /plan filtered to one month. Every bar in the pace map is a link to its own month. */
+  openMonth: (month: number) => void;
   trackTotals: { name: string; count: number; hours: number; done: number }[];
   setTrack: (name: string) => void;
   marketTiers: { market: string; window: string; rank: number; label: string; tone: string }[];
@@ -222,7 +224,7 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
               : <div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Next action</p><h2>Start here</h2></div><span className="priority">P1</span></div><div className="next-action"><div className="action-index">{nextRow ? String(nextIndex + 1).padStart(2, "0") : "-"}</div><div><h3>{nextRow ? String(nextRow[2]) : "Plan complete"}</h3><p>{nextRow ? String(nextRow[3]) : "Every topic is done or skipped."}</p>{nextRow && <Link href={String(nextRow[5])}>Open reading</Link>}</div></div><button className="primary-button" onClick={() => setView("Plan")}>Open the plan <span>→</span></button></div>}
           </div>
           <div className="home-slot slot-wall"><ShippedWall feed={feed.artifacts} planCount={planRows.length} nextRow={nextRow} nextIndex={nextIndex} openPlan={() => setView("Plan")} /></div>
-          <div className="home-slot slot-pace"><div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Pace map</p><h2>Where the hours go</h2></div><span className="panel-meta">{hours}h · {tracks.length} tracks</span></div><div className="bar-chart">{monthHours.map((item) => <div className="bar-item" key={item.month}><div className="bar-value">{item.hours}h</div><div className="bar-track"><div className="bar-fill" style={{ height: `${Math.max(12, item.hours / maxMonthHours * 100)}%` }} /></div><div className="bar-label">M{item.month}</div></div>)}</div><div className="chart-foot"><span><i className="legend-dot rose" /> planned hours</span><span>Peak: Month {peakMonth.month} · {peakMonth.hours}h</span></div></div></div>
+          <div className="home-slot slot-pace"><div className="panel wide"><div className="panel-head"><div><p className="eyebrow">Pace map</p><h2>Where the hours go</h2></div><span className="panel-meta">{hours}h · {tracks.length} tracks</span></div><div className="bar-chart">{monthHours.map((item) => <button className="bar-item" key={item.month} onClick={() => openMonth(item.month)} aria-label={`Month ${item.month}, ${item.hours} hours planned. Open the plan filtered to this month.`} title={`Open month ${item.month} in the plan`}><div className="bar-value">{item.hours}h</div><div className="bar-track"><div className="bar-fill" style={{ height: `${Math.max(12, item.hours / maxMonthHours * 100)}%` }} /></div><div className="bar-label">M{item.month}</div></button>)}</div><div className="chart-foot"><span><i className="legend-dot rose" /> planned hours</span><span>Peak: Month {peakMonth.month} · {peakMonth.hours}h</span></div></div></div>
         </div>
 
         <div className="home-rail">
