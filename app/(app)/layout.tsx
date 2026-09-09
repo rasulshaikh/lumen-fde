@@ -11,6 +11,7 @@ import { AskDock } from "./dock";
 import { HeroLines } from "./hero-lines";
 import { HeroHeadline } from "./hero-headline";
 import { headlines, pool } from "@/lib/hero";
+import { PROGRAMME, TITLE } from "@/lib/profile";
 
 /**
  * The shell every one of the ten routes renders inside.
@@ -80,7 +81,7 @@ function Chrome({ children }: { children: React.ReactNode }) {
   const share = async () => {
     const url = window.location.href;
     try {
-      if (navigator.share) { await navigator.share({ title: "Lumen · Senior FDE plan", url }); return; }
+      if (navigator.share) { await navigator.share({ title: TITLE, url }); return; }
       await navigator.clipboard.writeText(url);
       setShared(true); window.setTimeout(() => setShared(false), 2000);
     } catch { /* cancelled, or clipboard blocked without a secure context */ }
@@ -88,7 +89,7 @@ function Chrome({ children }: { children: React.ReactNode }) {
 
   return <main className={askOpen ? "shell ask-open" : "shell"}>
     <header className="topbar"><a className="brand brand-link" href="/overview" aria-label="Return to Lumen home"><LogoMark className="brand-mark" /><div><div className="brand-name">Lumen</div><div className="brand-sub">by Rasul</div></div></a><div className="top-actions"><button className="ask-trigger" onClick={() => { setAskTopic(null); setAskOpen(true); }}><AskMark size={14} /> Quaere</button><button className="ghost-button" onClick={share} aria-live="polite">{shared ? "✓ Link copied" : "↗ Share"}</button><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`} title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>{theme === "dark" ? "☀" : "☾"}</button></div></header>
-    <section className="hero"><div><p className="kicker">Preparation command center</p><HeroHeadline lines={headlines(heroState)} /><HeroLines lines={heroLines} /></div>{/* Current focus was a 300x73 chip in a 306px hero - about 7% of it - carrying one line.
+    <section className="hero"><div><p className="kicker">{PROGRAMME}</p><HeroHeadline lines={headlines(heroState)} /><HeroLines lines={heroLines} /></div>{/* Current focus was a 300x73 chip in a 306px hero - about 7% of it - carrying one line.
         It is the only thing on the hero that changes as the plan moves, so it now says what it
         knows: where you are in the 23 months, the row you are actually on, and what that row
         costs. Every figure is read from the provider; nothing here is typed. */}
@@ -124,6 +125,6 @@ function Chrome({ children }: { children: React.ReactNode }) {
     {/* The dock slot. Everything Quaere needs is already in the provider above, so this is a
         one-line seam: the route-aware dock replaces app/(app)/dock.tsx and nothing here moves. */}
     <AskDock />
-    <footer><span>Built from Rasul&apos;s Senior FDE plan · {activeRows.length} active topics · {hours} hours{curParts ? ` · ${curParts.toLocaleString()} syllabus parts` : ""}</span><span>{NAV.length} views · dashboard and MCP read the same plan</span></footer>
+    <footer><span>{PROGRAMME} · {activeRows.length} active topics · {hours} hours{curParts ? ` · ${curParts.toLocaleString()} syllabus parts` : ""}</span><span>{NAV.length} views · dashboard and MCP read the same plan</span></footer>
   </main>;
 }

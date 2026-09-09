@@ -6,12 +6,13 @@ import repositories from "@/data/repository-context.json";
 import sources from "@/data/market-sources.json";
 import { LADDER } from "@/lib/review";
 import { LogoMark } from "./brand";
+import { PROGRAMME, TITLE } from "@/lib/profile";
 
 type Row = (string | number | null)[];
 type Topic = { subtopics?: unknown[]; interviewQuestions?: unknown[] };
 
 export const metadata: Metadata = {
-  title: "Lumen · a Senior FDE preparation system",
+  title: TITLE,
   description:
     "The study system behind one 23-month Senior Forward Deployed Engineer plan: 117 topics, 2,236 syllabus parts, and a nightly scan of 27 job boards that ranks the plan by what is actually being asked for.",
 };
@@ -67,8 +68,8 @@ export default function LandingPage() {
       </header>
 
       <section className="lp-hero">
-        <p className="lp-kicker">A Senior FDE preparation system</p>
-        <h1>Twenty-three months of preparation, measured against the market that hires for it.</h1>
+        <p className="lp-kicker">{PROGRAMME}</p>
+        <h1>Twenty-three months, hands on, measured against the market that hires for it.</h1>
         <p className="lp-lede">
           Lumen is the study system behind one Senior Forward Deployed Engineer plan. It holds the
           curriculum, schedules the recall, records what gets shipped, and every night it reads the

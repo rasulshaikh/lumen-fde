@@ -15,12 +15,16 @@
  * Next's App Router picks all three up by filename and emits the <link>/<meta> tags.
  */
 import sharp from "sharp";
+import profile from "../data/profile.json" with { type: "json" };
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = join(ROOT, "app");
+
+/** The programme name, from data/profile.json, so the card cannot drift from the app. */
+const PROGRAMME = profile.programme ?? "FDE Hands-on Program";
 
 const CANVAS = "#010102";
 const INK = "#f7f8f8";
@@ -99,7 +103,8 @@ function ogCard(markPng) {
   <rect width="1200" height="630" fill="${CANVAS}"/>
   <rect x="0" y="0" width="1200" height="10" fill="${ACCENT}"/>
   <image x="96" y="86" width="88" height="88" href="data:image/png;base64,${markPng.toString("base64")}"/>
-  <text x="208" y="143" font-family="Helvetica,Arial,sans-serif" font-size="26" font-weight="700" letter-spacing="5" fill="${ACCENT}">LUMEN</text>
+  <text x="208" y="132" font-family="Helvetica,Arial,sans-serif" font-size="26" font-weight="700" letter-spacing="5" fill="${ACCENT}">LUMEN</text>
+  <text x="208" y="158" font-family="Helvetica,Arial,sans-serif" font-size="15" font-weight="500" letter-spacing="1.5" fill="#8a93a5">${PROGRAMME.toUpperCase()}</text>
   <text x="96" y="316" font-family="Helvetica,Arial,sans-serif" font-size="72" font-weight="700" fill="${INK}">${escapeXml(lines[0])}</text>
   <text x="96" y="398" font-family="Helvetica,Arial,sans-serif" font-size="72" font-weight="700" fill="${INK}">${escapeXml(lines[1])}</text>
   <rect x="96" y="446" width="120" height="4" fill="${ACCENT}"/>

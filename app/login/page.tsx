@@ -1,7 +1,7 @@
 import workbook from "@/data/workbook.json";
 import curriculum from "@/data/curriculum.json";
 import library from "@/data/library-context.json";
-import { weeklyPace } from "@/lib/profile";
+import { PROGRAMME, weeklyPace } from "@/lib/profile";
 import { LogoMark } from "../brand";
 import { LoginForm } from "./form";
 
@@ -45,7 +45,7 @@ export default function LoginPage() {
       <div className="login-split">
         <section className="login-intro">
           <div className="login-brand"><LogoMark className="brand-mark" /><span>Lumen</span></div>
-          <p className="login-kicker">Rasul&apos;s Senior FDE command center</p>
+          <p className="login-kicker">{PROGRAMME}</p>
           <h1>Pick up where the work left off.</h1>
           <p className="login-copy">
             One plan, its full syllabus, spaced recall, mock loops and a private study guide,

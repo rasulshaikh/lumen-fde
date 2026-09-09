@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Backdrop } from "@/components/Backdrop";
-export const metadata: Metadata = { title: "Lumen · Senior FDE Plan", description: "Rasul's Senior FDE preparation command center." };
+import { PREMISE, TITLE } from "@/lib/profile";
+export const metadata: Metadata = { title: TITLE, description: PREMISE };
 // Runs before first paint. Without it the light palette renders, then React hydrates and
 // swaps to dark - a full-page flash on every load for anyone who prefers dark.
 const themeScript = `(function(){try{var s=localStorage.getItem('lumen-theme');var d=s==='dark'||(!s&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.theme=d?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}})()`;

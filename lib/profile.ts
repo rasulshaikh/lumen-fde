@@ -22,7 +22,28 @@
  */
 import profile from "@/data/profile.json";
 
+/**
+ * What the product calls itself, in one place.
+ *
+ * It called itself seven different things across seven files: "Senior FDE Plan" in the tab title,
+ * "a Senior FDE preparation system" on the landing page, "Preparation command center" in the hero,
+ * "Rasul's Senior FDE command center" on the login screen, "Senior FDE plan" in the share sheet
+ * and again in the footer. None of them agreed, and changing the name meant finding all seven.
+ *
+ * `TITLE` is what a browser tab, a share sheet and a link preview show. `PROGRAMME` is the
+ * descriptor on its own. `PREMISE` is the one-sentence claim, and it is deliberately about what
+ * the thing does rather than what it is worth: "more than a degree" is a comparison the reader can
+ * draw for themselves from 119 topics that each end in a deliverable.
+ */
+export const PROGRAMME = String((profile as { programme?: string }).programme ?? "FDE Hands-on Program");
+export const PREMISE = String((profile as { premise?: string }).premise ?? "");
+export const PRODUCT = String((profile as { product?: string }).product ?? "Lumen");
+export const TITLE = `${PRODUCT} · ${PROGRAMME}`;
+
 export type Profile = {
+  product?: string;
+  programme?: string;
+  premise?: string;
   name: string;
   location: string;
   targetRole: string;
