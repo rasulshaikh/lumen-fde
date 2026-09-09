@@ -75,7 +75,7 @@ const escapeXml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(
  * is affected. The app itself loads the real Manrope.
  *
  * The headline is split across two lines by hand rather than set on one: at a size
- * large enough to carry the card, "Build proof, not just knowledge." runs past 1200px
+ * large enough to carry the card, "Build proof you can show." runs past 1200px
  * and collides with the mark. SVG has no text wrapping, so the break is explicit.
  */
 /**
@@ -93,7 +93,7 @@ function planSubtitle() {
 }
 
 function ogCard(markPng) {
-  const lines = ["Build proof,", "not just knowledge."];
+  const lines = ["Build proof", "you can show."];
   const sub = planSubtitle();
   return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">
   <rect width="1200" height="630" fill="${CANVAS}"/>

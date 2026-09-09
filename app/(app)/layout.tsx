@@ -7,6 +7,7 @@ import { AppStateProvider, useAppState } from "@/components/AppState";
 import { NAV, Nav } from "@/components/Nav";
 import { AskDock } from "./dock";
 import { HeroLines } from "./hero-lines";
+import { pool } from "@/lib/hero";
 
 /**
  * The shell every one of the ten routes renders inside.
@@ -25,20 +26,32 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 }
 
 function Chrome({ children }: { children: React.ReactNode }) {
-  const { askOpen, setAskOpen, setAskTopic, theme, toggleTheme, hours, focus, activeRows, curParts, startedTopics, done, doneHours, peakMonth, monthHours, nextRow, nextIndex } = useAppState();
+  const { askOpen, setAskOpen, setAskTopic, theme, toggleTheme, hours, focus, activeRows, curParts, startedTopics, done, doneHours, peakMonth, monthHours, nextRow, nextIndex, weeklyHours, trackTotals } = useAppState();
   const [shared, setShared] = useState(false);
 
-  // What the hero rotates through. Every line is arithmetic over values this component already
-  // holds - no new fetch, and nothing here can say something the footer would contradict. A line
-  // that cannot be derived is dropped rather than filled in, which is why this is a filter and
-  // not a fixed array.
-  const heroLines = [
-    `Your ${hours}-hour Senior FDE plan, cut down to the pace and practice this week asks for.`,
-    focus ? `Month ${focus.month} of ${monthHours.length} · ${focus.track}.` : null,
-    `${done} of ${activeRows.length} topics recorded · ${hours - doneHours}h still ahead.`,
-    curParts ? `${curParts.toLocaleString()} syllabus parts, each naming one public resource.` : null,
-    peakMonth ? `Heaviest month is ${peakMonth.month}, at ${peakMonth.hours}h.` : null,
-  ].filter((line): line is string => Boolean(line));
+  // What the hero rotates through. Built by lib/hero.ts from values this component already holds,
+  // so there is no new fetch and nothing here can say something the footer would contradict.
+  //
+  // It is a pool rather than a list, and `HeroLines` shuffles it per visit. Five fixed lines in a
+  // fixed order stop being read within a fortnight, and this is the first thing on the screen
+  // every morning for 23 months. The pool also changes shape as the plan moves: lines that count
+  // completed work do not exist until there is completed work, so the first morning is not greeted
+  // with three different renderings of zero.
+  const heroLines = pool({
+    hours,
+    doneHours,
+    done,
+    total: activeRows.length,
+    month: focus?.month ?? null,
+    months: monthHours.length,
+    track: focus?.track ?? null,
+    nextTopic: nextRow ? String(nextRow[2]) : null,
+    nextHours: nextRow ? Number(nextRow[13] || 0) || null : null,
+    parts: curParts,
+    tracks: trackTotals.length,
+    weeklyHours,
+    peak: peakMonth ?? null,
+  });
 
   const share = async () => {
     const url = window.location.href;

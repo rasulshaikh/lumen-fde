@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { shuffle } from "@/lib/hero";
 
 const INTERVAL_MS = 7000;
 
@@ -31,6 +32,22 @@ export function HeroLines({ lines }: { lines: string[] }) {
   const [still, setStill] = useState(true);
   const paused = useRef(false);
 
+  /**
+   * A different line greets you each visit.
+   *
+   * The seed is drawn once, on mount, and never during render. Picking an order while rendering
+   * would give the server one order and the client another, which is a hydration mismatch; and
+   * `Math.random()` in a render body is not a pure render. Starting at 0 and reordering after
+   * mount errs in the safe direction: the server's HTML is always the pool's first line, and the
+   * reorder costs one frame.
+   *
+   * Seeded rather than calling Math.random per position so the shuffle is the same function the
+   * tests assert on.
+   */
+  const [seed, setSeed] = useState<number | null>(null);
+  useEffect(() => { setSeed(Math.floor(Math.random() * 0xffffffff)); }, []);
+  const ordered = useMemo(() => (seed === null ? lines : shuffle(lines, seed)), [lines, seed]);
+
   // Read the media query in an effect, not during render: the server has no matchMedia, and
   // deciding this during the first client render would disagree with the server's HTML and
   // hydrate into a mismatch. Starting "still" and relaxing after mount is the safe direction -
@@ -44,16 +61,16 @@ export function HeroLines({ lines }: { lines: string[] }) {
   }, []);
 
   useEffect(() => {
-    if (still || lines.length < 2) return;
+    if (still || ordered.length < 2) return;
     const id = window.setInterval(() => {
       if (paused.current || document.hidden) return;
-      setIndex((current) => (current + 1) % lines.length);
+      setIndex((current) => (current + 1) % ordered.length);
     }, INTERVAL_MS);
     return () => window.clearInterval(id);
-  }, [still, lines.length]);
+  }, [still, ordered.length]);
 
-  if (!lines.length) return null;
-  if (still || lines.length < 2) return <p className="hero-copy">{lines[0]}</p>;
+  if (!ordered.length) return null;
+  if (still || ordered.length < 2) return <p className="hero-copy">{ordered[0]}</p>;
 
   return (
     <div
@@ -64,7 +81,7 @@ export function HeroLines({ lines }: { lines: string[] }) {
       onBlurCapture={() => { paused.current = false; }}
     >
       <div className="hero-lines">
-        {lines.map((line, i) => (
+        {ordered.map((line, i) => (
           // aria-hidden on the inactive lines so a screen reader reads one sentence, not five
           // stacked ones. They stay in the DOM because they are what holds the height open.
           <p className={i === index ? "hero-copy is-current" : "hero-copy"} key={line} aria-hidden={i === index ? undefined : true}>
@@ -73,7 +90,7 @@ export function HeroLines({ lines }: { lines: string[] }) {
         ))}
       </div>
       <div className="hero-dots" role="tablist" aria-label="Plan facts">
-        {lines.map((line, i) => (
+        {ordered.map((line, i) => (
           <button
             key={line}
             role="tab"

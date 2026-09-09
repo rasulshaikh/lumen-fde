@@ -1,21 +1,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Lumen">
   <!--
-    Lumen mark: an aperture. A solid rounded square in Linear's lavender with a diamond
-    opening cut clean through it.
+    Lumen mark: a six-sided iris.
 
-    Abstract and geometric by request — no letterform, so it cannot be mistaken for the
-    wordmark beside it, and it collides with no icon set. The opening is the idea: a
-    lumen is light through an aperture onto a surface.
+    A lumen is a unit of light, so the mark is the thing light passes through. Two concentric
+    hexagonal rings around an open centre: the outer body, the blade ring inside it, and the
+    aperture itself, which is a real hole rather than a filled shape (fill-rule evenodd) so the
+    mark carries exactly one colour and adapts to whatever sits behind it. A dark tab strip, a
+    light one, a pinned tab, forced-colors.
 
-    The cut is a real hole (fill-rule evenodd) rather than a filled shape, so the mark
-    carries exactly one colour and adapts to whatever sits behind it — a dark tab strip,
-    a light one, a pinned tab, forced-colors.
+    Rotationally symmetric, so it never looks tilted and needs no optical centring.
 
-    Chosen by rendering five candidates at 16/20/32/64/200px against the panel colour and
-    reading the 16px pixel grid. Two that looked strong at 200px (a three-bar beam, a
-    stepped stack) fragmented into scattered dots at favicon size; this one holds a clean
-    4px aperture with unbroken walls.
+    Drawn to survive 16px, which is where the previous attempt at this shape failed. Three
+    candidates were rasterised at 16, 20 and 32px with sharp and inspected as actual pixels
+    rather than re-rendered vectors. A version with six radial blade gaps smeared its top blade
+    into a horizontal blur at 16px; a solid hexagon with a single notch lost the notch. This one
+    keeps both rings unbroken at 16px because every wall is at least 3 units of the 32 grid and
+    every gap at least 2, which is the floor below which a half-pixel feature disappears.
+
+    Colour is the palette's dark-theme accent. It has to be one fixed value because an SVG file
+    cannot read a CSS custom property, and this reads on both a light and a dark tab strip. The
+    file it replaced was still #5e6ad2, the Linear lavender from two palettes ago, so the browser
+    tab had been showing a colour the app itself stopped using.
+
+    app/brand.tsx `LogoMark` inlines this same path so the header paints on the first frame.
+    Change one, change the other, then re-run scripts/build-icons.mjs.
   -->
-  <path fill="#5e6ad2" fill-rule="evenodd"
-        d="M8 4h16a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4Zm8 6 6 6-6 6-6-6 6-6Z"/>
+  <path fill="#4c8dff" fill-rule="evenodd"
+        d="M16 1.6 28.5 8.8v14.4L16 30.4 3.5 23.2V8.8L16 1.6Zm0 4.4L7.3 11v10l8.7 5 8.7-5V11L16 6Z"/>
+  <path fill="#4c8dff" fill-rule="evenodd"
+        d="M16 10.2 21.9 13.6v6.8L16 23.8l-5.9-3.4v-6.8L16 10.2Zm0 3.5-2.9 1.7v3.4l2.9 1.7 2.9-1.7v-3.4L16 13.7Z"/>
 </svg>
