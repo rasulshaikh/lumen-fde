@@ -21,8 +21,11 @@
  * Rather than fabricate the split or drop the number, every path carries an `attribution`:
  *
  *  - `exact` — the tiers map onto this path and nothing else. The count is this path's count.
- *  - `shared` — the tiers describe a demand, not a destination. The count is the pool, and the
- *    UI must say so in those words.
+ *  - `shared` — the tiers describe a demand, not a destination. **The UI must render no total for
+ *    these paths at all.** The first version summed the tiers and captioned the sum with a
+ *    disclaimer, which produced "180 of 191 live requisitions" under "The US market" — and was
+ *    doubly wrong, because the US tiers are the relocation pool PLUS `out-of-reach`, so the sum is
+ *    not even the shared pool it claimed to be. Per-tier counts are each true; their total is not.
  *  - `none` — no requisition can evidence this path, because it is not a job market.
  *
  * The third case is the entrepreneurial route, and it gets `none` rather than zero on purpose.
@@ -88,7 +91,12 @@ export const PATHS: readonly PathDef[] = [
     premise: "Build the product instead of applying. No requisition can evidence this one — the plan's shipped deliverables are the only proof it has.",
     tiers: [],
     attribution: "none",
-    match: /$^/, // deliberately matches nothing: no salary band describes working for yourself
+    // `(?!)` — a negative lookahead on the empty pattern, which can never succeed. The previous
+    // `/$^/` was wrong in a way that only a blank cell would expose: `/$^/.test("")` is TRUE, so a
+    // CompReality row with an empty market column would have been claimed as a salary band by
+    // "Your own thing" instead of surfacing through `unclaimedBands`. `(?!)` matches nothing at
+    // all, including the empty string.
+    match: /(?!)/,
   },
 ];
 

@@ -144,15 +144,27 @@ console.log("the disclosure actually reaches the screen");
   const render = (id: string, over: Record<string, unknown> = {}) =>
     renderToStaticMarkup(createElement(Openings, { path: views.find((v) => v.id === id)!, core: 44, state: "ready", synced: true, ...over } as never));
 
+  // A shared path renders NO total and NO denominator. Both were defects: summing the tiers gave
+  // the US card the relocation pool PLUS out-of-reach, so its "whole pool" caption described a
+  // number that was not the pool — and the hero styling out-argued the caption either way.
   const gulf = render("gulf");
-  ck("a shared path names the pool as shared", /shared with the other relocation path/.test(gulf), gulf.slice(0, 200));
-  ck("and says the scan does not record the destination", /not <em>where to<\/em>/.test(gulf));
-  ck("it still shows the measured count", gulf.includes("20"));
-  ck("the US card carries the same disclosure", /shared with the other relocation path/.test(render("us")));
+  ck("a shared path says no market count exists", /No count of roles in this market exists/.test(gulf), gulf.slice(0, 160));
+  ck("it renders NO headline total", !/path-count/.test(gulf), gulf);
+  ck("and no 'of N' denominator, which is what made it read as market share", !/of 44/.test(gulf));
+  ck("it names the shared pool by its real size", gulf.includes("20") && /same requisitions the other relocation path/.test(gulf));
+  ck("the Gulf does NOT mention out-of-reach — it does not count them", !/closed to you outright/.test(gulf));
+
+  const us = render("us");
+  ck("the US card also renders no total", !/path-count/.test(us));
+  ck("it separates the 20 relocation reqs from the 9 blocked ones", us.includes("20") && us.includes("9"));
+  ck("and says the blocked ones are closed, not destination-unknown", /closed to you outright, not waiting on a destination/.test(us));
+  ck("neither card ever claims the sum", !us.includes("29") && !gulf.includes("29"));
+  ck("both warn against adding the cards together", /would double-count/.test(us) && /would double-count/.test(gulf));
 
   const india = render("india");
-  ck("an exact path carries NO shared caveat", !/shared with the other relocation path/.test(india));
-  ck("and does show its count against the core denominator", india.includes("22") && india.includes("of 44"));
+  ck("an exact path DOES keep its headline count", /path-count/.test(india));
+  ck("and shows it against the core denominator", india.includes("22") && india.includes("of 44"));
+  ck("an exact path carries no double-count warning", !/would double-count/.test(india));
 
   const own = render("own");
   ck("the no-market path says why, and never shows a zero", /No requisition can evidence this one/.test(own) && !/>0</.test(own));
@@ -162,6 +174,42 @@ console.log("the disclosure actually reaches the screen");
   const noscan = render("india", { path: { ...views[0], openings: null }, synced: true });
   ck("a synced store with no scan says so differently", /No scan has recorded/.test(noscan), noscan);
   ck("the two empty states are not the same sentence", unread !== noscan);
+}
+
+console.log("a blank market cell is surfaced, never claimed");
+{
+  // `/$^/` — the previous "matches nothing" regex for the own path — returns TRUE for the empty
+  // string, so a CompReality row with a blank market column was claimed as a salary band by
+  // "Your own thing" instead of surfacing through unclaimedBands. Only a blank cell exposed it,
+  // and the real sheet has none, so nothing in the suite caught it.
+  const own = PATHS.find((p) => p.id === "own")!;
+  ck("the own path matches nothing at all", !own.match.test("anything"));
+  ck("including the empty string", !own.match.test(""), "/$^/ returned true here");
+
+  const withBlank = [...COMP, ["", "band", "src", "takes", "odds"] as Row];
+  const views = buildPaths(withBlank, slices);
+  ck("a blank row is claimed by no path", views.every((v) => v.bands.every((b) => b.market !== "")));
+  ck("and comes out of unclaimedBands instead", unclaimedBands(withBlank).some((b) => b.market === ""));
+}
+
+console.log("an unreadable artifacts store is unknown, not an empty portfolio");
+{
+  // /api/artifacts degrades with HTTP 200 and synced:false, so `r.ok` proves nothing. Reading
+  // `.length` off that payload gave 0 and the card printed "0 deliverables recorded" during a
+  // GitHub outage — on the one path whose only stated proof is work you shipped.
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const { PathCard } = await import("../components/Paths.tsx");
+  const own = buildPaths(COMP, slices).find((v) => v.id === "own")!;
+  const card = (built: number | null, state = "ready") =>
+    renderToStaticMarkup(createElement(PathCard, { path: own, index: 3, core: 44, state, synced: true, built } as never));
+
+  ck("a real zero says zero", card(0).includes("0 deliverables recorded"));
+  ck("a real count says the count", card(3).includes("3 deliverables recorded"));
+  ck("one deliverable is singular", card(1).includes("1 deliverable recorded") && !card(1).includes("1 deliverables"));
+  const unknown = card(null);
+  ck("unknown says unknown, and never 0", /unknown rather than none/.test(unknown) && !unknown.includes("0 deliverable"), unknown.slice(0, 200));
+  ck("loading is not the same as unreadable", /reading/i.test(card(null, "loading")) && !/could not be read/.test(card(null, "loading")));
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

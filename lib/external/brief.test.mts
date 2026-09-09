@@ -151,6 +151,19 @@ console.log("the prompt block states its own date, age and rank");
   ck("the block is capped", lines.length === MAX_ITEMS, `${lines.length}`);
 }
 
+console.log("a partial fetch says it is partial");
+{
+  // `note` was written on every partial fetch and read by nobody — not the UI, not the prompt.
+  // A short brief that does not say it is short reads as a quiet market rather than a failed fetch.
+  const item = (n: number): BriefItem => ({ title: `T${n}`, url: `https://x.test/${n}`, snippet: "", query: "q" });
+  const partial = { ...emptyBrief("2026-09-09"), items: [item(1)], note: "2 of 3 queries failed: timeout" };
+  const text = externalContext(partial, NOW);
+  ck("the note reaches the prompt", text.includes("2 of 3 queries failed"), text);
+  ck("and is labelled as incompleteness, not colour", /INCOMPLETE/.test(text));
+  const clean = { ...emptyBrief("2026-09-09"), items: [item(1)] };
+  ck("a complete brief carries no such line", !/INCOMPLETE/.test(externalContext(clean, NOW)));
+}
+
 console.log("no brief is silence, not an empty claim");
 {
   // The rule every reader in this codebase follows: unknown is never rendered as none. An empty

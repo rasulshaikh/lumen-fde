@@ -190,9 +190,14 @@ export function externalContext(brief: ExternalBrief | null, now: Date): string 
   const stale = age !== null && age > STALE_AFTER_DAYS;
   const head = `OUTSIDE CONTEXT — a stored web brief fetched on ${brief.day}${age !== null ? ` (${age} day${age === 1 ? "" : "s"} old)` : ""}${stale ? ", WHICH IS STALE — say so if you use it" : ""}.`;
   const lines = brief.items.slice(0, MAX_ITEMS).map((i) => `- ${i.title} — ${i.url}${i.snippet ? `\n  ${i.snippet}` : ""}`);
+  // `note` records that some queries failed, and until now nothing ever read it — the field was
+  // written on every partial fetch and surfaced to no one, human or model. A short brief that does
+  // not say it is short reads as a quiet market rather than a failed fetch.
+  const note = brief.note ? [`This brief is INCOMPLETE: ${brief.note}. Treat it as a partial view, and say so if you lean on it.`] : [];
   return [
     head,
     ...lines,
+    ...note,
     "Cite the URL whenever you use one of these. This is outside opinion: it NEVER overrides a number measured in this repository (the plan's hours, the benchmark's shares, the readiness figure). If it disagrees with a measured number, say both and say which one is measured.",
   ].join("\n");
 }

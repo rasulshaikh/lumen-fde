@@ -53,7 +53,7 @@ redeploy, be diffable, and be readable by a second process on a different host.
 │  Vercel — Next.js (proxy.ts gate)     │   │  Render — mcp/server.js          │
 │                                       │   │  Node http, JSON-RPC at /mcp     │
 │  app/(app)/      8 routes              │   │  18 tools, MCP 2025-03-26        │
-│  app/api/*       12 routes            │   │  /healthz · free tier, sleeps    │
+│  app/api/*       13 routes            │   │  /healthz · free tier, sleeps    │
 │  vercel.json     2 crons              │   └─────────┬───────────────────────┘
 │                                       │             │ POST /api/ask
 │   ┌─ /api/cron/market-scan  03:00 UTC │◄────────────┘ x-lumen-internal-key
@@ -155,7 +155,7 @@ This paragraph described a single 699-line client component holding all ten sect
 routing migration replaced it, and `app/page.tsx` no longer exists. The tab count is anchored and
 was checked; a sentence is not, which is the whole reason the count and the prose disagreed.
 
-Three tabs fetch; the rest render bundled JSON:
+Four tabs fetch; the rest render bundled JSON:
 
 | tab | source |
 |---|---|
@@ -203,9 +203,10 @@ It is also why the external brief is **not** a cron. It wanted `15 3 * * *`; a t
 deploy while building perfectly with `next build`, which validates nothing about the plan. Neither
 fold was available either — the scan already runs past 60s and resumes on a cursor, and the digest
 sends email — so `/api/external-brief` refreshes on the first visit of the day instead, fired
-unawaited from the Overview page. It keeps its `CRON_SECRET` path so it becomes a real cron the day
-a slot exists, and it lives outside `/api/cron/` because `proxy.ts` gates that prefix on the secret
-and a browser cannot present one.
+unawaited from the Overview page. It lives outside `/api/cron/` because `proxy.ts` gates that prefix
+on the secret and a browser cannot present one, so it is gated by the session cookie instead — which
+also means it is **not cron-callable as written**. Promoting it later needs a free slot, a
+`Bearer CRON_SECRET` check in the route, and a `proxy.ts` exemption; not one of the three exists today.
 
 **The same 60s cap is why live web search is not in `/api/ask`.** The scrape measures 27-39s and the
 model call claims up to 55; they do not fit one function. The search is its own route with its own
@@ -740,8 +741,8 @@ noted.
 | `PUBLIC_MCP_URL` | `mcp/server.js` | `get_connection_map` reports `https://lumen-fde.onrender.com/mcp` |
 | `LUMEN_DASHBOARD_URL` | `mcp/server.js` | `get_connection_map` reports `https://lumen-fde.vercel.app`. **Not in `.env.example`**, same condition as `MARKET_TO_EMAIL` above |
 | `PORT` | `mcp/server.js` | defaults to 10000 (Render sets it) |
-| `SURFSENSE_API_KEY`, `SURFSENSE_WORKSPACE_ID` | `mcp/server.js` | `semantic_search` falls back to GitHub code search over this repo; an explicit `provider: "surfsense"` errors instead of falling back |
-| `SURFSENSE_API_URL` | `mcp/server.js` | defaults to `https://api.surfsense.com` |
+| `SURFSENSE_API_KEY`, `SURFSENSE_WORKSPACE_ID` | `mcp/server.js`, `lib/external/brief.ts` (so `/api/external-brief` and, through it, Quaere's outside context) | `semantic_search` falls back to GitHub code search over this repo; `/api/external-brief` 503s, no brief is ever written, and `externalContext` contributes nothing — Quaere answers from the repo alone |
+| `SURFSENSE_API_URL` | `mcp/server.js`, `lib/external/brief.ts` | defaults to `https://api.surfsense.com` |
 | `NODE_ENV` | `/api/auth/login` | the session cookie's `secure` flag is set only in production |
 
 One entry in `.env.example` is read by nothing in `app/`, `lib/`, `mcp/` or `proxy.ts`:

@@ -56,7 +56,7 @@ export default function LoginPage() {
               <div key={label}><dt>{value}</dt><dd>{label}</dd></div>
             ))}
           </dl>
-          <p className="login-note">{library.length} books indexed · answers come from the plan and library, never the open web</p>
+          <p className="login-note">{library.length} books indexed · answers come from the plan, the library, and a dated web brief stored in the repo</p>
         </section>
 
         <section className="login-card">

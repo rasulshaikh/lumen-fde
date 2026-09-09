@@ -41,9 +41,14 @@ export const maxDuration = 60;
  *
  * So the brief refreshes on the first visit of the day instead. For a dashboard opened every
  * morning that is the same freshness a 03:15 cron would give, and it skips the scrape entirely on
- * days nobody studies. The route keeps its `CRON_SECRET` path so it becomes a real cron the day a
- * slot exists — but it lives OUTSIDE `/api/cron/`, because `proxy.ts` gates that prefix on the
- * secret and a browser cannot present one.
+ * days nobody studies. It lives OUTSIDE `/api/cron/` because `proxy.ts` gates that prefix on
+ * CRON_SECRET, and this route is called by a browser, which cannot present one — so it is gated
+ * by the session cookie like every other non-cron API route.
+ *
+ * **It is therefore not cron-callable today, and there is no CRON_SECRET path here.** An earlier
+ * version of this comment claimed there was one; there never was. Promoting this to a real cron
+ * needs three things, not one: a free cron slot, a `Bearer CRON_SECRET` check in this file, and an
+ * exemption in `proxy.ts` — which would widen a prefix that file deliberately keeps closed.
  *
  * ## Two verbs, two budgets
  *
@@ -64,7 +69,17 @@ export const maxDuration = 60;
 /** Live searches are the reader waiting on a spinner, so cap the work rather than the patience. */
 const LIVE_ITEMS = 5;
 
-async function refresh(): Promise<{ ok: boolean; note: string | null; items: number }> {
+/**
+ * Fetch and store. Returns `written: false` when it deliberately stored nothing.
+ *
+ * That distinction exists because the first version of this function wrote unconditionally, and on
+ * a SurfSense outage `Promise.allSettled` hands back three rejections without throwing — so it
+ * would have committed an EMPTY brief stamped with today's date over a good one from yesterday.
+ * `externalContext` would then read as "today's brief, nothing happening outside", which is the
+ * most confident possible way to say nothing. Yesterday's cited lines, honestly dated and ageing,
+ * beat that every time.
+ */
+async function refresh(): Promise<{ ok: boolean; written: boolean; note: string | null; items: number }> {
   const { data: benchmark } = await readJson<Benchmark>(BENCHMARK_PATH);
   const skills = (benchmark?.coverage ?? []).slice(0, 2).map((c) => String(c.label ?? c.id ?? "")).filter(Boolean);
   const queries = briefQueries(skills);
@@ -103,18 +118,24 @@ async function refresh(): Promise<{ ok: boolean; note: string | null; items: num
     if (!added) break;
   }
 
-  const brief = {
-    ...emptyBrief(new Date().toISOString().slice(0, 10)),
-    queries,
-    items,
-    note: failures.length ? `${failures.length} of ${queries.length} queries failed: ${failures.join(" | ")}` : null,
-  };
+  const note = failures.length ? `${failures.length} of ${queries.length} queries failed: ${failures.join(" | ")}` : null;
+
+  // Nothing came back at all, so there is nothing to store. Writing here would stamp an empty
+  // brief with today's date over a perfectly good one from yesterday, and the prompt block would
+  // then present "nothing is happening outside" as a fresh, confident finding. A partial result
+  // IS stored — some cited lines plus a note saying what failed is a real brief — but a total
+  // failure leaves the previous one exactly where it is, ageing honestly.
+  if (!items.length) return { ok: false, written: false, note: note ?? "every query returned no usable items", items: 0 };
+
+  const brief = { ...emptyBrief(new Date().toISOString().slice(0, 10)), queries, items, note };
 
   // latest.json is REWRITTEN, so it needs the sha it was read with. Without it the contents API
   // refuses the update; with a stale one, two runs silently clobber each other.
   const { sha } = await readJson(LATEST_PATH);
   const written = await writeBrief(brief, sha);
-  return { ok: written.latest.ok, note: brief.note, items: items.length };
+  // `dated.ok` is false on the second refresh of a day — the path already exists and the store is
+  // append-only by protocol, which is intended, not an error. Only `latest` decides success.
+  return { ok: written.latest.ok, written: written.latest.ok, note: brief.note, items: items.length };
 }
 
 /**
@@ -130,16 +151,42 @@ export async function GET(request: Request) {
   }
   const force = new URL(request.url).searchParams.get("force") === "1";
   const before = await readLatestBrief();
+
+  /*
+   * `synced: false` means the STORE could not be read — not that no brief exists. The two must not
+   * collapse, and here the cost of collapsing them is unusually concrete: Overview fires this on
+   * every session, so treating an unreadable store as "no brief yet" would spend a 30s triple
+   * scrape on every page load for the length of a GitHub blip, and then write a brief on top of
+   * one it never managed to read.
+   *
+   * So an unreadable store refreshes nothing and says so. `force` cannot override it either — a
+   * forced refresh against a store we cannot read is the exact write that clobbers.
+   */
+  if (!before.synced) {
+    return NextResponse.json({
+      ok: false, refreshed: false, brief: null, known: false,
+      error: "The brief store could not be read. This is unknown, not empty — nothing was fetched and nothing was written.",
+    });
+  }
+
   const age = before.brief ? briefAgeDays(before.brief.day, new Date()) : null;
   // `age === null` on an unparseable or future-dated day. Refreshing is the right answer there:
-  // a brief nobody can date is not one to keep serving.
+  // a brief nobody can date is not one to keep serving. `before.brief === null` here genuinely
+  // means no brief has ever been written, because the store read succeeded.
   const stale = force || !before.brief || age === null || age >= 1;
   if (!stale) return NextResponse.json({ ok: true, refreshed: false, brief: before.brief, age });
 
   try {
     const result = await refresh();
     const after = await readLatestBrief();
-    return NextResponse.json({ ok: result.ok, refreshed: true, items: result.items, note: result.note, brief: after.brief ?? before.brief });
+    return NextResponse.json({
+      ok: result.ok,
+      refreshed: result.written,
+      items: result.items,
+      note: result.note,
+      // A refresh that stored nothing returns what was already there, unchanged and correctly dated.
+      brief: (result.written ? after.brief : before.brief) ?? before.brief,
+    });
   } catch (error) {
     return NextResponse.json({
       ok: false,

@@ -5,7 +5,7 @@ import { benchmarkGapsContext, evidenceContext, recallContext, workbookContext }
 import { readSessionSummary } from "@/lib/companion/session";
 import { readArtifacts } from "@/lib/artifacts";
 import type { ReviewState } from "@/lib/review";
-import { externalContext, readLatestBrief, type ExternalBrief } from "@/lib/external/brief";
+import { externalContext, readLatestBrief } from "@/lib/external/brief";
 import sourceCatalog from "@/data/library-sources.json";
 import repositories from "@/data/repository-context.json";
 import curriculum from "@/data/curriculum.json";
@@ -336,7 +336,15 @@ export async function POST(request: Request) {
      */
     let outside = "";
     try {
-      const { brief } = await readLatestBrief();
+      // Raced, for the same reason the two market reads above are raced: `readJson` passes no
+      // AbortSignal to fetch, so on its own this inherits the platform default and can outlive the
+      // whole function. It was added here unbounded, which put an unbounded GitHub read inside the
+      // ~5s this route has before the 55s model call — a slow contents API would have cost the
+      // ANSWER, not just the brief. Losing the brief is cheap; losing the answer is the failure.
+      const brief = await Promise.race([
+        readLatestBrief().then((r) => r.brief),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), MARKET_READ_MS)),
+      ]);
       outside = externalContext(brief, new Date());
     } catch { /* no brief is the pre-existing state, not an error worth failing on */ }
 
