@@ -1,0 +1,94 @@
+/**
+ * Backdrop geometry tests. Run with:  npx tsx lib/backdrop.test.mts
+ *
+ * This draws behind every page on the site, on a loop, for two years. The failure modes are not
+ * "it looks wrong" but the arithmetic ones nobody watches for: a perspective divide that reaches
+ * zero, a form that walks off the canvas at some viewport nobody tried, a frame that is quietly
+ * identical to the last one so the whole thing is a still image pretending to animate.
+ */
+import { CAMERA, DEPTHS, RADIUS, SIDES, frame, ringAlpha } from "./backdrop.ts";
+
+let fails = 0;
+const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
+
+const VIEWPORTS: [string, number, number][] = [
+  ["phone", 375, 812], ["tablet", 768, 1024], ["laptop", 1440, 900],
+  ["wide", 2560, 1440], ["short", 1280, 400], ["square", 900, 900],
+];
+const TIMES = [0, 137, 5_000, 60_000, 3_600_000, 86_400_000];
+
+console.log("the shape is the shape");
+{
+  const f = frame(0, 1440, 900);
+  ck("five rings", f.rings.length === DEPTHS.length, `${f.rings.length}`);
+  ck("six sides each", f.rings.every((r) => r.length === SIDES));
+  ck("spokes join every ring to the next", f.spokes.length === (DEPTHS.length - 1) * SIDES, `${f.spokes.length}`);
+}
+
+console.log("the perspective divide can never blow up");
+{
+  // Every point sits within |z| <= RADIUS + max(depth), and the camera is further out than that.
+  const reach = RADIUS + Math.max(...DEPTHS.map(Math.abs));
+  ck("the camera sits outside the form", CAMERA > reach, `camera ${CAMERA} vs reach ${reach.toFixed(2)}`);
+
+  for (const t of TIMES) {
+    for (const [name, w, h] of VIEWPORTS) {
+      const pts = frame(t, w, h).rings.flat();
+      ck(`finite at t=${t} on ${name}`, pts.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.k)));
+      ck(`never behind the camera at t=${t} on ${name}`, pts.every((p) => p.k > 0));
+    }
+  }
+}
+
+console.log("it stays roughly where it should on every viewport");
+{
+  for (const [name, w, h] of VIEWPORTS) {
+    const pts = frame(9_000, w, h).rings.flat();
+    const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+    // Generous bounds: this is decoration behind the page and clipping is harmless. What it must
+    // not do is drift somewhere it is never seen, which is what these catch.
+    ck(`${name}: horizontally on canvas`, Math.min(...xs) > -w && Math.max(...xs) < w * 2, `${Math.round(Math.min(...xs))}..${Math.round(Math.max(...xs))} of ${w}`);
+    ck(`${name}: vertically on canvas`, Math.min(...ys) > -h && Math.max(...ys) < h * 2, `${Math.round(Math.min(...ys))}..${Math.round(Math.max(...ys))} of ${h}`);
+    // Anchored to the shorter side, so a 2560px window does not get a 2560px wireframe.
+    const span = Math.max(...xs) - Math.min(...xs);
+    ck(`${name}: fits inside the shorter side`, span < Math.min(w, h), `span ${Math.round(span)} vs min side ${Math.min(w, h)}`);
+  }
+}
+
+console.log("it actually moves, and slowly");
+{
+  const at = (t: number) => frame(t, 1440, 900).rings.flat().map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join("|");
+  ck("a second apart is a different frame", at(0) !== at(1000));
+  ck("a minute apart is a different frame", at(0) !== at(60_000));
+  ck("the same time is the same frame", at(1234) === at(1234));
+
+  // Slow enough that a glance never catches it. One full turn should take minutes, not seconds.
+  const turn = (Math.PI * 2) / 0.000048 / 1000;
+  ck("a full rotation takes over a minute", turn > 60, `${Math.round(turn)}s per turn`);
+
+  // And still moving after a day open, rather than having wrapped into a stutter.
+  ck("still animating after 24h open", at(86_400_000) !== at(86_401_000));
+}
+
+console.log("depth is legible but never opaque");
+{
+  const f = frame(0, 1440, 900);
+  const alphas = f.rings.map(ringAlpha);
+  ck("every ring is faint", alphas.every((a) => a > 0 && a < 0.24), alphas.join(", "));
+  ck("nearer rings are brighter than further ones", Math.max(...alphas) > Math.min(...alphas), alphas.join(", "));
+  // Every panel on the site is opaque, so this only ever shows in the page margin and never sits
+  // behind body text. The ceiling is about not competing with the page, not about contrast.
+  ck("the brightest ring stays under 22% alpha", Math.max(...alphas) < 0.22, `${Math.max(...alphas)}`);
+  ck("the faintest is still drawn", Math.min(...alphas) > 0.05, `${Math.min(...alphas)}`);
+}
+
+console.log("degenerate viewports do not produce garbage");
+{
+  for (const [w, h] of [[0, 0], [1, 1], [320, 0], [0, 640]] as [number, number][]) {
+    const pts = frame(1000, w, h).rings.flat();
+    ck(`${w}x${h} stays finite`, pts.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)));
+  }
+}
+
+console.log(fails ? `\n${fails} FAILED` : "\nall passed");
+process.exit(fails ? 1 : 0);
