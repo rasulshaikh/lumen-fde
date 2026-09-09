@@ -12,7 +12,7 @@ Three surfaces, and they are not interchangeable:
 
 | surface | reach for it when |
 |---|---|
-| the dashboard, 10 tabs <!-- verify:tabs=10 --> | you are reading, filtering, marking status, or looking at the market |
+| the dashboard, 7 tabs <!-- verify:tabs=7 --> | you are reading, filtering, marking status, or looking at the market |
 | the MCP, 18 tools <!-- verify:mcp_tools=18 --> | Claude Code needs the plan in its context, or needs to write something durable |
 | the 2 crons <!-- verify:crons=2 --> | they reach for you — 03:00 and 03:30 UTC, unattended |
 
@@ -398,7 +398,19 @@ the case for adding.
 
 ---
 
-## 2. The 10 tabs
+## 2. The 7 tabs
+
+**Three former tabs now live inside another view.** Their panels are unchanged and every one still
+renders; only the address moved, and the old URLs redirect rather than 404:
+
+| was | is now | why |
+|---|---|---|
+| `/mocks`, `/assessments` | `/practice` | both answer "do you actually know this" |
+| `/roadmaps` | `/library` | both are material someone else wrote, that you consult |
+| `/comp` | `/market` | one is what the market asks for, the other what it pays |
+
+The descriptions further down still name Mocks, Roadmaps and Comp reality because those are still
+the panels' names — look for them on the page above rather than in the tab bar.
 
 `components/Nav.tsx`, the `NAV` constant, in order. Each is its own route under `app/(app)/`, sharing one layout; the recall strip
 sits above the tab bar, so it is on every one of them (architecture.md §3.2).

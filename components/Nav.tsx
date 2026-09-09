@@ -18,14 +18,30 @@ export const NAV = [
   { label: "Overview", href: "/overview" },
   { label: "Plan", href: "/plan" },
   { label: "Curriculum", href: "/curriculum" },
-  { label: "Sandbox", href: "/sandbox" },
-  { label: "Mocks", href: "/mocks" },
-  { label: "Roadmaps", href: "/roadmaps" },
-  { label: "Library", href: "/library" },
-  { label: "Assessments", href: "/assessments" },
-  { label: "Comp reality", href: "/comp" },
+  { label: "Practice", href: "/practice" },
   { label: "Market", href: "/market" },
+  { label: "Library", href: "/library" },
+  { label: "Sandbox", href: "/sandbox" },
 ];
+
+/**
+ * Seven, down from ten, and the three that went were not deletions.
+ *
+ * Five of the ten tabs rendered a single panel over one workbook sheet — Mocks and Comp reality
+ * were five lines each, Roadmaps twenty-one — while sitting as equal peers to a 387-line Market
+ * view. Ten equal slots presenting five substantial views and five stubs is a bar that looks full
+ * and destinations that look empty, and it is a large part of why the app read as a document
+ * rather than a product.
+ *
+ * They merged along the question each answers rather than by size:
+ *   Mocks + Assessments -> Practice   both are "find out whether you actually know this"
+ *   Roadmaps -> Library               both are material someone else wrote, that you consult
+ *   Comp reality -> Market            one is what the market asks for, the other what it pays
+ *
+ * Nothing was removed from the product: every panel still renders, on the page where its question
+ * is already being asked. The old URLs still resolve — see the redirects in next.config.ts, kept
+ * because a bookmark that 404s is indistinguishable from a feature that was deleted.
+ */
 
 /**
  * /design is deliberately NOT in NAV. It is the only view about the app rather than about the
