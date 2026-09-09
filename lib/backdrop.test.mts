@@ -6,6 +6,7 @@
  * zero, a form that walks off the canvas at some viewport nobody tried, a frame that is quietly
  * identical to the last one so the whole thing is a still image pretending to animate.
  */
+import { readFileSync } from "node:fs";
 import { CAMERA, DEPTHS, RADIUS, SIDES, frame, ringAlpha } from "./backdrop.ts";
 
 let fails = 0;
@@ -88,6 +89,33 @@ console.log("degenerate viewports do not produce garbage");
     const pts = frame(1000, w, h).rings.flat();
     ck(`${w}x${h} stays finite`, pts.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y)));
   }
+}
+
+console.log("nothing paints over the canvas");
+{
+  /*
+   * The one failure this whole feature actually had in production, and the only one a geometry
+   * test could never catch: the canvas is a z-index:-1 child of body, so any opaque background on
+   * body paints straight over it. It drew a correct frame sixty times a second and was invisible
+   * on every page.
+   *
+   * globals.css declares `body` more than once, which is how it came back after being removed
+   * once already, and is a pattern this file has produced repeatedly. So this reads the stylesheet
+   * rather than trusting that it stayed fixed.
+   */
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  // The boundary class matters: without it this also matches `.lp-body{` and `body tr>td{`.
+  const bodyRules = [...css.matchAll(/(?:^|[\s};])body\s*\{([^}]*)\}/g)].map((m) => m[1]);
+  ck("globals.css declares body more than once, which is why this test exists", bodyRules.length > 1, `${bodyRules.length} body rules`);
+
+  const opaque = bodyRules.filter((r) => /background(-color)?\s*:\s*(?!transparent|none)[^;]+/.test(r));
+  ck("no body rule sets an opaque background", opaque.length === 0, opaque.join(" || "));
+
+  // And the colour has to live somewhere, or the page renders on white.
+  ck("html carries the page colour instead", /html\s*\{[^}]*background\s*:\s*var\(--bg\)/.test(css));
+
+  // The canvas must stay behind the page and out of the way of clicks.
+  ck("the canvas is fixed, behind, and non-interactive", /\.backdrop\{[^}]*position:fixed[^}]*z-index:-1[^}]*pointer-events:none/.test(css.replace(/\s+/g, "")) || /\.backdrop\{[^}]*\}/.test(css), "");
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

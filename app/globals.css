@@ -236,9 +236,14 @@ html{background:var(--bg)}
    a panel edge. Panels are opaque (--surface) and paint over it; that interruption is the
    panel edge, and it is the second limb of the disjunctive canvas->card floor.
 
-   min-height:100svh so the body box, which is what the background paints into, always
-   covers the viewport on a short page. */
-body{background-color:var(--bg);min-height:100svh;margin:0;color:var(--ink)}
+   min-height:100svh so the body box always covers the viewport on a short page.
+
+   No background-color here any more, and that is load-bearing rather than tidying. The backdrop
+   canvas is a z-index:-1 child of body, so ANY opaque background on body paints straight over it:
+   the field drew every frame and was invisible on every page. `html` carries the page colour now
+   (declared at the top of this file and again below), which is what a negative-z child paints in
+   front of. lib/backdrop.test.mts asserts no rule puts one back. */
+body{min-height:100svh;margin:0;color:var(--ink)}
 body::before{content:none}
 /* The ruling stops where body text meets the bare canvas.
    Provably necessary, not a preference: in light theme --muted #61574f is 4.64 on the flat
