@@ -35,6 +35,22 @@ jobs:
       - run: npm run test:companion
       - run: npm run test:brief
       - run: npm run test:session
+      - run: npm run test:external
+      - run: npm run test:paths
+
+      # "This list is now exhaustive" was a comment, and a comment is not a check. The motivation
+      # suite went unrun for weeks precisely because nothing compared the two lists, so this does:
+      # every `test:` script in package.json must appear as a step in this file.
+      - name: every test script is wired into CI
+        run: |
+          node -e '
+            const fs = require("fs");
+            const scripts = Object.keys(require("./package.json").scripts).filter((s) => s.startsWith("test:"));
+            const ci = fs.readFileSync(".github/workflows/ci.yml", "utf8");
+            const missing = scripts.filter((s) => !ci.includes(`npm run ${s}`));
+            if (missing.length) { console.error(`Not run by CI: ${missing.join(", ")}`); process.exit(1); }
+            console.log(`${scripts.length} suites, all wired`);
+          '
 
       # Documentation drift is a build failure, not a chore. docs/platform/*.md pin their
       # numbers to anchors resolved from workbook.json and the source itself, so a plan

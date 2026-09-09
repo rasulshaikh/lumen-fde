@@ -64,7 +64,7 @@ type AppState = {
   setAskTopic: (index: number | null) => void;
   messages: Message[];
   asking: boolean;
-  askLumen: (prompt?: string) => Promise<void>;
+  askLumen: (prompt?: string, opts?: { web?: boolean }) => Promise<void>;
   setPageContext: (context: string, topicIndex: number | null) => void;
   // derived from statuses, shared by the layout chrome and the Overview page
   done: number;
@@ -217,11 +217,29 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const pageContext = useRef<{ context: string; topicIndex: number | null }>({ context: "", topicIndex: null });
   const setPageContext = useCallback((context: string, topicIndex: number | null) => { pageContext.current = { context, topicIndex }; }, []);
 
-  const askLumen = useCallback(async (prompt = askText) => {
+  /**
+   * Ask Quaere, optionally searching the web first.
+   *
+   * Two requests when `web` is on, and that is a platform constraint rather than a preference:
+   * the search measures 27-39s, the model claims up to 55, and a Hobby function stops at 60. Run
+   * as two calls each gets its own budget. `/api/external-brief` never throws for a failed
+   * search — it answers `{ok:false, items:[]}` — so a search that times out costs the results and
+   * not the question, and `web:true` still reaches the route, which is what makes the answer say
+   * the search did not come back rather than quietly answering without it.
+   */
+  const askLumen = useCallback(async (prompt = askText, opts: { web?: boolean } = {}) => {
     if (!prompt.trim() || asking) return;
     setMessages((m) => [...m, { role: "user", content: prompt }]); setAskText(""); setAsking(true);
     const topicIndex = askTopic ?? pageContext.current.topicIndex ?? undefined;
-    try { const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, context: pageContext.current.context, topicIndex, history: messages }) }); const data = await res.json(); setMessages((m) => [...m, { role: "assistant", content: data.answer || data.error || "Lumen could not answer right now.", reportUrl: data.reportUrl || undefined }]); } catch { setMessages((m) => [...m, { role: "assistant", content: "Lumen is unavailable. Add MINIMAX_API_KEY in Vercel project settings and try again." }]); } finally { setAsking(false); }
+    let webItems: unknown[] | undefined;
+    if (opts.web) {
+      try {
+        const res = await fetch("/api/external-brief", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ q: prompt }) });
+        const data = await res.json();
+        if (Array.isArray(data.items) && data.items.length) webItems = data.items;
+      } catch { /* the answer still goes ahead, and says the search did not come back */ }
+    }
+    try { const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, context: pageContext.current.context, topicIndex, history: messages, web: Boolean(opts.web), webItems }) }); const data = await res.json(); setMessages((m) => [...m, { role: "assistant", content: data.answer || data.error || "Lumen could not answer right now.", reportUrl: data.reportUrl || undefined }]); } catch { setMessages((m) => [...m, { role: "assistant", content: "Lumen is unavailable. Add MINIMAX_API_KEY in Vercel project settings and try again." }]); } finally { setAsking(false); }
   }, [askText, asking, askTopic, messages]);
 
   useEffect(() => {

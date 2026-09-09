@@ -17,7 +17,7 @@ from either doc.
 
 A single-user study platform for one 23-month Senior FDE plan. Three things run:
 
-1. **A Next.js app on Vercel** — the dashboard (7 tabs), 12 API routes, and 2 cron endpoints.
+1. **A Next.js app on Vercel** — the dashboard (8 tabs), 13 API routes, and 2 cron endpoints.
 2. **An MCP server on Render** — 18 tools, so Claude Code can read the same plan the dashboard
    reads, and write progress back to it.
 3. **GitHub, as the database** — every mutable artifact (progress events, review schedule,
@@ -131,11 +131,11 @@ If `LUMEN_PASSWORD` is unset the password gate is off and the rest of the app is
 `/api/cron/*` still 401s without `CRON_SECRET`, because that branch returns before the password
 check is reached. "Every route is public" was true before the cron prefix was gated and is not now.
 
-### 3.2 The 7 tabs
+### 3.2 The 8 tabs
 
 `components/Nav.tsx`, the `NAV` constant:
 
-`Overview` · `Plan` · `Curriculum` · `Practice` · `Market` · `Library` · `Sandbox`
+`Overview` · `Plan` · `Curriculum` · `Practice` · `Market` · `Paths` · `Library` · `Sandbox`
 
 Each is its own route under `app/(app)/`, and each page imports its section from `components/` —
 `Market` is `components/Market.tsx`, not a branch inside a shared file. Nine of the eleven pages
@@ -145,7 +145,7 @@ public landing page took that path; `/` now belongs to a signed-out visitor (§3
 `Sandbox` renders `Terminal` from `app/terminal.tsx`; the recall strip (`app/recall.tsx`) is
 mounted in `app/(app)/layout.tsx`, which is why it is present on every view.
 
-**8 app routes, 7 tabs — the difference is deliberate.** `/design` is a route under `app/(app)/`
+**9 app routes, 8 tabs — the difference is deliberate.** `/design` is a route under `app/(app)/`
 but is not in `NAV`. It is the living style guide: it renders the tokens the other ten views are
 drawn with and measures the five contrast floors in the browser, which is how the light-theme
 ruling failure was caught. It is about the app rather than about the plan, and the tab bar is
@@ -164,11 +164,12 @@ Three tabs fetch; the rest render bundled JSON:
 | Curriculum | `GET /api/curriculum?summary=1`, then `?i=<row>` per opened topic |
 | Sandbox | `POST /api/sandbox` (NDJSON stream) |
 | Market | `GET /api/market` on mount |
+| Paths | `GET /api/market` (reach tiers) + `GET /api/artifacts`, over the bundled `CompReality` sheet |
 
 The Plan tab writes status to `localStorage` under `lumen-statuses` and mirrors it to
 `POST /api/progress`; on load it merges back whatever `GET /api/progress` returns.
 
-### 3.3 The 12 API routes
+### 3.3 The 13 API routes
 
 | route | methods | what it does | degrades to |
 |---|---|---|---|
@@ -181,6 +182,7 @@ The Plan tab writes status to `localStorage` under `lumen-statuses` and mirrors 
 | `app/api/sandbox/route.ts` | POST | `run` / `stop` against the named Vercel Sandbox. | SDK error text plus an OIDC hint |
 | `app/api/artifacts/route.ts` | GET, POST | Shipped deliverables, one markdown file per artifact under `reports/artifacts`. The join key is the plan ROW, validated against the workbook; the topic is derived at write time and never accepted from the caller. Append-only by protocol — no `sha` is sent, so the contents API itself refuses an overwrite. | 502 without `GITHUB_TOKEN`; `synced:false` means "unknown", never "nothing built" |
 | `app/api/session/route.ts` | POST | Records that a study session happened, under `reports/companion/sessions`, and updates the companion digest. Same row-validated, topic-derived, append-only discipline as artifacts. **It never writes progress** — marking a row goes through `/api/progress`, which owns that validation and the hydration write-guard. | 400 on an invalid row; 502 when the write fails, leaving the session open to retry |
+| `app/api/external-brief/route.ts` | GET, POST | The one thing Lumen shows that is not a file in the repo. GET returns the stored brief and refreshes it when it is a day old, writing a dated file plus `latest.json` under `reports/external`; POST runs one live search for one question and stores nothing. `maxDuration = 60`, and both budgets are subtraction from it. | 503 without SurfSense config; a failed refresh returns the brief already stored, honestly dated |
 | `app/api/auth/login/route.ts` | POST | Issues the session cookie. | 503 without `LUMEN_PASSWORD` |
 | `app/api/cron/market-scan/route.ts` | GET | Section 5. | 401 without a matching `CRON_SECRET` |
 | `app/api/cron/daily-digest/route.ts` | GET | Section 6. | 401 without `CRON_SECRET`; 503 without Resend config |
@@ -196,6 +198,19 @@ The Plan tab writes status to `localStorage` under `lumen-statuses` and mirrors 
 
 Two, because Vercel Hobby allows two. That constraint is why the Monday market email is folded
 into the market scan behind `now.getUTCDay() === 1` rather than being a third entry.
+
+It is also why the external brief is **not** a cron. It wanted `15 3 * * *`; a third entry fails the
+deploy while building perfectly with `next build`, which validates nothing about the plan. Neither
+fold was available either — the scan already runs past 60s and resumes on a cursor, and the digest
+sends email — so `/api/external-brief` refreshes on the first visit of the day instead, fired
+unawaited from the Overview page. It keeps its `CRON_SECRET` path so it becomes a real cron the day
+a slot exists, and it lives outside `/api/cron/` because `proxy.ts` gates that prefix on the secret
+and a browser cannot present one.
+
+**The same 60s cap is why live web search is not in `/api/ask`.** The scrape measures 27-39s and the
+model call claims up to 55; they do not fit one function. The search is its own route with its own
+60s, the client makes two calls, and `/api/ask` re-cleans and re-caps every field that comes back
+before any of it reaches a prompt.
 
 ### 3.5 The sandbox
 
@@ -802,8 +817,8 @@ standing fact. The market block at the bottom is all of the second kind.
 | boards configured / enabled | 32 <!-- verify:boards=32 --> / 27 <!-- verify:enabled_boards=27 --> | `data/market-sources.json` |
 | `BOARD_COUNT` | 27 | `lib/market/benchmark.ts` |
 | skills / gaps / over-invested | 34 <!-- verify:skills=34 --> / 13 <!-- verify:gaps=13 --> / 3 | `data/market-skill-map.json` |
-| tabs | 7 <!-- verify:tabs=7 --> | `components/Nav.tsx` `NAV` |
-| API routes | 12 <!-- verify:api_routes=12 --> | `app/api/**/route.ts` |
+| tabs | 8 <!-- verify:tabs=8 --> | `components/Nav.tsx` `NAV` |
+| API routes | 13 <!-- verify:api_routes=13 --> | `app/api/**/route.ts` |
 | crons | 2 <!-- verify:crons=2 --> (03:00, 03:30 UTC) | `vercel.json` |
 | MCP tools | 18 <!-- verify:mcp_tools=18 --> | `mcp/server.js` `tools` |
 | review ladder | `[1, 7, 21, 60, 150, 240, 330]` — 7 rungs <!-- verify:ladder_rungs=7 --> | `lib/review.ts` |

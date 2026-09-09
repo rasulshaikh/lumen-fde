@@ -5,6 +5,7 @@ import { benchmarkGapsContext, evidenceContext, recallContext, workbookContext }
 import { readSessionSummary } from "@/lib/companion/session";
 import { readArtifacts } from "@/lib/artifacts";
 import type { ReviewState } from "@/lib/review";
+import { externalContext, readLatestBrief, type ExternalBrief } from "@/lib/external/brief";
 import sourceCatalog from "@/data/library-sources.json";
 import repositories from "@/data/repository-context.json";
 import curriculum from "@/data/curriculum.json";
@@ -15,6 +16,14 @@ import { BENCHMARK_PATH, INSIGHT_PATH, readJson } from "@/lib/market/store";
 import type { Benchmark } from "@/lib/market/benchmark";
 import type { Insight } from "@/lib/market/insight";
 
+/**
+ * 60, because Hobby will not build anything larger — see `market-scan`, which records the same.
+ *
+ * This route briefly searched the web itself. It cannot: the scrape measures 27-39s, the model
+ * call claims up to 55s, and 60 does not hold both. So the search moved to `/api/external-brief`,
+ * which gets its own 60s, and the client makes two calls instead of one. Nothing was dropped —
+ * the arithmetic just does not fit in a single function on this plan.
+ */
 export const maxDuration = 60;
 
 type Syllabus = { topic: string; why: string; prerequisites: string[]; subtopics: { name: string; learn: string }[]; outcomes: string[]; failureModes: string[] };
@@ -105,6 +114,16 @@ const MARGINAL_LINES = 5;
  * about five seconds. A GitHub that hangs must cost the market block, not the answer.
  */
 const MARKET_READ_MS = 4000;
+
+/**
+ * How many live web results may enter a prompt, whatever the client sends.
+ *
+ * `/api/external-brief` already caps its own response at five. This is the same cap enforced
+ * again on the receiving side, because the two are different guarantees: that one bounds what a
+ * well-behaved caller gets back, and this one bounds what this route will put in front of the
+ * model regardless of what arrives in the body.
+ */
+const WEB_ITEM_CAP = 5;
 
 /**
  * benchmark.json and insight.json, read from the repo at request time.
@@ -250,7 +269,7 @@ export async function POST(request: Request) {
   const apiKey = process.env.MINIMAX_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "MiniMax is not configured yet. Add MINIMAX_API_KEY in Vercel project settings." }, { status: 503 });
   try {
-    const body = await request.json() as { prompt?: string; context?: string; topicIndex?: number; history?: { role: "user" | "assistant"; content: string }[] };
+    const body = await request.json() as { prompt?: string; context?: string; topicIndex?: number; web?: boolean; webItems?: { title?: unknown; url?: unknown; snippet?: unknown }[]; history?: { role: "user" | "assistant"; content: string }[] };
 
     /**
      * What the companion already knows about this reader.
@@ -304,11 +323,61 @@ export async function POST(request: Request) {
     // as it was before the market existed.
     const [benchmark, insight] = await Promise.all([readMarket<Benchmark>(BENCHMARK_PATH), readMarket<Insight>(INSIGHT_PATH)]);
     const market = marketContext(benchmark, insight);
+    /**
+     * Outside context, in two forms, and both of them cited.
+     *
+     * The stored brief is the default: fetched on a schedule, committed to the repo, identical
+     * for every reading until the next fetch — so an answer built on it is reproducible. Live
+     * search is opt-in per question, for when currency matters more than reproducibility, and it
+     * is disclosed in the block itself so the answer can say which it used.
+     *
+     * Neither can fail the question. A live search that errors degrades to the stored brief; a
+     * missing brief degrades to no outside context at all, which is where this route was a day ago.
+     */
+    let outside = "";
+    try {
+      const { brief } = await readLatestBrief();
+      outside = externalContext(brief, new Date());
+    } catch { /* no brief is the pre-existing state, not an error worth failing on */ }
+
+    /*
+     * Live results, searched by `/api/external-brief` and handed here by the client.
+     *
+     * This route does not fetch them itself, and the reason is the 60s ceiling above — the scrape
+     * measures 27-39s and the model claims 55, so the two cannot share one function on this plan.
+     * Splitting them gives each its own.
+     *
+     * The cost of that split is that these strings arrive from the browser rather than from the
+     * engine, so **nothing here is trusted**. Every field is re-cleaned, re-capped and re-checked
+     * for an absolute http(s) URL before it can reach a prompt, and the count is capped too. The
+     * single-user session gate makes this a small risk; the block is still built as if it were
+     * not, because "only one person can reach it" is a property of today's deployment and this
+     * is a property of the code.
+     */
+    if (Array.isArray(body.webItems) && body.webItems.length) {
+      const clean = (v: unknown, max: number) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+      const live = body.webItems
+        .slice(0, WEB_ITEM_CAP)
+        .map((i) => ({ title: clean(i?.title, 200), url: clean(i?.url, 500), snippet: clean(i?.snippet, 320) }))
+        .filter((i) => i.title && /^https?:\/\//i.test(i.url));
+      if (live.length) {
+        outside += `${outside ? "\n\n" : ""}LIVE WEB RESULTS, fetched just now for this question. Cite the URL for anything you take from them, and say that you searched the web:\n` +
+          live.map((i) => `- ${i.title} — ${i.url}${i.snippet ? `\n  ${i.snippet}` : ""}`).join("\n") +
+          `\nThese are outside sources. They NEVER override a number measured in this repository.`;
+      }
+    } else if (body.web) {
+      // The toggle was on and the search came back with nothing — it timed out, it failed, or it
+      // genuinely found nothing. The model is told, because an answer that quietly omits the web
+      // reads exactly like one that searched and found nothing worth saying.
+      outside += `${outside ? "\n\n" : ""}A live web search was requested for this question and returned no usable results. Answer from the plan and say the search did not come back — do not imply you searched.`;
+    }
+
     const extra = [
       workbookContext(),
       benchmarkGapsContext(benchmark),
       evidenceContext({ artifacts: artifacts.artifacts, synced: artifacts.synced }, sessions),
       recallContext(review, new Date()),
+      outside,
     ].filter(Boolean).join("\n\n");
 
     const messages = [

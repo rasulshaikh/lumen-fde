@@ -20,12 +20,16 @@ export const NAV = [
   { label: "Curriculum", href: "/curriculum" },
   { label: "Practice", href: "/practice" },
   { label: "Market", href: "/market" },
+  // Paths sits immediately after Market because it is built out of it: the reach tiers on the
+  // Market tab are the evidence, and this is the decision they feed. Reading it before the market
+  // it draws on would make four salary bands look like four choices rather than four bets.
+  { label: "Paths", href: "/paths" },
   { label: "Library", href: "/library" },
   { label: "Sandbox", href: "/sandbox" },
 ];
 
 /**
- * Seven, down from ten, and the three that went were not deletions.
+ * Eight: ten, merged down to seven, plus one that was missing.
  *
  * Five of the ten tabs rendered a single panel over one workbook sheet — Mocks and Comp reality
  * were five lines each, Roadmaps twenty-one — while sitting as equal peers to a 387-line Market
@@ -41,6 +45,10 @@ export const NAV = [
  * Nothing was removed from the product: every panel still renders, on the page where its question
  * is already being asked. The old URLs still resolve — see the redirects in next.config.ts, kept
  * because a bookmark that 404s is indistinguishable from a feature that was deleted.
+ *
+ * Paths is the eighth, and it is an addition rather than a restoration. Seven tabs measured how
+ * the plan was going and none of them said what it was for; the compensation sheet and the scan's
+ * reach tiers had held that answer between them for months with no page to render it on.
  */
 
 /**

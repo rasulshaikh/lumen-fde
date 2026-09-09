@@ -182,10 +182,19 @@ async function askLumen(prompt, context = "") {
   if (!answer) throw new Error("MiniMax returned an empty answer");
   return answer;
 }
+/**
+ * The `/api/v1` prefix is not optional and was missing.
+ *
+ * Without it every call returned 404, the catch below fell through to a GitHub code search of
+ * this repository, and `semantic_search` answered web questions with repo matches — recorded only
+ * in an audit line reading "surfsense unavailable, fell back to github". Confirmed against the
+ * live OpenAPI spec: the endpoint is /api/v1/workspaces/{id}/scrapers/google_search/scrape, and
+ * it returns 200 with organicResults.
+ */
 async function surfSenseSearch(query, limit, countryCode) {
   if (!process.env.SURFSENSE_API_KEY || !process.env.SURFSENSE_WORKSPACE_ID) throw new Error("SurfSense is not configured. Add SURFSENSE_API_KEY and SURFSENSE_WORKSPACE_ID on Render.");
   const base = (process.env.SURFSENSE_API_URL || "https://api.surfsense.com").replace(/\/$/, "");
-  const response = await fetch(`${base}/workspaces/${encodeURIComponent(process.env.SURFSENSE_WORKSPACE_ID)}/scrapers/google_search/scrape`, { method: "POST", headers: { Authorization: `Bearer ${process.env.SURFSENSE_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ queries: [String(query)], country_code: countryCode || "us", language_code: "en", max_pages_per_query: Math.min(Math.max(Number(limit) || 1, 1), 3) }), signal: AbortSignal.timeout(25_000) });
+  const response = await fetch(`${base}/api/v1/workspaces/${encodeURIComponent(process.env.SURFSENSE_WORKSPACE_ID)}/scrapers/google_search/scrape`, { method: "POST", headers: { Authorization: `Bearer ${process.env.SURFSENSE_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ queries: [String(query)], country_code: countryCode || "us", language_code: "en", max_pages_per_query: Math.min(Math.max(Number(limit) || 1, 1), 3) }), signal: AbortSignal.timeout(25_000) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.message || `SurfSense request failed with ${response.status}`);
   return data;

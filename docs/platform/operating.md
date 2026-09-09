@@ -12,7 +12,7 @@ Three surfaces, and they are not interchangeable:
 
 | surface | reach for it when |
 |---|---|
-| the dashboard, 7 tabs <!-- verify:tabs=7 --> | you are reading, filtering, marking status, or looking at the market |
+| the dashboard, 8 tabs <!-- verify:tabs=8 --> | you are reading, filtering, marking status, or looking at the market |
 | the MCP, 18 tools <!-- verify:mcp_tools=18 --> | Claude Code needs the plan in its context, or needs to write something durable |
 | the 2 crons <!-- verify:crons=2 --> | they reach for you — 03:00 and 03:30 UTC, unattended |
 
@@ -398,7 +398,7 @@ the case for adding.
 
 ---
 
-## 2. The 7 tabs
+## 2. The 8 tabs
 
 **Three former tabs now live inside another view.** Their panels are unchanged and every one still
 renders; only the address moved, and the old URLs redirect rather than 404:
@@ -434,6 +434,16 @@ the dropdown is fire-and-forget: a failed sync looks identical to a successful o
 syllabus per opened topic, so it never ships the 3.7 MB bundle.
 *It will not let you edit anything*, and what it renders is built output. Corrections go to
 `data/curriculum/NN.json` followed by `scripts/build-curriculum.py` (architecture.md §4.2).
+
+**Paths** — the four routes out of the plan (stay in India, the Gulf, the US market, your own
+thing), each joining the CompReality sheet's bands, sources and odds to the reach tiers the
+nightly scan derived from real requisitions. The `$250K target` row belongs to no path and is
+rendered above the four as the thing they are answers to.
+*It will not tell you how many roles are open in the UAE, and neither will anything else here.*
+A reach tier records that a requisition needs a move and a visa, not where to — so the Gulf and
+the US read one shared pool, and both cards say so. Splitting it would be a number no scan
+measured. The odds column carries its own disclosure too: it was written against a 9-month
+horizon and the plan is 23 months, which the page derives rather than assumes.
 
 **Sandbox** — section 4 below.
 

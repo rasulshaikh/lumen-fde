@@ -1348,3 +1348,66 @@ th{padding:0 12px 10px}
 .faq-group{margin-top:14px}
 .faq-group-title{margin:0 0 6px;font-family:var(--font-data);font-size:10px;letter-spacing:.05em;
   text-transform:uppercase;color:var(--muted)}
+
+/* The web toggle. Deliberately visible rather than tucked in a menu: it changes where an answer
+   comes from and whether asking twice gives the same answer, which is not a hidden preference. */
+.ask-web{display:flex;align-items:center;gap:9px;margin:0 0 10px;min-height:44px;cursor:pointer;
+  font-size:12px;color:var(--muted);line-height:1.4}
+.ask-web input{width:16px;height:16px;flex:none;accent-color:var(--accent)}
+.ask-web span{display:flex;align-items:center;gap:8px;min-width:0}
+.ask-web b{font-family:var(--font-data);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
+  padding:2px 6px;border-radius:var(--r-sm);background:var(--surface-strong);color:var(--muted)}
+.ask-web input:checked + span b{background:var(--accent-soft);color:var(--accent-text)}
+
+/* ── Paths ────────────────────────────────────────────────────────────────────
+   The decision view. Four cards over one flowing grid rather than a fixed 2x2,
+   because the fourth card carries no salary band and no requisition count and is
+   therefore always shorter than the other three — a fixed grid would stretch it
+   to match and leave a hole where its evidence would be.
+
+   minmax(min(320px,100%),1fr) and not minmax(320px,1fr): auto-fit collapses the
+   column COUNT on a narrow screen but not the 320px floor, so the bare form
+   overflows a 375px viewport by the difference. Same fix, same reason, as the
+   market grid above. */
+.path-intro{margin:0 0 18px;max-width:68ch;color:var(--ink-2);font-size:14px;line-height:1.65}
+.path-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:12px;margin-top:16px}
+.path-card{display:flex;flex-direction:column;gap:10px;padding:16px;background:var(--surface);
+  border:1px solid var(--line);border-radius:var(--r-lg)}
+.path-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.path-num{font-family:var(--font-data);font-size:11px;color:var(--muted);letter-spacing:.08em}
+.path-head h3{margin:0;font-size:17px;font-weight:700;color:var(--ink);flex:1;min-width:0}
+/* .prob is a padded block on the Market tab; here it is an inline chip beside a heading. */
+.path-head .prob{padding:2px 8px;font-size:10.5px;font-family:var(--font-data);letter-spacing:.06em;
+  text-transform:uppercase;background:var(--surface-strong);border-radius:var(--r-sm);flex:none}
+.path-premise{margin:0;font-size:13.5px;line-height:1.6;color:var(--ink-2)}
+
+.path-openings{margin:0;padding:11px 12px;background:var(--surface-strong);border-radius:var(--r-md);
+  font-size:13px;line-height:1.6;color:var(--ink-2)}
+.path-openings-quiet,.path-openings-none{color:var(--muted);font-size:12.5px}
+.path-count{margin:0;color:var(--ink)}
+.path-count strong{font-family:var(--font-data);font-size:19px;color:var(--accent-text);margin-right:2px}
+.path-tiers{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:3px;
+  font-size:12px;color:var(--muted)}
+.path-tiers span{font-family:var(--font-data);color:var(--ink-2);margin-right:5px}
+/* The disclosure that stops a shared pool reading as an exclusive count. Not styled as a
+   footnote — it is the most important sentence on two of the four cards. */
+.path-caveat{margin:9px 0 0;padding-top:9px;border-top:1px solid var(--line);
+  font-size:12px;line-height:1.6;color:var(--muted)}
+
+.path-band{padding-top:10px;border-top:1px solid var(--line)}
+.path-band-market{margin:0 0 3px;font-family:var(--font-data);font-size:10.5px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--muted)}
+.path-band-money{margin:0 0 5px;font-size:14px;font-weight:600;color:var(--ink);line-height:1.5}
+.path-band-takes{margin:0 0 5px;font-size:12.5px;line-height:1.6;color:var(--ink-2)}
+.path-band-odds{margin:0 0 4px;font-size:12.5px;line-height:1.6;color:var(--ink-2)}
+.path-source{margin:0;font-size:11.5px;color:var(--muted)}
+
+.path-target{padding:16px;background:var(--accent-soft);border:1px solid var(--line);
+  border-radius:var(--r-lg);margin-bottom:12px}
+.path-target h3{margin:2px 0 8px;font-size:20px;font-weight:700;color:var(--ink);line-height:1.35}
+.path-target p{margin:0 0 6px;font-size:13px;line-height:1.6;color:var(--ink-2)}
+.path-target .path-odds{font-weight:600;color:var(--ink)}
+.path-horizon{margin:0 0 4px;padding:11px 12px;background:var(--surface-strong);
+  border-radius:var(--r-md);font-size:12.5px;line-height:1.6;color:var(--ink-2)}
+.path-foot{margin:16px 0 0;padding-top:12px;border-top:1px solid var(--line);
+  font-size:12px;line-height:1.6;color:var(--muted);max-width:78ch}
