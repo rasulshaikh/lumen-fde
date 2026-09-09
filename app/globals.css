@@ -1306,3 +1306,40 @@ th{padding:0 12px 10px}
   text-transform:uppercase;color:var(--muted)}
 .ask-facts dd{margin:0;text-align:right;font-size:12.5px;color:var(--ink);line-height:1.45;
   font-variant-numeric:tabular-nums;min-width:0}
+
+/* ============================================================
+   Responsive defects found by sweeping real viewports.
+   ============================================================ */
+
+/* `.bar-item` is `flex:1 1 0%`, and a flex item's default `min-width:auto` refuses to shrink it
+   below its own content — here the "75.5h" value label. At 812x375 (a phone in landscape) that
+   held 23 bars at their text width: a 702px container with 847px of content, pushing 89px of
+   horizontal page scroll onto a page that has none at any other size. min-width:0 lets the track
+   shrink; the value hides below the width where it would be unreadable anyway. */
+.bar-item{min-width:0}
+
+/* The chart was already a horizontal scroller with fixed 32px bars under 600px, which is why
+   phones were clean. The broken band was 601-1024px: there the bars are `flex:1` and a flex
+   item's default `min-width:auto` refuses to shrink below its own content — the "75.5h" label —
+   so 23 bars needed 847px inside a 702px container and pushed 89px of page scroll onto an
+   812x375 phone in landscape.
+   The scroller now covers the whole band instead of stopping at 600. Hiding the hour labels
+   would also have fixed the overflow and would have thrown away the numbers the chart exists to
+   show; scrolling keeps them. */
+@media(max-width:1024px){
+  .bar-chart{overflow-x:auto;overscroll-behavior-x:contain;padding-bottom:8px;gap:8px}
+  .bar-item{flex:0 0 32px}
+}
+
+/* The cited-row chips on /market — 70 of them — were under the 24px target floor this repo
+   documents, and they are the control that carries you from a market citation to the plan row it
+   is about. Height only: their width is set by the row number they name. */
+.mkt-rowlink{min-height:24px;display:inline-flex;align-items:center}
+
+/* The hero's rotation dots are 7px by design; the hit area is grown around them rather than
+   growing the dot. 24px cleared the pointer floor but not the 44px coarse-pointer floor, and the
+   hero is on every route, so on a phone these were the smallest targets in the product. */
+@media(pointer:coarse){
+  .hero-dot:before{width:44px;height:44px;transform:translate(-19px,-19px)}
+  .mkt-rowlink{min-height:44px}
+}
