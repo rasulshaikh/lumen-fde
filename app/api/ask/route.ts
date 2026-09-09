@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import library from "@/data/library-context.json";
 import { applyMemory, readMemory, recurring, writeMemory } from "@/lib/companion/memory";
+import { benchmarkGapsContext, evidenceContext, recallContext, workbookContext } from "@/lib/companion/context";
+import { readSessionSummary } from "@/lib/companion/session";
+import { readArtifacts } from "@/lib/artifacts";
+import type { ReviewState } from "@/lib/review";
 import sourceCatalog from "@/data/library-sources.json";
 import repositories from "@/data/repository-context.json";
 import curriculum from "@/data/curriculum.json";
@@ -275,20 +279,46 @@ export async function POST(request: Request) {
       }
     } catch { /* continuity is not worth failing an answer over */ }
     if (!body.prompt?.trim()) return NextResponse.json({ error: "Ask a question first." }, { status: 400 });
+    /**
+     * Everything else Lumen already knows.
+     *
+     * These four reads run together rather than in sequence: they are independent, they are all
+     * network-bound, and the route already has a 55s ceiling it shares with the model call. Any
+     * one of them failing degrades that block to "unknown" rather than failing the question —
+     * `Promise.allSettled`, not `all`, for exactly that reason.
+     */
+    const [artifactsR, sessionsR, reviewR] = await Promise.allSettled([
+      readArtifacts(),
+      readSessionSummary(),
+      readJson<ReviewState>("reports/review/state.json"),
+    ]);
+    const artifacts = artifactsR.status === "fulfilled" ? artifactsR.value : { artifacts: [], unreadable: 0, synced: false, error: null };
+    const sessions = sessionsR.status === "fulfilled" ? sessionsR.value : { count: 0, latest: null, synced: false };
+    const review = reviewR.status === "fulfilled"
+      ? { state: (reviewR.value.data ?? {}) as ReviewState, synced: reviewR.value.synced }
+      : null;
+
     const deep = syllabusContext(body.topicIndex);
     // Two reads, one budget. Neither can fail the request: `readMarket` resolves null on every
     // path, and `marketContext` returns "" for a pair of nulls, which leaves the prompt exactly
     // as it was before the market existed.
     const [benchmark, insight] = await Promise.all([readMarket<Benchmark>(BENCHMARK_PATH), readMarket<Insight>(INSIGHT_PATH)]);
     const market = marketContext(benchmark, insight);
+    const extra = [
+      workbookContext(),
+      benchmarkGapsContext(benchmark),
+      evidenceContext({ artifacts: artifacts.artifacts, synced: artifacts.synced }, sessions),
+      recallContext(review, new Date()),
+    ].filter(Boolean).join("\n\n");
+
     const messages = [
-      { role: "system", content: `You are Quaere, the study guide inside Lumen. Lumen is the dashboard; you are the guide within it. Explain every idea in fifth-grade reading language while keeping the technical meaning exact. Use short sentences, define jargon immediately, give one concrete technical example, connect it to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. The user message contains the COMPLETE plan — every topic across every track. Never tell the learner a subject is missing from the plan without checking that full list first. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. The learner's indexed learning map is:\n${JSON.stringify(library)}\n\nThe local source catalog (metadata and chapter map only) is:\n${JSON.stringify(sourceCatalog)}\n\nThe public repository map is:\n${JSON.stringify(repositories)}${market ? MARKET_RULE : ""}${memoryBlock}` },
+      { role: "system", content: `You are Quaere, the study guide inside Lumen. Lumen is the dashboard; you are the guide within it. Explain every idea in fifth-grade reading language while keeping the technical meaning exact. Use short sentences, define jargon immediately, give one concrete technical example, connect it to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. The user message contains the COMPLETE plan — every topic across every track. Never tell the learner a subject is missing from the plan without checking that full list first. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. NEVER state how many recall cards are due, even if you can infer it: say whether recall is waiting. A backlog number is what makes people abandon a spaced-repetition system, and this learner has 23 months left. The learner's indexed learning map is:\n${JSON.stringify(library)}\n\nThe local source catalog (metadata and chapter map only) is:\n${JSON.stringify(sourceCatalog)}\n\nThe public repository map is:\n${JSON.stringify(repositories)}${market ? MARKET_RULE : ""}${memoryBlock}` },
       // Picked field by field, not spread. The client stores an assistant turn as
       // `{role, content, reportUrl?}`, and forwarding a turn that saved a report shipped a
       // `reportUrl` key into an OpenAI-shaped messages array. The declared type hid it from
       // tsc, so only the wire showed it.
       ...(body.history || []).slice(-8).map((m) => ({ role: m.role, content: m.content })),
-      { role: "user", content: `${planMap()}\n\nCurrently visible in the dashboard:\n${body.context || "No topic filter is active."}${deep ? `\n\n${deep}` : ""}${market ? `\n\n${market}` : ""}\n\nQuestion:\n${body.prompt}` },
+      { role: "user", content: `${planMap()}\n\nCurrently visible in the dashboard:\n${body.context || "No topic filter is active."}${deep ? `\n\n${deep}` : ""}${market ? `\n\n${market}` : ""}${extra ? `\n\n${extra}` : ""}\n\nQuestion:\n${body.prompt}` },
     ];
     const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, messages, temperature: 0.4, max_completion_tokens: 1600, stream: false }), signal: AbortSignal.timeout(55000) });
     const raw = await response.text();

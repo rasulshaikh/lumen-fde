@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { buildBrief, opening } from "@/lib/companion/brief";
+import { weeklyPace } from "@/lib/profile";
 import { usePathname } from "next/navigation";
 import library from "@/data/library-context.json";
 import repositories from "@/data/repository-context.json";
@@ -30,13 +31,52 @@ import { compRows, mockRows, months, planRows, roadmapRows, tracks } from "@/com
 // Starter questions. The first one is deliberate: Quaere once answered "there is no ML
 // topic in the visible plan" because the client sent it 8 of 119 rows. Asking it is now
 // the fastest way to see that the whole plan is in context.
-const FAQS = [
-  "Does my plan cover machine learning, and where?",
-  "What should I focus on this week, and why that over anything else?",
-  "Which of my indexed books actually helps with the topic I have open?",
-  // derived, not typed: this said "13 months" until the Hours column was re-baselined
-  `Am I on pace to finish in ${months[months.length - 1]} months at 16 hours a week?`,
-  "What will a senior FDE interview actually test that my plan does not cover?",
+/**
+ * Starter questions, grouped by what Quaere can now actually answer.
+ *
+ * The list was five flat questions written when it could only see the plan, the library and a
+ * readiness slice. It now also holds the compensation sheet, the audited gaps, the
+ * over-investment analysis, the shipped artifacts, the session history and the recall state — so
+ * the questions worth suggesting changed.
+ *
+ * The pace question reads the profile rather than saying "16 hours a week", which it did until
+ * now: the weekly target is editable, and a suggested question that contradicts the setting is
+ * the same stale-string defect this project has chased out of the digest and the login page.
+ */
+const FAQ_GROUPS: { group: string; questions: string[] }[] = [
+  {
+    group: "The plan",
+    questions: [
+      "What should I focus on this week, and why that over anything else?",
+      "Does my plan cover machine learning, and where?",
+      `Am I on pace to finish in ${months[months.length - 1]} months at ${weeklyPace()}?`,
+      "What is in my plan that the market is not asking for?",
+    ],
+  },
+  {
+    group: "Market and paths",
+    questions: [
+      "Which market should I actually aim at first, and what does my own comp sheet say about it?",
+      "What do the audited gaps mean for the next three months of the plan?",
+      "If I wanted to build something of my own instead, what would this plan already give me?",
+      "What will a senior FDE interview actually test that my plan does not cover?",
+    ],
+  },
+  {
+    group: "Evidence and rhythm",
+    questions: [
+      "What have I actually shipped, and what would make the strongest portfolio piece next?",
+      "Given my session history, am I being honest with myself about pace?",
+      "What is the single next thing that moves readiness the most?",
+    ],
+  },
+  {
+    group: "Library",
+    questions: [
+      "Which of my indexed books actually helps with the topic I have open?",
+      "Which repo in my map is worth reading end to end, and why?",
+    ],
+  },
 ];
 
 /**
@@ -198,7 +238,7 @@ export function QuaereDock() {
 
   return <>
     {!askOpen && <button className="ask-fab" onClick={() => { setAskTopic(null); setAskOpen(true); }} aria-label="Open Quaere" aria-keyshortcuts="Meta+K Control+K"><AskMark size={16} /> Quaere</button>}
-    {askOpen && <aside className="ask-panel" aria-label="Quaere"><div className="ask-head"><div className="ask-title"><AskMark size={20} className="ask-head-mark" /><div><p className="eyebrow">Lumen study guide</p><h2>Quaere</h2></div></div><button className="close-button" onClick={() => setAskOpen(false)} aria-label="Close Quaere (Escape)">×</button></div><p className="ask-intro">Latin for “seek”. Ask for a plain-English explanation, a session recap, or the next hands-on step. Quaere sees your whole plan and the indexed study library.</p><p className="ask-scope"><span>Reading</span><b>{scope || "Lumen"}</b>{keyHint && <kbd className="ask-kbd">{keyHint}</kbd>}</p><div className="context-status"><span className="sync-dot" /><span>Plan snapshot · {library.length} books · {repositories.length} repos · read-only</span></div><div className="suggestions"><button onClick={() => askLumen(`Explain what I am looking at in ${here} as if I am preparing for a senior FDE interview.`)}>Explain this</button><button onClick={() => askLumen(`Turn what is in front of me in ${here} into a 20-minute hands-on exercise.`)}>Give me a lab</button><button onClick={() => askLumen(`After working through ${here}, what should I be able to say or build?`)}>Check grasp</button></div><div className="messages">{messages.length === 0 && <div className="empty-chat"><AskMark size={22} className="empty-chat-mark" /><strong>{greeting}</strong><span>{standing}</span><span>Quaere reads your whole plan — all {planRows.length} topics across {tracks.length} tracks — plus the {library.length} indexed books, and whichever view you are on. Not the open web. It never changes your progress.</span>{facts.length > 0 && <dl className="ask-facts">{facts.map((f) => <div key={f.k}><dt>{f.k}</dt><dd>{f.v}</dd></div>)}</dl>}<ul className="faq-list">{FAQS.map((q) => <li key={q}><button onClick={() => askLumen(q)}>{q}</button></li>)}</ul></div>}{messages.map((m, i) => <div className={`message ${m.role}`} key={i}><span>{m.role === "user" ? "You" : "Lumen"}</span><p>{m.content}</p>{m.reportUrl && <a className="report-link" href={m.reportUrl} target="_blank" rel="noreferrer">Open saved report ↗</a>}</div>)}{asking && <div className="message assistant"><span>Lumen</span><p>Working through the plan context…</p></div>}</div><form className="ask-form" onSubmit={(e) => { e.preventDefault(); askLumen(); }}><input ref={inputRef} value={askText} onChange={(e) => setAskText(e.target.value)} placeholder={scope ? `Ask about ${scope}…` : "Ask about what you are learning…"} /><button aria-label="Send question" disabled={asking || !askText.trim()}>→</button></form><div className="ask-foot">Study guide · private context</div></aside>}
+    {askOpen && <aside className="ask-panel" aria-label="Quaere"><div className="ask-head"><div className="ask-title"><AskMark size={20} className="ask-head-mark" /><div><p className="eyebrow">Lumen study guide</p><h2>Quaere</h2></div></div><button className="close-button" onClick={() => setAskOpen(false)} aria-label="Close Quaere (Escape)">×</button></div><p className="ask-intro">Latin for “seek”. Ask for a plain-English explanation, a session recap, or the next hands-on step. Quaere sees your whole plan and the indexed study library.</p><p className="ask-scope"><span>Reading</span><b>{scope || "Lumen"}</b>{keyHint && <kbd className="ask-kbd">{keyHint}</kbd>}</p><div className="context-status"><span className="sync-dot" /><span>Plan snapshot · {library.length} books · {repositories.length} repos · read-only</span></div><div className="suggestions"><button onClick={() => askLumen(`Explain what I am looking at in ${here} as if I am preparing for a senior FDE interview.`)}>Explain this</button><button onClick={() => askLumen(`Turn what is in front of me in ${here} into a 20-minute hands-on exercise.`)}>Give me a lab</button><button onClick={() => askLumen(`After working through ${here}, what should I be able to say or build?`)}>Check grasp</button></div><div className="messages">{messages.length === 0 && <div className="empty-chat"><AskMark size={22} className="empty-chat-mark" /><strong>{greeting}</strong><span>{standing}</span><span>Quaere reads your whole plan — all {planRows.length} topics across {tracks.length} tracks — plus the {library.length} indexed books, and whichever view you are on. Not the open web. It never changes your progress.</span>{facts.length > 0 && <dl className="ask-facts">{facts.map((f) => <div key={f.k}><dt>{f.k}</dt><dd>{f.v}</dd></div>)}</dl>}{FAQ_GROUPS.map((g) => <div className="faq-group" key={g.group}><p className="faq-group-title">{g.group}</p><ul className="faq-list">{g.questions.map((q) => <li key={q}><button onClick={() => askLumen(q)}>{q}</button></li>)}</ul></div>)}</div>}{messages.map((m, i) => <div className={`message ${m.role}`} key={i}><span>{m.role === "user" ? "You" : "Lumen"}</span><p>{m.content}</p>{m.reportUrl && <a className="report-link" href={m.reportUrl} target="_blank" rel="noreferrer">Open saved report ↗</a>}</div>)}{asking && <div className="message assistant"><span>Lumen</span><p>Working through the plan context…</p></div>}</div><form className="ask-form" onSubmit={(e) => { e.preventDefault(); askLumen(); }}><input ref={inputRef} value={askText} onChange={(e) => setAskText(e.target.value)} placeholder={scope ? `Ask about ${scope}…` : "Ask about what you are learning…"} /><button aria-label="Send question" disabled={asking || !askText.trim()}>→</button></form><div className="ask-foot">Study guide · private context</div></aside>}
   </>;
 }
 

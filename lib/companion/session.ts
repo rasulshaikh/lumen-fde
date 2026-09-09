@@ -167,3 +167,31 @@ export async function writeSession(
     return { ok: false, path, url: null, synced: false, error: String((error as Error).message || error) };
   }
 }
+
+/**
+ * How many sessions have closed, and when the most recent one was.
+ *
+ * A count and a date, not the files. The companion needs to know whether the loop is being used
+ * and how recently; the session bodies are the reader's own notes and pushing twenty of them into
+ * a prompt would crowd out the plan without answering a question anyone asks.
+ *
+ * `synced: false` means "we do not know" — never "no sessions" — which is the rule every reader
+ * in this codebase follows and the one that stops a GitHub outage becoming "you have not studied".
+ */
+export async function readSessionSummary(): Promise<{ count: number; latest: string | null; synced: boolean }> {
+  if (!process.env.GITHUB_TOKEN) return { count: 0, latest: null, synced: false };
+  try {
+    const response = await fetch(`https://api.github.com/repos/${repo}/contents/${SESSIONS_DIR}?ref=${branch}`, {
+      headers: headers(), cache: "no-store",
+    });
+    // A directory that does not exist yet is a real, known answer: no session has been recorded.
+    if (response.status === 404) return { count: 0, latest: null, synced: true };
+    if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+    const listing = (await response.json()) as { name: string; type: string }[];
+    const files = listing.filter((f) => f.type === "file" && f.name.endsWith(".md")).map((f) => f.name).sort();
+    const newest = files.length ? files[files.length - 1] : null;
+    return { count: files.length, latest: newest ? newest.slice(0, 10) : null, synced: true };
+  } catch {
+    return { count: 0, latest: null, synced: false };
+  }
+}
