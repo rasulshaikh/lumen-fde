@@ -1458,3 +1458,70 @@ th{padding:0 12px 10px}
 .bar-chart .bar-item:hover .bar-fill{filter:brightness(1.12)}
 .bar-chart .bar-item:hover .bar-label,.bar-chart .bar-item:hover .bar-value{color:var(--ink)}
 .bar-chart .bar-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ── Practice: the assessment list and the test runner ────────────────────────
+   The 184px rail exists so the eyebrow and the panel meta sit in the margin
+   beside a lede with a real reading measure. That is right for the lede and
+   wrong for everything under it: the card list inherited grid-column 2, so the
+   rail ran empty down the whole panel and the cards were squeezed into two
+   thirds of the width for no reason. Everything below the lede spans both. */
+.full-panel:has(>.assessment-lead)>.assessment-list,
+.full-panel:has(>.assessment-lead)>.test-shell{grid-column:1/-1}
+
+.assessment-card{border-top:1px solid var(--line);border-radius:0}
+.assessment-toggle{width:100%;cursor:pointer;border-radius:var(--r-md)}
+.assessment-toggle:hover strong{color:var(--accent-text)}
+.assessment-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+/* The scope line names plan rows and now opens one, so it has to look like it does. */
+.assessment-topics-link{border:0;background:none;padding:0;font:inherit;text-align:left;
+  color:var(--teal);font-size:11px;font-weight:700;cursor:pointer;justify-self:start}
+.assessment-topics-link:hover{text-decoration:underline}
+.assessment-start{grid-column:1;display:grid;gap:8px;align-content:start}
+.assessment-go{width:auto;gap:20px;align-items:center}
+.assessment-go span:last-child{font-family:var(--font-data);font-size:11px;opacity:.75}
+
+/* The runner. One question at a time, so the page holds one thing and the
+   answer box is the widest element on it. */
+.test-shell{display:grid;gap:14px;max-width:760px}
+.test-bar{display:flex;justify-content:space-between;align-items:baseline;gap:16px;
+  font-family:var(--font-data);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.test-progress{height:3px;background:var(--surface-strong);border-radius:99px;overflow:hidden}
+.test-progress span{display:block;height:100%;background:var(--accent);border-radius:99px;transition:width .2s ease}
+.test-topic{margin:0;font-family:var(--font-data);font-size:11px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--accent-text)}
+.test-prompt{margin:0;font-size:17px;line-height:1.55;color:var(--ink);max-width:66ch}
+.test-answer{width:100%;min-height:150px;resize:vertical;padding:13px 14px;font:inherit;font-size:14px;
+  line-height:1.6;color:var(--ink);background:var(--surface);border:1px solid var(--line-strong);
+  border-radius:var(--r-md);outline:none}
+.test-answer:focus{outline:2px solid var(--accent);outline-offset:1px}
+.test-key{background:var(--surface-strong);border-radius:var(--r-md);padding:14px 16px;display:grid;gap:8px}
+.test-key strong{font-size:12px;color:var(--ink)}
+.test-key ul{margin:0;padding-left:18px;display:grid;gap:7px}
+.test-key li{font-size:13px;line-height:1.6;color:var(--ink-2)}
+.test-grade{display:grid;gap:8px}
+.test-grade-ask{margin:0;font-size:13px;color:var(--ink-2)}
+.test-grade-row{display:flex;gap:8px;flex-wrap:wrap}
+.grade-gone:hover{border-color:var(--danger);color:var(--danger)}
+.grade-halting:hover{border-color:var(--warn);color:var(--warn)}
+.grade-fluent:hover{border-color:var(--teal);color:var(--teal)}
+.test-actions{display:flex;gap:16px;align-items:center;flex-wrap:wrap;
+  padding-top:12px;border-top:1px solid var(--line)}
+.test-quiet{color:var(--muted);font-size:12.5px;line-height:1.6;margin:0}
+.test-title{margin:2px 0 6px;font-size:20px;font-weight:700;color:var(--ink)}
+.test-note{margin:0;font-size:13px;line-height:1.6;color:var(--ink-2)}
+.test-tally{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(120px,100%),1fr));gap:10px}
+.test-tally-cell{padding:14px 16px;background:var(--surface-strong);border-radius:var(--r-md);display:grid;gap:3px}
+.test-tally-cell strong{font-family:var(--font-data);font-size:26px;color:var(--ink);line-height:1}
+.test-tally-cell span{font-size:11px;color:var(--muted)}
+.tally-gone strong{color:var(--danger)}
+.tally-halting strong{color:var(--warn)}
+.tally-fluent strong{color:var(--teal)}
+.test-weak{display:grid;gap:8px;padding:14px 16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md)}
+.test-weak strong{font-size:12px}
+.test-weak ul{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.test-weak li{display:flex;gap:9px;align-items:baseline;font-size:13px;color:var(--ink-2)}
+.test-chip{font-family:var(--font-data);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
+  padding:2px 6px;border-radius:var(--r-sm);background:var(--surface-strong);flex:none}
+.chip-gone{color:var(--danger)}
+.chip-halting{color:var(--warn)}
+@media(max-width:640px){.assessment-go{width:100%}}
