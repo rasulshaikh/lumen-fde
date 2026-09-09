@@ -143,6 +143,42 @@ export function pool(s: HeroState): string[] {
 }
 
 /**
+ * The headline, which also changes per visit.
+ *
+ * Only the small line under it rotated at first, so the biggest words on the page were the one
+ * thing that never moved. If the hero is meant to be new when you open it, the 42px sentence is
+ * the part that decides whether it feels new.
+ *
+ * These are stance rather than status. The sub-line carries the arithmetic; a headline that
+ * reported a number would put a fifth metric in the largest type on the screen, which is the
+ * mistake the pool below already made once.
+ *
+ * Two constraints they all meet. They are short, because this renders at 42px in a hero that is
+ * two lines tall and a third line pushes the focus card out of alignment. And none of them is a
+ * not-X-but-Y contrast, which is the shape this codebase keeps removing from its own copy.
+ *
+ * The first entry is canonical: the server renders it, `scripts/build-icons.mjs` prints it on the
+ * link-preview card, and the shuffle only takes over after mount. So a shared link and a cold load
+ * always agree, and the variety is something the reader gets rather than something a crawler sees.
+ */
+export function headlines(s: HeroState): string[] {
+  const lines = [
+    "Build proof you can show.",
+    "An artifact is the part somebody else can open.",
+    "The next row is the whole job today.",
+    "Nobody is checking this but you.",
+    "Answer it before you read the key.",
+    "Retrieval beats rereading.",
+    "Ship something with a URL on it.",
+    "Finish the row. Then write it down.",
+  ];
+  // Two that are actually yours rather than anyone's.
+  if (s.months) lines.push(`${s.months} months, one row at a time.`);
+  if (s.total) lines.push(`${s.total} topics. One of them is today.`);
+  return lines;
+}
+
+/**
  * Fisher-Yates over a copy, driven by a seeded generator so a given seed always produces the same
  * order. Seeded rather than `Math.random()` directly so the ordering can be asserted in a test.
  */

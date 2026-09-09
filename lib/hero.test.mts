@@ -9,7 +9,7 @@
  * So: no line may report completed work before there is any, no line may render a placeholder for
  * a value it does not have, and the pool must never be empty whatever the state.
  */
-import { pool, shuffle, type HeroState } from "./hero.ts";
+import { headlines, pool, shuffle, type HeroState } from "./hero.ts";
 
 let fails = 0;
 const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
@@ -144,6 +144,37 @@ console.log("no line is a duplicate of another");
 {
   const lines = pool({ ...base, done: 40, doneHours: 600, month: 12 });
   ck("all distinct", new Set(lines).size === lines.length, lines.join(" | "));
+}
+
+console.log("the headline changes per visit and stays headline-sized");
+{
+  const hs = headlines(base);
+  ck("there is a pool to choose from", hs.length >= 6, `${hs.length} headlines`);
+  ck("all distinct", new Set(hs).size === hs.length);
+
+  // The canonical one is first: the server renders it and build-icons.mjs prints it on the
+  // link-preview card, so a shared link and a cold load have to agree.
+  ck("the canonical headline is first", hs[0] === "Build proof you can show.");
+
+  // 42px, two lines, with a focus card beside it. A third line pushes that card out of line.
+  ck("every headline fits two lines at hero size", hs.every((h) => h.length <= 48), hs.find((h) => h.length > 48) ?? "");
+  ck("every headline is a sentence", hs.every((h) => /[.!?]$/.test(h)));
+
+  // The shape this codebase keeps removing from its own copy.
+  ck("none is a not-X-but-Y contrast", !hs.some((h) => /\bnot just\b|\bnot only\b|\brather than\b|, not /i.test(h)), hs.find((h) => /not just|not only|rather than|, not /i.test(h)) ?? "");
+
+  // The headline must not become a fifth metric in the largest type on the page.
+  for (const [what, pattern] of ALREADY_ON_SCREEN) {
+    ck(`no headline repeats ${what}`, !hs.some((h) => pattern.test(h)), hs.find((h) => pattern.test(h)) ?? "");
+  }
+
+  const picked = new Set(Array.from({ length: 40 }, (_, i) => shuffle(hs, i * 7919)[0]));
+  ck("the visit actually changes it", picked.size >= 5, `${picked.size} distinct over 40 visits`);
+
+  // Derived entries drop out when their inputs do, like every other line here.
+  const thin = headlines({ ...base, months: 0, total: 0 });
+  ck("derived headlines drop when the numbers are missing", thin.length === hs.length - 2, `${thin.length} vs ${hs.length}`);
+  ck("nothing renders a zero", !thin.some((h) => /^0 /.test(h)));
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

@@ -7,7 +7,8 @@ import { AppStateProvider, useAppState } from "@/components/AppState";
 import { NAV, Nav } from "@/components/Nav";
 import { AskDock } from "./dock";
 import { HeroLines } from "./hero-lines";
-import { pool } from "@/lib/hero";
+import { HeroHeadline } from "./hero-headline";
+import { headlines, pool } from "@/lib/hero";
 
 /**
  * The shell every one of the ten routes renders inside.
@@ -37,7 +38,7 @@ function Chrome({ children }: { children: React.ReactNode }) {
   // every morning for 23 months. The pool also changes shape as the plan moves: lines that count
   // completed work do not exist until there is completed work, so the first morning is not greeted
   // with three different renderings of zero.
-  const heroLines = pool({
+  const heroState = {
     hours,
     doneHours,
     done,
@@ -53,7 +54,8 @@ function Chrome({ children }: { children: React.ReactNode }) {
     peak: peakMonth ?? null,
     skipped,
     skippedHours,
-  });
+  };
+  const heroLines = pool(heroState);
 
   const share = async () => {
     const url = window.location.href;
@@ -66,7 +68,7 @@ function Chrome({ children }: { children: React.ReactNode }) {
 
   return <main className={askOpen ? "shell ask-open" : "shell"}>
     <header className="topbar"><a className="brand brand-link" href="/overview" aria-label="Return to Lumen home"><LogoMark className="brand-mark" /><div><div className="brand-name">Lumen</div><div className="brand-sub">by Rasul</div></div></a><div className="top-actions"><button className="ask-trigger" onClick={() => { setAskTopic(null); setAskOpen(true); }}><AskMark size={14} /> Quaere</button><button className="ghost-button" onClick={share} aria-live="polite">{shared ? "✓ Link copied" : "↗ Share"}</button><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`} title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>{theme === "dark" ? "☀" : "☾"}</button></div></header>
-    <section className="hero"><div><p className="kicker">Preparation command center</p><h1>Build proof you can show.</h1><HeroLines lines={heroLines} /></div>{/* Current focus was a 300x73 chip in a 306px hero - about 7% of it - carrying one line.
+    <section className="hero"><div><p className="kicker">Preparation command center</p><HeroHeadline lines={headlines(heroState)} /><HeroLines lines={heroLines} /></div>{/* Current focus was a 300x73 chip in a 306px hero - about 7% of it - carrying one line.
         It is the only thing on the hero that changes as the plan moves, so it now says what it
         knows: where you are in the 23 months, the row you are actually on, and what that row
         costs. Every figure is read from the provider; nothing here is typed. */}
