@@ -372,7 +372,7 @@ th{padding:0 12px 10px}
 /* --- Focus: the accent ring, per the spec --- */
 .brand-link:focus-visible,.ask-trigger:focus-visible,.tab:focus-visible,.primary-button:focus-visible,
 .topic-toggle:focus-visible,.text-button:focus-visible,.ask-row:focus-visible,.weekly-input:focus-visible,
-.quiz-option:focus-visible,.quiz-action:focus-visible,.theme-toggle:focus-visible{
+.quiz-option:focus-visible,.quiz-action:focus-visible,.plan-sync-retry:focus-visible,.theme-toggle:focus-visible{
   outline:2px solid var(--line-strong);outline-offset:2px}
 .filters input:focus-visible,.filters select:focus-visible,.status-select:focus-visible,.login-form input:focus-visible,.ask-form:focus-within{
   outline:2px solid var(--line-strong);outline-offset:2px;border-color:var(--line-strong);box-shadow:none}
@@ -1662,3 +1662,10 @@ html{background:var(--bg)}
    highlight rather than a preference. */
 .rail-aim{color:var(--accent);font-size:11px}
 .paths-rail-list li.is-aiming .paths-rail-name{color:var(--accent-text)}
+
+/* The failed progress sync used to offer only a title tooltip on a disabled select, which is
+   invisible to keyboard and screen-reader users, and its text said "Refresh to try again" back when
+   reloading really was the only way out. retryProgress() exists now, so the way out is a real button. */
+.plan-sync{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:-10px 0 18px;font-size:12px;line-height:1.5;color:var(--danger);max-width:92ch}
+.plan-sync-retry{border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);border-radius:7px;padding:7px 11px;font-size:12px;white-space:nowrap;min-height:40px}
+.plan-sync-retry:hover{background:var(--surface-strong)}

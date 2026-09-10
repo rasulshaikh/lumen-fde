@@ -12,7 +12,7 @@ import { useAppState } from "@/components/AppState";
  * hiding the row you were sent to look at is the failure this avoids.
  */
 export function PlanView({ initialTrack, initialMonth, initialExpanded }: { initialTrack: string; initialMonth: string; initialExpanded: number | null }) {
-  const { statuses, progressSync, setStatus, setAskOpen, setAskTopic, setAskText, renderSyllabus, requestSyllabus, setPageContext } = useAppState();
+  const { statuses, progressSync, retryProgress, setStatus, setAskOpen, setAskTopic, setAskText, renderSyllabus, requestSyllabus, setPageContext } = useAppState();
   const [track, setTrack] = useState(initialTrack);
   const [month, setMonth] = useState(initialMonth);
   const [query, setQuery] = useState("");
@@ -77,6 +77,7 @@ export function PlanView({ initialTrack, initialMonth, initialExpanded }: { init
     expanded={expanded} setExpanded={setExpanded}
     statuses={statuses}
     progressSync={progressSync}
+    retryProgress={retryProgress}
     setStatus={setStatus}
     setAskTopic={setAskTopic}
     setAskOpen={setAskOpen}
