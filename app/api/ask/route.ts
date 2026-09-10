@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import library from "@/data/library-context.json";
 import { applyMemory, readMemory, recurring, writeMemory } from "@/lib/companion/memory";
-import { aimContext, benchmarkGapsContext, evidenceContext, marketDepthContext, recallContext, rhythmContext, workbookContext } from "@/lib/companion/context";
+import {
+  libraryContext, aimContext, benchmarkGapsContext, evidenceContext, marketDepthContext, recallContext, rhythmContext, workbookContext } from "@/lib/companion/context";
 import { readSessionSummary } from "@/lib/companion/session";
 import { papersContext, readPapers } from "@/lib/papers";
 import { readAskTitles } from "@/lib/companion/asks";
@@ -261,7 +262,7 @@ const STOP = new Set([
 ]);
 
 /**
- * The market injection's own ceiling, the same 7000 `syllabusContext` uses.
+ * The market injection's own ceiling. Not the syllabus ceiling: SYLLABUS_CAP is 14000.
  *
  * The two blocks are never both at their limit in practice - a syllabus is only built when a
  * topic filter is active - but the reason for the number is identical in both places: a
@@ -675,7 +676,7 @@ export async function POST(request: Request) {
     ].filter(Boolean).join("\n\n");
 
     const messages = [
-      { role: "system", content: `You are Quaere, the study guide inside Lumen. Lumen is the dashboard; you are the guide within it. Explain every idea in fifth-grade reading language while keeping the technical meaning exact. Use short sentences, define jargon immediately, give one concrete technical example, connect it to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. The user message contains the COMPLETE plan - every topic across every track. Never tell the learner a subject is missing from the plan without checking that full list first. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. NEVER state how many recall cards are due, even if you can infer it: say whether recall is waiting. A backlog number is what makes people abandon a spaced-repetition system, and this learner has 23 months left. The learner's indexed learning map is:\n${JSON.stringify(library)}\n\nThe local source catalog (metadata and chapter map only) is:\n${JSON.stringify(sourceCatalog)}\n\nBOOKS RULE: you have titles, page counts and chapter names for these books. You do NOT have their text. Nothing in this repository holds a single page of any of them; the files live on the learner's own machine. Never quote, summarise or paraphrase a passage as though you had read their copy, and never attribute a claim to a specific page. Name the book and the chapter and say what to look for in it. This is the same rule the market numbers follow: cite what is in a file, invent nothing.\n\nThe public repository map is:\n${JSON.stringify(repositories)}${market ? MARKET_RULE : ""}${memoryBlock}` },
+      { role: "system", content: `You are Quaere, the study guide inside Lumen. Lumen is the dashboard; you are the guide within it. Explain every idea in fifth-grade reading language while keeping the technical meaning exact. Use short sentences, define jargon immediately, give one concrete technical example, connect it to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. The user message contains the COMPLETE plan - every topic across every track. Never tell the learner a subject is missing from the plan without checking that full list first. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. NEVER state how many recall cards are due, even if you can infer it: say whether recall is waiting. A backlog number is what makes people abandon a spaced-repetition system, and this learner has 23 months left.\n\n${libraryContext(library, sourceCatalog.sources)}\n\nBOOKS RULE: you have titles, page counts and chapter names for these books. You do NOT have their text. Nothing in this repository holds a single page of any of them; the files live on the learner's own machine. Never quote, summarise or paraphrase a passage as though you had read their copy, and never attribute a claim to a specific page. Name the book and the chapter and say what to look for in it. This is the same rule the market numbers follow: cite what is in a file, invent nothing.\n\nThe public repository map is:\n${JSON.stringify(repositories)}${market ? MARKET_RULE : ""}${memoryBlock}` },
       // Picked field by field, not spread. The client stores an assistant turn as
       // `{role, content, reportUrl?}`, and forwarding a turn that saved a report shipped a
       // `reportUrl` key into an OpenAI-shaped messages array. The declared type hid it from

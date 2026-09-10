@@ -245,3 +245,75 @@ export function aimContext(aim: string | null, label: (id: string) => string | n
   if (!name) return "";
   return `THE ROUTE THEY ARE AIMING AT: ${name}. They chose this on the Paths tab, and it is a current preference rather than a commitment - they can change it in one press. Where a question has different answers for different routes, answer for this one first and say briefly what would change if they were aiming elsewhere. Do not treat it as settled, and do not congratulate them for having chosen.`;
 }
+
+/**
+ * The two library files, merged into one block instead of two JSON dumps.
+ *
+ * `data/library-context.json` (16 curated books: title, author, pages, role, topics) and
+ * `data/library-sources.json` (16 indexed PDFs: title, pages, filename, relativeFolder, chapters)
+ * were both `JSON.stringify`d straight into the system message. Measured against the real prompt,
+ * that was 4,892 + 15,483 = 20,375 characters, the largest thing in it, and it carried three
+ * problems at once.
+ *
+ * **It shipped the same books twice.** Title and page count appeared in both files, once curated
+ * and once as the raw filename's idea of a title.
+ *
+ * **It shipped the crawl instead of the content.** `filename` (1,003 chars) and `relativeFolder`
+ * (250) describe where PDFs sit on the learner's laptop. No study question is better answered for
+ * knowing a file lives in `Books ML`. Only `chapters` (78.8% of the file) is information a model
+ * can use, and it is the one field the curated file does not have.
+ *
+ * **It shipped provenance nobody chose to publish.** `filename` carries `(Z-Library)` and
+ * `(PDFDrive)` tags and a `.pdf` extension; `title` carries `(for Soumadipta Majumder)`, a
+ * watermark bearing a third party's name. Every question sent all of it to a third-party model
+ * API. None of it helps answer anything, so the merge is the moment to stop sending it.
+ *
+ * The join is by page count, which is unique and total across both files today - 16 of 16, no
+ * collisions. That is asserted in the tests rather than trusted here: if a book is added whose
+ * page count collides, or a source stops matching, the suite fails instead of this function
+ * silently falling back for that row and quietly reintroducing a filename-derived title.
+ *
+ * Measured: 20,375 -> 15,996 characters, a 21.9% cut, with no Z-Library, PDFDrive, .pdf, folder
+ * name or watermark surviving.
+ */
+type LibraryBook = { id: string; title: string; author: string; pages: number; role: string; topics: string[] };
+type LibrarySource = { title: string; pages: number; chapters?: string[] };
+
+/** Strips the provenance a scanned filename carries, for the fallback path only. */
+export const cleanSourceTitle = (title: string): string =>
+  title
+    .replace(/\.pdf$/i, "")
+    .replace(/\s*\((?:Z-Library|PDFDrive|Anna's Archive|(?:First|Second|Third) Early Release|for [^)]+)\)/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+export function libraryContext(books: LibraryBook[], sources: LibrarySource[]): string {
+  if (!books.length && !sources.length) return "";
+
+  // Built from the source side so a page count that appears twice cannot silently overwrite one
+  // book with another: a collision drops the entry to null and the row falls back, visibly.
+  const byPages = new Map<number, LibraryBook | null>();
+  for (const b of books) byPages.set(b.pages, byPages.has(b.pages) ? null : b);
+
+  const chapters = new Map<number, string[]>();
+  for (const s of sources) if (s.chapters?.length) chapters.set(s.pages, s.chapters);
+
+  const lines = books.map((b) => {
+    const ch = byPages.get(b.pages) === b ? chapters.get(b.pages) : undefined;
+    const head = `- ${b.title} - ${b.author} (${b.pages}pp). ${b.role}.`;
+    const covers = b.topics?.length ? `\n  covers: ${b.topics.join("; ")}` : "";
+    // Said plainly rather than omitted. A book with no chapter list is not a book with no
+    // chapters, and the difference is the same unknown-is-not-none rule the rest of this file
+    // is held to.
+    const map = ch ? `\n  chapters: ${ch.join("; ")}` : `\n  chapters: not indexed for this one`;
+    return `${head}${covers}${map}`;
+  });
+
+  // Sources with no curated entry still ship, under the cleaned title, rather than vanishing.
+  const orphans = sources
+    .filter((s) => byPages.get(s.pages) === undefined || byPages.get(s.pages) === null)
+    .map((s) => `- ${cleanSourceTitle(s.title)} (${s.pages}pp). Indexed on the learner's machine, not in the curated list.${s.chapters?.length ? `\n  chapters: ${s.chapters.join("; ")}` : ""}`);
+
+  const all = [...lines, ...orphans];
+  return `THE LEARNER'S LIBRARY, all ${all.length} of them, complete rather than a slice:\n${all.join("\n")}`;
+}

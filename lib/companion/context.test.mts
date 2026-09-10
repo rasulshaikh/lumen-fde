@@ -16,6 +16,8 @@
  */
 import {
   aimContext,
+  cleanSourceTitle,
+  libraryContext,
   benchmarkGapsContext,
   evidenceContext,
   marketDepthContext,
@@ -24,6 +26,8 @@ import {
   workbookContext,
 } from "./context.ts";
 import { LADDER } from "../review.ts";
+import books from "../../data/library-context.json" with { type: "json" };
+import catalog from "../../data/library-sources.json" with { type: "json" };
 
 let fails = 0;
 const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
@@ -145,6 +149,83 @@ console.log("the chosen route reaches the companion, and only a real one");
   ck("an unknown route renders nothing", aimContext("mars", label) === "");
   ck("a crafted id renders nothing", aimContext("../../etc/passwd", label) === "");
   ck("an empty id renders nothing", aimContext("", label) === "");
+}
+
+
+console.log("the library ships once, not twice, and without the crawl");
+{
+  const text = libraryContext(books as never, catalog.sources as never);
+
+  // The join is by page count. It is unique and total today - 16 of 16 - and this is the assertion
+  // that keeps it that way: add a book whose page count collides with another and this fails here
+  // rather than silently falling back to a filename-derived title in the prompt.
+  const pages = books.map((b) => b.pages);
+  ck("no two curated books share a page count", new Set(pages).size === pages.length, `${pages.length} books, ${new Set(pages).size} distinct`);
+  const unmatched = catalog.sources.filter((s) => !pages.includes(s.pages));
+  ck("every indexed source joins to a curated book", unmatched.length === 0, unmatched.map((s) => s.title.slice(0, 40)).join(", "));
+
+  ck("all 16 books render", (text.match(/^- /gm) ?? []).length === 16, `${(text.match(/^- /gm) ?? []).length}`);
+  ck("and the block says it is complete rather than a slice", /all 16 of them, complete rather than a slice/.test(text));
+  ck("each carries its author", /- Oliver Theobald \(179pp\)/.test(text));
+  ck("and the role the curated file gives it", /Plain-English foundation/.test(text));
+  ck("and its chapter map", /chapters: Chapter 1 The Machine Learning Landscape/.test(text));
+}
+
+console.log("nothing about where the files came from reaches the model");
+{
+  const text = libraryContext(books as never, catalog.sources as never);
+  // All four of these are in data/library-sources.json today and all four were being sent to a
+  // third-party model API on every question, inside `JSON.stringify(sourceCatalog)`. None of them
+  // helps answer a study question. The watermark is the one that matters most: it carries a real
+  // person's name, and it was never anyone's decision to publish it.
+  for (const leak of ["Z-Library", "PDFDrive", ".pdf", "Majumder", "Books ML", "relativeFolder", "indexedAt"]) {
+    ck(`no ${leak}`, !text.includes(leak));
+  }
+  ck("the raw filename field is gone entirely", !/filename/i.test(text));
+}
+
+console.log("a missing chapter list is unknown, not an absent book");
+{
+  // The same rule recall and artifacts are held to. A book the indexer did not reach is not a book
+  // without chapters, and dropping the line would make it a book that does not exist.
+  const text = libraryContext(
+    [{ id: "x", title: "A Book", author: "An Author", pages: 111, role: "Reference", topics: ["one", "two"] }] as never,
+    [] as never,
+  );
+  ck("the book still ships", /- A Book - An Author \(111pp\)/.test(text));
+  ck("and says the chapters are not indexed", /chapters: not indexed for this one/.test(text));
+  ck("rather than claiming it has none", !/no chapters|0 chapters/i.test(text));
+
+  const real = libraryContext(books as never, catalog.sources as never);
+  ck("exactly one real book is unindexed today", (real.match(/not indexed for this one/g) ?? []).length === 1, `${(real.match(/not indexed for this one/g) ?? []).length}`);
+}
+
+console.log("an indexed source with no curated entry is not dropped");
+{
+  const text = libraryContext(
+    [] as never,
+    [{ title: "Something (Z-Library).pdf", pages: 42, chapters: ["Chapter 1 Whatever"] }] as never,
+  );
+  ck("the orphan ships", /- Something \(42pp\)/.test(text), text);
+  ck("under a cleaned title", !/Z-Library|\.pdf/.test(text));
+  ck("and is labelled as uncurated", /not in the curated list/.test(text));
+  ck("with its chapters intact", /Chapter 1 Whatever/.test(text));
+}
+
+console.log("the title cleaner strips provenance and nothing else");
+{
+  ck("shadow-library tag", cleanSourceTitle("A Title (Z-Library).pdf") === "A Title");
+  ck("the other one", cleanSourceTitle("A Title (PDFDrive).pdf") === "A Title");
+  ck("the personal watermark", cleanSourceTitle("A Title (for Jane Doe)") === "A Title");
+  ck("an early-release marker", cleanSourceTitle("A Title (Second Early Release)") === "A Title");
+  // A parenthetical that is part of the actual title must survive - over-stripping would rename books.
+  ck("a real parenthetical survives", cleanSourceTitle("Deep Learning (Adaptive Computation)") === "Deep Learning (Adaptive Computation)");
+  ck("an already-clean title is untouched", cleanSourceTitle("Mathematics for Machine Learning") === "Mathematics for Machine Learning");
+}
+
+console.log("empty in, empty out");
+{
+  ck("no books and no sources contributes nothing", libraryContext([] as never, [] as never) === "");
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
