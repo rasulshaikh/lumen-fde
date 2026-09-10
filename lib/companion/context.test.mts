@@ -29,6 +29,8 @@ import {
 import { LADDER } from "../review.ts";
 import books from "../../data/library-context.json" with { type: "json" };
 import catalog from "../../data/library-sources.json" with { type: "json" };
+import skillMap from "../../data/market-skill-map.json" with { type: "json" };
+import insight from "../../reports/market/insight.json" with { type: "json" };
 
 let fails = 0;
 const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
@@ -296,6 +298,57 @@ console.log("the new-roles cap discloses what it dropped");
   ck("the overflow is stated, not silently dropped", /37 more are not listed here/.test(text));
   ck("the shown-of-total is explicit", /Showing 3 of 40/.test(text));
   ck("and the model is told to call it partial", /list is partial rather than implying it is all of them/.test(text));
+}
+
+
+console.log("what the requisitions say travels with the percentage it explains");
+{
+  const text = marketDepthContext(insight as never);
+  const quoted = (text.match(/requisitions say:/g) ?? []).length;
+  const rows = (text.match(/^- /gm) ?? []).length;
+
+  // The join is by id, falling back to label. It is total today. If a skill is renamed on one side
+  // this drops silently to "no quote for that row", so it is pinned rather than trusted.
+  // Asserted as "every rendered row carries one", not "34 of them do". reports/market/insight.json
+  // is written by the nightly cron and committed, so pinning the literal 34 here would fail CI on
+  // an unrelated commit the first morning a partial scan shipped fewer skills. The join is what
+  // this test owns; the scan's yield is the scan's business.
+  ck("every measured skill carries its phrasing", rows > 0 && quoted === rows, `${quoted} of ${rows}`);
+  ck("the evidence file still holds one for all 34", (skillMap.skills as { evidence?: string }[]).filter((sk) => sk.evidence).length === 34);
+  ck("and each skill is one row, not two", rows === (insight as { reachability?: { skills?: unknown[] } }).reachability!.skills!.length, `${rows}`);
+  ck("a real fragment is rendered", /highly proficient in Python/.test(text));
+
+  // Each label appears once. A separate evidence block would have repeated all 34 in a different
+  // order beside this one.
+  const label = "Python as the AI application language";
+  ck("each label appears exactly once", text.split(label).length - 1 === 1);
+}
+
+console.log("the phrasing is never turned into an employer");
+{
+  const text = marketDepthContext(insight as never);
+  ck("the rule ships in the block", /NEVER attribute one of these to a named employer/.test(text));
+  ck("and says what the file does and does not record", /records the WORDING only/.test(text));
+  ck("the count is measured, not asserted", new RegExp(`${(text.match(/^- /gm) ?? []).length} of \\d+ skills carry one`).test(text));
+
+  // The rule is only honest if the data cannot contradict it. If a fragment named a company, the
+  // model would see a name and a instruction not to use one, and would eventually use it.
+  const named = (skillMap.skills as { label?: string; evidence?: string }[])
+    .filter((sk) => ["Anthropic", "OpenAI", "Cohere", "Databricks", "Scale AI", "Decagon", "Sierra", "Harvey"]
+      .some((n) => (sk.evidence ?? "").toLowerCase().includes(n.toLowerCase())))
+    .map((sk) => sk.label);
+  ck("no stored fragment names an employer", named.length === 0, named.join(", "));
+}
+
+console.log("a skill with no recorded phrasing gets none invented");
+{
+  const text = marketDepthContext({
+    quaere: null,
+    reachability: { skills: [{ id: "not-a-real-id", label: "Not A Real Skill", marketPct: 5, reachablePct: 5 }] },
+  } as never);
+  ck("the row still ships", /- Not A Real Skill: market 5%, reachable 5%/.test(text));
+  ck("with no quote attached", !/requisitions say:/.test(text));
+  ck("and no disclosure claiming quotes exist", !/carry one/.test(text));
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

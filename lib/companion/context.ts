@@ -22,6 +22,7 @@
  * brief does and no integer ever reaches the prompt.
  */
 import workbook from "@/data/workbook.json";
+import skillMap from "@/data/market-skill-map.json";
 import type { Benchmark } from "@/lib/market/benchmark";
 import type { StoredArtifact } from "@/lib/artifacts";
 import { LADDER, isDue, type ReviewState } from "@/lib/review";
@@ -175,23 +176,52 @@ export function benchmarkGapsContext(benchmark: Benchmark | null): string {
  * **`insight.quaere`.** The nightly cron writes an 80-word reading of the scan explicitly for this
  * companion. The Market tab renders it. The companion it was written for never saw it.
  */
+/**
+ * The phrasing behind each percentage.
+ *
+ * `data/market-skill-map.json` carries an `evidence` string for all 34 skills - 3,813 characters of
+ * short excerpts, hand-copied from the audited postings, recorded as the reason that skill counts
+ * as demanded. Quaere had the percentages and none of the prose, so asked what a requisition
+ * actually says it paraphrased from its own priors.
+ *
+ * Attached to the existing skill lines rather than shipped as a second block. A separate 34-line
+ * list would repeat all 34 labels in a different order beside this one, and two adjacent lists of
+ * the same things in different orders is worse than either alone.
+ *
+ * The file records the PHRASING and not the employer. There is no company field on these entries,
+ * and the three research docs behind them cover three different corpora, so a per-fragment
+ * attribution would have to be inferred from prose - and for several of them it cannot be inferred
+ * at all. So the block says plainly that the source posting is not recorded and forbids naming one.
+ * Inventing a company here would be the exact failure this whole layer exists to prevent.
+ */
+const EVIDENCE = new Map<string, string>();
+for (const skill of skillMap.skills as { id?: string; label?: string; evidence?: string }[]) {
+  if (!skill.evidence) continue;
+  if (skill.id) EVIDENCE.set(skill.id, skill.evidence);
+  if (skill.label) EVIDENCE.set(skill.label, skill.evidence);
+}
+
 export function marketDepthContext(insight: {
   quaere?: string | null;
-  reachability?: { skills?: { label?: string; marketPct?: number; reachablePct?: number }[] } | null;
+  reachability?: { skills?: { id?: string; label?: string; marketPct?: number; reachablePct?: number }[] } | null;
 } | null): string {
   if (!insight) return "";
   const parts: string[] = [];
 
   const skills = (insight.reachability?.skills ?? []).filter((s) => s.label);
   if (skills.length) {
+    const lines = [...skills]
+      .sort((a, b) => (b.marketPct ?? 0) - (a.marketPct ?? 0))
+      .map((s) => {
+        const said = (s.id ? EVIDENCE.get(s.id) : undefined) ?? (s.label ? EVIDENCE.get(s.label) : undefined);
+        return `- ${s.label}: market ${s.marketPct ?? 0}%, reachable ${s.reachablePct ?? 0}%${said ? `\n    requisitions say: "${said}"` : ""}`;
+      });
+    const quoted = lines.filter((l) => l.includes("requisitions say:")).length;
     parts.push("SKILL DEMAND, all measured skills. `market` is the share of every core requisition; `reachable` is the share of only those you could take from India. Where they disagree, the reachable figure is the one that decides what to study next:");
-    parts.push(cap(
-      [...skills]
-        .sort((a, b) => (b.marketPct ?? 0) - (a.marketPct ?? 0))
-        .map((s) => `- ${s.label}: market ${s.marketPct ?? 0}%, reachable ${s.reachablePct ?? 0}%`),
-      34,
-      "skills",
-    ));
+    parts.push(cap(lines, 34, "skills"));
+    if (quoted) {
+      parts.push(`The quoted lines are short excerpts from the audited postings, recorded as the evidence that the skill is demanded - ${quoted} of ${lines.length} skills carry one. The file records the WORDING only: it does not record which company posted it, so quote the phrasing if it helps and NEVER attribute one of these to a named employer.`);
+    }
   }
 
   if (insight.quaere) {

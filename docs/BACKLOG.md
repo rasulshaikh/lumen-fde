@@ -30,32 +30,33 @@ pass.
 | Library blocks | `library-context.json` and `library-sources.json` were both `JSON.stringify`d into the system message: 20,375 chars, the largest thing in it, shipping the same 16 books twice plus `filename`, `relativeFolder`, `(Z-Library)`/`(PDFDrive)` tags and a `(for <name>)` watermark. Merged to one block, 21.0% smaller, none of that provenance surviving. |
 | Practice topic | /practice sent **no topic at all**, so `syllabusContext` never fired there and a question asked mid-paper was answered from the model's own idea of the subject. The runner now pins the current question's topic. |
 | New roles | `benchmark.newSinceLastRun` reached the reader's inbox every morning and reached no prompt, so a learner who read the digest and asked about those roles was talking to something that had never seen them. Now shipped, with the scan's own date leading it so a stale file cannot read as "today". |
+| JD evidence | the 34 `evidence` fragments (3,813 chars of audited posting wording) sat behind the coverage percentages and reached no prompt, so asked what a requisition says Quaere paraphrased from its priors. Now attached to the skill line each one explains, with the file's silence about the employer stated rather than papered over. |
 
 ---
 
 ## Ship next
 
-Ordered by what a reader would notice.
+Nothing. All six ranked items are shipped or retired, and the two that were retired are recorded
+below with the reason rather than deleted. Adding to this list again should require a measurement,
+the way every item above got here.
 
-### 1. Verbatim JD evidence
+---
 
-34 job-description fragments, 5,272 characters, behind the coverage percentages. Quaere has the
-shares and none of the prose, so it paraphrases from its own priors what requisitions say.
+## Considered and declined, with the reason
 
-An adversarial pass found the hard part is not the injection but the **attribution**. The 34
-fragments come from three research docs with three different corpora, not one; 3 of the 34 carry no
-company name anywhere near the quote; and two are cells in a summary table rather than quotations at
-all. A header claiming a single corpus and a clean provenance would be this repo's defect class 1
-written into the prompt itself. Build it with per-fragment attribution and an honest "source not
-recorded" for the three, or do not build it.
-
-### 2. Movement, deliberately not built
-
-`benchmark.movement` is the other half of the old item and it was left alone on purpose.
+**Movement into the prompt.** The other half of the `newSinceLastRun` item, left alone on purpose.
 `insight.velocity.statement` already reaches this prompt carrying a near-identical "no skill moved"
 sentence, and `components/Market.tsx:232` already renders movement on screen. A second block saying
 the same thing would teach the model to hedge between two sources that never disagree. Revisit only
 if velocity stops shipping.
+
+**Per-fragment JD attribution.** The evidence fragments ship, but without naming an employer. There
+is no company field on those entries; the three research docs behind them cover three different
+corpora, so the corpus size cannot be stated as one number; and for several fragments the source
+cannot be recovered from the prose at all. So the block states that the file records the wording and
+not the poster, and forbids attributing one to a named employer. Zero of the 34 fragments name a
+company, which is what makes that rule enforceable rather than aspirational - and there is a test
+pinning that, because the day one of them does, the rule quietly becomes a lie.
 
 ---
 
