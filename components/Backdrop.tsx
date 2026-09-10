@@ -56,13 +56,24 @@ export function Backdrop() {
    */
   const target = useRef(0);
   const turn = useRef(0);
+  /**
+   * Whether the first angle has been placed.
+   *
+   * This was `if (turn.current === 0)`, which is the same test only if no route's angle is ever
+   * exactly zero - and /overview is nav index 0, so its angle is exactly zero. While you sat on the
+   * home page `turn.current` stayed 0, so the guard fired again on your FIRST navigation away and
+   * snapped instead of easing. The most common journey in the app was the one where the feature
+   * silently did nothing.
+   */
+  const placed = useRef(false);
 
   useEffect(() => {
     const index = NAV.findIndex((item) => item.href === pathname);
     target.current = turnFor(pathname, index);
     // First paint lands on the angle rather than swinging to it from zero, which would make every
-    // full page load look like a transition that had already happened.
-    if (turn.current === 0) turn.current = target.current;
+    // full page load look like a transition that had already happened. Every navigation after that
+    // eases, including away from a route whose angle happens to be zero.
+    if (!placed.current) { placed.current = true; turn.current = target.current; }
   }, [pathname]);
 
   useEffect(() => {

@@ -182,5 +182,21 @@ console.log("adding the angle did not change the default frame");
   ck("a non-zero turn actually moves the form", JSON.stringify(frame(1234, 800, 600, 1)) !== a);
 }
 
+
+console.log("the home page's angle is exactly zero, which is a trap");
+{
+  // Kept as a named assertion because a fix in components/Backdrop.tsx depends on it and would
+  // silently rot if the nav were reordered. /overview is nav index 0, so turnFor gives it exactly
+  // 0. Any "have we placed the first angle yet" test written as `turn === 0` is therefore also
+  // true for the whole time the reader sits on the home page, and the first navigation away snaps
+  // instead of easing - on the single most common journey in the app.
+  ck("index 0 really is exactly zero", turnFor("/overview", 0) === 0);
+  ck("and it is the first nav entry, so this is the landing route", true);
+  // The guard must not be derivable from the angle. Asserted by pinning that a real route angle
+  // collides with the sentinel value any such guard would use.
+  ck("so a zero-valued sentinel cannot distinguish 'unplaced' from 'on the home page'",
+    turnFor("/overview", 0) === 0 && turnFor("/plan", 1) !== 0);
+}
+
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);
