@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
-import { LESSONS, dragToParam, restingParams, type Lesson as LessonDef, type Params } from "@/lib/lessons";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LESSONS, dragToParam, lessonById, restingParams, type Lesson as LessonDef, type Params } from "@/lib/lessons";
 import { takeStep } from "@/lib/lessons/gradient-descent";
 
 /**
@@ -145,5 +145,40 @@ export function LessonView({ lesson }: { lesson: LessonDef }) {
 }
 
 export function Lessons() {
-  return <>{LESSONS.map((l) => <LessonView key={l.id} lesson={l} />)}</>;
+  const [id, setId] = useState(LESSONS[0]?.id ?? "");
+  const [restored, setRestored] = useState(false);
+
+  // A lesson named in the URL wins, so the syllabus panel can link straight to the one that
+  // explains the topic being read. Read from window.location rather than useSearchParams, which
+  // opts the whole route into dynamic rendering for one optional string.
+  useEffect(() => {
+    if (restored) return;
+    setRestored(true);
+    try {
+      const wanted = new URLSearchParams(window.location.search).get("l");
+      if (wanted && lessonById(wanted)) setId(wanted);
+    } catch { /* no window, no query */ }
+  }, [restored]);
+
+  const lesson = lessonById(id) ?? LESSONS[0];
+  if (!lesson) return null;
+
+  return (
+    <>
+      {LESSONS.length > 1 ? (
+        <nav className="mx-picker" aria-label="Lessons">
+          {LESSONS.map((l) => (
+            <button key={l.id} type="button" className={`mx-pick${l.id === lesson.id ? " is-here" : ""}`}
+              aria-current={l.id === lesson.id ? "page" : undefined} onClick={() => setId(l.id)}>
+              <strong>{l.title.split(",")[0]}</strong>
+              <span>{l.params.length} things to move</span>
+            </button>
+          ))}
+        </nav>
+      ) : null}
+      {/* Keyed, so switching lessons starts the new one at rest rather than carrying the last
+          one's parameters into a lesson that does not have them. */}
+      <LessonView key={lesson.id} lesson={lesson} />
+    </>
+  );
 }

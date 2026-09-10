@@ -157,5 +157,24 @@ console.log("arriving at the bottom is not praised");
   ck("it says why it found it", /found it because it is the one you started above/.test(deep), deep.slice(-46));
 }
 
+
+console.log("lessons are reachable from the topic they explain");
+{
+  // Same guard the machines carry: `machinesForTopic` once shipped with zero callers while the
+  // design spec claimed machines were reachable from the topic being studied. Pinned at both ends.
+  const { readFileSync } = await import("node:fs");
+  const provider = readFileSync("components/AppState.tsx", "utf8");
+  ck("the syllabus panel calls lessonsForTopic", /lessonsForTopic\(/.test(provider));
+  ck("and links to the specific lesson", /\/machines\?l=\$\{l\.id\}/.test(provider));
+
+  const view = readFileSync("components/Lesson.tsx", "utf8");
+  ck("the page reads the l parameter", /URLSearchParams\(window\.location\.search\)\.get\("l"\)/.test(view));
+  ck("and validates it before using it", /lessonById\(wanted\)/.test(view));
+
+  for (const l of LESSONS) {
+    ck(`${l.id} is reachable from a topic`, l.topicIndices.some((i) => lessonsForTopic(i).some((x) => x.id === l.id)));
+  }
+}
+
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { machinesForTopic } from "@/lib/machines";
+import { lessonsForTopic } from "@/lib/lessons";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { compRows, months, planRows, topicKey, tracks, verdictTier, type Row, type Syllabus } from "./shared";
 import { computeStreak } from "@/lib/motivation";
@@ -251,10 +252,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
      * sentence being deleted.
      */
     const machines = machinesForTopic(idx);
-    const strip = machines.length ? (
+    const lessons = lessonsForTopic(idx);
+    const strip = machines.length || lessons.length ? (
       <p className="syllabus-machine">
         {machines.map((m) => (
           <Link key={m.id} href={`/machines?m=${m.id}`}>Step through {m.title.split(":")[0]} and break it</Link>
+        ))}
+        {lessons.map((l) => (
+          <Link key={l.id} href={`/machines?l=${l.id}`}>Drag {l.title.split(",")[0].toLowerCase()}</Link>
         ))}
       </p>
     ) : null;
