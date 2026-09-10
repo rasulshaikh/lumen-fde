@@ -317,3 +317,63 @@ export function libraryContext(books: LibraryBook[], sources: LibrarySource[]): 
   const all = [...lines, ...orphans];
   return `THE LEARNER'S LIBRARY, all ${all.length} of them, complete rather than a slice:\n${all.join("\n")}`;
 }
+
+/**
+ * The new core roles the daily email announces and Quaere could not discuss.
+ *
+ * `benchmark.newSinceLastRun` reaches the reader's inbox every morning and reached no prompt, so a
+ * learner who read the digest and then asked "what were those new roles" was talking to something
+ * that had never seen them.
+ *
+ * Deliberately NOT movement. `benchmark.movement` already renders at components/Market.tsx:232 and
+ * `insight.velocity.statement` already reaches this prompt carrying a near-identical "no skill
+ * moved" sentence. Shipping movement here too would put two sentences saying the same thing in one
+ * prompt, which is how a model learns to hedge.
+ *
+ * ## The staleness trap
+ *
+ * app/api/cron/daily-digest/route.ts:370-374 records it: benchmark.json carries the day the scan
+ * last SUCCEEDED, so on a morning the scan did not run, `newSinceLastRun` still lists yesterday's
+ * roles. The digest recomputes from index.json to avoid announcing them twice. This block cannot
+ * afford that read in the ask path, so it does the other honest thing instead: it never says
+ * "today" or "new". It names the scan's own date and lets the date carry the claim.
+ *
+ * ## Four ways to have no roles, and only one of them is "none"
+ *
+ * A cold-start run marks everything new and emits nothing. A partial scan suppresses the list
+ * because on an incomplete fetch "new" is indistinguishable from "not fetched yet". An unreadable
+ * store knows nothing at all. Only a complete scan that found none has actually found none, and
+ * these must not collapse into one sentence - the same rule recall, artifacts and the market
+ * feed are held to.
+ */
+export function newRolesContext(benchmark: Benchmark | null, now: Date): string {
+  const head = "NEW ROLES FROM THE JOB-BOARD SCAN";
+  if (!benchmark) {
+    return `${head}: the benchmark store could not be read, so this is not known. Do not tell the learner no new roles appeared; you do not know that. Say the scan could not be read.`;
+  }
+
+  const day = String(benchmark.day ?? "").slice(0, 10);
+  const today = now.toISOString().slice(0, 10);
+  // The date leads and is never left implicit, because "the scan found these" reads as "these are
+  // current" unless something says otherwise, and benchmark.json can be days old.
+  const dateLine = day === today ? `scan dated ${day}, today` : `scan dated ${day}, which is the last day the scan succeeded and is NOT today`;
+  const stale = day === today ? "" : ` Treat these as of ${day} rather than as of now, and say so if it matters.`;
+
+  if (benchmark.baseline) {
+    return `${head} (${dateLine}): this was the first scan, so every requisition in it is new and none can honestly be called newly posted. There is no earlier run to compare against yet. Do not present anything as a new opening.`;
+  }
+  if (benchmark.movement?.suppressed) {
+    return `${head} (${dateLine}): the list is SUPPRESSED for this run - ${benchmark.movement.statement}. On an incomplete fetch a role that is new cannot be told apart from one that was simply not fetched, so nothing is claimed. This is not "no new roles"; it is "not known for this run".`;
+  }
+
+  const entries = benchmark.newSinceLastRun ?? [];
+  if (!entries.length) {
+    return `${head} (${dateLine}): it recorded no core requisition it had not seen before. That is a real answer from a complete scan, not a missing one.${stale}`;
+  }
+
+  const overflow = benchmark.newSinceLastRunOverflow ?? 0;
+  const total = benchmark.newSinceLastRunTotal ?? entries.length;
+  const lines = entries.map((r) => `- ${r.statement}${r.url ? ` (${r.url})` : ""}`);
+  const more = overflow > 0 ? `\nShowing ${entries.length} of ${total}; ${overflow} more are not listed here. Say that the list is partial rather than implying it is all of them.` : "";
+  return `${head} (${dateLine}): it first recorded ${total === 1 ? "one core requisition" : `${total} core requisitions`} it had not seen before, deduped so a role posted in fifteen cities counts once.${stale}\n${lines.join("\n")}${more}\nThese are postings, not offers, and the scan records that a role exists rather than that the learner is a fit for it.`;
+}

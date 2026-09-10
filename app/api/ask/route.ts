@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import library from "@/data/library-context.json";
 import { applyMemory, readMemory, recurring, writeMemory } from "@/lib/companion/memory";
 import {
-  libraryContext, aimContext, benchmarkGapsContext, evidenceContext, marketDepthContext, recallContext, rhythmContext, workbookContext } from "@/lib/companion/context";
+  libraryContext, newRolesContext, aimContext, benchmarkGapsContext, evidenceContext, marketDepthContext, recallContext, rhythmContext, workbookContext } from "@/lib/companion/context";
 import { readSessionSummary } from "@/lib/companion/session";
 import { papersContext, readPapers } from "@/lib/papers";
 import { readAskTitles } from "@/lib/companion/asks";
@@ -667,6 +667,7 @@ export async function POST(request: Request) {
       // Card keys are plan row indices; the schedule stores them as strings.
       recallContext(review, new Date(), (key) => String((workbook.Plan as PlanRow[])[Number(key) + 1]?.[2] ?? key)),
       marketDepthContext(insight),
+      newRolesContext(benchmark, new Date()),
       rhythmContext(streak, askHistory),
       papersContext(
         papersR.status === "fulfilled" ? papersR.value : { papers: [], synced: false },

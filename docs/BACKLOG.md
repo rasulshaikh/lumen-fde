@@ -29,6 +29,7 @@ pass.
 | `context.ts` tests | the module building most of the prompt was the only one in its folder with no test. |
 | Library blocks | `library-context.json` and `library-sources.json` were both `JSON.stringify`d into the system message: 20,375 chars, the largest thing in it, shipping the same 16 books twice plus `filename`, `relativeFolder`, `(Z-Library)`/`(PDFDrive)` tags and a `(for <name>)` watermark. Merged to one block, 21.0% smaller, none of that provenance surviving. |
 | Practice topic | /practice sent **no topic at all**, so `syllabusContext` never fired there and a question asked mid-paper was answered from the model's own idea of the subject. The runner now pins the current question's topic. |
+| New roles | `benchmark.newSinceLastRun` reached the reader's inbox every morning and reached no prompt, so a learner who read the digest and asked about those roles was talking to something that had never seen them. Now shipped, with the scan's own date leading it so a stale file cannot read as "today". |
 
 ---
 
@@ -48,15 +49,13 @@ all. A header claiming a single corpus and a clean provenance would be this repo
 written into the prompt itself. Build it with per-fragment attribution and an honest "source not
 recorded" for the three, or do not build it.
 
-### 2. `benchmark.newSinceLastRun` and movement
+### 2. Movement, deliberately not built
 
-The daily delta the reader gets by email and Quaere cannot discuss.
-
-Narrower than it looks. `benchmark.movement` already exists, is already rendered at
-`components/Market.tsx:232`, and `insight.velocity.statement` - which reaches the prompt already -
-carries a near-identical "nothing moved" sentence. The genuinely absent part is the new-requisition
-list, not movement. Build that; duplicating velocity would put two sentences saying the same thing
-in one prompt.
+`benchmark.movement` is the other half of the old item and it was left alone on purpose.
+`insight.velocity.statement` already reaches this prompt carrying a near-identical "no skill moved"
+sentence, and `components/Market.tsx:232` already renders movement on screen. A second block saying
+the same thing would teach the model to hedge between two sources that never disagree. Revisit only
+if velocity stops shipping.
 
 ---
 

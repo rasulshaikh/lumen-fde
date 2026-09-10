@@ -18,6 +18,7 @@ import {
   aimContext,
   cleanSourceTitle,
   libraryContext,
+  newRolesContext,
   benchmarkGapsContext,
   evidenceContext,
   marketDepthContext,
@@ -226,6 +227,75 @@ console.log("the title cleaner strips provenance and nothing else");
 console.log("empty in, empty out");
 {
   ck("no books and no sources contributes nothing", libraryContext([] as never, [] as never) === "");
+}
+
+
+console.log("the new-roles block keeps four kinds of nothing apart");
+{
+  const base = {
+    day: "2026-09-10", baseline: false, movement: { suppressed: false, changes: [], statement: "" },
+    newSinceLastRun: [], newSinceLastRunTotal: 0, newSinceLastRunOverflow: 0,
+  };
+  const at = (b: unknown) => newRolesContext(b as never, NOW);
+
+  const unreadable = at(null);
+  ck("an unreadable store says it is not known", /could not be read, so this is not known/.test(unreadable));
+  ck("and forbids the none reading in those words", /Do not tell the learner no new roles appeared/.test(unreadable));
+
+  const cold = at({ ...base, baseline: true });
+  ck("a cold start says every role is new and none can be called new", /first scan/.test(cold));
+  ck("and refuses to present anything as an opening", /Do not present anything as a new opening/.test(cold));
+
+  const partial = at({ ...base, movement: { suppressed: true, changes: [], statement: "partial scan, 4 of 7 boards, deltas suppressed" } });
+  ck("a partial scan says SUPPRESSED", /SUPPRESSED/.test(partial));
+  ck("it carries the board counts from the benchmark's own sentence", /4 of 7 boards/.test(partial));
+  ck("and says explicitly that this is not 'no new roles'", /not "no new roles"; it is "not known for this run"/.test(partial));
+
+  const none = at(base);
+  ck("a complete scan with none says so as a real answer", /recorded no core requisition it had not seen before/.test(none));
+  ck("and labels it a real answer rather than a missing one", /not a missing one/.test(none));
+
+  // The four must be four different sentences. Collapsing any pair is the bug.
+  const four = [unreadable, cold, partial, none];
+  ck("all four are distinct", new Set(four).size === 4);
+  ck("only the genuine empty says 'no core requisition'", four.filter((t) => /recorded no core requisition/.test(t)).length === 1);
+}
+
+console.log("the new-roles block never says today unless it is today");
+{
+  const withRoles = (day: string) => newRolesContext({
+    day, baseline: false, movement: { suppressed: false, changes: [], statement: "" },
+    newSinceLastRun: [{ id: "1", company: "Acme", title: "FDE", location: "Pune", url: "https://x.test/1", statement: "Acme, FDE, Pune" }],
+    newSinceLastRunTotal: 1, newSinceLastRunOverflow: 0,
+  } as never, NOW);
+
+  const sameDay = withRoles("2026-09-10");
+  ck("a scan from today is called today", /dated 2026-09-10, today/.test(sameDay));
+
+  // The trap the daily digest documents: benchmark.json holds the day the scan last SUCCEEDED, so
+  // a stale file lists yesterday's roles. This block cannot afford the recompute, so it must never
+  // let the date go unstated.
+  const stale = withRoles("2026-09-03");
+  ck("a stale scan is not called today", !/, today/.test(stale));
+  ck("the real date is named", /dated 2026-09-03/.test(stale));
+  ck("and the staleness is spelled out", /is NOT today/.test(stale) && /Treat these as of 2026-09-03/.test(stale));
+  ck("no branch ever calls a role 'new today'", !/new today/i.test(stale) && !/new today/i.test(sameDay));
+
+  ck("the role itself ships", /Acme, FDE, Pune/.test(sameDay));
+  ck("with its link", /https:\/\/x\.test\/1/.test(sameDay));
+  ck("and a posting is not called an offer", /postings, not offers/.test(sameDay));
+}
+
+console.log("the new-roles cap discloses what it dropped");
+{
+  const many = Array.from({ length: 3 }, (_, i) => ({ id: String(i), company: `C${i}`, title: "FDE", location: "Pune", url: "", statement: `C${i}, FDE, Pune` }));
+  const text = newRolesContext({
+    day: "2026-09-10", baseline: false, movement: { suppressed: false, changes: [], statement: "" },
+    newSinceLastRun: many, newSinceLastRunTotal: 40, newSinceLastRunOverflow: 37,
+  } as never, NOW);
+  ck("the overflow is stated, not silently dropped", /37 more are not listed here/.test(text));
+  ck("the shown-of-total is explicit", /Showing 3 of 40/.test(text));
+  ck("and the model is told to call it partial", /list is partial rather than implying it is all of them/.test(text));
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
