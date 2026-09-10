@@ -35,27 +35,30 @@ export const bandwidthDelay: Lesson = {
   title: "Throughput, and the number that is not on the invoice",
   prompt: "Drag the round-trip time. Find where a 10 Gbps link stops being 10 Gbps.",
   topicIndices: [2],
-  view: { x0: 0, x1: 300, y0: 0, y1: 10000 },
+  // log10(RTT). Linear put the whole crossover region in the leftmost 1% of the axis, so the
+  // one thing the lesson is about was unreachable with a pointer.
+  view: { x0: 0, x1: 2.4771212547, y0: 0, y1: 10000 },
 
   params: [
-    { id: "rtt", label: "Round-trip time", min: 1, max: 300, step: 1, unit: "ms", value: 4, slider: false,
+    { id: "logRtt", label: "Round-trip time", min: 0, max: 2.4771212547, step: 0.01, unit: "", value: 0.6, slider: false,
       hint: "Drag the ball. 1ms is the same rack, 80ms is London to New York, 300ms is a satellite." },
     { id: "loss", label: "Packet loss", min: 0, max: 1, step: 0.01, unit: "%", value: 0, slider: true,
       hint: "A tenth of a percent is a link nobody would call broken. Watch what it does anyway." },
   ],
-  handles: [{ id: "ball", param: "rtt", axis: "x" }],
+  handles: [{ id: "ball", param: "logRtt", axis: "x" }],
 
   scene(params: Params): LessonScene {
-    const rtt = paramValue(bandwidthDelay, params, "rtt");
+    const rtt = 10 ** paramValue(bandwidthDelay, params, "logRtt");
     const lossPct = paramValue(bandwidthDelay, params, "loss");
     const loss = lossPct / 100;
     const t = throughput(rtt, loss);
     const cross = bdpCrossoverMs();
 
+    const logRtt = Math.log10(rtt);
     const curve: Array<[number, number]> = [];
     for (let i = 0; i <= 200; i++) {
-      const x = 1 + (299 * i) / 200;
-      curve.push([x, Math.min(10000, throughput(x, loss))]);
+      const l = (2.4771212547 * i) / 200;
+      curve.push([l, Math.min(10000, throughput(10 ** l, loss))]);
     }
 
     const linkBound = t >= LINK_GBPS * 1000 - 1e-9;
@@ -75,20 +78,20 @@ export const bandwidthDelay: Lesson = {
         : `A single flow can have at most one window of data unacknowledged, so its ceiling is window/RTT and the link rate does not appear. Past ${cross.toFixed(2)}ms that ceiling is under 10 Gbps and the width of the pipe stops mattering.`;
 
     const arrived = rtt >= 60 && loss >= 0.0005
-      ? `${mbps(t)} on a link sold as 10 Gbps, at ${rtt}ms and ${lossPct.toFixed(2)}% loss. Neither of the two numbers doing the damage appears on the invoice, and the one that does is not the constraint. This is why the answer to a slow transfer is usually more streams, a closer endpoint, or finding the drops - not a bigger pipe.`
+      ? `${mbps(t)} on a link sold as 10 Gbps, at ${rtt.toFixed(0)}ms and ${lossPct.toFixed(2)}% loss. Neither of the two numbers doing the damage appears on the invoice, and the one that does is not the constraint. This is why the answer to a slow transfer is usually more streams, a closer endpoint, or finding the drops - not a bigger pipe.`
       : undefined;
 
     return {
       paths: [
         { id: "throughput", kind: "curve", points: curve },
-        { id: "link", kind: "guide", points: [[0, 10000], [300, 10000]] },
+        { id: "link", kind: "guide", points: [[0, 10000], [2.4771212547, 10000]] },
       ],
       dots: [
-        { id: "ball", kind: "handle", x: rtt, y: Math.min(10000, t), label: `${rtt}ms` },
-        { id: "cross", kind: "marker", x: cross, y: 10000 },
+        { id: "ball", kind: "handle", x: logRtt, y: Math.min(10000, t), label: `${rtt.toFixed(rtt < 10 ? 1 : 0)}ms` },
+        { id: "cross", kind: "marker", x: Math.log10(cross), y: 10000 },
       ],
       readouts: [
-        { label: "rtt", value: `${rtt}ms` },
+        { label: "rtt", value: `${rtt.toFixed(rtt < 10 ? 1 : 0)}ms` },
         { label: "throughput", value: mbps(t) },
         { label: "of the link", value: `${(share * 100).toFixed(1)}%` },
         { label: "window limit", value: mbps(windowLimit(rtt)) },

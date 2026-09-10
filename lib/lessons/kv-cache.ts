@@ -40,28 +40,31 @@ export const kvCache: Lesson = {
   title: "KV cache, and the number that decides how many users fit",
   prompt: "Drag the context length. Watch concurrency collapse, then halve the KV heads.",
   topicIndices: [11, 49],
-  view: { x0: 512, x1: 32768, y0: 0, y1: 260 },
+  // log2 of the context. A hyperbola on a linear axis is a spike against the left edge; on a
+  // log axis the halving-per-doubling that IS the lesson becomes a straight line you can see.
+  view: { x0: 9, x1: 15, y0: 0, y1: 260 },
 
   params: [
-    { id: "context", label: "Context per request", min: 512, max: 32768, step: 256, unit: " tok", value: 4096, slider: false,
+    { id: "logContext", label: "Context per request", min: 9, max: 15, step: 0.05, unit: "", value: 12, slider: false,
       hint: "Drag the ball. How much history each concurrent request is carrying." },
     { id: "kvHeads", label: "KV heads", min: 1, max: 32, step: 1, unit: "", value: 8, slider: true,
       hint: "32 is multi-head attention, 8 is grouped-query, 1 is multi-query. This is the only lever here that is an architecture choice rather than a product one." },
   ],
-  handles: [{ id: "ball", param: "context", axis: "x" }],
+  handles: [{ id: "ball", param: "logContext", axis: "x" }],
 
   scene(params: Params): LessonScene {
-    const context = paramValue(kvCache, params, "context");
+    const context = 2 ** paramValue(kvCache, params, "logContext");
     const kvHeads = paramValue(kvCache, params, "kvHeads");
     const users = concurrency(context, kvHeads);
     const perToken = kvBytesPerToken(kvHeads);
     const perSeq = perToken * context;
     const ceiling = contextCeiling(kvHeads);
 
+    const logContext = Math.log2(context);
     const curve: Array<[number, number]> = [];
     for (let i = 0; i <= 200; i++) {
-      const x = 512 + (32256 * i) / 200;
-      curve.push([x, Math.min(260, concurrency(x, kvHeads))]);
+      const l = 9 + (6 * i) / 200;
+      curve.push([l, Math.min(260, concurrency(2 ** l, kvHeads))]);
     }
 
     const cacheExceedsWeights = perSeq * Math.max(1, Math.floor(users)) > weightsGB() * 1e9;
@@ -84,8 +87,8 @@ export const kvCache: Lesson = {
         { id: "users", kind: "curve", points: curve },
       ],
       dots: [
-        { id: "ball", kind: "handle", x: context, y: Math.min(260, users), label: `${Math.floor(users)} users` },
-        ...(ceiling <= 32768 ? [{ id: "ceiling", kind: "marker" as const, x: ceiling, y: 1 }] : []),
+        { id: "ball", kind: "handle", x: logContext, y: Math.min(260, users), label: `${Math.floor(users)} users` },
+        ...(ceiling <= 32768 ? [{ id: "ceiling", kind: "marker" as const, x: Math.log2(ceiling), y: 1 }] : []),
       ],
       readouts: [
         { label: "context", value: k(context) },
