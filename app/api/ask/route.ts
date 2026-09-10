@@ -4,6 +4,7 @@ import { applyMemory, readMemory, recurring, writeMemory } from "@/lib/companion
 import { benchmarkGapsContext, evidenceContext, recallContext, workbookContext } from "@/lib/companion/context";
 import { readSessionSummary } from "@/lib/companion/session";
 import { papersContext, readPapers } from "@/lib/papers";
+import { PROFILE, PROGRAMME, weeklyPace } from "@/lib/profile";
 import { readArtifacts } from "@/lib/artifacts";
 import type { ReviewState } from "@/lib/review";
 import { externalContext, readLatestBrief } from "@/lib/external/brief";
@@ -120,9 +121,46 @@ function syllabusContext(index: number | undefined) {
  * they are a workload figure and skipped hours are not work - labelled as such.
  */
 type PlanRow = (string | number | null)[];
-function planMap() {
+
+/**
+ * Live status, overlaid on the plan.
+ *
+ * `workbook.Plan` column 15 is a FROZEN baseline: it reads "Not started" for 117 of 119 rows and
+ * always will, because it is a committed input rather than a store. Progress lives in
+ * `reports/progress/` as append-only events. So a plan block built from column 15 tells the model
+ * that nothing has ever been started, whatever the reader has actually done, and no answer about
+ * pace, revision or what to do next can be right on top of that.
+ *
+ * This is the same defect the daily digest already had and fixed. `app/api/cron/daily-digest`
+ * records it: the digest sent row 1 every morning for weeks because it read this same column
+ * instead of the event history.
+ *
+ * The statuses come from the client, and that is a deliberate exception to this route's own rule
+ * that the plan is built server-side. The rule exists because the client once sent 8 of 119 rows
+ * and Quaere answered "there is no ML topic in the visible plan" - a TRUNCATION failure. This
+ * cannot truncate: the route still builds all 119 rows itself and only overlays a status onto each,
+ * every value is checked against the four the app allows, and any row the client does not mention
+ * keeps the baseline. Reading the store here instead would mean a directory listing plus a fetch
+ * per event inside the ~5s this route has before the model call, which is the budget the market
+ * reads are already racing for.
+ */
+const STATUSES = new Set(["Not started", "In progress", "Done", "Skipped"]);
+
+function liveStatuses(raw: unknown): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!raw || typeof raw !== "object") return out;
+  for (const [topic, status] of Object.entries(raw as Record<string, unknown>)) {
+    const t = String(topic).trim().toLowerCase();
+    const v = String(status ?? "").trim();
+    if (t && STATUSES.has(v)) out.set(t, v);
+  }
+  return out;
+}
+
+function planMap(live: Map<string, string> = new Map()) {
   const rows = (workbook.Plan as PlanRow[]).slice(1);
-  const active = rows.filter((r) => String(r[15]).trim().toLowerCase() !== "skipped");
+  const statusOf = (r: PlanRow) => live.get(String(r[2]).trim().toLowerCase()) ?? String(r[15] ?? "Not started").trim();
+  const active = rows.filter((r) => statusOf(r).toLowerCase() !== "skipped");
   const byTrack = new Map<string, { n: number; h: number }>();
   for (const r of active) {
     const t = String(r[0]);
@@ -130,11 +168,16 @@ function planMap() {
     byTrack.set(t, { n: cur.n + 1, h: cur.h + Number(r[13] || 0) });
   }
   const tracks = [...byTrack.entries()].map(([t, v]) => `${t} - ${v.n} topics, ${v.h}h`).join("\n");
-  const lines = rows.map((r, i) => `${i + 1}. [M${r[1]}] ${r[0]} :: ${r[2]} (${r[13]}h) - ${r[15]}`).join("\n");
+  const lines = rows.map((r, i) => `${i + 1}. [M${r[1]}] ${r[0]} :: ${r[2]} (${r[13]}h) - ${statusOf(r)}`).join("\n");
   const skipped = rows.length - active.length;
+  const done = rows.filter((r) => statusOf(r) === "Done").length;
+  const started = rows.filter((r) => statusOf(r) === "In progress").length;
   return `THE FULL PLAN - all ${rows.length} topics, of which ${active.length} are active (${active.reduce((n, r) => n + Number(r[13] || 0), 0)}h across ${byTrack.size} tracks)`
     + `${skipped ? ` and ${skipped} are marked Skipped - those are listed below too, with Skipped as their status` : ""}.`
     + `\nEvery topic in the plan is in this list; nothing is hidden from you.`
+    + (live.size
+        ? `\nStatuses below are the learner's CURRENT recorded progress: ${done} done, ${started} in progress.`
+        : `\nStatuses below are the workbook's frozen baseline, not live progress - it could not be read, so do not tell the learner they have started nothing.`)
     + `\n\nTracks, counting active topics only:\n${tracks}`
     + `\n\nEvery topic. The number is the plan row number, the same numbering any market benchmark below uses:\n${lines}`;
 }
@@ -451,7 +494,7 @@ export async function POST(request: Request) {
   const apiKey = process.env.MINIMAX_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "MiniMax is not configured yet. Add MINIMAX_API_KEY in Vercel project settings." }, { status: 503 });
   try {
-    const body = await request.json() as { prompt?: string; context?: string; topicIndex?: number; web?: boolean; webItems?: { title?: unknown; url?: unknown; snippet?: unknown }[]; selection?: unknown; history?: { role: "user" | "assistant"; content: string }[] };
+    const body = await request.json() as { prompt?: string; context?: string; topicIndex?: number; web?: boolean; webItems?: { title?: unknown; url?: unknown; snippet?: unknown }[]; selection?: unknown; statuses?: unknown; history?: { role: "user" | "assistant"; content: string }[] };
 
     /**
      * What the companion already knows about this reader.
@@ -581,7 +624,18 @@ export async function POST(request: Request) {
     // Occupies the slot the syllabus vacates rather than competing with it.
     const partsBlock = deep ? "" : partsIndexContext(String(body.prompt ?? ""));
 
+    /*
+     * Who is asking.
+     *
+     * data/profile.json has carried this since it was created and none of it reached the prompt.
+     * The companion advises on relocation paths without being told the reader is in Pune, and
+     * reasons about pace without the weekly commitment every other surface derives from. Sixty
+     * tokens, and it is the difference between generic advice and advice for one person.
+     */
+    const who = `WHO YOU ARE TALKING TO: ${PROFILE.name}, based in ${PROFILE.location}, working toward ${PROFILE.targetRole}. This is ${PROGRAMME}: ${(PROFILE as { premise?: string }).premise ?? ""} The committed pace is ${weeklyPace()}, which is editable in the app, so use it rather than assuming a figure.`;
+
     const extra = [
+      who,
       selectionBlock,
       partsBlock,
       workbookContext(),
@@ -605,7 +659,7 @@ export async function POST(request: Request) {
       // finish, which is how a five-part reply ended on an empty "## 5." heading.
       { role: "system", content: `LENGTH: you have about ${MAX_ANSWER_TOKENS} tokens, roughly ${Math.round(MAX_ANSWER_TOKENS * 0.7)} words. Plan the answer to fit. Cover fewer things completely rather than starting a section you cannot finish, and never end on a heading with nothing under it. If the question is bigger than the budget, say what you are leaving out and offer to continue.` },
       ...(body.history || []).slice(-8).map((m) => ({ role: m.role, content: m.content })),
-      { role: "user", content: `${planMap()}\n\nCurrently visible in the dashboard:\n${body.context || "No topic filter is active."}${deep ? `\n\n${deep}` : ""}${market ? `\n\n${market}` : ""}${extra ? `\n\n${extra}` : ""}\n\nQuestion:\n${body.prompt}` },
+      { role: "user", content: `${planMap(liveStatuses(body.statuses))}\n\nCurrently visible in the dashboard:\n${body.context || "No topic filter is active."}${deep ? `\n\n${deep}` : ""}${market ? `\n\n${market}` : ""}${extra ? `\n\n${extra}` : ""}\n\nQuestion:\n${body.prompt}` },
     ];
     const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, messages, temperature: 0.4, max_completion_tokens: MAX_ANSWER_TOKENS, stream: false }), signal: AbortSignal.timeout(MODEL_TIMEOUT_MS) });
     const raw = await response.text();

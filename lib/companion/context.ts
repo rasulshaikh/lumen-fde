@@ -49,7 +49,11 @@ export function workbookContext(): string {
   const parts: string[] = [];
   if (comp.length) {
     parts.push("COMPENSATION REALITY (the learner's own calibration, from data/workbook.json):");
-    parts.push(cap(comp.map((r) => `- ${r[0]}: ${r[1]} | verdict ${r[2]} | ${r[3]}${r[4] ? ` | ${r[4]}` : ""}`), 12, "markets"));
+    // Every column named. The first version labelled column 2 as the verdict, but column 2 is the
+    // SOURCE: the prompt read "verdict fde.academy salary guide (Feb 2026)", presenting a citation
+    // as a probability, while the real verdict in column 4 arrived unlabelled at the end. A model
+    // handed that will quote a salary guide as the odds.
+    parts.push(cap(comp.map((r) => `- ${r[0]}: ${r[1]} | source: ${r[2]} | what it takes: ${r[3]}${r[4] ? ` | odds (the learner's own read, not data): ${r[4]}` : ""}`), 12, "markets"));
   }
   if (mocks.length) {
     parts.push("\nINTERVIEW REPS PLANNED:");
