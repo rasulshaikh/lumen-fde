@@ -44,11 +44,11 @@ export const vagueRag: Incident = {
       hint: "Look at what retrieval actually returns for a question you know the answer to.",
       output:
         '[\n' +
-        '  {"score":0.71,"doc":"2019-brand-guidelines.pdf","text":"...our logo should never be..."},\n' +
-        '  {"score":0.70,"doc":"office-move-faq.md","text":"...parking is available on level..."},\n' +
-        '  {"score":0.70,"doc":"2019-brand-guidelines.pdf","text":"...the secondary palette..."}\n' +
+        '  {"score":0.06,"doc":"2019-brand-guidelines.pdf","text":"...our logo should never be..."},\n' +
+        '  {"score":0.05,"doc":"office-move-faq.md","text":"...parking is available on level..."},\n' +
+        '  {"score":0.05,"doc":"2019-brand-guidelines.pdf","text":"...the secondary palette..."}\n' +
         ']\n\n' +
-        "(Twenty chunks came back. The top three are unrelated. The scores are all clustered.)",
+        "(Twenty chunks came back. The top three are unrelated, and every score is near zero.)",
       decisive: true,
     },
     {
@@ -56,9 +56,12 @@ export const vagueRag: Incident = {
       cmd: "curl -s $API/debug/retrieve -d '{\"q\":\"how do I rotate our API keys\"}' | jq '[.chunks[].score] | {min:min, max:max}'",
       hint: "The shape of the scores, rather than the documents.",
       output:
-        '{"min":0.68,"max":0.71}\n\n' +
-        "(A 0.03 spread across twenty chunks. Before Tuesday this query's top chunk scored 0.89 and " +
-        "the twentieth scored 0.42. Everything is now equally, mildly similar to everything.)",
+        '{"min":0.02,"max":0.06}\n\n' +
+        "(Before Tuesday this query's top chunk scored 0.89 and the twentieth scored 0.42. Now the whole " +
+        "set sits under 0.06 with a 0.04 spread. Two signals, and you need both: the magnitude " +
+        "collapsed, which is what unrelated vector spaces look like, AND the spread collapsed, which " +
+        "is what having no signal to rank on looks like. Merely bad documents would keep the " +
+        "magnitude and lose the spread.)",
       decisive: true,
     },
     {

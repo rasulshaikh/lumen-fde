@@ -117,5 +117,28 @@ console.log("lookups refuse bad input rather than throwing");
   ck("fixById returns null for a made-up id", fixById(i, "no-such-fix") === null);
 }
 
+
+console.log("the numbers a probe prints agree with the numbers the next probe prints");
+{
+  // A terminal that contradicts itself teaches the reader to distrust the exercise rather than the
+  // system. The retrieval probe lists individual scores; the scores probe reports min and max over
+  // the same query, so one must bracket the other.
+  const rag = incidentById("vague-rag")!;
+  const listed = [...(probeById(rag, "retrieval")?.output ?? "").matchAll(/"score":([\d.]+)/g)].map((m) => Number(m[1]));
+  const range = (probeById(rag, "scores")?.output ?? "").match(/"min":([\d.]+),"max":([\d.]+)/);
+  ck("the retrieval probe lists scores", listed.length >= 3, `${listed.length}`);
+  ck("the scores probe reports a range", !!range);
+  const [min, max] = [Number(range![1]), Number(range![2])];
+  ck("every listed score sits inside the reported range", listed.every((v) => v >= min && v <= max),
+    `listed ${listed.join(",")} vs ${min}-${max}`);
+
+  // Cross-space cosine is near zero, not near 0.7. Vectors from two unrelated embedding spaces are
+  // effectively random with respect to each other, and the collapsed MAGNITUDE is half the
+  // diagnostic - merely poor documents would keep the magnitude and lose only the spread.
+  ck("the scores are near zero, as unrelated spaces actually produce", max < 0.2, `max ${max}`);
+  ck("and the output explains that magnitude and spread are two separate signals",
+    /magnitude collapsed/.test(probeById(rag, "scores")?.output ?? ""));
+}
+
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

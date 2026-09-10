@@ -28,6 +28,17 @@ import { INCIDENTS, probeById, fixById, resolvingFix, type Incident as IncidentD
 const decisiveRun = (incident: IncidentDef, ran: string[]) =>
   incident.probes.filter((p) => p.decisive && ran.includes(p.id));
 
+/*
+ * Probe and fix buttons stay ENABLED after they are used, and are only styled as spent.
+ *
+ * Disabling a control at the moment it is clicked removes it from the tab order while it holds
+ * focus, so the browser drops focus to <body>. A keyboard user lost their place in the command
+ * list after every single command, and had to tab back in from the top of the document each time.
+ *
+ * Nothing needs the disabled state: `run` and `apply` both ignore an id they have already seen, so
+ * a second press is a no-op rather than a duplicate terminal block or a re-applied fix.
+ */
+
 export function IncidentView({ incident }: { incident: IncidentDef }) {
   const [ran, setRan] = useState<string[]>([]);
   const [tried, setTried] = useState<string[]>([]);
@@ -67,7 +78,7 @@ export function IncidentView({ incident }: { incident: IncidentDef }) {
             {incident.probes.map((p) => {
               const done = ran.includes(p.id);
               return (
-                <button key={p.id} type="button" className={`inc-cmd${done ? " is-run" : ""}`} onClick={() => run(p.id)} disabled={done}>
+                <button key={p.id} type="button" className={`inc-cmd${done ? " is-run" : ""}`} onClick={() => run(p.id)}>
                   <code>{p.cmd}</code>
                   <span>{p.hint}</span>
                 </button>
@@ -108,7 +119,7 @@ export function IncidentView({ incident }: { incident: IncidentDef }) {
             const done = tried.includes(f.id);
             return (
               <div key={f.id}>
-                <button type="button" className={`inc-fix${done ? " is-tried" : ""}`} onClick={() => apply(f.id)} disabled={done}>
+                <button type="button" className={`inc-fix${done ? " is-tried" : ""}`} onClick={() => apply(f.id)}>
                   <span className="inc-fix-label">{f.label}</span>
                   <code>{f.cmd}</code>
                 </button>

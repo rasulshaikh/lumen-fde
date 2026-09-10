@@ -26,6 +26,9 @@ const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`
 const dom = new JSDOM("<!doctype html><html><body><div id=root></div></body></html>", { url: "https://lumen.test/machines", pretendToBeVisual: true });
 const g = globalThis as unknown as Record<string, unknown>;
 g.window = dom.window;
+// next/link reaches for `self` through its idle-callback shim, which is a browser global rather
+// than a property of the jsdom window object.
+g.self = dom.window;
 g.document = dom.window.document;
 // Node 22 defines `navigator` as a getter-only global, so it is redefined rather than assigned.
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true, writable: true });
@@ -156,6 +159,41 @@ console.log("reduced motion still advances the sequence, without sliding");
   ck("it is parked on a node, not mid-flight", onANode, `cx ${cx} vs nodes ${nodes.join(",")}`);
 
   prefersReduced = false;
+  await unmount();
+}
+
+
+console.log("running a command does not throw the keyboard user back to the top");
+{
+  // Disabling a control while it holds focus removes it from the tab order, and the browser drops
+  // focus to <body>. A keyboard user lost their place after every single command and had to tab in
+  // from the top of the document again. Both handlers dedupe, so nothing needed the disabled state.
+  const { IncidentView } = await import("../components/Incident.tsx");
+  const { INCIDENTS } = await import("./incidents/index.ts");
+  const { host, unmount } = await mount(createElement(IncidentView, { incident: INCIDENTS[0] } as never));
+
+  const cmd = host.querySelector(".inc-cmd") as HTMLButtonElement;
+  ck("there is a command to run", !!cmd);
+  cmd.focus();
+  ck("it can hold focus", dom.window.document.activeElement === cmd);
+
+  await act(async () => { cmd.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+  ck("the command ran", !!host.querySelector(".inc-term"));
+  ck("and focus is still on the button, not on the body", dom.window.document.activeElement === cmd,
+    String(dom.window.document.activeElement?.tagName));
+  ck("the button is not disabled", cmd.disabled === false);
+  ck("it is marked as spent visually instead", cmd.className.includes("is-run"));
+
+  // A second press must be a no-op rather than a duplicate terminal block.
+  await act(async () => { cmd.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+  ck("pressing it again adds nothing", host.querySelectorAll(".inc-out").length === 1,
+    `${host.querySelectorAll(".inc-out").length} blocks`);
+
+  const fix = host.querySelector(".inc-fix") as HTMLButtonElement;
+  fix.focus();
+  await act(async () => { fix.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+  ck("the same holds for a fix", dom.window.document.activeElement === fix && fix.disabled === false);
+
   await unmount();
 }
 
