@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import library from "@/data/library-context.json";
 import { applyMemory, readMemory, recurring, writeMemory } from "@/lib/companion/memory";
-import { benchmarkGapsContext, evidenceContext, marketDepthContext, recallContext, rhythmContext, workbookContext } from "@/lib/companion/context";
+import { aimContext, benchmarkGapsContext, evidenceContext, marketDepthContext, recallContext, rhythmContext, workbookContext } from "@/lib/companion/context";
 import { readSessionSummary } from "@/lib/companion/session";
 import { papersContext, readPapers } from "@/lib/papers";
 import { readAskTitles } from "@/lib/companion/asks";
+import { PATHS } from "@/lib/paths";
 import { PROFILE, PROGRAMME, weeklyPace } from "@/lib/profile";
 import { readArtifacts } from "@/lib/artifacts";
 import type { ReviewState } from "@/lib/review";
@@ -495,7 +496,7 @@ export async function POST(request: Request) {
   const apiKey = process.env.MINIMAX_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "MiniMax is not configured yet. Add MINIMAX_API_KEY in Vercel project settings." }, { status: 503 });
   try {
-    const body = await request.json() as { prompt?: string; context?: string; topicIndex?: number; web?: boolean; webItems?: { title?: unknown; url?: unknown; snippet?: unknown }[]; selection?: unknown; statuses?: unknown; streak?: unknown; history?: { role: "user" | "assistant"; content: string }[] };
+    const body = await request.json() as { prompt?: string; context?: string; topicIndex?: number; web?: boolean; webItems?: { title?: unknown; url?: unknown; snippet?: unknown }[]; selection?: unknown; statuses?: unknown; streak?: unknown; aim?: unknown; history?: { role: "user" | "assistant"; content: string }[] };
 
     /**
      * What the companion already knows about this reader.
@@ -648,8 +649,15 @@ export async function POST(request: Request) {
     const streakLine = String(body.streak ?? "").replace(/\s+/g, " ").trim().slice(0, 400);
     const streak = streakLine ? { statement: streakLine } : null;
 
+    // Validated against the four routes that exist, so a stale or crafted id renders nothing.
+    const aimBlock = aimContext(
+      String(body.aim ?? "").trim().slice(0, 40) || null,
+      (id) => PATHS.find((p) => p.id === id)?.label ?? null,
+    );
+
     const extra = [
       who,
+      aimBlock,
       selectionBlock,
       partsBlock,
       workbookContext(),

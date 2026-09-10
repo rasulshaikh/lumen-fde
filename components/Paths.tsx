@@ -114,15 +114,15 @@ export function Openings({ path, core, state, synced, openMarket }: { path: Path
  * and the disclosures they need, live on /paths where there is room to state them properly - a
  * rail is not the place to explain why two cards share one pool.
  */
-export function PathsRail({ open }: { open: () => void }) {
+export function PathsRail({ open, aim }: { open: () => void; aim?: string | null }) {
   const views = buildPaths(compRows, null);
   return <div className="panel paths-rail">
     <p className="eyebrow">Four routes</p>
     <h2>Which way out</h2>
     <p className="paths-rail-lead">Same plan either way. What changes is what counts as done.</p>
     <ul className="paths-rail-list">
-      {views.map((p) => <li key={p.id}>
-        <span className="paths-rail-name">{p.label}</span>
+      {views.map((p) => <li key={p.id} className={p.id === aim ? "is-aiming" : undefined}>
+        <span className="paths-rail-name">{p.label}{p.id === aim ? <span className="rail-aim" title="The route you are aiming at"> ◆</span> : null}</span>
         <Verdict bands={p.bands} />
         <span className="paths-rail-band">{p.bands[0]?.band || "No salary band describes this one."}</span>
       </li>)}
@@ -187,10 +187,13 @@ export function PathCard({ path, index, core, state, synced, built, open, onTogg
   </article>;
 }
 
-/** Where the chosen route is kept. Local to the device: it is a preference, not a commitment. */
-const AIM_KEY = "lumen-path";
-
-export function Paths({ planMonths, openMarket }: { planMonths: number; openMarket?: () => void }) {
+export function Paths({ planMonths, openMarket, aim, onAim }: {
+  planMonths: number;
+  openMarket?: () => void;
+  /** The chosen route, from the provider. See `AppState.aim` for why it does not live here. */
+  aim: string | null;
+  onAim: (id: string | null) => void;
+}) {
   const [state, setState] = useState<Load>("loading");
   /*
    * One card open at a time, starting with none.
@@ -201,19 +204,7 @@ export function Paths({ planMonths, openMarket }: { planMonths: number; openMark
    * purpose of this view.
    */
   const [open, setOpen] = useState<string | null>(null);
-  const [aim, setAim] = useState<string | null>(null);
-
-  // Read after mount, never during render: localStorage does not exist on the server and reading
-  // it while rendering would give the server one answer and the client another.
-  useEffect(() => {
-    try { setAim(localStorage.getItem(AIM_KEY)); } catch { /* private mode, or storage disabled */ }
-  }, []);
-
-  const chooseAim = (id: string) => {
-    const next = aim === id ? null : id;
-    setAim(next);
-    try { next ? localStorage.setItem(AIM_KEY, next) : localStorage.removeItem(AIM_KEY); } catch { /* nothing to do */ }
-  };
+  const chooseAim = (id: string) => onAim(aim === id ? null : id);
   const [feed, setFeed] = useState<Feed | null>(null);
   const [shipped, setShipped] = useState<Shipped | null>(null);
 
@@ -231,7 +222,14 @@ export function Paths({ planMonths, openMarket }: { planMonths: number; openMark
 
   const reach = feed?.insight?.reachability ?? null;
   const tiers: ReachSlice[] | null = reach ? reach.tiers.map((t) => ({ tier: t.tier, label: t.label, count: t.count, companies: t.companies })) : null;
-  const views = buildPaths(compRows, tiers);
+  /*
+   * The chosen route leads the grid.
+   *
+   * A choice that leaves everything where it was is a highlight, not a choice. Ordering by it
+   * means the page opens on the decision already made, and the ordering is stable otherwise:
+   * `sort` is applied to a copy and only lifts the one id.
+   */
+  const views = [...buildPaths(compRows, tiers)].sort((a, b) => Number(b.id === aim) - Number(a.id === aim));
   const unclaimed = unclaimedBands(compRows);
   const note = horizonNote(String((workbook.CompReality[0] as unknown[])[4] ?? ""), planMonths);
   /*

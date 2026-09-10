@@ -15,6 +15,7 @@
  *    sentence claiming the reader has done nothing.
  */
 import {
+  aimContext,
   benchmarkGapsContext,
   evidenceContext,
   marketDepthContext,
@@ -125,6 +126,25 @@ console.log("every block states its own cap when it truncates");
 
   const gaps = benchmarkGapsContext({ gaps: Array.from({ length: 20 }, (_, i) => ({ id: `g${i}`, statement: `Gap ${i}` })), overInvested: [] } as never);
   ck("gaps disclose theirs too", /more gaps not shown/.test(gaps), gaps.split("\n").pop() ?? "");
+}
+
+console.log("the chosen route reaches the companion, and only a real one");
+{
+  const label = (id: string) => ({ india: "Stay in India", gulf: "The Gulf" } as Record<string, string>)[id] ?? null;
+
+  const chosen = aimContext("gulf", label);
+  ck("the route is named", /THE ROUTE THEY ARE AIMING AT: The Gulf/.test(chosen));
+  ck("it is framed as a preference, not a commitment", /rather than a commitment/.test(chosen));
+  ck("and the model is told to answer for it first", /answer for this one first/.test(chosen));
+  ck("while saying what would change elsewhere", /what would change if they were aiming elsewhere/.test(chosen));
+  // The product refuses to congratulate people for pressing buttons everywhere else.
+  ck("no praise for having chosen", /do not congratulate them for having chosen/.test(chosen));
+
+  // The id comes from localStorage on the reader's device, so it can be stale or hand-edited.
+  ck("no choice, no block", aimContext(null, label) === "");
+  ck("an unknown route renders nothing", aimContext("mars", label) === "");
+  ck("a crafted id renders nothing", aimContext("../../etc/passwd", label) === "");
+  ck("an empty id renders nothing", aimContext("", label) === "");
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

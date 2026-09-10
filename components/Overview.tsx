@@ -162,7 +162,7 @@ function StandingPanel({ streak, loading, openPlan }: { streak: Streak | null; l
   </div>;
 }
 
-export function Overview({ done, activeRows, skipped, hours, doneHours, skippedHours, weeklyHours, setWeekly, monthHours, maxMonthHours, peakMonth, nextRow, nextIndex, setView, trackTotals, setTrack, marketTiers, feed, brief, readingUrl, setFocusStatus, openMonth }: {
+export function Overview({ done, activeRows, skipped, hours, doneHours, skippedHours, weeklyHours, setWeekly, monthHours, maxMonthHours, peakMonth, nextRow, nextIndex, setView, trackTotals, setTrack, marketTiers, feed, brief, readingUrl, setFocusStatus, openMonth, aim }: {
   done: number;
   activeRows: Row[];
   skipped: number;
@@ -179,6 +179,8 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
   setView: (name: string) => void;
   /** Opens /plan filtered to one month. Every bar in the pace map is a link to its own month. */
   openMonth: (month: number) => void;
+  /** The route chosen on /paths, marked here so the choice is visible where the day starts. */
+  aim?: string | null;
   trackTotals: { name: string; count: number; hours: number; done: number }[];
   setTrack: (name: string) => void;
   marketTiers: { market: string; window: string; rank: number; label: string; tone: string }[];
@@ -237,7 +239,7 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
               closes most of that, and it answers the question the panel above it raises: Reality
               check says $250K is not what this plan promises, so the next thing to say is what you
               are aiming at instead. */}
-          <div className="home-slot slot-paths"><PathsRail open={() => setView("Paths")} /></div>
+          <div className="home-slot slot-paths"><PathsRail open={() => setView("Paths")} aim={aim} /></div>
         </div>
       </div>
 

@@ -10,9 +10,9 @@ import { useAppState } from "@/components/AppState";
  * the reader is on - and it is derived from the workbook by the provider, not typed anywhere.
  */
 export default function PathsPage() {
-  const { monthHours } = useAppState();
+  const { monthHours, aim, setAim } = useAppState();
   const router = useRouter();
   // The tiers are a slice of the nightly scan, and the scan lives on Market. A number the reader
   // wants to interrogate should be a way in, not a full stop.
-  return <Paths planMonths={monthHours.length} openMarket={() => router.push("/market")} />;
+  return <Paths planMonths={monthHours.length} openMarket={() => router.push("/market")} aim={aim} onAim={setAim} />;
 }

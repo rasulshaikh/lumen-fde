@@ -84,6 +84,15 @@ type AppState = {
   trackTotals: { name: string; count: number; hours: number; done: number }[];
   startedTopics: number[];
   marketTiers: { market: string; window: string; rank: number; label: string; tone: string }[];
+  /**
+   * Which of the four routes on /paths the reader is aiming at, or null.
+   *
+   * It lives here rather than in the Paths view because a preference nothing else can read is not
+   * a preference, it is a highlight. The Overview rail marks it, and Quaere is told about it, so
+   * choosing a route actually changes what the product says to you.
+   */
+  aim: string | null;
+  setAim: (id: string | null) => void;
   curParts: number;
 };
 
@@ -111,6 +120,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [statuses, setStatuses] = useState<Record<string, string>>({});
   const [progressSync, setProgressSync] = useState<ProgressSync>("loading");
   const [lastEventDay, setLastEventDay] = useState<string | null>(null);
+  const [aim, setAimState] = useState<string | null>(null);
   const progressRef = useRef<Progress | null>(null);
 
   // A non-ok response must reject rather than resolve to null: swallowing it would mark the
@@ -253,7 +263,20 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
    * dependency. Quaere's plan block is built server-side from the workbook, whose status column is
    * a frozen baseline reading "Not started" for 117 of 119 rows; these are what make it current.
    */
+  // Read after mount, never during render: localStorage does not exist on the server, and reading
+  // it while rendering would give the server one answer and the client another.
+  useEffect(() => {
+    try { setAimState(localStorage.getItem("lumen-path")); } catch { /* private mode */ }
+  }, []);
+  const setAim = useCallback((id: string | null) => {
+    setAimState(id);
+    try { id ? localStorage.setItem("lumen-path", id) : localStorage.removeItem("lumen-path"); } catch { /* nothing to do */ }
+  }, []);
+
   const statusesRef = useRef<Record<string, string>>({});
+  // A ref so askLumen does not need `aim` in its dependency array and go stale.
+  const aimRef = useRef<string | null>(null);
+  useEffect(() => { aimRef.current = aim; }, [aim]);
   useEffect(() => {
     const live: Record<string, string> = {};
     for (const r of planRows) {
@@ -275,7 +298,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         if (Array.isArray(data.items) && data.items.length) webItems = data.items;
       } catch { /* the answer still goes ahead, and says the search did not come back */ }
     }
-    try { const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, context: pageContext.current.context, topicIndex, history: messages, web: Boolean(opts.web), webItems, selection: opts.selection || undefined, statuses: statusesRef.current, streak: progressRef.current ? computeStreak(progressRef.current, new Date()).statement : undefined }) }); const data = await res.json(); setMessages((m) => [...m, { role: "assistant", content: data.answer || data.error || "Lumen could not answer right now.", reportUrl: data.reportUrl || undefined }]); } catch { setMessages((m) => [...m, { role: "assistant", content: "Lumen is unavailable. Add MINIMAX_API_KEY in Vercel project settings and try again." }]); } finally { setAsking(false); }
+    try { const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, context: pageContext.current.context, topicIndex, history: messages, web: Boolean(opts.web), webItems, selection: opts.selection || undefined, statuses: statusesRef.current, streak: progressRef.current ? computeStreak(progressRef.current, new Date()).statement : undefined, aim: aimRef.current }) }); const data = await res.json(); setMessages((m) => [...m, { role: "assistant", content: data.answer || data.error || "Lumen could not answer right now.", reportUrl: data.reportUrl || undefined }]); } catch { setMessages((m) => [...m, { role: "assistant", content: "Lumen is unavailable. Add MINIMAX_API_KEY in Vercel project settings and try again." }]); } finally { setAsking(false); }
   }, [askText, asking, askTopic, messages]);
 
   useEffect(() => {
@@ -349,7 +372,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     lastEventDay,
     curSummary, ensureSummary, requestSyllabus, renderSyllabus, syllabusFor,
     askOpen, setAskOpen, askText, setAskText, askTopic, setAskTopic, messages, asking, askLumen, setPageContext,
-    ...derived, marketTiers, curParts,
+    ...derived, marketTiers, curParts, aim, setAim,
   }), [statuses, progressSync, lastEventDay, setStatus, statusOf, theme, toggleTheme, weeklyHours, setWeekly, curSummary, ensureSummary, requestSyllabus, renderSyllabus, syllabusFor, askOpen, askText, askTopic, messages, asking, askLumen, setPageContext, derived, marketTiers, curParts]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

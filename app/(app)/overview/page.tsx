@@ -291,6 +291,7 @@ export default function OverviewPage() {
     nextIndex={state.nextIndex}
     setView={setView}
     openMonth={openMonth}
+    aim={state.aim}
     trackTotals={state.trackTotals}
     setTrack={setTrack}
     marketTiers={state.marketTiers}

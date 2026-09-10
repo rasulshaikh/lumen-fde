@@ -226,3 +226,22 @@ export function rhythmContext(
   }
   return parts.join("\n");
 }
+
+/**
+ * The route the reader has chosen to aim at.
+ *
+ * `/paths` offers four, and picking one wrote to localStorage and changed nothing else: a
+ * preference nothing could read is a highlight, not a preference. It is the single most useful
+ * thing the companion can know when the same question has four different right answers, because
+ * "should I take a contract or hold out" depends entirely on whether the target is a dollar-linked
+ * remote role from Pune or a Gulf relocation.
+ *
+ * Stated as a choice rather than a fact, and revocable in one press, so the model advises toward it
+ * without treating it as settled.
+ */
+export function aimContext(aim: string | null, label: (id: string) => string | null): string {
+  if (!aim) return "";
+  const name = label(aim);
+  if (!name) return "";
+  return `THE ROUTE THEY ARE AIMING AT: ${name}. They chose this on the Paths tab, and it is a current preference rather than a commitment - they can change it in one press. Where a question has different answers for different routes, answer for this one first and say briefly what would change if they were aiming elsewhere. Do not treat it as settled, and do not congratulate them for having chosen.`;
+}
