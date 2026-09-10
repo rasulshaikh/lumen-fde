@@ -24,6 +24,7 @@
  * nothing deletes one.
  */
 import workbook from "@/data/workbook.json";
+import recallBank from "@/data/recall-bank.json";
 
 export const PAPERS_DIR = "reports/papers";
 
@@ -67,6 +68,7 @@ export type Validated = { ok: true; value: Paper } | { ok: false; error: string 
 
 const text = (v: unknown, max: number) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 const isGrade = (v: unknown): v is Grade => GRADES.includes(v as Grade);
+const validQuestions = new Map((recallBank.prompts as { k: string; i: number }[]).map((p) => [p.k, p.i]));
 
 /**
  * Validate before storing, for the reason `lib/artifacts.ts` records: `/api/progress` once accepted
@@ -98,11 +100,13 @@ export function validatePaper(input: PaperInput, now: Date = new Date()): Valida
     // The same question twice is a bug in the caller, and averaging it away would hide that.
     if (seen.has(k)) return { ok: false, error: `question ${k} appears twice.` };
     seen.add(k);
+    if (!validQuestions.has(k)) return { ok: false, error: `question ${k} is not in the recall bank.` };
     if (!isGrade(raw?.grade)) return { ok: false, error: `grade must be one of ${GRADES.join(", ")}.` };
     const i = Number(raw?.i);
     if (!Number.isInteger(i) || i < 0 || i >= PLAN_ROWS) {
       return { ok: false, error: `row index ${raw?.i} is outside the plan.` };
     }
+    if (validQuestions.get(k) !== i) return { ok: false, error: `question ${k} does not belong to row ${i}.` };
     answered.push({ k, i, grade: raw.grade });
   }
 
@@ -215,7 +219,11 @@ export async function readPapers(limit = 4): Promise<{ papers: Paper[]; synced: 
       .filter((f) => f.type === "file" && f.name.endsWith(".json"))
       .sort((a, b) => b.name.localeCompare(a.name))
       .slice(0, limit);
-    const loaded = await Promise.allSettled(files.map((f) => fetch(f.download_url, { cache: "no-store" }).then((r) => r.json())));
+    const loaded = await Promise.allSettled(files.map((f) => fetch(f.download_url, { cache: "no-store" }).then((r) => {
+      if (!r.ok) throw new Error(`GitHub returned ${r.status}`);
+      return r.json();
+    })));
+    if (loaded.some((r) => r.status === "rejected")) return { papers: [], synced: false };
     const papers = loaded
       .filter((r): r is PromiseFulfilledResult<Paper> => r.status === "fulfilled")
       .map((r) => r.value)

@@ -19,6 +19,7 @@ let fails = 0;
 const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
 const NOW = new Date("2026-09-10T06:30:00Z");
 const ans = (n: number, grade = "fluent") => Array.from({ length: n }, (_, i) => ({ k: `q${i}-0`, i, grade }));
+const key = (i: number, suffix = 0) => `q${i}-${suffix}`;
 const good = { scope: "weekly", label: "Up next", minutes: 28, answered: ans(6) };
 
 console.log("a paper is validated before it becomes permanent");
@@ -33,8 +34,8 @@ console.log("a paper is validated before it becomes permanent");
 
 console.log("the row index is the join key, so it is checked against the plan");
 {
-  ck("row 0 is valid", validatePaper({ ...good, answered: [{ k: "a", i: 0, grade: "gone" }] }, NOW).ok);
-  ck("the last row is valid", validatePaper({ ...good, answered: [{ k: "a", i: PLAN_ROWS - 1, grade: "gone" }] }, NOW).ok);
+  ck("row 0 is valid", validatePaper({ ...good, answered: [{ k: key(0), i: 0, grade: "gone" }] }, NOW).ok);
+  ck("the last row is valid", validatePaper({ ...good, answered: [{ k: key(PLAN_ROWS - 1), i: PLAN_ROWS - 1, grade: "gone" }] }, NOW).ok);
   ck("past the end is refused", !validatePaper({ ...good, answered: [{ k: "a", i: PLAN_ROWS, grade: "gone" }] }, NOW).ok);
   ck("a negative row is refused", !validatePaper({ ...good, answered: [{ k: "a", i: -1, grade: "gone" }] }, NOW).ok);
   ck("a float row is refused", !validatePaper({ ...good, answered: [{ k: "a", i: 1.5, grade: "gone" }] }, NOW).ok);
@@ -43,7 +44,7 @@ console.log("the row index is the join key, so it is checked against the plan");
 
 console.log("grades are the three states, and nothing else");
 {
-  for (const g of GRADES) ck(`${g} is accepted`, validatePaper({ ...good, answered: [{ k: "a", i: 0, grade: g }] }, NOW).ok);
+  for (const g of GRADES) ck(`${g} is accepted`, validatePaper({ ...good, answered: [{ k: key(0), i: 0, grade: g }] }, NOW).ok);
   ck("a score is refused", !validatePaper({ ...good, answered: [{ k: "a", i: 0, grade: 7 }] }, NOW).ok);
   ck("a made-up grade is refused", !validatePaper({ ...good, answered: [{ k: "a", i: 0, grade: "excellent" }] }, NOW).ok);
   ck("a missing grade is refused", !validatePaper({ ...good, answered: [{ k: "a", i: 0 }] }, NOW).ok);
@@ -79,8 +80,8 @@ console.log("the path is append-only friendly and safe to write");
 console.log("the tally counts, and counts only");
 {
   const paper = (validatePaper({ ...good, answered: [
-    { k: "a", i: 0, grade: "fluent" }, { k: "b", i: 1, grade: "fluent" },
-    { k: "c", i: 2, grade: "halting" }, { k: "d", i: 3, grade: "gone" },
+    { k: key(0), i: 0, grade: "fluent" }, { k: key(1), i: 1, grade: "fluent" },
+    { k: key(2), i: 2, grade: "halting" }, { k: key(3), i: 3, grade: "gone" },
   ] }, NOW) as { ok: true; value: Paper }).value;
   const t = tally(paper);
   ck("fluent", t.fluent === 2, `${t.fluent}`);
@@ -93,7 +94,7 @@ console.log("the prompt block names topics and never computes a score");
 {
   const name = (row: number) => ["Shell mastery", "Linux internals", "Networking", "Kafka"][row] ?? `row ${row + 1}`;
   const paper = (validatePaper({ ...good, minutes: 31, answered: [
-    { k: "a", i: 0, grade: "fluent" }, { k: "b", i: 3, grade: "gone" }, { k: "c", i: 2, grade: "halting" },
+    { k: key(0), i: 0, grade: "fluent" }, { k: key(3), i: 3, grade: "gone" }, { k: key(2), i: 2, grade: "halting" },
   ] }, NOW) as { ok: true; value: Paper }).value;
   const text = papersContext({ papers: [paper], synced: true }, name);
 

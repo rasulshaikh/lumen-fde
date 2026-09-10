@@ -302,6 +302,9 @@ const NO_SPONSORSHIP =
 const US_ONLY_REGION =
   /\b(?:must|required to|need to|expected to|should)\b[^.]{0,40}\b(?:reside|residing|located|locate|based|live|living)\b[^.]{0,25}\b(?:in|within) the (?:united states|u\.?s\.?a?)\b|\bremote (?:with)?in the (?:united states|u\.?s\.?)\b/;
 
+const NON_INDIA_ONLY_REGION =
+  /\b(?:must|required to|need to|expected to|should)\b[^.]{0,40}\b(?:reside|residing|located|locate|based|live|living)\b[^.]{0,25}\b(?:in|within) (?:the )?(?:united kingdom|uk|singapore|canada|australia|new zealand|germany|france|ireland|netherlands|switzerland|denmark|sweden|finland|norway)\b|\bremote (?:with)?in (?:the )?(?:united kingdom|uk|singapore|canada|australia|new zealand|germany|france|ireland|netherlands|switzerland|denmark|sweden|finland|norway)\b/;
+
 /**
  * The positive signals, and they are narrow on purpose.
  *
@@ -343,7 +346,7 @@ export function classifyReach(posting: ReachPosting, jdText: string | null): Rea
   // that bounds a sentence, and on the hyphen in `india-based`.
   const jd = jdText ? jdText.toLowerCase().replace(/\s+/g, " ") : "";
 
-  if (jd && (CLEARANCE.test(jd) || US_PERSON.test(jd) || NO_SPONSORSHIP.test(jd) || US_ONLY_REGION.test(jd))) {
+  if (jd && (CLEARANCE.test(jd) || US_PERSON.test(jd) || NO_SPONSORSHIP.test(jd) || US_ONLY_REGION.test(jd) || NON_INDIA_ONLY_REGION.test(jd))) {
     return "out-of-reach";
   }
 

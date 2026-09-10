@@ -128,8 +128,21 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const setStatus = useCallback((r: Row, status: string) => {
     if (progressSync !== "ready") return;
     if (status === String(statuses[topicKey(r)] || r[15] || "Not started")) return;
-    const next = { ...statuses, [topicKey(r)]: status }; setStatuses(next); localStorage.setItem("lumen-statuses", JSON.stringify(next));
-    fetch("/api/progress", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topic: String(r[2]), status: status.toLowerCase().replace(" ", "_") }) }).catch(() => {});
+    const key = topicKey(r);
+    const previous = String(statuses[key] || r[15] || "Not started");
+    const next = { ...statuses, [key]: status }; setStatuses(next); localStorage.setItem("lumen-statuses", JSON.stringify(next));
+    fetch("/api/progress", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ topic: String(r[2]), status: status.toLowerCase().replace(" ", "_") }) })
+      .then((response) => { if (!response.ok) throw new Error(`progress sync failed: ${response.status}`); })
+      .catch(() => {
+        setStatuses((current) => {
+          if (current[key] !== status) return current;
+          const restored = { ...current };
+          if (previous === "Not started") delete restored[topicKey(r)];
+          else restored[key] = previous;
+          localStorage.setItem("lumen-statuses", JSON.stringify(restored));
+          return restored;
+        });
+      });
   }, [progressSync, statuses]);
 
   // Was hardcoded "16h" next to a separate hours/16, so the two could disagree and

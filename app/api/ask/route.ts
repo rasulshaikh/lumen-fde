@@ -79,7 +79,7 @@ function syllabusContext(index: number | undefined) {
   const detail: string[] = [];
   for (const x of s.subtopics ?? []) {
     const line = `- ${x.name}: ${x.learn}`;
-    if (out.length + detail.join("\n").length + line.length + 40 > SYLLABUS_CAP) break;
+    if (out.length + detail.join("\n").length + line.length + 80 > SYLLABUS_CAP) break;
     detail.push(line);
   }
   if (detail.length) {
@@ -164,7 +164,7 @@ const PARTS_LINES = 30;
 const PARTS_CAP = 6000;
 
 function partsIndexContext(question: string) {
-  const terms = question.toLowerCase().match(/[a-z0-9+#.]{3,}/g)?.filter((t) => !STOP.has(t)) ?? [];
+  const terms = question.toLowerCase().match(/[a-z0-9+#]+/g)?.filter((t) => (t.length >= 3 || t === "go") && !STOP.has(t)) ?? [];
   if (!terms.length) return "";
 
   const topics = (curriculum as { topics: Record<string, Syllabus> }).topics;
@@ -206,11 +206,11 @@ const STOP = new Set([
   "the", "and", "for", "with", "how", "what", "why", "should", "does", "did", "are", "was", "were",
   "can", "you", "your", "his", "her", "its", "this", "that", "these", "those", "from", "into",
   "about", "when", "where", "which", "who", "will", "would", "could", "have", "has", "had", "not",
-  "but", "all", "any", "get", "got", "make", "made", "need", "want", "plan", "topic", "learn",
+  "but", "all", "any", "got", "make", "made", "need", "want", "plan", "topic", "learn",
   "study", "like", "something", "anything", "nothing", "really", "actually", "just", "also",
   "more", "most", "some", "other", "than", "then", "them", "there", "their", "here", "well",
-  "good", "best", "help", "please", "give", "tell", "show", "know", "think", "mean", "means",
-  "thing", "things", "stuff", "way", "ways", "much", "many", "look", "looks", "see", "seen",
+  "good", "best", "help", "please", "give", "tell", "show", "know", "think",
+  "thing", "things", "stuff", "way", "ways", "much", "many", "look", "looks", "see", "seen", "answer", "answers", "question", "questions", "explain", "explains", "ask", "asking",
   "entirely", "completely", "unrelated", "related", "does", "doing", "done", "next", "first",
   "last", "new", "old", "own", "out", "off", "over", "under", "again", "still", "even", "ever",
 ]);
@@ -248,6 +248,12 @@ const REACHABLE_ROLES = 8;
  * about five seconds. A GitHub that hangs must cost the market block, not the answer.
  */
 const MARKET_READ_MS = 4000;
+const BOOKKEEPING_TIMEOUT_MS = 1500;
+const MODEL_TIMEOUT_MS = 50000;
+
+function deadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([promise, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))]);
+}
 
 /**
  * How many live web results may enter a prompt, whatever the client sends.
@@ -424,7 +430,7 @@ const MARKET_RULE =
   ` rounded whole numbers over a stated denominator, so quote the denominator with them.`;
 
 function cleanAnswer(value: string) {
-  return value.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/\*/g, "").replace(/[–—]/g, " - ").replace(/\n{3,}/g, "\n\n").trim();
+  return value.replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/[–—]/g, " - ").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 async function saveAskReport(prompt: string, context: string, answer: string) {
@@ -435,7 +441,7 @@ async function saveAskReport(prompt: string, context: string, answer: string) {
   const slug = prompt.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "ask";
   const path = `reports/asks/${stamp}-${slug}.md`;
   const markdown = `# Lumen Ask\n\nDate: ${new Date().toISOString()}\n\n## Question\n\n${prompt}\n\n## Plan context\n\n${context || "No topic filter was active."}\n\n## Answer\n\n${answer}\n`;
-  const response = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json", "User-Agent": "lumen-fde" }, body: JSON.stringify({ message: `docs: save Lumen ask ${stamp}`, content: Buffer.from(markdown, "utf8").toString("base64"), branch: process.env.GITHUB_BRANCH || "main" }) });
+  const response = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, { method: "PUT", headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json", "User-Agent": "lumen-fde" }, body: JSON.stringify({ message: `docs: save Lumen ask ${stamp}`, content: Buffer.from(markdown, "utf8").toString("base64"), branch: process.env.GITHUB_BRANCH || "main" }), signal: AbortSignal.timeout(BOOKKEEPING_TIMEOUT_MS) });
   if (!response.ok) { const error = await response.json().catch(() => ({})) as { message?: string }; console.error("[api/ask] GitHub report save failed", { status: response.status, message: error.message, repo, path }); return null; }
   const data = await response.json() as { content?: { html_url?: string } };
   return data.content?.html_url || `https://github.com/${repo}/blob/${process.env.GITHUB_BRANCH || "main"}/${path}`;
@@ -462,8 +468,8 @@ export async function POST(request: Request) {
     let memoryBlock = "";
     let memoryState: Awaited<ReturnType<typeof readMemory>> | null = null;
     try {
-      memoryState = await readMemory();
-      if (memoryState.synced) {
+      memoryState = await deadline(readMemory(), BOOKKEEPING_TIMEOUT_MS, null);
+      if (memoryState?.synced) {
         const explained = memoryState.memory.explained.slice(0, 8).map((n) => n.key);
         const repeats = recurring(memoryState.memory).slice(0, 5).map((n) => `${n.key} (asked ${n.count} times)`);
         const parts: string[] = [];
@@ -601,7 +607,7 @@ export async function POST(request: Request) {
       ...(body.history || []).slice(-8).map((m) => ({ role: m.role, content: m.content })),
       { role: "user", content: `${planMap()}\n\nCurrently visible in the dashboard:\n${body.context || "No topic filter is active."}${deep ? `\n\n${deep}` : ""}${market ? `\n\n${market}` : ""}${extra ? `\n\n${extra}` : ""}\n\nQuestion:\n${body.prompt}` },
     ];
-    const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, messages, temperature: 0.4, max_completion_tokens: MAX_ANSWER_TOKENS, stream: false }), signal: AbortSignal.timeout(55000) });
+    const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, messages, temperature: 0.4, max_completion_tokens: MAX_ANSWER_TOKENS, stream: false }), signal: AbortSignal.timeout(MODEL_TIMEOUT_MS) });
     const raw = await response.text();
     let data: { choices?: { message?: { content?: string }; finish_reason?: string }[]; base_resp?: { status_msg?: string } } = {};
     try { data = JSON.parse(raw); } catch { console.error("[api/ask] MiniMax returned non-JSON", { status: response.status }); }
@@ -643,7 +649,7 @@ export async function POST(request: Request) {
           asked: [body.prompt],
           explained: topic ? [topic] : [],
         }, new Date());
-        if (next !== memoryState.memory) await writeMemory(next, memoryState.sha);
+        if (next !== memoryState.memory) await deadline(writeMemory(next, memoryState.sha), BOOKKEEPING_TIMEOUT_MS, null);
       } catch { /* the answer matters more than the bookkeeping */ }
     }
 

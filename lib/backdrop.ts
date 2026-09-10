@@ -45,7 +45,7 @@ export function frame(t: number, width: number, height: number): Frame {
   // 0.22 rather than the 0.42 this started at. RADIUS is 1.35 and the perspective divide reaches
   // about 1.15 on the nearest ring, so the drawn span is roughly 3.1x the scale factor: at 0.42
   // that put a 1507px wireframe behind a 900px-tall laptop window and spilled a phone by 70%.
-  const scale = Math.min(width, height) * 0.22;
+  const scale = Math.min(width, height) * 0.20;
   const ox = width / 2;
   const oy = height * 0.42;
 

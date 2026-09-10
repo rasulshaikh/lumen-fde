@@ -68,7 +68,7 @@ async function github(pathname, options = {}) {
 function slug(value, fallback) { return String(value).replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase().slice(0, 60) || fallback; }
 function audit(action, ok, detail = "") { auditEvents.unshift({ action, ok, detail: String(detail).slice(0, 180), at: new Date().toISOString() }); if (auditEvents.length > 500) auditEvents.pop(); }
 async function durableAudit(action, detail) { try { const stamp = new Date().toISOString().replace(/[:.]/g, "-"); const file = `reports/audit/${stamp}-${slug(action, "event")}.json`; await github(file, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: `audit: ${action}`, content: Buffer.from(JSON.stringify({ action, detail, at: new Date().toISOString() }, null, 2)).toString("base64"), branch: repoConfig().branch }) }); } catch (error) { audit("durable_audit", false, error.message); } }
-function cleanAnswer(value) { return String(value || "").replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/\*/g, "").replace(/[–—]/g, " - ").replace(/\n{3,}/g, "\n\n").trim(); }
+function cleanAnswer(value) { return String(value || "").replace(/<think>[\s\S]*?<\/think>/gi, "").replace(/[–—]/g, " - ").replace(/\n{3,}/g, "\n\n").trim(); }
 
 /**
  * Everything below to the end of `marketContext` is a port of app/api/ask/route.ts, and the two
@@ -91,6 +91,9 @@ const MARGINAL_LINES = 5;
 /** Bounded for the same reason the route bounds it: `github()` passes no signal to fetch, and
  *  the MiniMax call downstream already claims 25 s. A hung GitHub costs the market block only. */
 const MARKET_READ_MS = 4000;
+const MCP_MODEL_TIMEOUT_MS = 50_000;
+const MCP_PROXY_TIMEOUT_MS = 58_000;
+const MAX_ANSWER_TOKENS = 3600;
 
 /** Read live from GitHub rather than from the checkout on disk. `readJson` would serve whatever
  *  reports/market held at deploy time, so Claude Code and the dashboard would quote different
@@ -164,7 +167,7 @@ const MARKET_RULE =
 
 async function askLumen(prompt, context = "") {
   if (process.env.LUMEN_ASK_URL && process.env.LUMEN_INTERNAL_API_KEY) {
-    const response = await fetch(process.env.LUMEN_ASK_URL, { method: "POST", headers: { "Content-Type": "application/json", "x-lumen-internal-key": process.env.LUMEN_INTERNAL_API_KEY }, body: JSON.stringify({ prompt, context }), signal: AbortSignal.timeout(30_000) });
+    const response = await fetch(process.env.LUMEN_ASK_URL, { method: "POST", headers: { "Content-Type": "application/json", "x-lumen-internal-key": process.env.LUMEN_INTERNAL_API_KEY }, body: JSON.stringify({ prompt, context }), signal: AbortSignal.timeout(MCP_PROXY_TIMEOUT_MS) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.answer) throw new Error(data.error || `Lumen Ask request failed with ${response.status}`);
     return data.answer;
@@ -175,11 +178,12 @@ async function askLumen(prompt, context = "") {
   // `marketContext` returns "" for a pair of nulls, leaving this prompt as it was before.
   const [benchmark, insight] = await Promise.all([readMarketReport("reports/market/benchmark.json"), readMarketReport("reports/market/insight.json")]);
   const market = marketContext(benchmark, insight);
-  const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${process.env.MINIMAX_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, temperature: 0.4, max_completion_tokens: 1600, stream: false, messages: [{ role: "system", content: `You are Lumen, a Senior FDE learning guide. Explain in fifth-grade reading language while keeping technical meaning exact. Use short sentences, define jargon immediately, give one technical example, connect it to production and FDE interviews, and finish with one practical next step. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. Indexed context:\n${JSON.stringify(learning)}${market ? MARKET_RULE : ""}` }, { role: "user", content: `Active plan context:\n${context || "No active topic filter."}${market ? `\n\n${market}` : ""}\n\nQuestion:\n${prompt}` }] }), signal: AbortSignal.timeout(25_000) });
+  const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${process.env.MINIMAX_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, temperature: 0.4, max_completion_tokens: MAX_ANSWER_TOKENS, stream: false, messages: [{ role: "system", content: `You are Lumen, a Senior FDE learning guide. Explain in fifth-grade reading language while keeping technical meaning exact. Use short sentences, define jargon immediately, give one technical example, connect it to production and FDE interviews, and finish with one practical next step. Never emit hidden reasoning, <think> tags, or em dashes. Plan the answer to fit within about ${MAX_ANSWER_TOKENS} tokens; cover fewer things completely rather than ending on an empty heading. Indexed context:\n${JSON.stringify(learning)}${market ? MARKET_RULE : ""}` }, { role: "user", content: `Active plan context:\n${context || "No active topic filter."}${market ? `\n\n${market}` : ""}\n\nQuestion:\n${prompt}` }] }), signal: AbortSignal.timeout(MCP_MODEL_TIMEOUT_MS) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.base_resp?.status_msg || `MiniMax request failed with ${response.status}`);
-  const answer = cleanAnswer(data.choices?.[0]?.message?.content);
+  let answer = cleanAnswer(data.choices?.[0]?.message?.content);
   if (!answer) throw new Error("MiniMax returned an empty answer");
+  if (data.choices?.[0]?.finish_reason === "length") answer += "\n\n---\n\nThis answer hit the length limit and stops here. Ask me to continue from where it broke off.";
   return answer;
 }
 /**

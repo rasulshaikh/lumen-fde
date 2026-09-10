@@ -133,6 +133,27 @@ export function TestRunner({ scope, onExit }: { scope: Scope; onExit: () => void
     started.current = Date.now(); setElapsed(0);
   }, []);
 
+  const savePaper = useCallback(async () => {
+    if (saved !== "no") return;
+    setSaved("saving");
+    const minutes = Math.min(600, Math.max(0, Math.ceil(elapsed / 60000)));
+    try {
+      const response = await fetch("/api/papers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scope: scope.id,
+          label: scope.label,
+          minutes,
+          answered: paper.map((p) => ({ k: p.k, i: p.i, grade: grades[p.k] })),
+        }),
+      });
+      setSaved(response.ok ? "yes" : "failed");
+    } catch {
+      setSaved("failed");
+    }
+  }, [elapsed, grades, paper, saved, scope.id, scope.label]);
+
   if (failed) {
     return <div className="test-shell">
       <p className="test-quiet">The question bank could not be loaded, so there is no paper to sit. This is unknown, not empty.</p>
@@ -172,8 +193,9 @@ export function TestRunner({ scope, onExit }: { scope: Scope; onExit: () => void
         </li>)}</ul>
       </div>}
       <p className="test-note test-quiet">
-        Nothing here was saved. This does not touch your recall schedule or your progress, because a
-        practice run moving twenty scheduled cards is how a schedule stops being trustworthy.
+        {saved === "yes" ? "Recorded in your paper history. This did not touch your recall schedule or progress." :
+          saved === "failed" ? "The paper could not be recorded. Try again; your recall schedule and progress were not changed." :
+          "Nothing is saved until you choose Record paper. Recording this does not touch your recall schedule or progress."}
       </p>
       <p className="test-note">
         This paper was {paper.length} of the {bank.prompts.length} questions your scope owns, drawn
@@ -181,6 +203,9 @@ export function TestRunner({ scope, onExit }: { scope: Scope; onExit: () => void
         different ones.
       </p>
       <div className="test-actions">
+        <button className="quiz-action" onClick={savePaper} disabled={saved === "saving" || saved === "yes"}>
+          {saved === "saving" ? "Recording…" : saved === "yes" ? "Paper recorded" : "Record paper"}
+        </button>
         <button className="quiz-action" onClick={again}>Draw another {scope.questions} →</button>
         <button className="text-button" onClick={onExit}>Done</button>
       </div>
