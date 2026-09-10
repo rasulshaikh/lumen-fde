@@ -51,14 +51,35 @@ console.log("machines point at real plan topics");
   ck("and returns empty for a topic with no machine", machinesForTopic(117).length === 0);
 }
 
-console.log("every fault changes what you see");
+console.log("every fault changes what you see, in every combination");
 {
-  // The assertion this suite exists for. A fault that renders identically is a dead control.
+  /*
+   * The assertion this suite exists for, and the version of it that actually works.
+   *
+   * The first version tested each fault ALONE against the healthy machine, and passed while two
+   * controls were dead: TCP's "drop a data segment" did nothing whenever "drop the SYN-ACK" was
+   * already on, because the handshake branch returned before the data branch was ever read, and
+   * RAG's "chunks too large" did nothing whenever retrieval was empty. Both were reachable in two
+   * clicks and both rendered a toggle that moved and changed not one pixel.
+   *
+   * So the property is now checked against every OTHER combination as well: for each fault, and
+   * for every subset of the remaining faults, adding it must change something. With three faults
+   * per machine that is four contexts each, which is cheap and catches the whole class.
+   */
+  const subsets = (ids: string[]): string[][] =>
+    ids.reduce<string[][]>((acc, id) => [...acc, ...acc.map((set) => [...set, id])], [[]]);
+
   for (const m of MACHINES) {
     const clean = JSON.stringify(allScenes(m));
     for (const fault of m.faults) {
-      const broken = JSON.stringify(allScenes(m, [fault.id]));
-      ck(`${m.id}/${fault.id} changes the machine`, broken !== clean);
+      const others = m.faults.filter((f) => f.id !== fault.id).map((f) => f.id);
+      let deadIn: string | null = null;
+      for (const base of subsets(others)) {
+        const without = JSON.stringify(allScenes(m, base));
+        const withIt = JSON.stringify(allScenes(m, [...base, fault.id]));
+        if (without === withIt) { deadIn = base.length ? `alongside ${base.join(" + ")}` : "on its own"; break; }
+      }
+      ck(`${m.id}/${fault.id} changes the machine in every combination`, deadIn === null, deadIn ?? "");
     }
     // An id that is not a declared fault must do nothing at all, or a typo in the UI would look
     // like a working control.
@@ -239,9 +260,13 @@ console.log("the strip states a fact about the machine, never about the person")
   ck("it carries the plan topic for the recall bridge", note.topicIndex === 7);
 
   // The standing sentence is taken from the machine's own scene rather than written in the strip,
-  // so what the card says and what the diagram shows cannot drift apart.
-  const scene = machineById("k8s")!.scene(2, 0.55, ["cordon-a", "no-capacity"]);
-  ck("the standing line comes from the machine itself", note.standing === (scene.fault || scene.caption), note.standing);
+  // so what the card says and what the diagram shows cannot drift apart. It is the FIRST step whose
+  // break is visible, not the step you happened to stop on - reading the stored step printed the
+  // healthy caption for seven of the eight faults and told the reader a broken machine was fine.
+  const k8s = machineById("k8s")!;
+  const firstBreak = k8s.steps.map((_, i) => k8s.scene(i, 0.55, ["cordon-a", "no-capacity"])).find((sc) => sc.fault);
+  ck("the standing line comes from the machine itself", note.standing === firstBreak!.fault, note.standing);
+  ck("and it describes the break rather than healthy operation", note.standing !== k8s.scene(2, 0.55, []).caption);
 
   // The rules this product holds itself to. Every one of these has a refusal written down in the
   // codebase, and a returning-user prompt is exactly where they get quietly broken.
@@ -272,6 +297,28 @@ console.log("the strip is invisible until the browser says otherwise");
   const { createElement } = await import("react");
   const { Unfinished } = await import("../components/Unfinished.tsx");
   ck("nothing is rendered server-side", renderToStaticMarkup(createElement(Unfinished)) === "");
+}
+
+
+console.log("machines are reachable from the topic they explain");
+{
+  // machinesForTopic shipped with zero callers while the design spec claimed each machine is
+  // "reachable from the topic you are studying rather than floating in its own world". Pinned here
+  // so the claim cannot quietly become false again.
+  const { readFileSync } = await import("node:fs");
+  const provider = readFileSync("components/AppState.tsx", "utf8");
+  ck("the syllabus panel calls machinesForTopic", /machinesForTopic\(/.test(provider));
+  ck("and links to the specific machine, not the bare tab", /\/machines\?m=\$\{m\.id\}/.test(provider));
+
+  // And the deep link it builds has to resolve on the other end.
+  const runner = readFileSync("components/Machine.tsx", "utf8");
+  ck("the machines page reads the m parameter", /URLSearchParams\(window\.location\.search\)\.get\("m"\)/.test(runner));
+  ck("and validates it before using it", /machineById\(wanted\)/.test(runner));
+
+  // Every machine must be reachable from at least one real topic, or it is unreachable content.
+  for (const m of MACHINES) {
+    ck(`${m.id} is reachable from a topic`, m.topicIndices.some((i) => machinesForTopic(i).some((x) => x.id === m.id)));
+  }
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

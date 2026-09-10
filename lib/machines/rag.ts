@@ -32,7 +32,7 @@ const EDGES = [
   { from: "rank", to: "llm", dashed: true },
   { from: "store", to: "llm", dashed: true },
   { from: "llm", to: "q", dashed: true },
-  { from: "q", to: "llm", label: "question", dashed: true },
+  { from: "q", to: "llm", dashed: true },
 ];
 
 export const rag: Machine = {
@@ -68,7 +68,7 @@ export const rag: Machine = {
           tokens: [{ id: "r", from: "emb", to: "store", at: Math.min(p, 0.5), label: "nearest 20", tone: "fault" }],
           caption: "The store returns nothing at all.",
           detail: "Note what did NOT happen: no error, no exception, no alert. An empty result set is a perfectly valid response to a query, and everything downstream treats it as one.",
-          fault: "Zero chunks retrieved." };
+          fault: `Zero chunks retrieved.${fat ? " Chunk size is set too large as well, and it cannot matter: there is nothing to fit." : ""}${skipRank ? " The reranker is off as well, and that cannot matter either." : ""}` };
       }
       return { nodes: [q(), emb(), store(fat ? "20 chunks, 2000 tok each" : "20 chunks"), rank(undefined, skipRank), llm()], edges: EDGES,
         tokens: [{ id: "r", from: "emb", to: "store", at: p, label: "nearest 20", tone: fat ? "slow" : "normal" }],
@@ -82,7 +82,7 @@ export const rag: Machine = {
         return { nodes: [q(), emb(), store("0 matches", true), rank("nothing to rank", true), llm()], edges: EDGES, tokens: [],
           caption: "There is nothing to rerank.",
           detail: "Every stage after retrieval degrades gracefully to doing nothing, which is exactly why the failure travels all the way to the answer without meeting resistance.",
-          fault: "The pipeline is still perfectly healthy. It is just empty." };
+          fault: `The pipeline is still perfectly healthy. It is just empty.${skipRank ? " You also turned the reranker off, which changes nothing while there is nothing to rank - two settings, one of them invisible." : ""}` };
       }
       if (skipRank) {
         return { nodes: [q(), emb(), store("20 chunks"), rank("skipped", true), llm()], edges: EDGES,
@@ -103,7 +103,7 @@ export const rag: Machine = {
           tokens: [{ id: "c", from: "q", to: "llm", at: p, label: "question, no context", tone: "fault" }],
           caption: "The model receives the question and no supporting context.",
           detail: "This is the moment the system stops being a retrieval system and becomes a chatbot, without changing a line of code or logging anything unusual.",
-          fault: "Nothing grounds the answer that is about to be produced." };
+          fault: `Nothing grounds the answer that is about to be produced.${fat ? " The chunk-size setting you changed is still wrong and still irrelevant: a budget cannot truncate an empty list." : ""}` };
       }
       return { nodes: [q(), emb(), store(), rank(undefined, skipRank), llm(`${fits} chunks fit`)], edges: EDGES,
         tokens: [{ id: "c", from: skipRank ? "store" : "rank", to: "llm", at: p, label: `top ${fits}`, tone: fat ? "slow" : "normal" }],

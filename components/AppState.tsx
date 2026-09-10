@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { machinesForTopic } from "@/lib/machines";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { compRows, months, planRows, topicKey, tracks, verdictTier, type Row, type Syllabus } from "./shared";
 import { computeStreak } from "@/lib/motivation";
@@ -239,7 +241,25 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   const renderSyllabus = useCallback((idx: number) => {
     const s = curriculum[String(idx)];
-    if (s) return <SyllabusView s={s} row={planRows[idx]} />;
+    /*
+     * The machine for this topic, offered where the topic is being read.
+     *
+     * `machinesForTopic` existed with zero callers, while the design spec claimed each machine is
+     * "reachable from the topic you are studying rather than floating in its own world". It was
+     * not: the only way to a machine was the Machines tab. That is defect class 2 - a document
+     * asserting something the code does not do - and this is the code catching up rather than the
+     * sentence being deleted.
+     */
+    const machines = machinesForTopic(idx);
+    const strip = machines.length ? (
+      <p className="syllabus-machine">
+        {machines.map((m) => (
+          <Link key={m.id} href={`/machines?m=${m.id}`}>Step through {m.title.split(":")[0]} and break it</Link>
+        ))}
+      </p>
+    ) : null;
+    if (s) return <>{strip}<SyllabusView s={s} row={planRows[idx]} /></>;
+    if (strip) return <>{strip}<p className="syllabus-empty">No deep syllabus for this topic yet.</p></>;
     if (curriculumState === "loading") return <p className="syllabus-empty">Loading the syllabus…</p>;
     if (curriculumState === "error") return <p className="syllabus-empty">The syllabus could not be loaded. Refresh and try again.</p>;
     return <p className="syllabus-empty">No deep syllabus for this topic yet.</p>;

@@ -130,7 +130,7 @@ export function IncidentView({ incident }: { incident: IncidentDef }) {
           <p className="inc-seen">
             {seen.length === 0
               ? "You fixed it without running any of the commands that carry the evidence. That works here. It does not work on a system you have not seen before."
-              : `The evidence was on your screen in ${seen.map((p) => p.cmd.split(" ").slice(0, 2).join(" ")).join(", ")}.`}
+              : `The evidence was on your screen in ${seen.map((p) => p.cmd).join(" / ")}.`}
           </p>
         </div>
       ) : null}
@@ -144,7 +144,7 @@ export function IncidentView({ incident }: { incident: IncidentDef }) {
       ) : null}
 
       <div className="inc-actions">
-        {incident.machineId ? <Link className="text-button" href="/machines">Stuck? Step through the system underneath</Link> : null}
+        {incident.machineId ? <Link className="text-button" href={`/machines?m=${incident.machineId}`}>Stuck? Step through the system underneath</Link> : null}
         {!over ? <button type="button" className="text-button" onClick={() => setGaveUp(true)}>Tell me what it was</button> : null}
         {over ? <button type="button" className="text-button" onClick={() => { setRan([]); setTried([]); setResolved(false); setGaveUp(false); }}>Run it again from the top</button> : null}
       </div>

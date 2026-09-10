@@ -143,16 +143,21 @@ console.log("every view gets its own angle, and they are far enough apart to see
   // A hash of the path put /plan at 1.200 rad and /practice at 1.199 - one milliradian, invisible.
   // Quantising to twelve slots collided four of nine. Nine items into twelve slots collide by
   // birthday however good the mixing is, so the nav's ordering does the job instead.
-  const routes = ["/overview", "/plan", "/curriculum", "/machines", "/practice", "/market", "/paths", "/library", "/sandbox"];
-  const angles = routes.map((r, i) => turnFor(r, i));
+  const { NAV } = await import("../components/Nav.tsx");
+  const routes = NAV.map((item: { href: string }) => item.href);
+  const angles = routes.map((r: string, i: number) => turnFor(r, i));
+  ck("the test covers every nav entry, not a list someone typed", routes.length === NAV.length && routes.length >= 9, `${routes.length}`);
 
   ck("every route gets a distinct angle", new Set(angles).size === routes.length, `${new Set(angles).size} of ${routes.length}`);
   ck("all angles are inside one turn", angles.every((a) => a >= 0 && a < Math.PI * 2));
   ck("nothing is NaN", angles.every((a) => Number.isFinite(a)));
 
-  const sorted = [...angles].sort((a, b) => a - b);
+  const sorted = [...angles].sort((a: number, b: number) => a - b);
   let smallest = Infinity;
   for (let i = 1; i < sorted.length; i++) smallest = Math.min(smallest, sorted[i] - sorted[i - 1]);
+  // The wrap. These are angles on a circle, so the first and last are neighbours, and measuring
+  // only the linear gaps meant the one pair that straddles zero was never compared.
+  smallest = Math.min(smallest, sorted[0] + Math.PI * 2 - sorted[sorted.length - 1]);
   const deg = (smallest * 180) / Math.PI;
   // 15 degrees is the line between "a different view" and "the same view rendered twice".
   ck("the closest pair is still visibly different", deg > 15, `${deg.toFixed(1)} deg apart`);

@@ -67,15 +67,36 @@ export const tcp: Machine = {
           fault: "You dropped the SYN-ACK." };
       }
       if (s === 2) {
+        if (lostData) {
+          return { ...base, nodes: [{ ...CLIENT, note: "retransmit 1" }, { ...SERVER, note: "ESTABLISHED" }],
+            tokens: [{ id: "syn2", from: "client", to: "server", at: p, label: "SYN (retry)", tone: "retry" }],
+            caption: "The timer fires, the client resends, and this time the connection opens.",
+            detail: "One lost packet cost a whole retransmission timeout before any payload could move. This is why a lossy link shows up as latency rather than as errors, and why tail latency is the number worth watching.",
+            fault: "Recovered from the dropped SYN-ACK. The data segment you also dropped is still ahead." };
+        }
         return { ...base, nodes: [{ ...CLIENT, note: "RTO running" }, { ...SERVER, note: "SYN-RECEIVED" }], tokens: [],
           caption: "Nothing is in flight. The client is waiting on a timer.",
           detail: "This is the part worth saying out loud in an interview: the client cannot tell a lost packet from a slow server from a server that has gone away. It has no signal. Only a timer.",
           fault: "No acknowledgement is coming." };
       }
       if (s === 3) {
+        if (lostData) {
+          return { ...base, nodes: [{ ...CLIENT, note: "RTO running" }, { ...SERVER, note: "ESTABLISHED" }],
+            tokens: [{ id: "data", from: "client", to: "server", at: Math.min(p, LOST_AT), label: "1460 bytes", tone: "fault" }],
+            caption: "Now the payload is lost too, on a connection that was already late.",
+            detail: "Two timeouts on one request. The application still sees one slow call, and the only place either loss is visible is a retransmission counter nobody has open.",
+            fault: "You dropped both the SYN-ACK and the data." };
+        }
         return { ...base, nodes: [{ ...CLIENT, note: "retransmit 1" }, SERVER], tokens: [{ id: "syn2", from: "client", to: "server", at: p, label: "SYN (retry)", tone: "retry" }],
           caption: "The timer fires. The client sends the same SYN again.",
           detail: "The wait doubles after each attempt. Exponential backoff is how a network full of retrying clients avoids becoming a network full of retrying clients." };
+      }
+      if (lostData) {
+        return { ...base, nodes: [{ ...CLIENT, note: "retransmit 2" }, { ...SERVER, note: "ESTABLISHED" }],
+          tokens: [{ id: "data2", from: "client", to: "server", at: p, label: "1460 bytes (retry)", tone: "retry" }],
+          caption: "The client resends the bytes. This time they land.",
+          detail: "Every backoff doubled the wait, so a request that should have taken one round trip took several. Nothing above the socket ever learned why, which is the whole reason a timeout budget is guesswork until you measure the link.",
+          fault: "Both losses recovered. The caller only ever saw one slow request." };
       }
       return { ...base, tokens: [{ id: "synack2", from: "server", to: "client", at: p, label: "SYN-ACK", tone: "normal" }],
         caption: "The second answer gets through. The connection opens, late.",

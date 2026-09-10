@@ -22,9 +22,11 @@
  *
  * ## Shape
  *
- * Same discipline as the machines: pure functions of state. `probe(id, ran)` returns terminal
- * output, `resolve(fixId, ran)` returns what happened. Nothing reads a clock, nothing holds
- * internal state, everything is asserted without a DOM.
+ * Same discipline as the machines, though simpler: an incident is DATA, not a function. Probe
+ * output and fix consequences are fixed strings on the object, looked up by id through
+ * `probeById` and `fixById`. Nothing reads a clock, nothing holds internal state, and the whole
+ * thing is assertable without a DOM. (An earlier version of this comment described a
+ * `probe(id, ran)` / `resolve(fixId, ran)` API that was never written.)
  */
 
 export type Probe = {

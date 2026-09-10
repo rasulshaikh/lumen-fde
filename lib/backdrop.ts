@@ -60,6 +60,9 @@ export const CAMERA = 4;
  */
 export const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
+/** Where off-nav routes start on the lattice: past any plausible nav length. */
+export const FALLBACK_OFFSET = 32;
+
 export function turnFor(pathname: string, index = -1): number {
   if (index >= 0) return (index * GOLDEN_ANGLE) % (Math.PI * 2);
 
@@ -68,9 +71,20 @@ export function turnFor(pathname: string, index = -1): number {
     h ^= pathname.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
-  // >>> 0 because Math.imul returns a signed 32-bit int, and a negative here would put the form
-  // through a mirrored orientation rather than a rotated one.
-  return ((h >>> 0) / 4294967296) * (Math.PI * 2);
+  // Placed on the SAME golden-angle lattice as the nav, at an index past its end, rather than
+  // anywhere in a continuous circle. Free-floating, /design landed two degrees from /curriculum,
+  // which is the near-miss case: close enough to look like a rendering fault rather than a
+  // different view. On the lattice, two off-nav paths either get clearly different angles or the
+  // exact same one, and identical is fine - two 404s are the same view.
+  //
+  // What this does NOT give, stated because the nav guarantee is easy to over-read: an off-nav
+  // angle can still sit a few degrees from a nav angle. The fifteen-degree floor is a promise
+  // about the nine routes you actually navigate between, and nothing else. Nobody moves between
+  // /curriculum and a 404 as a matter of routine.
+  //
+  // >>> 0 because Math.imul returns a signed 32-bit int, and a negative index would walk the
+  // lattice backwards into the routes it is meant to sit clear of.
+  return (((h >>> 0) % 8) + FALLBACK_OFFSET) * GOLDEN_ANGLE % (Math.PI * 2);
 }
 
 export function frame(t: number, width: number, height: number, turn = 0): Frame {

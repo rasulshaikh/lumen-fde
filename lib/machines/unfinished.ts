@@ -102,7 +102,18 @@ export function unfinishedNote(found: { state: Unfinished; machine: Machine } | 
     ? labels[0]
     : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
 
-  const scene = machine.scene(state.step, 0.55, state.faults);
+  /*
+   * The first step where the break is actually visible, not necessarily the step you stopped on.
+   *
+   * This used to read the scene at the stored step and take `scene.fault || scene.caption`. Most
+   * steps set no `fault` field even with faults active - the break has not bitten yet at that
+   * point in the sequence - so for seven of the eight faults the card printed the HEALTHY caption
+   * and told the reader a broken machine was working normally.
+   */
+  const withFault = machine.steps
+    .map((_, i) => machine.scene(i, 0.55, state.faults))
+    .find((sc) => sc.fault);
+  const scene = withFault ?? machine.scene(state.step, 0.55, state.faults);
   return {
     machineId: machine.id,
     title: machine.title.split(":")[0],

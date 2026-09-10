@@ -99,10 +99,28 @@ export const k8s: Machine = {
     }
 
     if (s === 4) {
+      if (feasible === 0) {
+        return { nodes: [api("pod: Pending 6m"), sched("still nothing to bind"), nodeA("cordoned", true, true), nodeB("insufficient memory", true, true)], edges: EDGES, tokens: [],
+          caption: "No kubelet has anything to start. There is no container.",
+          detail: "Every step past scheduling is a step this pod never reaches. That is what makes Pending so easy to misread as a slow start: the sequence has not stalled somewhere in the middle, it never began.",
+          fault: "Nothing was bound, so nothing is starting." };
+      }
       return { nodes: [api("pod: ContainerCreating"), sched("done"), nodeA(target === "nodeA" ? "pulling image" : "", cordoned), nodeB(target === "nodeB" ? "pulling image" : "", full)], edges: EDGES,
         tokens: [{ id: "start", from: "api", to: target, at: p, label: "kubelet: start", tone: "normal" }],
         caption: "The kubelet on the assigned node pulls the image and starts the container.",
         detail: "Running is not Ready. The container has a process; nothing yet says that process can serve traffic, and the Service will not send it any until something does." };
+    }
+
+    if (feasible === 0) {
+      return { nodes: [api("pod: Pending 6m"), sched("no binding"), nodeA("cordoned", true, true), nodeB("insufficient memory", true, true)], edges: EDGES, tokens: [],
+        caption: "Still Pending. Readiness is not a question that gets asked of a pod that never ran.",
+        detail: "A Service with no Ready endpoints returns connection refused, and the pod that would have served is still a row in etcd with an empty nodeName. Nothing here will change on its own.",
+        // Named rather than swallowed. A probe setting that cannot matter because nothing is
+        // running is its own lesson, and a toggle that changes nothing on screen teaches that the
+        // thing you changed does not matter - which is the opposite of true here.
+        fault: tight
+          ? "Uncordon a node or lower the request. The probe timeout you also set is real and completely invisible from here: a probe cannot fail against a container that was never created, so fixing scheduling will reveal a second outage rather than end this one."
+          : "Uncordon a node or lower the request. Nothing else in this sequence can start." };
     }
 
     if (tight) {

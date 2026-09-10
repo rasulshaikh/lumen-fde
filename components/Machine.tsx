@@ -69,26 +69,67 @@ export function MachineView({ machine, initial }: { machine: MachineDef; initial
   const last = machine.steps.length - 1;
   const scene = useMemo(() => machine.scene(step, ease(phase), faults), [machine, step, phase, faults]);
 
+  /**
+   * Whether the reader asked for reduced motion.
+   *
+   * Read in an effect into state, never during render: `matchMedia` during render makes the server
+   * and the client disagree about the first paint. Held as state rather than a ref because the
+   * render actually branches on it.
+   */
+  const [still, setStill] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setStill(mq.matches);
+    const onChange = () => setStill(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
   // The frame loop. `startedAt` is set inside the effect, never during render.
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
   useEffect(() => {
     if (!playing) { startedAt.current = null; return; }
+
+    // Reduced motion still advances the sequence - it is the content - but places each step at its
+    // end state instead of sliding toward it. A timer rather than a frame loop, because there is
+    // nothing to interpolate.
+    if (still) {
+      setPhase(1);
+      const id = window.setInterval(() => {
+        setStep((s) => { if (s >= last) { setPlaying(false); return s; } return s + 1; });
+        setPhase(1);
+      }, STEP_MS);
+      return () => window.clearInterval(id);
+    }
+
     const tick = (now: number) => {
-      if (startedAt.current === null) startedAt.current = now;
+      /*
+       * Resuming picks up where the pause left it.
+       *
+       * `startedAt = now` would restart the current step from phase 0, so pressing Pause halfway
+       * and then Play visibly rewound the packet to the node it had already left. Seeding the
+       * clock backwards by however much of the step is already done makes Play a resume.
+       */
+      if (startedAt.current === null) startedAt.current = now - phaseRef.current * STEP_MS;
       const p = Math.min(1, (now - startedAt.current) / STEP_MS);
       setPhase(p);
       if (p >= 1) {
         startedAt.current = null;
         setStep((s) => {
+          // Last step: stop with the token where it arrived. Resetting phase to 0 here parked the
+          // final packet back at its origin the instant the sequence finished, so the machine ended
+          // on a frame that had never been part of it.
           if (s >= last) { setPlaying(false); return s; }
+          setPhase(0);
           return s + 1;
         });
-        setPhase(0);
       }
       raf.current = requestAnimationFrame(tick);
     };
     raf.current = requestAnimationFrame(tick);
     return () => { if (raf.current !== null) cancelAnimationFrame(raf.current); raf.current = null; };
-  }, [playing, last]);
+  }, [playing, last, still]);
 
   /*
    * Remember what is broken, so it is still broken when you come back.
@@ -98,7 +139,26 @@ export function MachineView({ machine, initial }: { machine: MachineDef; initial
    * clears the key rather than storing an empty fault list: nothing broken is not something to
    * return to, and a bookmark pointing at a working system is just noise on the Overview.
    */
+  const touched = useRef(false);
   useEffect(() => {
+    /*
+     * Nothing is written until the reader actually changes something, and that guard is the whole
+     * fix for a bug that made this feature never work at all.
+     *
+     * React commits passive effects bottom-up, child before parent. This effect lives in
+     * MachineView; the one that RESTORES the saved state lives in its parent, Machines. So on
+     * every mount of /machines this ran first, with `faults` still empty, took the `removeItem`
+     * branch, and deleted the record - and then the parent read the key it had just erased.
+     *
+     * The result was worse than "resume does not work". The Overview strip rendered correctly and
+     * its "Pick it back up" button was destructive: clicking it landed you on TCP with nothing
+     * broken AND wiped the bookmark, so the strip was gone afterwards too. Reproduced under
+     * hydrateRoot inside StrictMode, which is the shape Next actually renders.
+     *
+     * A mount is not a user action, so it no longer writes. Clearing on purpose still works,
+     * because "Put it all back" and un-toggling a fault both set `touched` first.
+     */
+    if (!touched.current) return;
     try {
       if (faults.length) localStorage.setItem(MACHINE_STATE_KEY, toStorage(machine.id, faults, step));
       else localStorage.removeItem(MACHINE_STATE_KEY);
@@ -106,6 +166,7 @@ export function MachineView({ machine, initial }: { machine: MachineDef; initial
   }, [machine.id, faults, step]);
 
   const go = useCallback((next: number) => {
+    touched.current = true;
     setPlaying(false);
     setStep(Math.max(0, Math.min(last, next)));
     // Mid-step rather than 0, so a stepped-to scene shows its token in flight rather than glued to
@@ -114,6 +175,7 @@ export function MachineView({ machine, initial }: { machine: MachineDef; initial
   }, [last]);
 
   const toggleFault = useCallback((id: string) => {
+    touched.current = true;
     setFaults((current) => (current.includes(id) ? current.filter((f) => f !== id) : [...current, id]));
     // Back to the start. A fault that appears halfway through leaves the learner looking at a state
     // the fault did not actually produce.
@@ -193,7 +255,7 @@ export function MachineView({ machine, initial }: { machine: MachineDef; initial
             </button>
           );
         })}
-        {faults.length ? <button type="button" className="text-button" onClick={() => { setFaults([]); setPlaying(false); setStep(0); setPhase(0.55); }}>Put it all back</button> : null}
+        {faults.length ? <button type="button" className="text-button" onClick={() => { touched.current = true; setFaults([]); setPlaying(false); setStep(0); setPhase(0.55); }}>Put it all back</button> : null}
       </div>
     </section>
   );
@@ -227,6 +289,21 @@ export function Machines() {
   useEffect(() => {
     if (restored) return;
     setRestored(true);
+
+    /*
+     * A machine named in the URL wins over the saved one. This is how the incident sim's "Stuck?
+     * Step through the system underneath" arrives, and it has to land on the system that incident
+     * is about - it linked to a bare /machines before, so the RAG incident opened TCP.
+     *
+     * Read from window.location rather than useSearchParams: the hook opts the whole route into
+     * dynamic rendering and wants a Suspense boundary, which is a lot of machinery for one
+     * optional string. Inside an effect there is no hydration risk either way.
+     */
+    try {
+      const wanted = new URLSearchParams(window.location.search).get("m");
+      if (wanted && machineById(wanted)) { setId(wanted); return; }
+    } catch { /* no window, no query - fall through to the saved state */ }
+
     let raw: string | null = null;
     try { raw = localStorage.getItem(MACHINE_STATE_KEY); } catch { return; }
     const found = readUnfinished(raw, MACHINES);

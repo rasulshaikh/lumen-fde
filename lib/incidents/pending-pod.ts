@@ -40,8 +40,9 @@ export const pendingPod: Incident = {
       cmd: "kubectl logs checkout-7d9f4c8b5-2xk4p -n checkout",
       hint: "The app logs the customer says are empty.",
       output:
-        "Error from server (BadRequest): container \"checkout\" in pod \"checkout-7d9f4c8b5-2xk4p\" is waiting to start: ContainerCreating\n\n" +
-        "(There are no logs because there is no container. Nothing has been scheduled to run.)",
+        "Error from server (BadRequest): pod checkout-7d9f4c8b5-2xk4p does not have a host assigned\n\n" +
+        "(Not \"no logs yet\" - no host. The API server is telling you the pod has never been placed " +
+        "on a node, which is a scheduling answer arriving through a logging command.)",
     },
     {
       id: "describe",
@@ -75,8 +76,8 @@ export const pendingPod: Incident = {
         "  Resource   Requests      Limits\n" +
         "  --------   --------      ------\n" +
         "  cpu        1400m (35%)   3200m (80%)\n" +
-        "  memory     11Gi (73%)    14Gi (93%)\n\n" +
-        "(16Gi allocatable. 4Gi of requests left. The pod asks for 6Gi.)",
+        "  memory     12Gi (75%)    14Gi (87%)\n\n" +
+        "(16Gi allocatable, 12Gi requested, so 4Gi of requests left. The pod asks for 6Gi.)",
       decisive: true,
     },
     {
@@ -125,9 +126,12 @@ export const pendingPod: Incident = {
       cmd: "kubectl set resources deploy/checkout -n checkout --requests=memory=2Gi",
       resolves: false,
       effect:
-        "The pod schedules onto node-b and serves. It is also now requesting less memory than the " +
-        "version was raised to need, on the only node still accepting work. It survives the " +
-        "afternoon and is OOMKilled under evening load.",
+        "The pod schedules onto node-b and serves. It is also now requesting less than the version " +
+        "was raised to need, which does not cap what it can use - the limit is unchanged - but does " +
+        "drop it from Guaranteed to Burstable. Under evening load node-b comes under memory " +
+        "pressure and the kubelet evicts the lowest-QoS pod on the node, which is now this one. " +
+        "Requests decide scheduling and eviction order; limits decide OOMKills. They are not the " +
+        "same lever and this fix moved the wrong one.",
     },
     {
       id: "scale",

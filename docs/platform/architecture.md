@@ -145,7 +145,7 @@ public landing page took that path; `/` now belongs to a signed-out visitor (§3
 `Sandbox` renders `Terminal` from `app/terminal.tsx`; the recall strip (`app/recall.tsx`) is
 mounted in `app/(app)/layout.tsx`, which is why it is present on every view.
 
-**9 app routes, 9 tabs - the difference is deliberate.** `/design` is a route under `app/(app)/`
+**10 app routes, 9 tabs - the difference is deliberate.** `/design` is a route under `app/(app)/`
 but is not in `NAV`. It is the living style guide: it renders the tokens the other ten views are
 drawn with and measures the five contrast floors in the browser, which is how the light-theme
 ruling failure was caught. It is about the app rather than about the plan, and the tab bar is

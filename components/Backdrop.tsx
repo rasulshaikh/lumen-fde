@@ -57,6 +57,15 @@ export function Backdrop() {
   const target = useRef(0);
   const turn = useRef(0);
   /**
+   * A handle on the draw loop's `start`, so a route change can force a repaint.
+   *
+   * Under `prefers-reduced-motion` the loop draws exactly one frame and stops, and `start` was
+   * only called on mount, resize, visibility and theme change - never on navigation. So the new
+   * angle was computed on every route change and never painted. Someone who asked for reduced
+   * motion got a backdrop frozen on whichever view they happened to load first.
+   */
+  const repaint = useRef<(() => void) | null>(null);
+  /**
    * Whether the first angle has been placed.
    *
    * This was `if (turn.current === 0)`, which is the same test only if no route's angle is ever
@@ -74,6 +83,8 @@ export function Backdrop() {
     // full page load look like a transition that had already happened. Every navigation after that
     // eases, including away from a route whose angle happens to be zero.
     if (!placed.current) { placed.current = true; turn.current = target.current; }
+    // Only needed when nothing is looping. With motion on, the next frame picks the target up.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) repaint.current?.();
   }, [pathname]);
 
   useEffect(() => {
@@ -186,6 +197,7 @@ export function Backdrop() {
     const themed = new MutationObserver(() => { readColour(); if (still.matches || document.hidden) draw(0); });
     themed.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class"] });
 
+    repaint.current = start;
     start();
     window.addEventListener("resize", onResize);
     document.addEventListener("visibilitychange", start);
@@ -195,6 +207,7 @@ export function Backdrop() {
       observer.disconnect();
       themed.disconnect();
       window.removeEventListener("resize", onResize);
+      repaint.current = null;
       document.removeEventListener("visibilitychange", start);
       still.removeEventListener("change", start);
     };

@@ -37,7 +37,6 @@ export type SceneNode = {
 export type SceneEdge = {
   from: string;
   to: string;
-  label?: string;
   /** A path that exists but is not carrying anything at this step. */
   dashed?: boolean;
 };

@@ -1736,7 +1736,10 @@ html{background:var(--bg)}
 .mx-fault-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 @media(max-width:768px){.mx-sub{margin-top:-6px}.mx-controls{flex-wrap:wrap}.mx-btn{flex:1}}
-@media(prefers-reduced-motion:reduce){.mx-token circle,.mx-token .mx-token-label{transition:none}}
+/* Token motion is driven by requestAnimationFrame in components/Machine.tsx, not by a CSS
+   transition, so the rule that used to sit here suppressed something that was never declared. The
+   real preference is honoured in the component: reduced motion places each step at its end state
+   instead of animating toward it. */
 
 /* Route transition. Keyed on the pathname in app/(app)/layout.tsx so React remounts the subtree
    and this re-runs; without the key the same DOM is reused and it would play once, on first load,
@@ -1797,3 +1800,16 @@ html{background:var(--bg)}
 .inc-seen{font-size:12px;line-height:1.55;color:var(--muted);margin:0;max-width:78ch}
 .inc-actions{display:flex;gap:16px;flex-wrap:wrap;margin-top:18px}
 @media(max-width:900px){.inc-cols{grid-template-columns:1fr}}
+
+/* `.label` was used seven times across the machine, incident and unfinished components and had no
+   rule anywhere in this stylesheet, so every one of those section headings rendered as plain body
+   text. Matches the .eyebrow treatment it was written to sit beside. */
+.label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;margin:0 0 6px}
+
+/* The machine link inside a syllabus panel. `machinesForTopic` had zero callers while the design
+   spec claimed machines were reachable from the topic you are studying; this is where that becomes
+   true rather than where the sentence gets deleted. */
+.syllabus-machine{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 14px}
+.syllabus-machine a{font-size:12px;font-weight:600;color:var(--accent-text);text-decoration:none;display:inline-flex;align-items:center;min-height:36px}
+.syllabus-machine a:hover{text-decoration:underline}
+.syllabus-machine a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
