@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
-import { frame, ringAlpha, turnFor } from "@/lib/backdrop";
+import { frame, ringAlpha, stepAngle, turnFor } from "@/lib/backdrop";
 import { NAV } from "@/components/Nav";
 
 /**
@@ -137,10 +137,7 @@ export function Backdrop() {
        * Someone who asked for reduced motion gets the angle immediately. They still get a
        * different view per tab; they do not get a thing sliding across their screen to deliver it.
        */
-      let delta = target.current - turn.current;
-      while (delta > Math.PI) delta -= Math.PI * 2;
-      while (delta < -Math.PI) delta += Math.PI * 2;
-      turn.current = still.matches ? target.current : turn.current + delta * 0.045;
+      turn.current = still.matches ? target.current : stepAngle(turn.current, target.current);
 
       const { rings, spokes } = frame(t, width, height, turn.current);
       ctx.clearRect(0, 0, width, height);

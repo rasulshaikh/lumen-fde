@@ -7,7 +7,7 @@
  * identical to the last one so the whole thing is a still image pretending to animate.
  */
 import { readFileSync } from "node:fs";
-import { CAMERA, DEPTHS, RADIUS, SIDES, frame, ringAlpha, turnFor, GOLDEN_ANGLE} from "./backdrop.ts";
+import { CAMERA, DEPTHS, RADIUS, SIDES, frame, ringAlpha, turnFor, GOLDEN_ANGLE, stepAngle, TURN_RATE} from "./backdrop.ts";
 
 let fails = 0;
 const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
@@ -201,6 +201,37 @@ console.log("the home page's angle is exactly zero, which is a trap");
   // collides with the sentinel value any such guard would use.
   ck("so a zero-valued sentinel cannot distinguish 'unplaced' from 'on the home page'",
     turnFor("/overview", 0) === 0 && turnFor("/plan", 1) !== 0);
+}
+
+
+console.log("the backdrop turns rather than jumping, and takes the short way round");
+{
+  // Measured in a browser first, with a pumped clock, navigating away from /overview - the case
+  // the old guard broke, because that view's angle is exactly zero. Frame 1 reached 4.8% of the
+  // total turn and frame 144 reached 100%. That shape is what these assertions hold.
+  const from = 0, to = turnFor("/machines", 3);
+
+  let a = from;
+  a = stepAngle(a, to);
+  const firstFrame = Math.abs(a - from) / Math.abs(to - from);
+  ck("one frame moves a small fraction, not the whole way", firstFrame > 0.01 && firstFrame < 0.1, `${(firstFrame * 100).toFixed(1)}%`);
+
+  let n = 1;
+  while (Math.abs(stepAngle(a, to) - to) > 1e-4 && n < 5000) { a = stepAngle(a, to); n++; }
+  ck("and it does converge rather than creeping forever", n < 400, `${n} frames`);
+  ck("it never overshoots past the target", Math.abs(a - to) <= Math.abs(to - from));
+
+  // The wrap. 350 degrees to 10 degrees is 20 degrees forward, not 340 back.
+  const near = (deg: number) => (deg * Math.PI) / 180;
+  const moved = stepAngle(near(350), near(10)) - near(350);
+  ck("crossing zero takes the short way", moved > 0 && moved < near(2), `${((moved * 180) / Math.PI).toFixed(2)} deg`);
+  const other = stepAngle(near(10), near(350)) - near(10);
+  ck("and the same in reverse", other < 0 && other > -near(2), `${((other * 180) / Math.PI).toFixed(2)} deg`);
+
+  // Reduced motion passes rate 1 in effect by assigning the target directly; this is the same idea.
+  ck("a rate of 1 arrives immediately", Math.abs(stepAngle(1, 2, 1) - 2) < 1e-9);
+  ck("NaN cannot poison the angle", stepAngle(NaN, 1.2) === 1.2 && stepAngle(1.2, NaN) === 0);
+  ck("the rate is the one the component uses", TURN_RATE === 0.045);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
