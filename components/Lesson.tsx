@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LESSONS, dragToParam, lessonById, restingParams, type Lesson as LessonDef, type Params } from "@/lib/lessons";
-import { takeStep } from "@/lib/lessons/gradient-descent";
 
 /**
  * The lesson engine. Written once, so a lesson is data.
@@ -125,7 +124,9 @@ export function LessonView({ lesson }: { lesson: LessonDef }) {
       </div>
 
       <div className="ls-controls">
-        <button type="button" className="mx-btn mx-play" onClick={() => setParams(takeStep)}>Take a step</button>
+        {lesson.action ? (
+          <button type="button" className="mx-btn mx-play" onClick={() => setParams(lesson.action!.apply)}>{lesson.action.label}</button>
+        ) : null}
         <button type="button" className="mx-btn" onClick={() => setParams(restingParams(lesson))}>Put it back</button>
       </div>
 

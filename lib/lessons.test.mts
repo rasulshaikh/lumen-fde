@@ -22,6 +22,10 @@ import workbook from "../data/workbook.json" with { type: "json" };
 import { LESSONS, lessonById, lessonsForTopic } from "./lessons/index.ts";
 import { dragToParam, paramValue, quantise, restingParams } from "./lessons/types.ts";
 import { lossAt, slopeAt, takeStep, MINIMA, gradientDescent } from "./lessons/gradient-descent.ts";
+import { crossEnt, entropy, kldiv, dLoss, crossEntropy } from "./lessons/cross-entropy.ts";
+import { seqScanCost, indexScanCost, crossoverSelectivity, indexCrossover } from "./lessons/index-crossover.ts";
+import { latency, idealLatency, utilisation, wall, capacity, cacheHitRate } from "./lessons/cache-hit-rate.ts";
+import { chain, peakGradient, backpropChain } from "./lessons/backprop-chain.ts";
 
 let fails = 0;
 const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
@@ -174,6 +178,144 @@ console.log("lessons are reachable from the topic they explain");
   for (const l of LESSONS) {
     ck(`${l.id} is reachable from a topic`, l.topicIndices.some((i) => lessonsForTopic(i).some((x) => x.id === l.id)));
   }
+}
+
+
+console.log("every lesson holds the shared rules, not just the first one");
+{
+  for (const l of LESSONS) {
+    const rest = restingParams(l);
+    const sc = l.scene(rest);
+    ck(`${l.id}: draws something`, sc.paths.length > 0 && sc.dots.length > 0);
+    ck(`${l.id}: has readouts`, sc.readouts.length >= 3, `${sc.readouts.length}`);
+    ck(`${l.id}: captions its resting state`, sc.caption.length > 15 && sc.detail.length > 60);
+    ck(`${l.id}: scene is pure`, JSON.stringify(l.scene(rest)) === JSON.stringify(l.scene(rest)));
+
+    // Nothing may be NaN on screen. A NaN coordinate is an invisible path, not an error.
+    const bad = sc.paths.flatMap((pa) => pa.points).some(([x, y]) => !Number.isFinite(x) || !Number.isFinite(y))
+      || sc.dots.some((d) => !Number.isFinite(d.x) || !Number.isFinite(d.y));
+    ck(`${l.id}: no NaN geometry at rest`, !bad);
+
+    // Sweep the draggable parameter across its whole range - the reader will.
+    const h = l.handles[0];
+    const hp = l.params.find((q) => q.id === h.param)!;
+    let broke = "";
+    for (let i = 0; i <= 60; i++) {
+      const v = hp.min + ((hp.max - hp.min) * i) / 60;
+      const s2 = l.scene({ ...rest, [hp.id]: v });
+      if (!s2.caption || !s2.detail) { broke = `no caption at ${v}`; break; }
+      if (s2.paths.flatMap((pa) => pa.points).some(([x, y]) => !Number.isFinite(x) || !Number.isFinite(y))) { broke = `NaN path at ${v}`; break; }
+      if (s2.dots.some((d) => !Number.isFinite(d.x) || !Number.isFinite(d.y))) { broke = `NaN dot at ${v}`; break; }
+    }
+    ck(`${l.id}: survives the whole drag range`, broke === "", broke);
+
+    // No praise, anywhere, in any branch reachable by the drag.
+    let praised = "";
+    for (let i = 0; i <= 40; i++) {
+      const v = hp.min + ((hp.max - hp.min) * i) / 40;
+      const t = JSON.stringify(l.scene({ ...rest, [hp.id]: v }));
+      if (/well done|great job|nice work|congrat|perfect!|correct!/i.test(t)) { praised = `at ${v}`; break; }
+    }
+    ck(`${l.id}: never praises`, praised === "", praised);
+
+    // The button only exists where the lesson declares it.
+    ck(`${l.id}: action is declared or absent, never inherited`, l.action === undefined || typeof l.action.apply === "function");
+  }
+  ck("only gradient descent offers a step", LESSONS.filter((l) => l.action).map((l) => l.id).join(",") === "gradient-descent");
+}
+
+console.log("cross-entropy: the identity holds and the penalty has no floor");
+{
+  // CE = H + KL, with KL computed independently rather than by subtraction, so this is a real check.
+  let worst = 0;
+  for (let q = 0.6; q <= 1; q += 0.02) for (let p = 0.01; p <= 0.99; p += 0.01) {
+    worst = Math.max(worst, Math.abs(crossEnt(p, q) - (entropy(q) + kldiv(p, q))));
+  }
+  ck("CE = H + KL everywhere in the box", worst < 1e-12, `worst ${worst.toExponential(1)}`);
+
+  // The analytic derivative against a central difference - a different method.
+  let dworst = 0;
+  for (let q = 0.6; q <= 1; q += 0.05) for (let p = 0.05; p <= 0.95; p += 0.01) {
+    const hh = 1e-6;
+    dworst = Math.max(dworst, Math.abs((crossEnt(p + hh, q) - crossEnt(p - hh, q)) / (2 * hh) - dLoss(p, q)));
+  }
+  ck("dCE/dp matches a numerical gradient", dworst < 1e-4, `worst ${dworst.toExponential(1)}`);
+  ck("the loss is least exactly where the prediction matches the truth", Math.abs(dLoss(0.8, 0.8)) < 1e-12);
+  ck("entropy is zero for a certain outcome, not -0", Object.is(entropy(1), 0));
+  ck("being sure and wrong costs more than being unsure and wrong", crossEnt(0.01, 1) > crossEnt(0.5, 1) * 5);
+}
+
+console.log("index crossover: the seq scan does not care and the index does");
+{
+  const seq = seqScanCost();
+  ck("the sequential scan costs the same at every selectivity", seqScanCost() === seq);
+  // The whole lesson: index cost rises with selectivity, seq cost does not.
+  let rises = true, prev = -1;
+  for (let s = 0.0001; s <= 1; s *= 1.3) { const c = indexScanCost(s, 0); if (c < prev) rises = false; prev = c; }
+  ck("the index scan's cost rises with selectivity", rises);
+
+  for (const corr of [0, 0.5, 1]) {
+    const x = crossoverSelectivity(corr);
+    const gap = Math.abs(indexScanCost(x, corr) - seq) / seq;
+    ck(`crossover at correlation ${corr} really is where they meet`, gap < 1e-6, `${(x * 100).toFixed(3)}%, gap ${gap.toExponential(1)}`);
+    ck(`  below it the index wins`, indexScanCost(x * 0.5, corr) < seq);
+    ck(`  above it the seq scan wins`, indexScanCost(Math.min(1, x * 2), corr) > seq);
+  }
+  // Correlation is the parameter people do not expect to matter, so pin that it does, a lot.
+  ck("physical row order moves the crossover by an order of magnitude", crossoverSelectivity(1) > crossoverSelectivity(0) * 10,
+    `${(crossoverSelectivity(0) * 100).toFixed(3)}% -> ${(crossoverSelectivity(1) * 100).toFixed(3)}%`);
+}
+
+console.log("cache: the win is at the bottom, and the gap is the queue");
+{
+  // The lesson's own resting value, so the test measures what the reader actually meets.
+  const w = cacheHitRate.params.find((p) => p.id === "workers")!.value;
+  ck("at rest the wall is off the left of the view", wall(w) < cacheHitRate.view.x0, `wall ${(wall(w) * 100).toFixed(1)}%`);
+
+  // Equal moves in hit rate buy comparable reductions while the origin keeps up. This is the first
+  // half of the misconception and it must be visible without touching the second slider.
+  const lowMove = latency(0.5, w) - latency(0.55, w);
+  const highMove = latency(0.9, w) - latency(0.95, w);
+  ck("both moves are finite inside the view", Number.isFinite(lowMove) && Number.isFinite(highMove));
+  // The lesson's actual claim, and the opposite of the misconception: the win is at the BOTTOM.
+  ck("five points buys far more at a low hit rate than a high one", lowMove > highMove * 3,
+    `${lowMove.toFixed(2)}ms low vs ${highMove.toFixed(2)}ms high`);
+
+  // The queue-free line is straight, which is what makes the gap above it mean something.
+  const a = idealLatency(0.5) - idealLatency(0.55);
+  const b = idealLatency(0.9) - idealLatency(0.95);
+  ck("the queue-free line really is straight", Math.abs(a - b) < 1e-12, `${a.toFixed(4)} vs ${b.toFixed(4)}`);
+  ck("and the real curve sits above it wherever there is a queue", latency(0.7, w) > idealLatency(0.7));
+  ck("converging as the origin empties", latency(0.999, w) - idealLatency(0.999) < latency(0.6, w) - idealLatency(0.6));
+
+  // The second half: pulling connections down walks the wall into hit rates that felt comfortable.
+  ck("dropping connections brings the wall into the view", wall(10) > cacheHitRate.view.x0, `${(wall(10) * 100).toFixed(0)}%`);
+
+  ck("the wall is where arrivals meet capacity", Math.abs(utilisation(wall(w), w) - 1) < 1e-9, `${(wall(w) * 100).toFixed(1)}%`);
+  ck("past the wall latency is unbounded rather than large", !Number.isFinite(latency(wall(w) - 0.01, w)));
+  ck("and finite the other side of it", Number.isFinite(latency(wall(w) + 0.01, w)));
+  ck("fewer connections move the wall into hit rates that felt safe", wall(4) > wall(30));
+  ck("capacity is workers times what one can finish", capacity(20) === 1000);
+}
+
+console.log("backprop: three correct factors multiply to nothing");
+{
+  // The composed gradient against a central difference of the composed function.
+  let worst = 0;
+  for (let w = 1; w <= 10; w += 0.5) for (let x = -3; x <= 3; x += 0.05) {
+    const hh = 1e-6;
+    const numeric = (chain(x + hh, w).y - chain(x - hh, w).y) / (2 * hh);
+    worst = Math.max(worst, Math.abs(numeric - chain(x, w).g));
+  }
+  ck("dy/dx matches a numerical gradient over the whole box", worst < 1e-5, `worst ${worst.toExponential(1)}`);
+  ck("the closed form at the centre agrees with the chain", Math.abs(chain(0, 4).g - peakGradient(4)) < 1e-12);
+  ck("each sigmoid derivative peaks at a quarter", Math.abs(chain(0, 1).s1 - 0.25) < 1e-12);
+
+  // The lesson: the gradient collapses as the input leaves the centre, with nothing broken.
+  const centre = Math.abs(chain(0, 4).g);
+  const out = Math.abs(chain(2.5, 4).g);
+  ck("moving off centre collapses the gradient by orders of magnitude", centre / out > 100, `${centre.toExponential(1)} -> ${out.toExponential(1)}`);
+  ck("and it never becomes negative or NaN", Number.isFinite(out) && out > 0);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

@@ -52,6 +52,7 @@ export const gradientDescent: Lesson = {
   ],
   // The ball IS the control. No slider for position: you grab the thing on the curve.
   handles: [{ id: "ball", param: "x", axis: "x" }],
+  action: { label: "Take a step", apply: (p) => takeStep(p) },
 
   scene(params: Params): LessonScene {
     const x = paramValue(gradientDescent, params, "x");

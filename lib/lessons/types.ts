@@ -91,6 +91,16 @@ export type Lesson = {
   handles: Handle[];
   /** PURE. Numbers in, drawing out. */
   scene: (params: Params) => LessonScene;
+  /**
+   * An action the lesson offers beyond dragging, if it has one.
+   *
+   * Only gradient descent does: "take a step" is the algorithm, so watching it move on its own is
+   * part of the lesson. The other four are pure manipulation and offer nothing here - and the
+   * button is only rendered when this exists, because a control wired to another lesson's function
+   * is the dead-control defect this repo keeps producing. It shipped that way for about ten
+   * minutes.
+   */
+  action?: { label: string; apply: (params: Params) => Params };
 };
 
 /** Clamps a parameter into its declared range, tolerating a hand-edited or missing value. */
