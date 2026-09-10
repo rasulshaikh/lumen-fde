@@ -4,6 +4,10 @@ import { cpuThrottling } from "./cpu-throttling";
 import { histogramP99 } from "./histogram-p99";
 import { scalabilityLaw } from "./scalability-law";
 import { asyncBlocking } from "./async-blocking";
+import { kvCache } from "./kv-cache";
+import { baseRate } from "./base-rate";
+import { dimensionality } from "./dimensionality";
+import { stepSize } from "./step-size";
 import { indexCrossover } from "./index-crossover";
 import { cacheHitRate } from "./cache-hit-rate";
 import { gradientDescent } from "./gradient-descent";
@@ -12,8 +16,9 @@ import { backpropChain } from "./backprop-chain";
 import type { Lesson } from "./types";
 
 export const LESSONS: Lesson[] = [
-  bandwidthDelay, cpuThrottling, histogramP99, scalabilityLaw, asyncBlocking,
-  indexCrossover, cacheHitRate, gradientDescent, crossEntropy, backpropChain,
+  bandwidthDelay, cpuThrottling, kvCache, histogramP99, scalabilityLaw, asyncBlocking,
+  indexCrossover, cacheHitRate, baseRate, gradientDescent, crossEntropy, dimensionality,
+  stepSize, backpropChain,
 ];
 
 export const lessonById = (id: string): Lesson | null => LESSONS.find((l) => l.id === id) ?? null;

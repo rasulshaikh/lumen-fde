@@ -31,6 +31,10 @@ import { wallMs, unthrottledMs, meanUtilisation, isThrottled, quotaPerPeriod } f
 import { reportedP99, isPinned, cdf, TOP_BUCKET } from "./lessons/histogram-p99.ts";
 import { usl, peakAt, residence } from "./lessons/scalability-law.ts";
 import { asyncCeiling, syncCeiling, crossoverB } from "./lessons/async-blocking.ts";
+import { concurrency, contextCeiling, kvBytesPerToken, weightsGB, freeGB } from "./lessons/kv-cache.ts";
+import { precision, halfAt as precisionHalfAt, falseBlocksPerMillion } from "./lessons/base-rate.ts";
+import { edgeLength, halfAt as edgeHalfAt } from "./lessons/dimensionality.ts";
+import { totalError, truncation, roundoff, optimalH } from "./lessons/step-size.ts";
 
 let fails = 0;
 const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
@@ -390,6 +394,72 @@ console.log("async: the crossover is lower than anyone guesses");
   ck("the sync ceiling does not depend on the blocking fraction when IO-bound",
     syncCeiling(0.01, false) === syncCeiling(0.19, false));
   ck("zero blocking is unbounded rather than NaN", asyncCeiling(0) === Infinity);
+}
+
+
+console.log("kv cache: concurrency is a hyperbola, not a slope");
+{
+  // The shape is the lesson. Doubling the context must halve the users, exactly, at every point.
+  for (const c of [1024, 4096, 16384]) {
+    ck(`doubling ${c} tokens halves concurrency`, Math.abs(concurrency(c, 8) / concurrency(c * 2, 8) - 2) < 1e-9);
+  }
+  // GQA is the only lever with a constant factor, and it is exactly the head ratio.
+  ck("quartering the KV heads quadruples the users", Math.abs(concurrency(4096, 8) / concurrency(4096, 32) - 4) < 1e-9);
+  ck("the cache per token is 2 * layers * heads * d_head * dtype", kvBytesPerToken(8) === 2 * 32 * 8 * 128 * 2);
+  ck("the weights are the small number", weightsGB() < freeGB(), `${weightsGB()}GB weights, ${freeGB()}GB free`);
+  // The claim in the prose: long context genuinely squeezes a big card down to a handful of users.
+  ck("32k context on an 80GB card is a handful of users", concurrency(32768, 8) < 20, `${concurrency(32768, 8).toFixed(0)}`);
+  ck("the context ceiling is where exactly one sequence fits", Math.abs(concurrency(contextCeiling(8), 8) - 1) < 1e-9);
+}
+
+console.log("base rate: precision moves and nothing else does");
+{
+  const tpr = 0.99, fpr = 0.01;
+  ck("on a balanced set it looks excellent", precision(0.5, tpr, fpr) > 0.98, `${(precision(0.5, tpr, fpr) * 100).toFixed(1)}%`);
+  ck("and at production prevalence it does not", precision(1e-4, tpr, fpr) < 0.02, `${(precision(1e-4, tpr, fpr) * 100).toFixed(2)}%`);
+  ck("the half-precision point is FPR / (TPR + FPR)", Math.abs(precisionHalfAt(tpr, fpr) - fpr / (tpr + fpr)) < 1e-12);
+  ck("and precision really is a half there", Math.abs(precision(precisionHalfAt(tpr, fpr), tpr, fpr) - 0.5) < 1e-12);
+  // The second half of the lesson: the ROC point is prevalence-free, which is WHY this is a trap.
+  ck("sensitivity does not depend on prevalence", true);
+  ck("false blocks scale with FPR and barely with prevalence",
+    Math.abs(falseBlocksPerMillion(1e-4, fpr) / falseBlocksPerMillion(1e-3, fpr) - 1) < 0.01);
+  ck("precision falls monotonically as the thing gets rarer",
+    precision(0.1, tpr, fpr) > precision(0.01, tpr, fpr) && precision(0.01, tpr, fpr) > precision(0.001, tpr, fpr));
+}
+
+console.log("dimensionality: asking for less barely shrinks the box");
+{
+  ck("one dimension is the honest case", Math.abs(edgeLength(1, 0.01) - 0.01) < 1e-12);
+  ck("ten dimensions is not", edgeLength(10, 0.01) > 0.6, `${(edgeLength(10, 0.01) * 100).toFixed(1)}%`);
+  /*
+   * The counterintuitive half, stated correctly the second time.
+   *
+   * The first version of this asserted that a smaller fraction needs a LONGER edge, and the lesson's
+   * own prose said so. It is false: e = r^(1/d) shrinks with r. The real surprise is how little it
+   * shrinks - the d-th root flattens it, so asking for ten times less data buys almost nothing.
+   */
+  ck("a smaller fraction does shorten the edge", edgeLength(10, 0.001) < edgeLength(10, 0.01));
+  ck("but hardly at all - ten times less data is a fifth off the edge",
+    edgeLength(10, 0.001) / edgeLength(10, 0.01) > 0.75,
+    `${(edgeLength(10, 0.01) * 100).toFixed(1)}% -> ${(edgeLength(10, 0.001) * 100).toFixed(1)}%`);
+  ck("so even a thousandth of the data needs half of every axis", edgeLength(10, 0.001) > 0.45);
+  ck("the half-axis crossing is ln(r)/ln(0.5)", Math.abs(edgeHalfAt(0.01) - Math.log(0.01) / Math.log(0.5)) < 1e-12);
+  ck("and the edge really is a half there", Math.abs(edgeLength(edgeHalfAt(0.01), 0.01) - 0.5) < 1e-12);
+  ck("the volume comes back to the fraction asked for", Math.abs(Math.pow(edgeLength(7, 0.05), 7) - 0.05) < 1e-9);
+}
+
+console.log("step size: the error is U-shaped and everyone knows only one arm");
+{
+  const best = optimalH(1, 1);
+  ck("the optimum is the cube root of 3 eps", Math.abs(best - Math.cbrt(3 * Number.EPSILON)) < 1e-18, best.toExponential(2));
+  // The whole lesson: past the optimum, smaller is worse.
+  ck("a smaller step than the optimum is worse", totalError(best / 100, 1, 1) > totalError(best, 1, 1));
+  ck("a larger step than the optimum is also worse", totalError(best * 100, 1, 1) > totalError(best, 1, 1));
+  ck("so the optimum really is a minimum", true);
+  ck("at 1e-16 the answer is garbage", totalError(1e-16, 1, 1) > 1, totalError(1e-16, 1, 1).toExponential(1));
+  ck("truncation falls as h squared", Math.abs(truncation(1e-2, 1) / truncation(1e-3, 1) - 100) < 1e-6);
+  ck("roundoff rises as one over h", Math.abs(roundoff(1e-4, 1) / roundoff(1e-3, 1) - 10) < 1e-6);
+  ck("a larger function scale raises the floor", optimalH(1, 1000) > optimalH(1, 1));
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
