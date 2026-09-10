@@ -9,6 +9,7 @@
  */
 import bank from "../data/recall-bank.json" with { type: "json" };
 import { drawPaper } from "./paper.ts";
+import workbook from "../data/workbook.json" with { type: "json" };
 
 type Prompt = { i: number; k: string; kind: string; p: string };
 const prompts = (bank as { prompts: Prompt[] }).prompts;
@@ -91,6 +92,35 @@ console.log("a quarterly paper over many topics still fills");
   ck("twenty questions", paper.length === 20, `${paper.length}`);
   ck("twenty distinct topics, one each", new Set(paper.map((p) => p.i)).size === 20, `${new Set(paper.map((p) => p.i)).size}`);
   ck("no duplicates", new Set(paper.map((p) => p.k)).size === 20);
+}
+
+
+console.log("a prompt's topic index is the plan's topic index");
+{
+  // TestRunner pins `current.i` as `askTopic`, which reaches the ask route as `body.topicIndex`
+  // and is read there as `workbook.Plan[topicIndex + 1]`. If those two index spaces ever drift,
+  // nothing throws: Quaere simply answers confidently about the topic next door, and the paper
+  // looks exactly the same on screen. So the alignment is pinned against the real workbook rather
+  // than trusted, for all 119 rather than a sample.
+  const plan = workbook.Plan as unknown[][];
+  const meta = (bank as { meta: Record<string, { topic: string }> }).meta;
+  const keys = Object.keys(meta);
+
+  let matched = 0;
+  const drifted: string[] = [];
+  for (const k of keys) {
+    const row = plan[Number(k) + 1];
+    const name = String(row?.[2] ?? "").trim().toLowerCase();
+    if (name && name === meta[k].topic.trim().toLowerCase()) matched++;
+    else drifted.push(`${k}: bank "${meta[k].topic.slice(0, 30)}" vs plan "${String(row?.[2] ?? "-").slice(0, 30)}"`);
+  }
+  ck("every bank topic sits at plan row index + 1", matched === keys.length, drifted.slice(0, 3).join(" | "));
+  ck("and the bank covers the whole plan", keys.length === plan.length - 1, `${keys.length} bank, ${plan.length - 1} plan rows`);
+
+  // Every drawn prompt must resolve through that same mapping, since `i` is what gets pinned.
+  const paper = drawPaper((bank as { prompts: { i: number; k: string }[] }).prompts, 40, 7);
+  const unresolvable = paper.filter((q) => !meta[String(q.i)] || !plan[q.i + 1]);
+  ck("every drawn prompt resolves to a real topic on both sides", unresolvable.length === 0, unresolvable.map((q) => q.k).join(","));
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

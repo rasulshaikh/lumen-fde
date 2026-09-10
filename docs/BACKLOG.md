@@ -27,6 +27,8 @@ pass.
 | Study rhythm | `lib/motivation.ts` had 19,510 bytes of tests and reached no prompt. |
 | Prior answers | `reports/asks/` was write-only; Quaere re-answered questions with no record it already had. |
 | `context.ts` tests | the module building most of the prompt was the only one in its folder with no test. |
+| Library blocks | `library-context.json` and `library-sources.json` were both `JSON.stringify`d into the system message: 20,375 chars, the largest thing in it, shipping the same 16 books twice plus `filename`, `relativeFolder`, `(Z-Library)`/`(PDFDrive)` tags and a `(for <name>)` watermark. Merged to one block, 21.0% smaller, none of that provenance surviving. |
+| Practice topic | /practice sent **no topic at all**, so `syllabusContext` never fired there and a question asked mid-paper was answered from the model's own idea of the subject. The runner now pins the current question's topic. |
 
 ---
 
@@ -34,25 +36,41 @@ pass.
 
 Ordered by what a reader would notice.
 
-### 1. `library-sources.json` ships whole and uncapped
-
-15,483 characters, roughly 40% indexing debris, with no key joining it to the plan. It is the
-single largest block in the system prompt and the least selective. Trimming it is the cheapest
-token win available and it is the last of the six ranked items.
-
-### 2. The bank's marking key per topic
-
-The three-outcome key the on-screen exam reveals never reaches a prompt, so Quaere marks written
-answers against its own idea of the topic rather than the plan's.
-
-### 3. Verbatim JD evidence
+### 1. Verbatim JD evidence
 
 34 job-description fragments, 5,272 characters, behind the coverage percentages. Quaere has the
 shares and none of the prose, so it paraphrases from its own priors what requisitions say.
 
-### 4. `benchmark.newSinceLastRun` and movement
+An adversarial pass found the hard part is not the injection but the **attribution**. The 34
+fragments come from three research docs with three different corpora, not one; 3 of the 34 carry no
+company name anywhere near the quote; and two are cells in a summary table rather than quotations at
+all. A header claiming a single corpus and a clean provenance would be this repo's defect class 1
+written into the prompt itself. Build it with per-fragment attribution and an honest "source not
+recorded" for the three, or do not build it.
+
+### 2. `benchmark.newSinceLastRun` and movement
 
 The daily delta the reader gets by email and Quaere cannot discuss.
+
+Narrower than it looks. `benchmark.movement` already exists, is already rendered at
+`components/Market.tsx:232`, and `insight.velocity.statement` - which reaches the prompt already -
+carries a near-identical "nothing moved" sentence. The genuinely absent part is the new-requisition
+list, not movement. Build that; duplicating velocity would put two sentences saying the same thing
+in one prompt.
+
+---
+
+## Removed from this list, because the item was wrong
+
+**"The bank's marking key per topic."** It said the exam's three-outcome key never reaches a prompt
+"so Quaere marks written answers against its own idea of the topic rather than the plan's". Quaere
+marks nothing. `components/TestRunner.tsx:17-21` refuses automatic marking in writing and gives the
+reason: "nothing available here can mark that honestly, and a score that looks objective while being
+a keyword match is worse than no score." The item described a feature that was deliberately declined,
+and building it would have reversed a documented decision on the strength of a backlog line.
+
+What was real underneath it: /practice sent no topic at all, so nothing about the subject reached
+Quaere from that page. Fixed above, without touching the grading decision.
 
 ---
 

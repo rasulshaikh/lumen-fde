@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { drawPaper } from "@/lib/paper";
+import { useAppState } from "@/components/AppState";
 
 /**
  * Sit the test, here, instead of reading about sitting it.
@@ -108,6 +109,31 @@ export function TestRunner({ scope, onExit }: { scope: Scope; onExit: () => void
   const answer = current ? answers[current.k] ?? "" : "";
   const graded = current ? grades[current.k] : undefined;
   const meta = current && bank ? bank.meta[String(current.i)] : null;
+
+  /**
+   * Tell Quaere which topic is on screen.
+   *
+   * /practice was the one page that sent no topic at all. `QuaereDock` maps each route to a static
+   * sentence, and /practice's says the page has "assessment questions and their answer keys" -
+   * true of the page, useless about the question you are actually stuck on. So a learner who
+   * opened the dock mid-paper to ask "why does set -e not fire there" got an answer built from the
+   * model's own idea of the topic, while `data/recall-bank.json` held that topic's three stated
+   * outcomes and `syllabusContext` was sitting one field away, unfired, because `body.topicIndex`
+   * was undefined.
+   *
+   * `prompt.i` is the plan topic index - asserted in lib/paper.test.mts against the workbook for
+   * all 119, because an off-by-one here would silently answer about the wrong topic rather than
+   * fail. Pinning it is the same mechanism the "Ask" button on a /plan row uses.
+   *
+   * Cleared on the way out, so a question asked after leaving the paper does not still carry it.
+   * This does NOT mark anything: the grading decision above stands, and nothing here reads a grade.
+   */
+  const { setAskTopic } = useAppState();
+  useEffect(() => {
+    if (typeof current?.i !== "number") return;
+    setAskTopic(current.i);
+    return () => setAskTopic(null);
+  }, [current?.i, setAskTopic]);
   const done = paper.length > 0 && at >= paper.length;
 
   const record = useCallback((g: Grade) => {
