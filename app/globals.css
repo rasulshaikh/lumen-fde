@@ -1375,7 +1375,11 @@ th{padding:0 12px 10px}
    overflows a 375px viewport by the difference. Same fix, same reason, as the
    market grid above. */
 .path-intro{margin:0 0 18px;max-width:68ch;color:var(--ink-2);font-size:14px;line-height:1.65}
-.path-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:12px;margin-top:16px}
+.path-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:12px;margin-top:16px;
+  /* start, not the default stretch. With one card expanded, stretch made the three collapsed
+     cards 579px tall to match it, so collapsing bought nothing and the row was mostly empty
+     space. The same trap `.content-grid` documents higher up in this file. */
+  align-items:start}
 .path-card{display:flex;flex-direction:column;gap:10px;padding:16px;background:var(--surface);
   border:1px solid var(--line);border-radius:var(--r-lg)}
 .path-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
@@ -1610,3 +1614,46 @@ html{background:var(--bg)}
 .ask-selection-actions button:first-child{border:1px solid var(--line-strong);background:var(--surface);
   color:var(--ink);border-radius:var(--r-md);padding:6px 10px;font-size:11px;font-weight:700}
 .ask-selection-actions button:first-child:hover{border-color:var(--accent);color:var(--accent-text)}
+
+/* ── Paths: a decision surface rather than a wall ─────────────────────────────
+   Four cards fully expanded is roughly 1,400px of prose, which is a page you
+   scroll instead of a choice you make. Collapsed, the four routes and their
+   verdicts fit on one screen, which is the only arrangement in which comparing
+   them is possible. */
+.path-head{width:100%;border:0;background:none;padding:0 0 2px;color:inherit;font:inherit;
+  text-align:left;cursor:pointer;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.path-head:hover h3{color:var(--accent-text)}
+.path-head:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:var(--r-sm)}
+.path-chev{margin-left:auto;font-size:17px;color:var(--accent-text);line-height:1;flex:none}
+.path-body{display:grid;gap:10px;margin-top:2px}
+
+/* Picking one is the point of the page, and the page used to end without asking. */
+.path-aim{align-self:start;justify-self:start;border:1px solid var(--line-strong);background:none;
+  color:var(--muted);border-radius:var(--r-md);padding:6px 11px;font-size:11.5px;font-weight:700;
+  cursor:pointer;transition:border-color .12s ease,color .12s ease,background .12s ease}
+.path-aim:hover{border-color:var(--accent);color:var(--accent-text)}
+.path-aim.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}
+.path-card.is-aiming{border-color:var(--accent)}
+.path-card.is-open .path-premise{margin-bottom:2px}
+
+/* A tier is a slice of the nightly scan, so it opens the scan. */
+.path-tiers button{border:0;background:none;padding:0;font:inherit;color:inherit;text-align:left;
+  cursor:pointer;border-bottom:1px solid transparent}
+.path-tiers button:hover{color:var(--ink-2);border-bottom-color:var(--line-strong)}
+.path-tiers button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Mocks: nine rows that described a practice regime and offered no way into it. */
+.mock-row-wrap{border-top:1px solid var(--line)}
+.mock-row-wrap:first-child{border-top:0}
+.mock-row{width:100%;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;
+  display:grid;grid-template-columns:2fr 1fr auto;gap:22px;align-items:center;padding:16px 0}
+.mock-row:hover strong{color:var(--accent-text)}
+.mock-row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:var(--r-sm)}
+.mock-chev{margin-left:12px;color:var(--accent-text);font-size:15px}
+.mock-detail{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));
+  gap:14px;padding:0 0 18px}
+.mock-label{margin:0 0 4px;font-family:var(--font-data);font-size:10.5px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--muted)}
+.mock-detail p{margin:0;font-size:13px;line-height:1.6;color:var(--ink-2)}
+.mock-run{grid-column:1/-1;justify-self:start;width:auto}
+@media(max-width:700px){.mock-row{grid-template-columns:1fr;gap:8px}}

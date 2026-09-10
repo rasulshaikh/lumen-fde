@@ -201,8 +201,14 @@ console.log("an unreadable artifacts store is unknown, not an empty portfolio");
   const { createElement } = await import("react");
   const { PathCard } = await import("../components/Paths.tsx");
   const own = buildPaths(COMP, slices).find((v) => v.id === "own")!;
+  // `open: true`, because the evidence block lives in the card body and the body is collapsed by
+  // default now. A card that is shut renders its header and premise and nothing else, so asserting
+  // the artifacts wording against a closed card would pass or fail for the wrong reason.
   const card = (built: number | null, state = "ready") =>
-    renderToStaticMarkup(createElement(PathCard, { path: own, index: 3, core: 44, state, synced: true, built } as never));
+    renderToStaticMarkup(createElement(PathCard, {
+      path: own, index: 3, core: 44, state, synced: true, built,
+      open: true, onToggle: () => {}, aiming: false, onAim: () => {},
+    } as never));
 
   ck("a real zero says zero", card(0).includes("0 deliverables recorded"));
   ck("a real count says the count", card(3).includes("3 deliverables recorded"));
@@ -210,6 +216,41 @@ console.log("an unreadable artifacts store is unknown, not an empty portfolio");
   const unknown = card(null);
   ck("unknown says unknown, and never 0", /could not be read/.test(unknown) && /unknown, not none/.test(unknown) && !unknown.includes("0 deliverable"), unknown.slice(0, 240));
   ck("loading is not the same as unreadable", /reading/i.test(card(null, "loading")) && !/could not be read/.test(card(null, "loading")));
+}
+
+console.log("the card is a control, not a paragraph");
+{
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const { PathCard } = await import("../components/Paths.tsx");
+  const india = buildPaths(COMP, slices).find((v) => v.id === "india")!;
+  const render = (over: Record<string, unknown> = {}) => renderToStaticMarkup(createElement(PathCard, {
+    path: india, index: 0, core: 44, state: "ready", synced: true, built: 0,
+    open: false, onToggle: () => {}, aiming: false, onAim: () => {}, openMarket: () => {}, ...over,
+  } as never));
+
+  const shut = render();
+  const opened = render({ open: true });
+
+  // Four cards fully expanded is a page you scroll; collapsed, they are a choice you can make.
+  // Matched on the element, not the string: `aria-controls="path-body-india"` correctly names
+  // the region it controls whether or not that region is rendered.
+  ck("a shut card hides its body", !/<div class="path-body"/.test(shut), shut.slice(0, 140));
+  ck("but still shows the route and its verdict", shut.includes("Stay in India") && shut.includes("prob-"));
+  ck("an open card shows the body", /<div class="path-body"/.test(opened));
+  ck("the header is a button, not a heading alone", /<button class="path-head"/.test(shut));
+  ck("and announces its state to assistive tech", /aria-expanded="false"/.test(shut) && /aria-expanded="true"/.test(opened));
+
+  // Choosing one is the point of the page, and the page used to end without asking.
+  ck("every card offers the choice", shut.includes("path-aim"));
+  ck("an unchosen card invites", shut.includes("Aim at this one") && /aria-pressed="false"/.test(shut));
+  const chosen = render({ aiming: true });
+  ck("a chosen card says so", chosen.includes("You are aiming here") && /aria-pressed="true"/.test(chosen));
+  ck("and is marked on the card itself", chosen.includes("is-aiming"));
+
+  // A tier is a slice of the nightly scan, so it is a way into the scan.
+  ck("tier rows are buttons when Market is reachable", /path-tiers[^>]*><li><button/.test(render({ open: true })));
+  ck("and plain text when it is not", !/path-tiers[^>]*><li><button/.test(render({ open: true, openMarket: undefined })));
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

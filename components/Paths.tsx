@@ -52,7 +52,7 @@ function Verdict({ bands }: { bands: PathView["bands"] }) {
  * HTML cannot prove the most important sentence here is ever emitted. As a function of its props
  * it can be rendered directly in the test suite, which is where that is now pinned.
  */
-export function Openings({ path, core, state, synced }: { path: PathView; core: number | null; state: Load; synced: boolean }) {
+export function Openings({ path, core, state, synced, openMarket }: { path: PathView; core: number | null; state: Load; synced: boolean; openMarket?: () => void }) {
   if (path.attribution === "none") {
     return <p className="path-openings path-openings-none">No requisition can evidence this one. It is the only path here whose proof is work you built yourself.</p>;
   }
@@ -85,7 +85,7 @@ export function Openings({ path, core, state, synced }: { path: PathView; core: 
     const blocked = slices.find((s) => s.tier === "out-of-reach");
     return <div className="path-openings">
       <p className="path-pool">No count of roles in this market exists. The scan records what a role <em>demands</em>, never which country it is in.</p>
-      <ul className="path-tiers">{slices.map((s) => <li key={s.tier}><span>{s.count}</span> {s.label}</li>)}</ul>
+      <ul className="path-tiers">{slices.map((s) => <li key={s.tier}>{openMarket ? <button onClick={openMarket}><span>{s.count}</span> {s.label}</button> : <><span>{s.count}</span> {s.label}</>}</li>)}</ul>
       <p className="path-caveat">
         {relocation ? <>The {relocation.count} needing a move and a visa are the same requisitions the other relocation path on this page counts, not additional ones. </> : null}
         {blocked ? <>The {blocked.count} marked out of reach are closed to you outright, not waiting on a destination. </> : null}
@@ -97,7 +97,7 @@ export function Openings({ path, core, state, synced }: { path: PathView; core: 
   const denom = core ? ` of ${core}` : "";
   return <div className="path-openings">
     <p className="path-count"><strong>{count}</strong>{denom} live requisitions{companies ? <> · {companies}+ companies</> : null}</p>
-    <ul className="path-tiers">{slices.map((s) => <li key={s.tier}><span>{s.count}</span> {s.label}</li>)}</ul>
+    <ul className="path-tiers">{slices.map((s) => <li key={s.tier}>{openMarket ? <button onClick={openMarket}><span>{s.count}</span> {s.label}</button> : <><span>{s.count}</span> {s.label}</>}</li>)}</ul>
   </div>;
 }
 
@@ -140,38 +140,80 @@ export function PathsRail({ open }: { open: () => void }) {
  * reach is a component whose layout nobody has looked at. As a function of its props it can be
  * rendered with real market data outside the app, which is how the populated layout gets checked.
  */
-export function PathCard({ path, index, core, state, synced, built }: { path: PathView; index: number; core: number | null; state: Load; synced: boolean; built: number | null }) {
-  return <article className="path-card">
-    <header className="path-head">
+export function PathCard({ path, index, core, state, synced, built, open, onToggle, aiming, onAim, openMarket }: {
+  path: PathView; index: number; core: number | null; state: Load; synced: boolean; built: number | null;
+  open: boolean; onToggle: () => void; aiming: boolean; onAim: () => void; openMarket?: () => void;
+}) {
+  return <article className={`path-card${open ? " is-open" : ""}${aiming ? " is-aiming" : ""}`}>
+    {/* The header is the control. Four cards fully expanded is 1,400px of prose you cannot
+        compare; collapsed, the four routes and their verdicts fit on one screen, which is the
+        only view in which choosing between them is possible. */}
+    <button className="path-head" onClick={onToggle} aria-expanded={open} aria-controls={`path-body-${path.id}`}>
       <span className="path-num">{String(index + 1).padStart(2, "0")}</span>
       <h3>{path.label}</h3>
       <Verdict bands={path.bands} />
-    </header>
+      <span className="path-chev" aria-hidden="true">{open ? "−" : "+"}</span>
+    </button>
+
     <p className="path-premise">{path.premise}</p>
 
-    <Openings path={path} core={core} state={state} synced={synced} />
+    {/* Picking one is the whole point of the page, and until now the page ended without asking.
+        It is a preference, not a commitment: nothing else changes, it is stored on this device,
+        and pressing it again puts it back. */}
+    <button className={`path-aim${aiming ? " on" : ""}`} onClick={onAim} aria-pressed={aiming}>
+      {aiming ? "◆ You are aiming here" : "Aim at this one"}
+    </button>
 
-    {path.bands.map((b) => <div className="path-band" key={b.market}>
-      <p className="path-band-market">{b.market}</p>
-      <p className="path-band-money">{b.band}</p>
-      <p className="path-band-takes">{b.takes}</p>
-      <p className="path-band-odds">{b.odds}</p>
-      <p className="path-source">{b.source}</p>
-    </div>)}
+    {open && <div className="path-body" id={`path-body-${path.id}`}>
+      <Openings path={path} core={core} state={state} synced={synced} openMarket={openMarket} />
 
-    {/* The fourth path has no band and no requisition, so its evidence is the only kind it
-        can have: things that exist because you made them. Unknown stays unknown here too -
-        an unreadable artifacts directory is not an empty one. */}
-    {path.attribution === "none" && <div className="path-band">
-      <p className="path-band-market">What would evidence it</p>
-      <p className="path-band-money">{state === "loading" ? "Shipped work: reading…" : built === null ? "Shipped work: the store could not be read, so this is unknown, not none" : `${built} deliverable${built === 1 ? "" : "s"} recorded`}</p>
-      <p className="path-band-takes">The plan carries one deliverable per topic. Elsewhere they are interview evidence; on this path they are the product. It is the only route here that pays nothing until it works, and everything after.</p>
+      {path.bands.map((b) => <div className="path-band" key={b.market}>
+        <p className="path-band-market">{b.market}</p>
+        <p className="path-band-money">{b.band}</p>
+        <p className="path-band-takes">{b.takes}</p>
+        <p className="path-band-odds">{b.odds}</p>
+        <p className="path-source">{b.source}</p>
+      </div>)}
+
+      {/* The fourth path has no band and no requisition, so its evidence is the only kind it
+          can have: things that exist because you made them. Unknown stays unknown here too -
+          an unreadable artifacts directory is not an empty one. */}
+      {path.attribution === "none" && <div className="path-band">
+        <p className="path-band-market">What would evidence it</p>
+        <p className="path-band-money">{state === "loading" ? "Shipped work: reading…" : built === null ? "Shipped work: the store could not be read, so this is unknown, not none" : `${built} deliverable${built === 1 ? "" : "s"} recorded`}</p>
+        <p className="path-band-takes">The plan carries one deliverable per topic. Elsewhere they are interview evidence; on this path they are the product. It is the only route here that pays nothing until it works, and everything after.</p>
+      </div>}
     </div>}
   </article>;
 }
 
-export function Paths({ planMonths }: { planMonths: number }) {
+/** Where the chosen route is kept. Local to the device: it is a preference, not a commitment. */
+const AIM_KEY = "lumen-path";
+
+export function Paths({ planMonths, openMarket }: { planMonths: number; openMarket?: () => void }) {
   const [state, setState] = useState<Load>("loading");
+  /*
+   * One card open at a time, starting with none.
+   *
+   * Four cards fully expanded is about 1,400px of prose, which is a page you scroll rather than a
+   * choice you make. Collapsed, the four routes and their verdicts fit on one screen, which is the
+   * only arrangement in which comparing them is possible - and comparing them is the entire
+   * purpose of this view.
+   */
+  const [open, setOpen] = useState<string | null>(null);
+  const [aim, setAim] = useState<string | null>(null);
+
+  // Read after mount, never during render: localStorage does not exist on the server and reading
+  // it while rendering would give the server one answer and the client another.
+  useEffect(() => {
+    try { setAim(localStorage.getItem(AIM_KEY)); } catch { /* private mode, or storage disabled */ }
+  }, []);
+
+  const chooseAim = (id: string) => {
+    const next = aim === id ? null : id;
+    setAim(next);
+    try { next ? localStorage.setItem(AIM_KEY, next) : localStorage.removeItem(AIM_KEY); } catch { /* nothing to do */ }
+  };
   const [feed, setFeed] = useState<Feed | null>(null);
   const [shipped, setShipped] = useState<Shipped | null>(null);
 
@@ -230,7 +272,20 @@ export function Paths({ planMonths }: { planMonths: number }) {
     {note && <p className="path-horizon">{note}</p>}
 
     <div className="path-grid">
-      {views.map((p, i) => <PathCard key={p.id} path={p} index={i} core={reach?.coreCount ?? null} state={state} synced={Boolean(feed?.synced)} built={built} />)}
+      {views.map((p, i) => <PathCard
+        key={p.id}
+        path={p}
+        index={i}
+        core={reach?.coreCount ?? null}
+        state={state}
+        synced={Boolean(feed?.synced)}
+        built={built}
+        open={open === p.id}
+        onToggle={() => setOpen(open === p.id ? null : p.id)}
+        aiming={aim === p.id}
+        onAim={() => chooseAim(p.id)}
+        openMarket={openMarket}
+      />)}
     </div>
 
     <p className="path-foot">

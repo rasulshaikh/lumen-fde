@@ -23,7 +23,7 @@ import { planRows, topicKey, type Row } from "@/components/shared";
  */
 export default function PracticePage() {
   const router = useRouter();
-  const { statuses, focus, activeRows } = useAppState();
+  const { statuses, focus, activeRows, setAskOpen, setAskText, setAskTopic } = useAppState();
   const statusOf = (r: Row) => String(statuses[topicKey(r)] || r[15] || "Not started");
   const title = (r: Row) => String(r[2]);
   const indexOf = (r: Row) => planRows.indexOf(r);
@@ -64,6 +64,8 @@ export default function PracticePage() {
 
   return <>
     <Assessments scopes={[weekly, monthly, quarterly]} openRow={(index) => router.push(`/plan?row=${index + 1}`)} />
-    <Mocks />
+    {/* A mock is a conversation, and the companion already holds the plan, the market and the
+        syllabus. Handing it the pass bar verbatim is the closest a dashboard gets to running one. */}
+    <Mocks ask={(prompt) => { setAskTopic(null); setAskText(prompt); setAskOpen(true); }} />
   </>;
 }

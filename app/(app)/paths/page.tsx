@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { Paths } from "@/components/Paths";
 import { useAppState } from "@/components/AppState";
 
@@ -10,5 +11,8 @@ import { useAppState } from "@/components/AppState";
  */
 export default function PathsPage() {
   const { monthHours } = useAppState();
-  return <Paths planMonths={monthHours.length} />;
+  const router = useRouter();
+  // The tiers are a slice of the nightly scan, and the scan lives on Market. A number the reader
+  // wants to interrogate should be a way in, not a full stop.
+  return <Paths planMonths={monthHours.length} openMarket={() => router.push("/market")} />;
 }
