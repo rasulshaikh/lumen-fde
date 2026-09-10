@@ -26,6 +26,11 @@ import { crossEnt, entropy, kldiv, dLoss, crossEntropy } from "./lessons/cross-e
 import { seqScanCost, indexScanCost, crossoverSelectivity, indexCrossover } from "./lessons/index-crossover.ts";
 import { latency, idealLatency, utilisation, wall, capacity, cacheHitRate } from "./lessons/cache-hit-rate.ts";
 import { chain, peakGradient, backpropChain } from "./lessons/backprop-chain.ts";
+import { throughput, windowLimit, mathisLimit, bdpCrossoverMs } from "./lessons/bandwidth-delay.ts";
+import { wallMs, unthrottledMs, meanUtilisation, isThrottled, quotaPerPeriod } from "./lessons/cpu-throttling.ts";
+import { reportedP99, isPinned, cdf, TOP_BUCKET } from "./lessons/histogram-p99.ts";
+import { usl, peakAt, residence } from "./lessons/scalability-law.ts";
+import { asyncCeiling, syncCeiling, crossoverB } from "./lessons/async-blocking.ts";
 
 let fails = 0;
 const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
@@ -316,6 +321,75 @@ console.log("backprop: three correct factors multiply to nothing");
   const out = Math.abs(chain(2.5, 4).g);
   ck("moving off centre collapses the gradient by orders of magnitude", centre / out > 100, `${centre.toExponential(1)} -> ${out.toExponential(1)}`);
   ck("and it never becomes negative or NaN", Number.isFinite(out) && out > 0);
+}
+
+
+console.log("bandwidth: the link stops being the constraint, and loss finishes the job");
+{
+  const cross = bdpCrossoverMs();
+  ck("below the crossover the link is the limit", throughput(cross * 0.5, 0) === 10000);
+  ck("above it the window is", throughput(cross * 2, 0) < 10000);
+  ck("the crossover really is where window/RTT meets the link", Math.abs(windowLimit(cross) - 10000) < 1e-6, `${cross.toFixed(3)}ms`);
+  // Throughput must fall as 1/RTT once window-bound, not merely decline.
+  ck("window-bound throughput halves when RTT doubles", Math.abs(throughput(20, 0) / throughput(40, 0) - 2) < 1e-9);
+  // The number that surprises people.
+  ck("a tenth of a percent of loss dominates a 10 Gbps link", throughput(80, 0.001) < 100, `${throughput(80, 0.001).toFixed(1)} Mbps`);
+  ck("zero loss removes the Mathis term rather than dividing by zero", Number.isFinite(throughput(80, 0)) && mathisLimit(80, 0) === Infinity);
+}
+
+console.log("cpu limits: latency climbs while the average stays calm");
+{
+  const T = 8;
+  ck("a request that fits in one period is not throttled", !isThrottled(2.5) && wallMs(2.5, T) === unthrottledMs(T), `${wallMs(2.5, T)}ms`);
+  ck("and the burn rate is the thread count, not the limit", wallMs(4, T) === 200 / T);
+  ck("below the fitting limit it is throttled", isThrottled(1));
+  // The lesson: latency multiplies while utilisation reads comfortable.
+  const wall = wallMs(1, T), util = meanUtilisation(1);
+  ck("latency is several times the work", wall > unthrottledMs(T) * 4, `${wall}ms vs ${unthrottledMs(T)}ms`);
+  ck("while mean utilisation is well under half", util < 0.5, `${(util * 100).toFixed(0)}%`);
+  ck("more threads do not help once throttled", wallMs(1, 32) >= wallMs(1, 8) * 0.9, `${wallMs(1, 32)}ms vs ${wallMs(1, 8)}ms`);
+  ck("the quota is per period, not per second", quotaPerPeriod(1) === 100);
+}
+
+console.log("histograms: the reported p99 pins and stops moving");
+{
+  ck("it tracks while the quantile is inside a finite bucket", reportedP99(120) > reportedP99(60));
+  ck("and pins once it is not", isPinned(1200) && reportedP99(1200) === TOP_BUCKET);
+  // The whole point: reality doubles and the number does not move at all.
+  ck("reality can double with no change on the dashboard", reportedP99(1200) === reportedP99(2400));
+  ck("the pin is exactly the top bucket", reportedP99(5000) === TOP_BUCKET);
+  ck("under-reporting is what makes it dangerous", reportedP99(1500) < 1500);
+  ck("the cdf is a real distribution", Math.abs(cdf(120, 120) - 0.99) < 1e-9);
+}
+
+console.log("scalability: throughput peaks and then goes down");
+{
+  const sigma = 0.03, kappa = 0.0008;
+  const peak = peakAt(sigma, kappa);
+  ck("the closed-form peak is a real maximum", usl(peak, sigma, kappa) >= usl(peak * 0.9, sigma, kappa)
+    && usl(peak, sigma, kappa) >= usl(peak * 1.1, sigma, kappa), `N* = ${peak.toFixed(1)}`);
+  // Retrograde: this is the claim the whole lesson rests on.
+  ck("past the peak more concurrency means less throughput", usl(256, sigma, kappa) < usl(peak, sigma, kappa) * 0.6,
+    `${usl(256, sigma, kappa).toFixed(2)}x vs ${usl(peak, sigma, kappa).toFixed(2)}x`);
+  ck("with no coherency there is no peak at all", peakAt(sigma, 0) === Infinity);
+  ck("and the curve merely flattens toward Amdahl", usl(1e6, sigma, 0) < 1 / sigma && usl(1e6, sigma, 0) > 1 / sigma - 1);
+  ck("residence time rises throughout", residence(256, sigma, kappa) > residence(32, sigma, kappa));
+  ck("one client is always one unit of work", usl(1, sigma, kappa) === 1);
+}
+
+console.log("async: the crossover is lower than anyone guesses");
+{
+  const c = crossoverB();
+  ck("the crossover is one over the threadpool", Math.abs(c - 1 / 40) < 1e-12, `${(c * 100).toFixed(1)}%`);
+  ck("they are equal there", Math.abs(asyncCeiling(c) - syncCeiling(c, false)) < 1e-9);
+  ck("async wins below it", asyncCeiling(c * 0.5) > syncCeiling(c * 0.5, false));
+  ck("and loses above it", asyncCeiling(c * 2) < syncCeiling(c * 2, false));
+  // The GIL half: threads stop helping when the blocking work is CPU.
+  ck("CPU-bound blocking collapses the sync ceiling onto the async one",
+    Math.abs(syncCeiling(0.05, true) - asyncCeiling(0.05)) < 1e-9);
+  ck("the sync ceiling does not depend on the blocking fraction when IO-bound",
+    syncCeiling(0.01, false) === syncCeiling(0.19, false));
+  ck("zero blocking is unbounded rather than NaN", asyncCeiling(0) === Infinity);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

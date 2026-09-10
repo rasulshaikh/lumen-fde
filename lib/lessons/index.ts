@@ -1,12 +1,20 @@
 /** The lesson registry, ordered by where the topic sits in the plan. */
+import { bandwidthDelay } from "./bandwidth-delay";
+import { cpuThrottling } from "./cpu-throttling";
+import { histogramP99 } from "./histogram-p99";
+import { scalabilityLaw } from "./scalability-law";
+import { asyncBlocking } from "./async-blocking";
 import { indexCrossover } from "./index-crossover";
 import { cacheHitRate } from "./cache-hit-rate";
-import { crossEntropy } from "./cross-entropy";
 import { gradientDescent } from "./gradient-descent";
+import { crossEntropy } from "./cross-entropy";
 import { backpropChain } from "./backprop-chain";
 import type { Lesson } from "./types";
 
-export const LESSONS: Lesson[] = [indexCrossover, cacheHitRate, gradientDescent, crossEntropy, backpropChain];
+export const LESSONS: Lesson[] = [
+  bandwidthDelay, cpuThrottling, histogramP99, scalabilityLaw, asyncBlocking,
+  indexCrossover, cacheHitRate, gradientDescent, crossEntropy, backpropChain,
+];
 
 export const lessonById = (id: string): Lesson | null => LESSONS.find((l) => l.id === id) ?? null;
 export const lessonsForTopic = (index: number): Lesson[] => LESSONS.filter((l) => l.topicIndices.includes(index));
