@@ -56,7 +56,7 @@ grep -rn "synced" lib/companion/context.ts lib/papers.ts components/Paths.tsx
 ```bash
 npm ci
 npx tsc --noEmit                      # expect: clean
-npm run build                         # expect: compiled, 14 API routes, 8 tabs
+npm run build                         # expect: compiled, 14 API routes, 9 tabs
 python3 scripts/verify-docs.py        # expect: checked 76 anchors, no failures
 node --check mcp/server.js
 for s in $(node -e "console.log(Object.keys(require('./package.json').scripts).filter(x=>x.startsWith('test:')).join(' '))"); do

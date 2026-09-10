@@ -18,6 +18,8 @@ export const NAV = [
   { label: "Overview", href: "/overview" },
   { label: "Plan", href: "/plan" },
   { label: "Curriculum", href: "/curriculum" },
+  // Between the syllabus and the test: watch the system move before being asked about it.
+  { label: "Machines", href: "/machines" },
   { label: "Practice", href: "/practice" },
   { label: "Market", href: "/market" },
   // Paths sits immediately after Market because it is built out of it: the reach tiers on the
@@ -29,7 +31,7 @@ export const NAV = [
 ];
 
 /**
- * Eight: ten, merged down to seven, plus one that was missing.
+ * Nine: ten, merged down to seven, plus one that was missing, plus Machines.
  *
  * Five of the ten tabs rendered a single panel over one workbook sheet - Mocks and Comp reality
  * were five lines each, Roadmaps twenty-one - while sitting as equal peers to a 387-line Market

@@ -12,7 +12,7 @@ Three surfaces, and they are not interchangeable:
 
 | surface | reach for it when |
 |---|---|
-| the dashboard, 8 tabs <!-- verify:tabs=8 --> | you are reading, filtering, marking status, or looking at the market |
+| the dashboard, 9 tabs <!-- verify:tabs=9 --> | you are reading, filtering, marking status, or looking at the market |
 | the MCP, 18 tools <!-- verify:mcp_tools=18 --> | Claude Code needs the plan in its context, or needs to write something durable |
 | the 2 crons <!-- verify:crons=2 --> | they reach for you - 03:00 and 03:30 UTC, unattended |
 
@@ -398,7 +398,7 @@ the case for adding.
 
 ---
 
-## 2. The 8 tabs
+## 2. The 9 tabs
 
 **Three former tabs now live inside another view.** Their panels are unchanged and every one still
 renders; only the address moved, and the old URLs redirect rather than 404:

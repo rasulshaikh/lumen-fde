@@ -1,0 +1,121 @@
+/**
+ * Kubernetes: how a pod gets onto a node, and the two ways it never does.
+ *
+ * Explains plan rows 7 and 8 - "Kubernetes core" and "Kubernetes production ops: probes, HPA,
+ * requests and limits".
+ *
+ * The scheduler is a filter and a score, and almost everyone learns it as magic. The two faults
+ * here are the two support tickets you will actually get: a pod stuck Pending because nothing can
+ * fit it, and a pod that starts fine and never becomes Ready because someone set a probe for a
+ * process that has not finished booting. Both look like "Kubernetes is broken" and neither is.
+ */
+import { clamp01, stepAt, type Machine, type Scene, type SceneNode } from "./types";
+
+const CORDON = "cordon-a";
+const NO_CAPACITY = "no-capacity";
+const TIGHT_PROBE = "tight-probe";
+
+const api = (note?: string, down = false): SceneNode => ({ id: "api", label: "API server", x: 48, y: 82, kind: "service", note, down });
+const sched = (note?: string): SceneNode => ({ id: "sched", label: "Scheduler", x: 152, y: 82, kind: "service", note });
+const nodeA = (note?: string, dim = false, down = false): SceneNode => ({ id: "nodeA", label: "node-a", x: 268, y: 38, kind: "store", note, dim, down });
+const nodeB = (note?: string, dim = false, down = false): SceneNode => ({ id: "nodeB", label: "node-b", x: 268, y: 126, kind: "store", note, dim, down });
+
+const EDGES = [
+  { from: "api", to: "sched", dashed: true },
+  { from: "sched", to: "nodeA", dashed: true },
+  { from: "sched", to: "nodeB", dashed: true },
+  { from: "api", to: "nodeA", dashed: true },
+  { from: "api", to: "nodeB", dashed: true },
+  { from: "nodeA", to: "api", dashed: true },
+  { from: "nodeB", to: "api", dashed: true },
+  { from: "sched", to: "api", dashed: true },
+];
+
+export const k8s: Machine = {
+  id: "k8s",
+  title: "Kubernetes: scheduling a pod, and the two ways it never runs",
+  subtitle: "Filter, score, bind, start, become Ready. Break a node or a probe and watch which of those five stops.",
+  topicIndices: [7, 8],
+  steps: ["Pod created", "Filter", "Score", "Bind", "Kubelet starts it", "Ready"],
+  faults: [
+    { id: CORDON, label: "Cordon node-a", blurb: "Mark a node unschedulable, the way you would before draining it for maintenance." },
+    { id: NO_CAPACITY, label: "node-b is full", blurb: "The remaining node has no memory left for this pod's request. Requests, not usage." },
+    { id: TIGHT_PROBE, label: "Readiness probe too aggressive", blurb: "A one-second timeout on a process that needs twenty to boot. The container is fine. It just never gets to say so." },
+  ],
+
+  scene(step, phase, faults): Scene {
+    const p = clamp01(phase);
+    const s = stepAt(step, 6);
+    const cordoned = faults.includes(CORDON);
+    const full = faults.includes(NO_CAPACITY);
+    const tight = faults.includes(TIGHT_PROBE);
+    const feasible = (!cordoned ? 1 : 0) + (!full ? 1 : 0);
+    const target = !cordoned ? "nodeA" : "nodeB";
+
+    if (s === 0) {
+      return { nodes: [api("pod: Pending"), sched(), nodeA(cordoned ? "cordoned" : "2 pods", cordoned, cordoned), nodeB(full ? "memory full" : "1 pod", full)], edges: EDGES,
+        tokens: [{ id: "pod", from: "api", to: "sched", at: p, label: "pod/api-7f4", tone: "normal" }],
+        caption: "A pod object exists with no node assigned. That is all Pending means.",
+        detail: "Nothing has been rejected. The pod is simply a row in etcd with an empty nodeName, and the scheduler's whole job is to fill that one field in." };
+    }
+
+    if (s === 1) {
+      if (feasible === 0) {
+        return { nodes: [api("pod: Pending"), sched("0 feasible"), nodeA("cordoned", true, true), nodeB("insufficient memory", true, true)], edges: EDGES, tokens: [],
+          caption: "Both nodes are filtered out. Nothing can run this pod.",
+          detail: "The event says 0/2 nodes are available and names the reason per node. That event is the answer to the ticket, and it is the first thing to read rather than the last.",
+          fault: "You removed every place this pod could go." };
+      }
+      return { nodes: [api("pod: Pending"), sched(`${feasible} feasible`), nodeA(cordoned ? "filtered: cordoned" : "fits", cordoned), nodeB(full ? "filtered: memory" : "fits", full)], edges: EDGES,
+        tokens: [{ id: "f", from: "sched", to: cordoned ? "nodeB" : "nodeA", at: p, label: "can you fit this?", tone: "normal" }],
+        caption: "The scheduler filters: which nodes could run this pod at all?",
+        detail: "Filtering is on requests, not on what is actually being used. A node at 90% real memory with nothing requested still looks empty here, which is how a cluster ends up overcommitted and surprised.",
+        fault: cordoned || full ? "A node has been taken out of the running." : undefined };
+    }
+
+    if (s === 2) {
+      if (feasible === 0) {
+        return { nodes: [api("pod: Pending 4m"), sched("nothing to score"), nodeA("cordoned", true, true), nodeB("insufficient memory", true, true)], edges: EDGES, tokens: [],
+          caption: "There is nothing to score. The pod stays Pending.",
+          detail: "It will sit here indefinitely and retry. Kubernetes does not fail this pod, because from its point of view nothing has failed yet - capacity might appear.",
+          fault: "Pending is not an error state. That is why nothing alerts." };
+      }
+      return { nodes: [api("pod: Pending"), sched("scoring"), nodeA(cordoned ? "out" : "score 74", cordoned), nodeB(full ? "out" : "score 61", full)], edges: EDGES, tokens: [],
+        caption: `Feasible nodes are scored. ${feasible === 1 ? "Only one is left, so it wins by default." : "Spread, affinity and image locality all weigh in."}`,
+        detail: "Scoring is a preference, not a guarantee. A pod that must land somewhere specific needs a rule that filters, like a nodeSelector or a taint, not one that merely scores." };
+    }
+
+    if (s === 3) {
+      if (feasible === 0) {
+        return { nodes: [api("pod: Pending 4m"), sched("no binding"), nodeA("cordoned", true, true), nodeB("insufficient memory", true, true)], edges: EDGES, tokens: [],
+          caption: "No binding is written. Nothing changes.",
+          detail: "Every loop the scheduler tries again and writes the same event. The pod is not lost and is not running, which is the least useful pair of facts a system can give you.",
+          fault: "Uncordon a node or lower the request to break the loop." };
+      }
+      return { nodes: [api("nodeName set"), sched("bound"), nodeA(target === "nodeA" ? "assigned" : "out", cordoned), nodeB(target === "nodeB" ? "assigned" : "out", full)], edges: EDGES,
+        tokens: [{ id: "bind", from: "sched", to: "api", at: p, label: "bind -> " + (target === "nodeA" ? "node-a" : "node-b"), tone: "normal" }],
+        caption: "The scheduler writes the binding back to the API server.",
+        detail: "The scheduler never contacts the node. It sets a field. The kubelet on that node is watching for its own name and picks the work up from there - the whole system is that pattern repeated." };
+    }
+
+    if (s === 4) {
+      return { nodes: [api("pod: ContainerCreating"), sched("done"), nodeA(target === "nodeA" ? "pulling image" : "", cordoned), nodeB(target === "nodeB" ? "pulling image" : "", full)], edges: EDGES,
+        tokens: [{ id: "start", from: "api", to: target, at: p, label: "kubelet: start", tone: "normal" }],
+        caption: "The kubelet on the assigned node pulls the image and starts the container.",
+        detail: "Running is not Ready. The container has a process; nothing yet says that process can serve traffic, and the Service will not send it any until something does." };
+    }
+
+    if (tight) {
+      return { nodes: [api("pod: Running 0/1 Ready"), sched("done"), nodeA(target === "nodeA" ? "probe failing" : "", cordoned, target === "nodeA"), nodeB(target === "nodeB" ? "probe failing" : "", full, target === "nodeB")], edges: EDGES,
+        tokens: [{ id: "probe", from: target, to: "api", at: Math.min(p, 0.4), label: "probe timeout", tone: "fault" }],
+        caption: "The container started. The readiness probe times out before the process finishes booting.",
+        detail: "The pod restarts, boots for twenty seconds, gets asked at one, fails, and restarts. Nothing is wrong with the image or the node. The fix is a startupProbe, or a timeout that matches reality.",
+        fault: "0/1 Ready, forever. The Service has no endpoints and callers get connection refused." };
+    }
+
+    return { nodes: [api("pod: Running 1/1"), sched("done"), nodeA(target === "nodeA" ? "serving" : "", cordoned), nodeB(target === "nodeB" ? "serving" : "", full)], edges: EDGES,
+      tokens: [{ id: "ready", from: target, to: "api", at: p, label: "Ready", tone: "normal" }],
+      caption: "The readiness probe passes and the pod is added to the Service endpoints.",
+      detail: "This is the moment traffic can arrive. Everything before it was setup, and the gap between Running and Ready is where most bad deploys actually live." };
+  },
+};
