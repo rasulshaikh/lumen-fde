@@ -35,6 +35,10 @@ import { concurrency, contextCeiling, kvBytesPerToken, weightsGB, freeGB } from 
 import { precision, halfAt as precisionHalfAt, falseBlocksPerMillion } from "./lessons/base-rate.ts";
 import { edgeLength, halfAt as edgeHalfAt } from "./lessons/dimensionality.ts";
 import { totalError, truncation, roundoff, optimalH } from "./lessons/step-size.ts";
+import { perArm, daysAt, mdeInADay } from "./lessons/statistical-power.ts";
+import { naiveRelError, welfordRelError, kappa } from "./lessons/catastrophic-cancellation.ts";
+import { topWeight, gradientThrough, logitGap } from "./lessons/softmax-scale.ts";
+import { halfLife, effectiveN, intervalInflation } from "./lessons/autocorrelation.ts";
 
 let fails = 0;
 const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
@@ -460,6 +464,61 @@ console.log("step size: the error is U-shaped and everyone knows only one arm");
   ck("truncation falls as h squared", Math.abs(truncation(1e-2, 1) / truncation(1e-3, 1) - 100) < 1e-6);
   ck("roundoff rises as one over h", Math.abs(roundoff(1e-4, 1) / roundoff(1e-3, 1) - 10) < 1e-6);
   ck("a larger function scale raises the floor", optimalH(1, 1000) > optimalH(1, 1));
+}
+
+
+console.log("power: the effect is squared, so the cost is quadrupled");
+{
+  // The single fact the lesson exists for.
+  for (const d of [0.1, 0.05, 0.02]) {
+    ck(`halving a ${(d * 100).toFixed(0)}-point effect quadruples the sample`,
+      Math.abs(perArm(d / 2) / perArm(d) - 4) < 1e-9);
+  }
+  ck("a one-point regression is months at a small canary", daysAt(0.01, 0.05) > 60, `${daysAt(0.01, 0.05).toFixed(0)} days`);
+  ck("and a small canary cannot catch a small effect in a day", mdeInADay(0.05) > 0.05, `${(mdeInADay(0.05) * 100).toFixed(1)} pts`);
+  // MDE is the same equation solved the other way, so it must round-trip.
+  ck("the detectable effect and the sample size are inverses of each other",
+    Math.abs(daysAt(mdeInADay(0.05), 0.05) - 1) < 1e-9);
+  ck("a bigger canary catches more", mdeInADay(0.5) < mdeInADay(0.05));
+}
+
+console.log("variance: the naive formula loses the condition number squared");
+{
+  // The relationship is the lesson: naive loses kappa^2 where Welford loses kappa.
+  for (const m of [1e2, 1e4, 1e6]) {
+    ck(`at offset ${m.toExponential(0)} naive error is welford error times kappa`,
+      Math.abs(naiveRelError(m, 1) / welfordRelError(m, 1) - kappa(m, 1)) < 1e-6);
+  }
+  ck("a ten-times offset costs naive two digits and welford one",
+    Math.abs(naiveRelError(1e6, 1) / naiveRelError(1e5, 1) - 100) < 0.1
+    && Math.abs(welfordRelError(1e6, 1) / welfordRelError(1e5, 1) - 10) < 0.1);
+  ck("naive has no digits left at a timestamp-sized offset", naiveRelError(1e8, 1) >= 1, naiveRelError(1e8, 1).toExponential(1));
+  ck("welford still does", welfordRelError(1e8, 1) < 1e-6);
+  ck("the spread, not the offset, is what conditioning is relative to", kappa(1e6, 1000) < kappa(1e6, 1));
+}
+
+console.log("softmax: the divide holds the temperature still");
+{
+  // Unscaled, attention hardens with width. Scaled, it does not move at all - and "does not move"
+  // is the claim, so it is asserted as an equality rather than a tolerance on a trend.
+  ck("unscaled attention hardens as the head widens", topWeight(256, false) > topWeight(16, false));
+  ck("scaled attention does not move at all", topWeight(1, true) === topWeight(512, true), `${(topWeight(512, true) * 100).toFixed(2)}%`);
+  ck("the scaled logit gap is a constant sqrt(2)", Math.abs(logitGap(512, true) - Math.SQRT2) < 1e-12);
+  // The consequence: the gradient through a saturated softmax is gone.
+  ck("and the gradient collapses with it", gradientThrough(512, false) < 1e-12, gradientThrough(512, false).toExponential(1));
+  ck("while the scaled gradient is unchanged by width", Math.abs(gradientThrough(1, true) - gradientThrough(512, true)) < 1e-12);
+  ck("at width one there is nothing to scale, so both agree", Math.abs(topWeight(1, false) - topWeight(1, true)) < 1e-12);
+}
+
+console.log("autocorrelation: two years of data, nineteen observations");
+{
+  ck("half-life is ln(0.5)/ln(phi)", Math.abs(halfLife(0.5) - 1) < 1e-9);
+  ck("and goes vertical as persistence approaches one", halfLife(0.99) > halfLife(0.9) * 8, `${halfLife(0.99).toFixed(0)}`);
+  ck("effective n collapses with it", effectiveN(0.95) < 25, `${effectiveN(0.95).toFixed(0)} of 730`);
+  ck("the interval inflation is sqrt(n / n_eff)", Math.abs(intervalInflation(0.9) - Math.sqrt(730 / effectiveN(0.9))) < 1e-9);
+  ck("an uncorrelated series would lose nothing", Math.abs(effectiveN(0) - 730) < 1e-9);
+  ck("and the two measures move together, because they are one fact",
+    halfLife(0.95) > halfLife(0.8) && effectiveN(0.95) < effectiveN(0.8));
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

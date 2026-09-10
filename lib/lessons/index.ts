@@ -8,6 +8,10 @@ import { kvCache } from "./kv-cache";
 import { baseRate } from "./base-rate";
 import { dimensionality } from "./dimensionality";
 import { stepSize } from "./step-size";
+import { statisticalPower } from "./statistical-power";
+import { catastrophicCancellation } from "./catastrophic-cancellation";
+import { softmaxScale } from "./softmax-scale";
+import { autocorrelation } from "./autocorrelation";
 import { indexCrossover } from "./index-crossover";
 import { cacheHitRate } from "./cache-hit-rate";
 import { gradientDescent } from "./gradient-descent";
@@ -17,8 +21,8 @@ import type { Lesson } from "./types";
 
 export const LESSONS: Lesson[] = [
   bandwidthDelay, cpuThrottling, kvCache, histogramP99, scalabilityLaw, asyncBlocking,
-  indexCrossover, cacheHitRate, baseRate, gradientDescent, crossEntropy, dimensionality,
-  stepSize, backpropChain,
+  indexCrossover, cacheHitRate, statisticalPower, baseRate, gradientDescent, crossEntropy,
+  catastrophicCancellation, dimensionality, autocorrelation, stepSize, backpropChain, softmaxScale,
 ];
 
 export const lessonById = (id: string): Lesson | null => LESSONS.find((l) => l.id === id) ?? null;
