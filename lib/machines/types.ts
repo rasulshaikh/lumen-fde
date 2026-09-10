@@ -103,3 +103,18 @@ export const clamp01 = (n: number) => (Number.isFinite(n) ? Math.min(1, Math.max
 /** Picks the step, tolerating out-of-range input rather than throwing into a render. */
 export const stepAt = (step: number, count: number) =>
   count <= 0 ? 0 : Math.min(count - 1, Math.max(0, Math.floor(Number.isFinite(step) ? step : 0)));
+
+/**
+ * Easing for the step clock.
+ *
+ * Applied by the renderer to `phase` before it reaches `scene()`, not inside any machine - so the
+ * machines stay pure functions of a linear 0..1 and their tests can keep passing exact phases.
+ *
+ * easeInOutQuad rather than a bounce or an elastic: a packet leaving a host accelerates and a
+ * packet arriving decelerates, and neither overshoots and springs back. A bounce would be motion
+ * describing something that does not happen.
+ */
+export const ease = (p: number): number => {
+  const x = clamp01(p);
+  return x < 0.5 ? 2 * x * x : 1 - ((-2 * x + 2) ** 2) / 2;
+};

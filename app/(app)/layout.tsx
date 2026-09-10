@@ -6,6 +6,7 @@ import { RecallStrip } from "@/app/recall";
 import { AppStateProvider, useAppState } from "@/components/AppState";
 import { planRows } from "@/components/shared";
 import { useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { NAV, Nav } from "@/components/Nav";
 import { AskDock } from "./dock";
 import { HeroLines } from "./hero-lines";
@@ -33,6 +34,7 @@ function Chrome({ children }: { children: React.ReactNode }) {
   const { askOpen, setAskOpen, setAskTopic, theme, toggleTheme, hours, focus, activeRows, curParts, startedTopics, done, doneHours, peakMonth, monthHours, nextRow, nextIndex, weeklyHours, trackTotals, skipped, skippedHours, statusOf } = useAppState();
   const [shared, setShared] = useState(false);
   const router = useRouter();
+  const pathname = usePathname();
 
   /*
    * What the focus card knows.
@@ -121,7 +123,7 @@ function Chrome({ children }: { children: React.ReactNode }) {
         </> : <p className="hero-focus-where">Plan complete</p>}
       </aside></section>
     <Nav /><RecallStrip startedTopics={startedTopics} />
-    {children}
+    <div key={pathname} className="route-enter">{children}</div>
     {/* The dock slot. Everything Quaere needs is already in the provider above, so this is a
         one-line seam: the route-aware dock replaces app/(app)/dock.tsx and nothing here moves. */}
     <AskDock />

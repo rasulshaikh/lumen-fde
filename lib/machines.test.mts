@@ -18,6 +18,7 @@
  */
 import workbook from "../data/workbook.json" with { type: "json" };
 import { MACHINES, machineById, machinesForTopic } from "./machines/index.ts";
+import { ease } from "./machines/types.ts";
 import type { Machine, Scene } from "./machines/types.ts";
 
 let fails = 0;
@@ -176,6 +177,23 @@ console.log("an empty retrieval still produces a confident answer");
   ck("the answer is marked as a fault, not a success", answer.tokens.some((t) => t.tone === "fault"));
   ck("and it names why this is the dangerous one", /indistinguishable from a good one/.test(answer.fault ?? ""));
   ck("no error is raised anywhere in the pipeline", /no error, no exception, no alert/.test(r.scene(1, 0.5, ["empty-retrieval"]).detail));
+}
+
+
+console.log("the step clock eases without ever leaving its bounds");
+{
+  ck("starts at rest", ease(0) === 0);
+  ck("ends at rest", ease(1) === 1);
+  ck("passes through the middle", Math.abs(ease(0.5) - 0.5) < 1e-9);
+  ck("never leaves 0..1", [0, 0.1, 0.37, 0.5, 0.63, 0.9, 1].every((p) => ease(p) >= 0 && ease(p) <= 1));
+  ck("is monotonic, so nothing ever travels backwards", (() => {
+    let prev = -1;
+    for (let i = 0; i <= 100; i++) { const v = ease(i / 100); if (v < prev) return false; prev = v; }
+    return true;
+  })());
+  // The reason for easing at all: the middle is faster than the ends.
+  ck("accelerates out and decelerates in", ease(0.55) - ease(0.45) > ease(0.1) - ease(0));
+  ck("garbage clamps rather than propagating", ease(NaN) === 0 && ease(-5) === 0 && ease(9) === 1);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

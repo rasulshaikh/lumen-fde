@@ -33,8 +33,48 @@ export const SPIN_X = 0.000021;
  */
 export const CAMERA = 4;
 
-export function frame(t: number, width: number, height: number): Frame {
-  const ay = t * SPIN_Y;
+/**
+ * A resting angle per view, so the form sits differently on each tab.
+ *
+ * Deliberately NOT a progress gauge. The obvious move is to light rings in proportion to how much
+ * of the plan is done, and it is the wrong one: a background that encodes a number you cannot read
+ * off it is a chart nobody can check, and this product's discipline is that a claim you cannot
+ * verify should not be made. This encodes nothing. It gives each tab its own view of the same
+ * object, so navigating has something to move through.
+ *
+ * ## Why an index and not a hash
+ *
+ * This started as a hash of the path, and the hash was wrong twice in a row. Continuous, it put
+ * /plan at 1.200 rad and /practice at 1.199 - one milliradian apart, invisible, so two tabs looked
+ * identical while the code insisted they differed. Quantised to twelve slots, four of the nine real
+ * routes collided; adding murmur3's finaliser moved which four collided and left it at five
+ * distinct angles out of nine, because nine items into twelve slots collide by birthday no matter
+ * how good the mixing is.
+ *
+ * So the nav's own ordering does the job a hash cannot: successive indices are placed at the
+ * golden angle, which is the arrangement with no near-repeats at any count - the same reason a
+ * sunflower uses it. Nine routes, nine distinct angles, guaranteed rather than hoped for.
+ *
+ * The hash survives only as the fallback for a path that is not in the nav (/design, a 404), where
+ * "some stable angle" is all that is needed and a collision costs nothing.
+ */
+export const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+
+export function turnFor(pathname: string, index = -1): number {
+  if (index >= 0) return (index * GOLDEN_ANGLE) % (Math.PI * 2);
+
+  let h = 2166136261;
+  for (let i = 0; i < pathname.length; i++) {
+    h ^= pathname.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  // >>> 0 because Math.imul returns a signed 32-bit int, and a negative here would put the form
+  // through a mirrored orientation rather than a rotated one.
+  return ((h >>> 0) / 4294967296) * (Math.PI * 2);
+}
+
+export function frame(t: number, width: number, height: number, turn = 0): Frame {
+  const ay = t * SPIN_Y + turn;
   const ax = Math.sin(t * SPIN_X) * 0.42;
   const cy = Math.cos(ay), sy = Math.sin(ay);
   const cx = Math.cos(ax), sx = Math.sin(ax);

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MACHINES, machineById } from "@/lib/machines";
+import { ease } from "@/lib/machines/types";
 import type { Machine as MachineDef, Scene, SceneNode } from "@/lib/machines/types";
 
 /**
@@ -65,7 +66,7 @@ export function MachineView({ machine }: { machine: MachineDef }) {
   const startedAt = useRef<number | null>(null);
 
   const last = machine.steps.length - 1;
-  const scene = useMemo(() => machine.scene(step, phase, faults), [machine, step, phase, faults]);
+  const scene = useMemo(() => machine.scene(step, ease(phase), faults), [machine, step, phase, faults]);
 
   // The frame loop. `startedAt` is set inside the effect, never during render.
   useEffect(() => {

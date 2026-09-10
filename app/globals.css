@@ -1737,3 +1737,11 @@ html{background:var(--bg)}
 
 @media(max-width:768px){.mx-sub{margin-top:-6px}.mx-controls{flex-wrap:wrap}.mx-btn{flex:1}}
 @media(prefers-reduced-motion:reduce){.mx-token circle,.mx-token .mx-token-label{transition:none}}
+
+/* Route transition. Keyed on the pathname in app/(app)/layout.tsx so React remounts the subtree
+   and this re-runs; without the key the same DOM is reused and it would play once, on first load,
+   and never again. Short and small on purpose - a page that takes half a second to arrive is a
+   page you wait for. */
+@keyframes route-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.route-enter{animation:route-in 220ms cubic-bezier(.22,.61,.36,1) both}
+@media(prefers-reduced-motion:reduce){.route-enter{animation:none}}

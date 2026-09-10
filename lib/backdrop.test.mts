@@ -7,7 +7,7 @@
  * identical to the last one so the whole thing is a still image pretending to animate.
  */
 import { readFileSync } from "node:fs";
-import { CAMERA, DEPTHS, RADIUS, SIDES, frame, ringAlpha } from "./backdrop.ts";
+import { CAMERA, DEPTHS, RADIUS, SIDES, frame, ringAlpha, turnFor, GOLDEN_ANGLE} from "./backdrop.ts";
 
 let fails = 0;
 const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
@@ -134,6 +134,52 @@ console.log("nothing paints over the canvas");
 
   // The canvas must stay behind the page and out of the way of clicks.
   ck("the canvas is fixed, behind, and non-interactive", /\.backdrop\{[^}]*position:fixed[^}]*z-index:-1[^}]*pointer-events:none/.test(css.replace(/\s+/g, "")) || /\.backdrop\{[^}]*\}/.test(css), "");
+}
+
+
+console.log("every view gets its own angle, and they are far enough apart to see");
+{
+  // This property failed twice before it passed, which is why it is pinned rather than eyeballed.
+  // A hash of the path put /plan at 1.200 rad and /practice at 1.199 - one milliradian, invisible.
+  // Quantising to twelve slots collided four of nine. Nine items into twelve slots collide by
+  // birthday however good the mixing is, so the nav's ordering does the job instead.
+  const routes = ["/overview", "/plan", "/curriculum", "/machines", "/practice", "/market", "/paths", "/library", "/sandbox"];
+  const angles = routes.map((r, i) => turnFor(r, i));
+
+  ck("every route gets a distinct angle", new Set(angles).size === routes.length, `${new Set(angles).size} of ${routes.length}`);
+  ck("all angles are inside one turn", angles.every((a) => a >= 0 && a < Math.PI * 2));
+  ck("nothing is NaN", angles.every((a) => Number.isFinite(a)));
+
+  const sorted = [...angles].sort((a, b) => a - b);
+  let smallest = Infinity;
+  for (let i = 1; i < sorted.length; i++) smallest = Math.min(smallest, sorted[i] - sorted[i - 1]);
+  const deg = (smallest * 180) / Math.PI;
+  // 15 degrees is the line between "a different view" and "the same view rendered twice".
+  ck("the closest pair is still visibly different", deg > 15, `${deg.toFixed(1)} deg apart`);
+
+  ck("the golden angle is what spreads them", Math.abs(turnFor("/plan", 1) - GOLDEN_ANGLE) < 1e-9);
+  ck("index 0 is the origin", turnFor("/overview", 0) === 0);
+}
+
+console.log("a route outside the nav still gets a stable angle");
+{
+  // /design is deliberately not in NAV, and a 404 is in no list at all. Neither should throw and
+  // neither should move between renders.
+  for (const path of ["/design", "/nope", ""]) {
+    ck(`${path || "(empty)"}: stable`, turnFor(path) === turnFor(path));
+    ck(`${path || "(empty)"}: inside one turn`, turnFor(path) >= 0 && turnFor(path) < Math.PI * 2);
+  }
+  ck("an unknown path differs from index 0", turnFor("/design") !== turnFor("/overview", 0));
+}
+
+console.log("adding the angle did not change the default frame");
+{
+  // frame() gained a parameter. Every existing caller and every assertion above passes three
+  // arguments, so the default has to be the old behaviour exactly.
+  const a = JSON.stringify(frame(1234, 800, 600));
+  const b = JSON.stringify(frame(1234, 800, 600, 0));
+  ck("omitting the turn is identical to passing zero", a === b);
+  ck("a non-zero turn actually moves the form", JSON.stringify(frame(1234, 800, 600, 1)) !== a);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { frame, ringAlpha } from "@/lib/backdrop";
+import { usePathname } from "next/navigation";
+import { frame, ringAlpha, turnFor } from "@/lib/backdrop";
+import { NAV } from "@/components/Nav";
 
 /**
  * The 3D field under the whole site.
@@ -42,6 +44,26 @@ import { frame, ringAlpha } from "@/lib/backdrop";
 
 export function Backdrop() {
   const ref = useRef<HTMLCanvasElement | null>(null);
+  const pathname = usePathname();
+
+  /**
+   * The angle this route wants, and the angle currently drawn.
+   *
+   * Held in refs rather than state on purpose. The frame loop reads them sixty times a second and
+   * a state update per frame would re-render the tree sixty times a second to change a number no
+   * React output depends on. `target` is written by the route effect; `turn` is eased toward it
+   * inside the loop and never triggers a render at all.
+   */
+  const target = useRef(0);
+  const turn = useRef(0);
+
+  useEffect(() => {
+    const index = NAV.findIndex((item) => item.href === pathname);
+    target.current = turnFor(pathname, index);
+    // First paint lands on the angle rather than swinging to it from zero, which would make every
+    // full page load look like a transition that had already happened.
+    if (turn.current === 0) turn.current = target.current;
+  }, [pathname]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -83,7 +105,22 @@ export function Backdrop() {
     };
 
     const draw = (t: number) => {
-      const { rings, spokes } = frame(t, width, height);
+      /*
+       * Eased toward the route's angle, by the shortest way round.
+       *
+       * Without the wrap the form takes the long way whenever a move crosses zero - navigating
+       * from a 20-degree tab to a 330-degree one would spin it 310 degrees forwards instead of 50
+       * back, which reads as a glitch rather than as a turn.
+       *
+       * Someone who asked for reduced motion gets the angle immediately. They still get a
+       * different view per tab; they do not get a thing sliding across their screen to deliver it.
+       */
+      let delta = target.current - turn.current;
+      while (delta > Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      turn.current = still.matches ? target.current : turn.current + delta * 0.045;
+
+      const { rings, spokes } = frame(t, width, height, turn.current);
       ctx.clearRect(0, 0, width, height);
       ctx.lineWidth = 1;
 
