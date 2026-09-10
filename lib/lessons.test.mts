@@ -39,6 +39,9 @@ import { perArm, daysAt, mdeInADay } from "./lessons/statistical-power.ts";
 import { naiveRelError, welfordRelError, kappa } from "./lessons/catastrophic-cancellation.ts";
 import { topWeight, gradientThrough, logitGap } from "./lessons/softmax-scale.ts";
 import { halfLife, effectiveN, intervalInflation } from "./lessons/autocorrelation.ts";
+import { precisionAt, recallAt, candidatePairs, blockingRecall } from "./lessons/blocking.ts";
+import { gain, bestSplit, sides } from "./lessons/split-gain.ts";
+import { hitRate, cachedCost, breakEvenPerHour } from "./lessons/prompt-cache.ts";
 
 let fails = 0;
 const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
@@ -519,6 +522,53 @@ console.log("autocorrelation: two years of data, nineteen observations");
   ck("an uncorrelated series would lose nothing", Math.abs(effectiveN(0) - 730) < 1e-9);
   ck("and the two measures move together, because they are one fact",
     halfLife(0.95) > halfLife(0.8) && effectiveN(0.95) < effectiveN(0.8));
+}
+
+
+console.log("blocking: the prior is the thing, not the matcher");
+{
+  // With no blocking the matcher is drowned by the base rate even though nothing is wrong with it.
+  ck("comparing everything is hopeless", precisionAt(0) < 0.01, `${(precisionAt(0) * 100).toFixed(2)}%`);
+  ck("and it is not the matcher's fault - recall is still high", recallAt(0) > 0.9);
+  // Tightening buys precision, and the pairs fall by orders of magnitude.
+  ck("blocking raises precision by orders of magnitude", precisionAt(0.8) > precisionAt(0) * 100);
+  ck("by removing pairs, not by improving the matcher", candidatePairs(0.8) < candidatePairs(0) / 1000);
+  // And then it costs recall, which is the half nobody measures.
+  ck("recall is nearly free at first", blockingRecall(0.4) > 0.99, `${(blockingRecall(0.4) * 100).toFixed(1)}%`);
+  ck("and expensive later", blockingRecall(0.9) < 0.6, `${(blockingRecall(0.9) * 100).toFixed(1)}%`);
+  ck("so precision and recall genuinely trade", precisionAt(0.9) > precisionAt(0.6) && recallAt(0.9) < recallAt(0.6));
+}
+
+console.log("split gain: the peak is where the label changes, and gamma is a floor");
+{
+  // The gain equation must find the real boundary. If it does not, the lesson teaches nothing.
+  ck("the best split is where the data actually splits", Math.abs(bestSplit(1, 0).t - 0.6) < 0.02, `${bestSplit(1, 0).t}`);
+  ck("gain is highest there", gain(0.6, 1, 0) > gain(0.4, 1, 0) && gain(0.6, 1, 0) > gain(0.8, 1, 0));
+  ck("the gradients sum to the parent's", Math.abs(sides(0.6).GL + sides(0.6).GR - sides(0.6).G) < 1e-12);
+
+  // Gamma is a flat toll: it must not move WHERE the best split is, only whether it happens.
+  ck("gamma does not move the best split", bestSplit(1, 8).t === bestSplit(1, 0).t);
+  ck("it lowers every gain by exactly itself", Math.abs((gain(0.6, 1, 0) - gain(0.6, 1, 4)) - 4) < 1e-12);
+  ck("and eventually stops the tree entirely", bestSplit(1, 13).value <= 0, `${bestSplit(1, 13).value.toFixed(2)}`);
+
+  // Lambda shrinks gains. On a clean balanced split it does NOT move the threshold - the lesson's
+  // prose said it did until this was measured.
+  ck("lambda shrinks the gain", gain(0.6, 50, 0) < gain(0.6, 0, 0));
+  ck("but does not move the best split on a balanced one", bestSplit(50, 0).t === bestSplit(0, 0).t);
+}
+
+console.log("prompt cache: below a rate it is a cost, not a saving");
+{
+  const even = breakEvenPerHour();
+  ck("break-even is a few requests an hour, not a few a second", even > 1 && even < 10, `${even.toFixed(2)}/h`);
+  ck("and it really is break-even", Math.abs(cachedCost(even) - 1) < 1e-9);
+  ck("below it caching costs more than not caching", cachedCost(even * 0.3) > 1, `${cachedCost(even * 0.3).toFixed(3)}x`);
+  ck("above it, it saves", cachedCost(even * 5) < 1);
+  // The trap: a positive hit rate is not the same as a saving.
+  ck("a cache can be hit and still lose money", hitRate(1) > 0 && cachedCost(1) > 1,
+    `${(hitRate(1) * 100).toFixed(0)}% hits at ${cachedCost(1).toFixed(2)}x`);
+  ck("the saving flattens once the cache is always warm", cachedCost(2000) - cachedCost(200) > -0.01);
+  ck("hit rate is 1 - e^(-lambda*TTL)", Math.abs(hitRate(3600 / 300) - (1 - Math.exp(-1))) < 1e-12);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
