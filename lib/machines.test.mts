@@ -19,6 +19,7 @@
 import workbook from "../data/workbook.json" with { type: "json" };
 import { MACHINES, machineById, machinesForTopic } from "./machines/index.ts";
 import { ease } from "./machines/types.ts";
+import { readUnfinished, unfinishedNote, toStorage } from "./machines/unfinished.ts";
 import type { Machine, Scene } from "./machines/types.ts";
 
 let fails = 0;
@@ -194,6 +195,83 @@ console.log("the step clock eases without ever leaving its bounds");
   // The reason for easing at all: the middle is faster than the ends.
   ck("accelerates out and decelerates in", ease(0.55) - ease(0.45) > ease(0.1) - ease(0));
   ck("garbage clamps rather than propagating", ease(NaN) === 0 && ease(-5) === 0 && ease(9) === 1);
+}
+
+
+console.log("the unfinished machine is read from storage, and never half-read");
+{
+  const ok = toStorage("k8s", ["cordon-a"], 2);
+  const found = readUnfinished(ok, MACHINES);
+  ck("a valid record resolves", found?.machine.id === "k8s" && found.state.step === 2);
+
+  // localStorage is on the reader's own device: stale, hand-editable, survives deploys. Every one
+  // of these must render nothing rather than half a sentence about a machine that stopped existing.
+  const rejected: [string, string | null][] = [
+    ["nothing stored", null],
+    ["empty string", ""],
+    ["not json", "{oh no"],
+    ["an array", "[1,2,3]"],
+    ["a bare string", '"k8s"'],
+    ["null literal", "null"],
+    ["a machine that does not exist", toStorage("mars-lander", ["cordon-a"], 1)],
+    ["a crafted id", toStorage("../../etc/passwd", ["cordon-a"], 1)],
+    ["a fault that does not exist", toStorage("k8s", ["delete-the-cluster"], 1)],
+    ["a step past the end", toStorage("k8s", ["cordon-a"], 99)],
+    ["a negative step", toStorage("k8s", ["cordon-a"], -1)],
+    ["a fractional step", toStorage("k8s", ["cordon-a"], 1.5)],
+  ];
+  for (const [name, raw] of rejected) ck(`rejected: ${name}`, readUnfinished(raw, MACHINES) === null);
+
+  // Partial validity is rejected outright rather than repaired. A record naming one live fault and
+  // one that was removed describes a state the reader never actually left it in.
+  ck("one good fault and one dead one is rejected whole",
+    readUnfinished(toStorage("k8s", ["cordon-a", "gone-in-a-deploy"], 1), MACHINES) === null);
+
+  // Nothing broken is not something to come back to. This is the gate the whole feature rests on.
+  ck("a machine at rest is not an open loop", readUnfinished(toStorage("k8s", [], 3), MACHINES) === null);
+}
+
+console.log("the strip states a fact about the machine, never about the person");
+{
+  const note = unfinishedNote(readUnfinished(toStorage("k8s", ["cordon-a", "no-capacity"], 2), MACHINES))!;
+  ck("it names the machine", note.title === "Kubernetes", note.title);
+  ck("it names both faults readably", /cordon node-a and node-b is full/.test(note.broken), note.broken);
+  ck("it carries the plan topic for the recall bridge", note.topicIndex === 7);
+
+  // The standing sentence is taken from the machine's own scene rather than written in the strip,
+  // so what the card says and what the diagram shows cannot drift apart.
+  const scene = machineById("k8s")!.scene(2, 0.55, ["cordon-a", "no-capacity"]);
+  ck("the standing line comes from the machine itself", note.standing === (scene.fault || scene.caption), note.standing);
+
+  // The rules this product holds itself to. Every one of these has a refusal written down in the
+  // codebase, and a returning-user prompt is exactly where they get quietly broken.
+  const text = `${note.title} ${note.broken} ${note.standing}`;
+  ck("no count of anything", !/\b\d+\s*(days?|cards?|questions?|sessions?)\b/i.test(text), text);
+  ck("no streak language", !/streak|in a row|don't break|keep it up/i.test(text));
+  ck("no reproach", !/you (left|haven't|failed|forgot|abandoned)|still not|overdue|behind/i.test(text), text);
+  ck("no praise either", !/well done|great|nice work|congrat/i.test(text));
+
+  ck("nothing found renders nothing", unfinishedNote(null) === null);
+}
+
+console.log("a single fault reads as a sentence, not a list of one");
+{
+  const one = unfinishedNote(readUnfinished(toStorage("tcp", ["drop-synack"], 1), MACHINES))!;
+  ck("no stray joining word", !/ and /.test(one.broken), one.broken);
+  ck("it is the fault's own label", one.broken === "drop the syn-ack", one.broken);
+  ck("and it points at the networking topic", one.topicIndex === 2);
+}
+
+
+console.log("the strip is invisible until the browser says otherwise");
+{
+  // Rendered on the server it must produce nothing at all. The note comes out of localStorage,
+  // which the server cannot see, so any markup here would be markup the client immediately
+  // replaces - the hydration mismatch four files in this repo already carry a comment about.
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { createElement } = await import("react");
+  const { Unfinished } = await import("../components/Unfinished.tsx");
+  ck("nothing is rendered server-side", renderToStaticMarkup(createElement(Unfinished)) === "");
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

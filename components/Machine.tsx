@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MACHINES, machineById } from "@/lib/machines";
+import { MACHINE_STATE_KEY, readUnfinished, toStorage } from "@/lib/machines/unfinished";
 import { ease } from "@/lib/machines/types";
 import type { Machine as MachineDef, Scene, SceneNode } from "@/lib/machines/types";
 
@@ -57,11 +58,11 @@ function NodeBox({ node }: { node: SceneNode }) {
   );
 }
 
-export function MachineView({ machine }: { machine: MachineDef }) {
-  const [step, setStep] = useState(0);
+export function MachineView({ machine, initial }: { machine: MachineDef; initial?: { step: number; faults: string[] } }) {
+  const [step, setStep] = useState(initial?.step ?? 0);
   const [phase, setPhase] = useState(0.55);
   const [playing, setPlaying] = useState(false);
-  const [faults, setFaults] = useState<string[]>([]);
+  const [faults, setFaults] = useState<string[]>(initial?.faults ?? []);
   const raf = useRef<number | null>(null);
   const startedAt = useRef<number | null>(null);
 
@@ -88,6 +89,21 @@ export function MachineView({ machine }: { machine: MachineDef }) {
     raf.current = requestAnimationFrame(tick);
     return () => { if (raf.current !== null) cancelAnimationFrame(raf.current); raf.current = null; };
   }, [playing, last]);
+
+  /*
+   * Remember what is broken, so it is still broken when you come back.
+   *
+   * Written in an effect and never during render, because localStorage during render is the
+   * hydration mismatch this codebase keeps rewriting the same comment about. A machine at rest
+   * clears the key rather than storing an empty fault list: nothing broken is not something to
+   * return to, and a bookmark pointing at a working system is just noise on the Overview.
+   */
+  useEffect(() => {
+    try {
+      if (faults.length) localStorage.setItem(MACHINE_STATE_KEY, toStorage(machine.id, faults, step));
+      else localStorage.removeItem(MACHINE_STATE_KEY);
+    } catch { /* private mode, a full quota - not worth failing a diagram over */ }
+  }, [machine.id, faults, step]);
 
   const go = useCallback((next: number) => {
     setPlaying(false);
@@ -198,11 +214,36 @@ export function MachinePicker({ current, onPick }: { current: string; onPick: (i
 
 export function Machines() {
   const [id, setId] = useState(MACHINES[0].id);
+  const [initial, setInitial] = useState<{ step: number; faults: string[] } | null>(null);
+  const [restored, setRestored] = useState(false);
+
+  /*
+   * Reopen whatever was left broken.
+   *
+   * Read once on mount, in an effect. `restored` gates it so picking a different machine by hand
+   * afterwards is not undone by this - the stored state is where you resume from, not a rail you
+   * are held on.
+   */
+  useEffect(() => {
+    if (restored) return;
+    setRestored(true);
+    let raw: string | null = null;
+    try { raw = localStorage.getItem(MACHINE_STATE_KEY); } catch { return; }
+    const found = readUnfinished(raw, MACHINES);
+    if (!found) return;
+    setId(found.machine.id);
+    setInitial({ step: found.state.step, faults: found.state.faults });
+  }, [restored]);
+
   const machine = machineById(id) ?? MACHINES[0];
+  const pick = useCallback((next: string) => { setId(next); setInitial(null); }, []);
+
   return (
     <>
-      <MachinePicker current={machine.id} onPick={setId} />
-      <MachineView machine={machine} />
+      <MachinePicker current={machine.id} onPick={pick} />
+      {/* Keyed, so switching machines rebuilds the view rather than carrying the previous one's
+          step and faults into a machine that does not have them. */}
+      <MachineView key={`${machine.id}:${initial ? "resumed" : "fresh"}`} machine={machine} initial={initial ?? undefined} />
     </>
   );
 }

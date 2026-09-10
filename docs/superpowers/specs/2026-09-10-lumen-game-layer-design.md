@@ -92,16 +92,30 @@ Explicitly polish, priced as polish. It teaches nothing and does not pretend to.
 
 ---
 
-## Build 3 - Daily pull
+## Build 3 - Daily pull  (BUILT: the unfinished machine)
 
-Not a build problem. A design problem, and it stays third until the design question is answered:
-what gets you into the 1,710-prompt bank when points, streaks, scores and praise are all off the
-table?
+The hook question was put to the reader and answered: **an unfinished machine**.
 
-The data is ready - the bank, the seven-rung ladder in `lib/review.ts`, `/api/recall`. The hook is
-not. The working hypothesis is that the pull is **an unfinished machine**: a system you were
-mid-way through breaking, waiting where you left it. Curiosity rather than obligation. That
-hypothesis is untested and is why this is not second.
+You cordon a node and walk away, and the pod is still Pending. That is not an obligation and not a
+debt - nothing accumulates while you are gone, nothing decays, and coming back a month later costs
+exactly what coming back tomorrow costs. An open loop rather than a number going down.
+
+The recall question rides along with it, and that is the actual job. The bank holds 1,710 prompts
+and the hard part was never answering one, it was opening the thing. A question about the system
+already on your screen is a much shorter walk than "go and practise".
+
+Held to three rules, each asserted:
+
+- **No count, ever.** Not days away, not questions waiting, not machines left open. A number turns
+  a return into a reckoning.
+- **No reproach.** "Still cordoned" is a fact about the machine. "You left this broken six days
+  ago" is a fact about the person, and this product does not make those.
+- **Untrusted input.** The state lives in localStorage on the reader's device, so it can be stale,
+  hand-edited or crafted. Twelve malformed shapes are pinned to render nothing rather than half a
+  sentence, and a record naming one live fault and one that a deploy removed is rejected whole
+  rather than repaired.
+
+The strip renders nothing at all when nothing is broken, and nothing server-side ever.
 
 ---
 

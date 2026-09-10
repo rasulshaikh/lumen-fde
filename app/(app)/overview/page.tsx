@@ -8,6 +8,7 @@ import { useAppState } from "@/components/AppState";
 import { planRows } from "@/components/shared";
 import { computeEvidence, computeStreak } from "@/lib/motivation";
 import { buildBrief, type Brief } from "@/lib/companion/brief";
+import { Unfinished } from "@/components/Unfinished";
 import type { ReviewState } from "@/lib/review";
 import type { Benchmark } from "@/lib/market/benchmark";
 import type { Insight, Progress } from "@/lib/market/insight";
@@ -280,7 +281,9 @@ export default function OverviewPage() {
     if (href && href !== "/") router.replace(href);
   }, [router]);
 
-  return <Overview
+  return <>
+    <Unfinished />
+    <Overview
     done={state.done}
     activeRows={state.activeRows}
     skipped={state.skipped}
@@ -306,5 +309,6 @@ export default function OverviewPage() {
     setFocusStatus={(status) => { if (state.nextRow) state.setStatus(state.nextRow, status); }}
     readingUrl={state.nextRow ? String(state.nextRow[5] ?? "") || null : null}
     feed={feed}
-  />;
+  />
+  </>;
 }
