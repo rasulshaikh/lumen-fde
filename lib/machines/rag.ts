@@ -13,11 +13,14 @@
  * answers anyway, fluently, from what it already believed - and that is indistinguishable from a
  * good answer until someone checks.
  */
-import { clamp01, stepAt, type Machine, type Scene, type SceneNode } from "./types";
+import { clamp01, dialValue, stepAt, type Machine, type Scene, type SceneNode } from "./types";
 
 const EMPTY = "empty-retrieval";
 const NO_RERANK = "no-rerank";
 const FAT_CHUNKS = "fat-chunks";
+
+/** Tokens left for retrieved passages once the question, instructions and answer room are paid for. */
+const CONTEXT_BUDGET = 4800;
 
 const q = (note?: string): SceneNode => ({ id: "q", label: "Question", x: 40, y: 82, kind: "actor", note });
 const emb = (note?: string): SceneNode => ({ id: "emb", label: "Embedder", x: 116, y: 38, kind: "service", note });
@@ -41,19 +44,32 @@ export const rag: Machine = {
   subtitle: "Embed, retrieve, rerank, fit, answer. Break retrieval and watch the model answer anyway.",
   topicIndices: [53],
   steps: ["Embed the question", "Retrieve", "Rerank", "Fit the context", "Generate"],
+  /*
+   * Chunk size as something you pull, because "how many chunks fit" is a division nobody performs.
+   * The budget is fixed; drag the chunk size and watch the number that survives fall, which is the
+   * same trade every RAG system makes and almost nobody sees happen.
+   */
+  dials: [
+    { id: "chunk", label: "Chunk size", min: 200, max: 3000, step: 100, unit: "tok", value: 800,
+      hint: "Bigger chunks carry more context each and crowd each other out of the budget." },
+  ],
   faults: [
     { id: EMPTY, label: "Retrieval returns nothing", blurb: "The store is reachable and matches nothing. The single most dangerous state in the whole pipeline." },
     { id: NO_RERANK, label: "Skip the reranker", blurb: "Ship whatever vector similarity ranked first. Similar is not the same as relevant." },
     { id: FAT_CHUNKS, label: "Chunks too large", blurb: "Fewer chunks fit the budget, so the right passage is the one that gets cut." },
   ],
 
-  scene(step, phase, faults): Scene {
+  scene(step, phase, faults, dials): Scene {
     const p = clamp01(phase);
     const s = stepAt(step, 5);
     const empty = faults.includes(EMPTY);
     const skipRank = faults.includes(NO_RERANK);
     const fat = faults.includes(FAT_CHUNKS);
-    const fits = fat ? 2 : 6;
+    // The fault is the shortcut; the dial is the arithmetic. Both land in the same place.
+    const chunk = fat ? 2000 : dialValue(rag, dials, "chunk");
+    // A fixed context budget, divided. 4,800 tokens is what is left for retrieved passages after
+    // the question, the instructions and room for an answer.
+    const fits = Math.max(0, Math.min(20, Math.floor(CONTEXT_BUDGET / chunk)));
 
     if (s === 0) {
       return { nodes: [q("why is my pod Pending?"), emb("1536 dims"), store(), rank(undefined, skipRank), llm()], edges: EDGES,
@@ -107,9 +123,9 @@ export const rag: Machine = {
       }
       return { nodes: [q(), emb(), store(), rank(undefined, skipRank), llm(`${fits} chunks fit`)], edges: EDGES,
         tokens: [{ id: "c", from: skipRank ? "store" : "rank", to: "llm", at: p, label: `top ${fits}`, tone: fat ? "slow" : "normal" }],
-        caption: fat ? "Only two chunks fit the budget." : "The top six chunks fit the context budget.",
+        caption: `${fits === 0 ? "No chunk fits" : fits === 1 ? "One chunk fits" : `${fits} chunks fit`} the ${CONTEXT_BUDGET}-token budget at ${chunk} tokens each.`,
         detail: "A cap that is too tight does not announce itself - the block still looks full. This repo shipped exactly that: a syllabus cap that made four sections structurally unreachable while every test passed.",
-        fault: fat ? "Four of the six best passages were cut to make room." : undefined };
+        fault: fits < 6 ? `At ${chunk} tokens a chunk, ${20 - fits} of the twenty retrieved passages are cut to make room. Retrieval found them; the budget threw them away.` : undefined };
     }
 
     if (empty) {

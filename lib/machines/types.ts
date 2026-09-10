@@ -76,6 +76,59 @@ export type Fault = {
   blurb: string;
 };
 
+/**
+ * A continuous input the reader drags.
+ *
+ * The difference between a diagram you operate and a thing you touch. Faults are a menu: you pick
+ * one of three. A dial has no menu - you pull it and the system responds while your finger is
+ * moving, and the threshold where behaviour changes is something you find by feel rather than
+ * something you are told.
+ *
+ * That matters most where the real system has a threshold that people memorise as a rule instead
+ * of understanding as arithmetic. "The pod did not fit" is a sentence. Dragging the request up
+ * until it stops fitting is the same fact, learned.
+ */
+export type Dial = {
+  id: string;
+  label: string;
+  min: number;
+  max: number;
+  /** Granularity of the drag. */
+  step: number;
+  /** Rendered after the value: "Gi", "ms", "tok". */
+  unit: string;
+  /** Where it sits before anyone touches it. The machine's healthy state. */
+  value: number;
+  /** What pulling it is meant to show. */
+  hint: string;
+};
+
+/** Dial values by id, as the renderer holds them. */
+export type Dials = Record<string, number>;
+
+/** Reads a dial with its declared default, so a machine never sees undefined. */
+export const dialValue = (machine: { dials?: Dial[] }, dials: Dials | undefined, id: string): number => {
+  const declared = machine.dials?.find((d) => d.id === id);
+  const raw = dials?.[id];
+  if (!declared) return Number.isFinite(raw) ? (raw as number) : 0;
+  if (!Number.isFinite(raw)) return declared.value;
+  return Math.min(declared.max, Math.max(declared.min, raw as number));
+};
+
+/**
+ * Where a drag across the stage lands.
+ *
+ * The whole sequence becomes one continuous track: dragging left to right walks every step and
+ * every position within it, so the packet moves because your finger is moving rather than because
+ * you pressed Next. Pure, so the mapping can be asserted without a pointer.
+ */
+export const scrubTo = (x: number, width: number, steps: number): { step: number; phase: number } => {
+  if (!Number.isFinite(x) || !Number.isFinite(width) || width <= 0 || steps <= 0) return { step: 0, phase: 0 };
+  const t = clamp01(x / width) * steps;
+  const step = Math.min(steps - 1, Math.floor(t));
+  return { step, phase: clamp01(t - step) };
+};
+
 export type Machine = {
   id: string;
   title: string;
@@ -88,12 +141,15 @@ export type Machine = {
   topicIndices: number[];
   steps: string[];
   faults: Fault[];
+  /** Continuous inputs, dragged rather than chosen. Optional: not every machine has a threshold. */
+  dials?: Dial[];
   /**
    * PURE. Same inputs, same output, every time - asserted. `phase` runs 0..1 inside the current
    * step so tokens glide instead of jumping; a machine that ignores it simply renders static
-   * positions, which is legitimate.
+   * positions, which is legitimate. `dials` is optional so every existing call site and every
+   * assertion written before dials existed keeps working unchanged.
    */
-  scene: (step: number, phase: number, faults: string[]) => Scene;
+  scene: (step: number, phase: number, faults: string[], dials?: Dials) => Scene;
 };
 
 /** Clamp helper shared by the machines, so a bad phase can never put a token off its edge. */

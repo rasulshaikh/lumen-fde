@@ -9,7 +9,7 @@
  * fit it, and a pod that starts fine and never becomes Ready because someone set a probe for a
  * process that has not finished booting. Both look like "Kubernetes is broken" and neither is.
  */
-import { clamp01, stepAt, type Machine, type Scene, type SceneNode } from "./types";
+import { clamp01, dialValue, stepAt, type Machine, type Scene, type SceneNode } from "./types";
 
 const CORDON = "cordon-a";
 const NO_CAPACITY = "no-capacity";
@@ -37,23 +37,43 @@ export const k8s: Machine = {
   subtitle: "Filter, score, bind, start, become Ready. Break a node or a probe and watch which of those five stops.",
   topicIndices: [7, 8],
   steps: ["Pod created", "Filter", "Score", "Bind", "Kubelet starts it", "Ready"],
+  /*
+   * Two dials rather than a "node-b is full" checkbox.
+   *
+   * Requests-versus-capacity is the arithmetic behind most Pending tickets, and it is usually
+   * learned as a rule ("the pod did not fit") instead of as a number. Dragging the request up
+   * until the pod stops fitting is the same fact with the threshold discovered rather than
+   * announced - and it makes the second thing visible too, which is that the scheduler compares
+   * against REQUESTS and not against what the node is really using.
+   */
+  dials: [
+    { id: "request", label: "This pod's memory request", min: 1, max: 12, step: 0.5, unit: "Gi", value: 2,
+      hint: "What the pod asks for. Pull it up until node-b stops being able to take it." },
+    { id: "free", label: "node-b unrequested memory", min: 0, max: 16, step: 0.5, unit: "Gi", value: 8,
+      hint: "What is left after every other pod's request. Not what is free in top." },
+  ],
   faults: [
     { id: CORDON, label: "Cordon node-a", blurb: "Mark a node unschedulable, the way you would before draining it for maintenance." },
     { id: NO_CAPACITY, label: "node-b is full", blurb: "The remaining node has no memory left for this pod's request. Requests, not usage." },
     { id: TIGHT_PROBE, label: "Readiness probe too aggressive", blurb: "A one-second timeout on a process that needs twenty to boot. The container is fine. It just never gets to say so." },
   ],
 
-  scene(step, phase, faults): Scene {
+  scene(step, phase, faults, dials): Scene {
     const p = clamp01(phase);
     const s = stepAt(step, 6);
     const cordoned = faults.includes(CORDON);
-    const full = faults.includes(NO_CAPACITY);
+    const request = dialValue(k8s, dials, "request");
+    const free = dialValue(k8s, dials, "free");
+    // The fault and the dials say the same thing two ways: the checkbox is the shortcut, the dials
+    // are the arithmetic. Either can make node-b unable to take the pod.
+    const full = faults.includes(NO_CAPACITY) || free < request;
+    const fit = `${free}Gi free, asks ${request}Gi`;
     const tight = faults.includes(TIGHT_PROBE);
     const feasible = (!cordoned ? 1 : 0) + (!full ? 1 : 0);
     const target = !cordoned ? "nodeA" : "nodeB";
 
     if (s === 0) {
-      return { nodes: [api("pod: Pending"), sched(), nodeA(cordoned ? "cordoned" : "2 pods", cordoned, cordoned), nodeB(full ? "memory full" : "1 pod", full)], edges: EDGES,
+      return { nodes: [api("pod: Pending"), sched(), nodeA(cordoned ? "cordoned" : "2 pods", cordoned, cordoned), nodeB(full ? `too small: ${fit}` : fit, full)], edges: EDGES,
         tokens: [{ id: "pod", from: "api", to: "sched", at: p, label: "pod/api-7f4", tone: "normal" }],
         caption: "A pod object exists with no node assigned. That is all Pending means.",
         detail: "Nothing has been rejected. The pod is simply a row in etcd with an empty nodeName, and the scheduler's whole job is to fill that one field in." };
@@ -66,7 +86,7 @@ export const k8s: Machine = {
           detail: "The event says 0/2 nodes are available and names the reason per node. That event is the answer to the ticket, and it is the first thing to read rather than the last.",
           fault: "You removed every place this pod could go." };
       }
-      return { nodes: [api("pod: Pending"), sched(`${feasible} feasible`), nodeA(cordoned ? "filtered: cordoned" : "fits", cordoned), nodeB(full ? "filtered: memory" : "fits", full)], edges: EDGES,
+      return { nodes: [api("pod: Pending"), sched(`${feasible} feasible`), nodeA(cordoned ? "filtered: cordoned" : "fits", cordoned), nodeB(full ? `filtered: ${fit}` : `fits: ${fit}`, full)], edges: EDGES,
         tokens: [{ id: "f", from: "sched", to: cordoned ? "nodeB" : "nodeA", at: p, label: "can you fit this?", tone: "normal" }],
         caption: "The scheduler filters: which nodes could run this pod at all?",
         detail: "Filtering is on requests, not on what is actually being used. A node at 90% real memory with nothing requested still looks empty here, which is how a cluster ends up overcommitted and surprised.",

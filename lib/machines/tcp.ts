@@ -9,7 +9,7 @@
  * everything TCP does about loss follows from that one fact. Breaking the SYN-ACK and watching the
  * client sit there is the point of this machine.
  */
-import { clamp01, stepAt, type Machine, type Scene, type SceneNode } from "./types";
+import { clamp01, dialValue, stepAt, type Machine, type Scene, type SceneNode } from "./types";
 
 const CLIENT = { id: "client", label: "Client", x: 52, y: 80, kind: "actor" as const };
 const SERVER = { id: "server", label: "Server", x: 268, y: 80, kind: "service" as const };
@@ -32,14 +32,28 @@ export const tcp: Machine = {
     "Data",
     "Data ACK",
   ],
+  /*
+   * Round-trip time as a dial, because every timeout anyone has ever tuned sits on top of it and
+   * almost nobody has watched the relationship move. Drag the link from datacentre-local to
+   * intercontinental and the retransmission timer moves with it - which is why a timeout that is
+   * generous in one region is a retry storm in another.
+   */
+  dials: [
+    { id: "rtt", label: "Round-trip time", min: 5, max: 400, step: 5, unit: "ms", value: 40,
+      hint: "5ms is the same rack. 40ms is a region away. 300ms is a satellite or a bad mobile link." },
+  ],
   faults: [
     { id: DROP_SYNACK, label: "Drop the SYN-ACK", blurb: "The server answers and the answer is lost. Watch what the client does with no information at all." },
     { id: DROP_DATA, label: "Drop a data segment", blurb: "The connection is open and the payload vanishes. This is where the retransmission timer earns its keep." },
   ],
 
-  scene(step, phase, faults): Scene {
+  scene(step, phase, faults, dials): Scene {
     const p = clamp01(phase);
     const s = stepAt(step, 5);
+    const rtt = dialValue(tcp, dials, "rtt");
+    // The initial retransmission timeout is derived from measured RTT, and doubles on each retry.
+    // One times RTT is the floor nothing can beat; the first RTO in practice is several times it.
+    const rto = Math.round(rtt * 3);
     const lostHandshake = faults.includes(DROP_SYNACK);
     const lostData = faults.includes(DROP_DATA);
 
@@ -74,9 +88,9 @@ export const tcp: Machine = {
             detail: "One lost packet cost a whole retransmission timeout before any payload could move. This is why a lossy link shows up as latency rather than as errors, and why tail latency is the number worth watching.",
             fault: "Recovered from the dropped SYN-ACK. The data segment you also dropped is still ahead." };
         }
-        return { ...base, nodes: [{ ...CLIENT, note: "RTO running" }, { ...SERVER, note: "SYN-RECEIVED" }], tokens: [],
+        return { ...base, nodes: [{ ...CLIENT, note: `RTO ${rto}ms` }, { ...SERVER, note: "SYN-RECEIVED" }], tokens: [],
           caption: "Nothing is in flight. The client is waiting on a timer.",
-          detail: "This is the part worth saying out loud in an interview: the client cannot tell a lost packet from a slow server from a server that has gone away. It has no signal. Only a timer.",
+          detail: `This is the part worth saying out loud in an interview: the client cannot tell a lost packet from a slow server from a server that has gone away. It has no signal, only a timer - and at ${rtt}ms round trip that timer is about ${rto}ms, doubling on every retry. Every timeout you have ever tuned sits on top of this number.`,
           fault: "No acknowledgement is coming." };
       }
       if (s === 3) {
@@ -106,7 +120,7 @@ export const tcp: Machine = {
     // --- the happy handshake, then optionally a lost payload ---
     if (s === 0) {
       return { ...base, tokens: [{ id: "syn", from: "client", to: "server", at: p, label: "SYN", tone: "normal" }],
-        caption: "The client sends a SYN, proposing a starting sequence number.",
+        caption: `The client sends a SYN, proposing a starting sequence number. One round trip is ${rtt}ms.`,
         detail: "Nothing is established yet. The client has spoken and has no idea whether anything heard it." };
     }
     if (s === 1) {
@@ -118,7 +132,7 @@ export const tcp: Machine = {
       return { ...base, nodes: [{ ...CLIENT, note: "ESTABLISHED" }, { ...SERVER, note: "ESTABLISHED" }],
         tokens: [{ id: "ack", from: "client", to: "server", at: p, label: "ACK", tone: "normal" }],
         caption: "The client acknowledges. Both sides now agree the connection exists.",
-        detail: "Three segments, one round trip before a single byte of payload. This is the cost TLS then pays again, and why connection reuse and HTTP/2 exist at all." };
+        detail: `Three segments and one full round trip - ${rtt}ms - before a single byte of payload moves. TLS then pays it again. That is the whole argument for connection reuse, and the reason it matters more the further apart the two ends are.` };
     }
     if (s === 3) {
       if (lostData) {

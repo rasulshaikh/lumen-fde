@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MACHINES, machineById } from "@/lib/machines";
 import { MACHINE_STATE_KEY, readUnfinished, toStorage } from "@/lib/machines/unfinished";
-import { ease } from "@/lib/machines/types";
+import { ease, scrubTo, type Dials } from "@/lib/machines/types";
 import type { Machine as MachineDef, Scene, SceneNode } from "@/lib/machines/types";
 
 /**
@@ -63,11 +63,14 @@ export function MachineView({ machine, initial }: { machine: MachineDef; initial
   const [phase, setPhase] = useState(0.55);
   const [playing, setPlaying] = useState(false);
   const [faults, setFaults] = useState<string[]>(initial?.faults ?? []);
+  const [dials, setDials] = useState<Dials>(() =>
+    Object.fromEntries((machine.dials ?? []).map((d) => [d.id, d.value])));
+  const stage = useRef<SVGSVGElement | null>(null);
   const raf = useRef<number | null>(null);
   const startedAt = useRef<number | null>(null);
 
   const last = machine.steps.length - 1;
-  const scene = useMemo(() => machine.scene(step, ease(phase), faults), [machine, step, phase, faults]);
+  const scene = useMemo(() => machine.scene(step, ease(phase), faults, dials), [machine, step, phase, faults, dials]);
 
   /**
    * Whether the reader asked for reduced motion.
@@ -174,6 +177,57 @@ export function MachineView({ machine, initial }: { machine: MachineDef; initial
     setPhase(0.55);
   }, [last]);
 
+  /**
+   * Drag anywhere across the stage to move through the whole sequence.
+   *
+   * The step buttons make this a diagram you operate. This makes it a thing you touch: the packet
+   * moves because your finger is moving, and stopping halfway is a position rather than a state
+   * you selected from a menu. Both are kept - the buttons are still the accessible path and the
+   * only one a keyboard can use.
+   *
+   * `scrubTo` is pure and asserted in lib/machines.test.mts; this handler only turns a pointer
+   * into an x, which is the part a test cannot hold anyway.
+   */
+  const scrub = useCallback((clientX: number) => {
+    const box = stage.current?.getBoundingClientRect();
+    if (!box || box.width <= 0) return;
+    const { step: next, phase: at } = scrubTo(clientX - box.left, box.width, machine.steps.length);
+    touched.current = true;
+    setPlaying(false);
+    setStep(next);
+    setPhase(at);
+  }, [machine.steps.length]);
+
+  /*
+   * Drag state in a ref, not read back from the pointer.
+   *
+   * This was `if (e.currentTarget.hasPointerCapture(e.pointerId))`, which is the browser's own
+   * record of the capture and is a worse question to ask: it is false for any pointer the platform
+   * did not originate, so the whole drag silently degraded to a single click. Capture is still
+   * requested - it is what keeps a drag alive once the finger leaves the diagram, which is exactly
+   * where someone dragging a packet to the far node ends up - but whether we are dragging is our
+   * own state, and it cannot disagree with itself.
+   */
+  const dragging = useRef(false);
+
+  const onDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
+    dragging.current = true;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* no active pointer to capture */ }
+    scrub(e.clientX);
+  }, [scrub]);
+
+  const onMove = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
+    if (dragging.current) scrub(e.clientX);
+  }, [scrub]);
+
+  const endDrag = useCallback(() => { dragging.current = false; }, []);
+
+  const setDial = useCallback((id: string, value: number) => {
+    touched.current = true;
+    setPlaying(false);
+    setDials((current) => ({ ...current, [id]: value }));
+  }, []);
+
   const toggleFault = useCallback((id: string) => {
     touched.current = true;
     setFaults((current) => (current.includes(id) ? current.filter((f) => f !== id) : [...current, id]));
@@ -194,7 +248,8 @@ export function MachineView({ machine, initial }: { machine: MachineDef; initial
       </div>
       <p className="mx-sub">{machine.subtitle}</p>
 
-      <svg className="mx-stage" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`} role="img"
+      <svg ref={stage} className="mx-stage" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`} role="img"
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={endDrag} onPointerCancel={endDrag} onPointerLeave={endDrag}
         aria-label={`${machine.title}. Step ${step + 1} of ${machine.steps.length}: ${scene.caption}`}>
         {scene.edges.map((e, i) => {
           const a = scene.nodes.find((n) => n.id === e.from);
@@ -214,6 +269,25 @@ export function MachineView({ machine, initial }: { machine: MachineDef; initial
           );
         })}
       </svg>
+
+      <p className="mx-scrub-hint">Drag across the diagram to move through it, or use the steps below.</p>
+
+      {machine.dials?.length ? (
+        <div className="mx-dials">
+          {machine.dials.map((d) => (
+            <label key={d.id} className="mx-dial">
+              <span className="mx-dial-head">
+                <span className="mx-dial-label">{d.label}</span>
+                <output className="mx-dial-value">{dials[d.id] ?? d.value}{d.unit}</output>
+              </span>
+              <input type="range" min={d.min} max={d.max} step={d.step}
+                value={dials[d.id] ?? d.value}
+                onChange={(e) => setDial(d.id, Number(e.target.value))} />
+              <span className="mx-dial-hint">{d.hint}</span>
+            </label>
+          ))}
+        </div>
+      ) : null}
 
       <ol className="mx-steps">
         {machine.steps.map((name, i) => (

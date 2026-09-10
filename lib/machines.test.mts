@@ -18,7 +18,7 @@
  */
 import workbook from "../data/workbook.json" with { type: "json" };
 import { MACHINES, machineById, machinesForTopic } from "./machines/index.ts";
-import { ease } from "./machines/types.ts";
+import { ease, scrubTo, dialValue } from "./machines/types.ts";
 import { readUnfinished, unfinishedNote, toStorage } from "./machines/unfinished.ts";
 import type { Machine, Scene } from "./machines/types.ts";
 
@@ -319,6 +319,69 @@ console.log("machines are reachable from the topic they explain");
   for (const m of MACHINES) {
     ck(`${m.id} is reachable from a topic`, m.topicIndices.some((i) => machinesForTopic(i).some((x) => x.id === m.id)));
   }
+}
+
+
+console.log("dragging across the diagram lands where the finger is");
+{
+  // scrubTo maps a pointer x onto the whole sequence as one track, so the packet moves because the
+  // finger is moving rather than because a button was pressed. Pure, so the mapping is assertable
+  // without a pointer; the handler only turns an event into an x.
+  ck("the left edge is the first frame", JSON.stringify(scrubTo(0, 600, 5)) === JSON.stringify({ step: 0, phase: 0 }));
+  ck("the right edge is the last step, fully played", JSON.stringify(scrubTo(600, 600, 5)) === JSON.stringify({ step: 4, phase: 1 }));
+  ck("halfway is the middle step", scrubTo(300, 600, 5).step === 2);
+  ck("dragging past the edge clamps rather than running off", scrubTo(9999, 600, 5).step === 4 && scrubTo(-9999, 600, 5).step === 0);
+  ck("a zero-width stage cannot divide by zero", JSON.stringify(scrubTo(10, 0, 5)) === JSON.stringify({ step: 0, phase: 0 }));
+  ck("NaN cannot become a step", Number.isFinite(scrubTo(NaN, 600, 5).step));
+
+  // Every x across the track must be reachable and in order.
+  let last = -1, monotonic = true;
+  for (let x = 0; x <= 600; x += 7) {
+    const t = scrubTo(x, 600, 5); const abs = t.step + t.phase;
+    if (abs < last - 1e-9) monotonic = false;
+    last = abs;
+  }
+  ck("dragging right never moves the sequence backwards", monotonic);
+}
+
+console.log("dials are continuous inputs, and every one of them changes something");
+{
+  for (const m of MACHINES.filter((x) => x.dials?.length)) {
+    for (const d of m.dials!) {
+      // The dead-control rule again, for a control with no menu. A dial that renders identically
+      // at both ends of its own range is a slider that does nothing.
+      const low = JSON.stringify(m.steps.map((_, i) => m.scene(i, 0.5, [], { [d.id]: d.min })));
+      const high = JSON.stringify(m.steps.map((_, i) => m.scene(i, 0.5, [], { [d.id]: d.max })));
+      ck(`${m.id}/${d.id}: moving it changes the machine`, low !== high);
+      ck(`${m.id}/${d.id}: has a sane range`, d.min < d.max && d.step > 0);
+      ck(`${m.id}/${d.id}: rests inside its own range`, d.value >= d.min && d.value <= d.max);
+      ck(`${m.id}/${d.id}: says what pulling it shows`, d.hint.length > 20);
+
+      // Out of range must clamp, not escape: these come from a slider a user can hand-edit.
+      ck(`${m.id}/${d.id}: clamps above`, dialValue(m, { [d.id]: d.max * 10 }, d.id) === d.max);
+      ck(`${m.id}/${d.id}: clamps below`, dialValue(m, { [d.id]: d.min - 999 }, d.id) === d.min);
+      ck(`${m.id}/${d.id}: NaN falls back to the resting value`, dialValue(m, { [d.id]: NaN }, d.id) === d.value);
+    }
+    // Omitting dials entirely must be identical to passing the defaults, or every assertion
+    // written before dials existed is quietly testing a different machine.
+    const defaults = Object.fromEntries(m.dials!.map((d) => [d.id, d.value]));
+    ck(`${m.id}: no dials passed is the same as the resting values`,
+      JSON.stringify(m.scene(1, 0.5, [])) === JSON.stringify(m.scene(1, 0.5, [], defaults)));
+  }
+}
+
+console.log("the k8s threshold is arithmetic you can feel, not a rule you are told");
+{
+  const k = machineById("k8s")!;
+  const noteAt = (request: number) => k.scene(1, 0.5, [], { request, free: 8 }).nodes.find((n) => n.id === "nodeB")!;
+  ck("at 8Gi request against 8Gi free it still fits", !noteAt(8).dim, noteAt(8).note);
+  ck("at 8.5Gi it does not", !!noteAt(8.5).dim, noteAt(8.5).note);
+  ck("and the note shows both numbers rather than the word full", /8Gi free, asks 8.5Gi/.test(noteAt(8.5).note ?? ""));
+
+  // Dragging the request up with the other node available must still schedule - the lesson is
+  // "this node cannot take it", not "nothing can".
+  ck("node-a still takes it", /readiness probe passes/i.test(k.scene(5, 0.5, [], { request: 12, free: 0 }).caption));
+  ck("unless it is cordoned too", /Still Pending/.test(k.scene(5, 0.5, ["cordon-a"], { request: 12, free: 0 }).caption));
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
