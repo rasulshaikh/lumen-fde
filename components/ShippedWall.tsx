@@ -69,7 +69,7 @@ export function ShippedWall({ feed, planCount, nextRow, nextIndex, openPlan }: {
                     : <span>Every topic is done or skipped.</span>}
                 </li>
                 <li><strong>Put it somewhere with a URL.</strong><span>A repo, a write-up or a demo. The URL is what makes it evidence.</span></li>
-                <li><strong>Record it.</strong><span>POST <code className="home-code">/api/artifacts</code> with <code className="home-code">{"{ row, title, url }"}</code>, or ask Quaere to record it for you.</span></li>
+                <li><strong>Record it.</strong><span>POST <code className="home-code">/api/artifacts</code> with <code className="home-code">{"{ row, title, url }"}</code>.</span></li>
               </ol>
               <p className="home-note">The plan row is the join key and it is checked against the workbook, so a row that does not exist cannot be written. There is no edit and no delete: an artifact records that something happened on a date.</p>
               <button className="text-button" onClick={openPlan}>Open the plan →</button>

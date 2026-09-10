@@ -15,6 +15,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+
+      # Two rules, and they are here because the absence of them already shipped a bug. `aim` was
+      # added to the provider's useMemo body and not to its dependency array, so the context object
+      # never recomputed: the button label, the aria-pressed state, the border and the card ordering
+      # all read a stale snapshot while tsc, the build and fifteen suites stayed green, because none
+      # of them can see a stale memo. `react-hooks/exhaustive-deps` is written for exactly that and
+      # this repo had no lint configured at all. On its first run it found two more.
+      - run: npm run lint
+
       - run: npm run build
 
       # The suites ran only when someone remembered to run them, which is how a scheduler

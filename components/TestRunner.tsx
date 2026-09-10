@@ -130,11 +130,16 @@ export function TestRunner({ scope, onExit }: { scope: Scope; onExit: () => void
   const again = useCallback(() => {
     setSeed(Math.floor(Math.random() * 0xffffffff));
     setAnswers({}); setGrades({}); setRevealed({}); setAt(0);
+    // Without this a second paper inherits the first one's "yes" and reports itself as recorded in
+    // your history, with no request ever made and no control left to make one.
+    setSaved("no");
     started.current = Date.now(); setElapsed(0);
   }, []);
 
   const savePaper = useCallback(async () => {
-    if (saved !== "no") return;
+    // "failed" must be retryable. The guard once read `saved !== "no"`, so pressing the enabled
+    // button under copy saying "Try again" returned before the fetch and did nothing, forever.
+    if (saved === "saving" || saved === "yes") return;
     setSaved("saving");
     const minutes = Math.min(600, Math.max(0, Math.ceil(elapsed / 60000)));
     try {

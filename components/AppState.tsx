@@ -27,6 +27,8 @@ type AppState = {
   // progress
   statuses: Record<string, string>;
   progressSync: ProgressSync;
+  /** Re-runs the progress fetch after a failure, so a blip is not terminal for the session. */
+  retryProgress: () => void;
   /**
    * UTC day of the newest recorded progress event, or null when none is known.
    *
@@ -119,6 +121,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // for that reason: one fetch per session, one settle, and the guard is never re-armed.
   const [statuses, setStatuses] = useState<Record<string, string>>({});
   const [progressSync, setProgressSync] = useState<ProgressSync>("loading");
+  /**
+   * Bumped to retry the progress fetch.
+   *
+   * The fetch below ran once, in a `[]` effect, and `setProgressSync("failed")` was terminal: no
+   * retry, no other writer. A 502 from /api/progress - which happens whenever GITHUB_TOKEN is
+   * missing or GitHub is briefly unreachable - disabled the status dropdown on all 119 plan rows
+   * for the rest of the session, with no way back except reloading the page. The write-guard that
+   * disables them is right; being unable to leave that state is not.
+   */
+  const [retry, setRetry] = useState(0);
+  const retryProgress = useCallback(() => { setProgressSync("loading"); setRetry((n) => n + 1); }, []);
   const [lastEventDay, setLastEventDay] = useState<string | null>(null);
   const [aim, setAimState] = useState<string | null>(null);
   const progressRef = useRef<Progress | null>(null);
@@ -134,7 +147,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       // pays for this fetch, and asking the network twice for one answer is how a page acquires
       // two answers to one question.
       progressRef.current = Array.isArray(data?.events) ? data : null;
-      for (const event of data?.events || []) { const row = planRows.find((item) => String(item[2]).trim().toLowerCase() === String(event.topic).trim().toLowerCase()); if (row && !synced[topicKey(row)]) synced[topicKey(row)] = String(event.status).replace("_", " ").replace(/^\w/, (letter) => letter.toUpperCase()); } if (Object.keys(synced).length) { setStatuses((current) => { const merged = { ...current, ...synced }; localStorage.setItem("lumen-statuses", JSON.stringify(merged)); return merged; }); } setProgressSync("ready"); }).catch(() => setProgressSync("failed")); }, []);
+      for (const event of data?.events || []) { const row = planRows.find((item) => String(item[2]).trim().toLowerCase() === String(event.topic).trim().toLowerCase()); if (row && !synced[topicKey(row)]) synced[topicKey(row)] = String(event.status).replace("_", " ").replace(/^\w/, (letter) => letter.toUpperCase()); } if (Object.keys(synced).length) { setStatuses((current) => { const merged = { ...current, ...synced }; localStorage.setItem("lumen-statuses", JSON.stringify(merged)); return merged; }); } setProgressSync("ready"); }).catch(() => setProgressSync("failed")); }, [retry]);
 
   // Every POST here is a permanent commit in the user's repo, so it has to be a deliberate
   // change: refuse while the sync is unsettled or failed (the select is disabled then, but a
@@ -367,13 +380,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const curParts = useMemo(() => (curSummary ? Object.values(curSummary).reduce((n, x) => n + x.parts, 0) : 0), [curSummary]);
 
   const value = useMemo<AppState>(() => ({
-    statuses, progressSync, setStatus, statusOf,
+    statuses, progressSync, retryProgress, setStatus, statusOf,
     theme, toggleTheme, weeklyHours, setWeekly,
     lastEventDay,
     curSummary, ensureSummary, requestSyllabus, renderSyllabus, syllabusFor,
     askOpen, setAskOpen, askText, setAskText, askTopic, setAskTopic, messages, asking, askLumen, setPageContext,
     ...derived, marketTiers, curParts, aim, setAim,
-  }), [statuses, progressSync, lastEventDay, setStatus, statusOf, theme, toggleTheme, weeklyHours, setWeekly, curSummary, ensureSummary, requestSyllabus, renderSyllabus, syllabusFor, askOpen, askText, askTopic, messages, asking, askLumen, setPageContext, derived, marketTiers, curParts]);
+  }), [statuses, progressSync, retryProgress, lastEventDay, setStatus, statusOf, theme, toggleTheme, weeklyHours, setWeekly, curSummary, ensureSummary, requestSyllabus, renderSyllabus, syllabusFor, askOpen, askText, askTopic, messages, asking, askLumen, setPageContext, derived, marketTiers, curParts, aim, setAim]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

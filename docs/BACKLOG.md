@@ -92,9 +92,9 @@ Stated plainly because a claim nobody checked is not a feature.
 
 ---
 
-## The three defect classes this repo actually produces
+## The four defect classes this repo actually produces
 
-Worth re-reading before adding anything, because all three have recurred.
+Worth re-reading before adding anything, because all four have recurred.
 
 1. **A duplicate CSS rule silently overriding an earlier one.** `.login-shell` declared three times,
    `.panel-head` four, `.bar-item` twice, `body` twice. Several fixes were written next to the first
@@ -105,3 +105,13 @@ Worth re-reading before adding anything, because all three have recurred.
    nothing checking it.
 3. **A cap or guard so tight that what it protects is unreachable.** The 7,000-character syllabus
    cut made four sections structurally impossible to ship, and every test passed the whole time.
+4. **A control that looks like it does something and does not.** "Aim at this one" set state nothing
+   read. "Try again" on a failed record returned immediately because the guard was `!== "no"`. A
+   second paper reported itself recorded with no request ever made. The Plan's status dropdown died
+   permanently on one failed fetch because `"failed"` had no way back. Each looked correct on screen.
+
+   The largest single cause is a stale `useMemo`: `aim` was in the memo body and absent from its
+   dependency array, so the provider's context object never recomputed and every visual consumer
+   read an old snapshot. tsc, `next build` and fifteen suites cannot see that. `react-hooks/
+   exhaustive-deps` can, and this repo had no lint configured at all - no eslint dependency, no
+   config, no script. It is wired into CI as an error now, and on its first run it found two more.

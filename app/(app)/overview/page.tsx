@@ -219,7 +219,12 @@ export default function OverviewPage() {
   // The syllabus for today's row, so the brief can name what the topic is actually made of.
   // Cached in the provider and shared with /plan and /curriculum, so this costs one request the
   // first time and none after it.
-  useEffect(() => { if (state.nextIndex >= 0) state.requestSyllabus([state.nextIndex]); }, [state.nextIndex, state.requestSyllabus]);
+  // Read off the two fields rather than the whole context. `state` is a memoised object that gets a
+  // new identity whenever any of its two dozen members changes, so depending on it would re-fire
+  // this fetch on every status toggle and every theme flip. The lint rule wants `state` because it
+  // cannot see that; pulling the fields out tells it the truth and keeps the effect firing once.
+  const { nextIndex, requestSyllabus } = state;
+  useEffect(() => { if (nextIndex >= 0) requestSyllabus([nextIndex]); }, [nextIndex, requestSyllabus]);
 
   // `new Date()` stays inside the effect for the reason the feed effect states: a brief is text
   // derived from the clock, and deriving it during render is a hydration mismatch waiting for
