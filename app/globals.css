@@ -1829,3 +1829,36 @@ html{background:var(--bg)}
 .mx-dial input[type=range]{width:100%;accent-color:var(--accent);height:26px;cursor:ew-resize}
 .mx-dial input[type=range]:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 @media(prefers-reduced-motion:reduce){.mx-stage{cursor:default}}
+
+/* Lessons: one continuous piece of maths you hold. The stage is a drag surface, so it takes the
+   same touch-action:none the machine stage does - without it a drag on a phone scrolls the page
+   instead of moving the ball, which loses the entire interaction on the device most likely to
+   want it. */
+.ls{margin-bottom:80px}
+.ls-prompt{font-size:13px;line-height:1.55;color:var(--muted);margin:-12px 0 16px;max-width:80ch}
+.ls-stage{width:100%;max-width:560px;height:auto;display:block;margin:0 auto;background:var(--surface-strong);border:1px solid var(--line);border-radius:var(--r-md);cursor:ew-resize;touch-action:none}
+.ls-axis{stroke:var(--line-strong);stroke-width:1}
+.ls-path{stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.ls-curve{stroke:var(--ink-2)}
+.ls-tangent{stroke:var(--brass);stroke-width:1.5;stroke-dasharray:4 3}
+.ls-step{stroke:var(--accent);stroke-width:2}
+.ls-dot circle{stroke:var(--surface-strong);stroke-width:2}
+.ls-dot text{font-size:10px;fill:var(--muted)}
+.ls-marker circle{fill:var(--line-strong);stroke:none}
+.ls-ghost circle{fill:none;stroke:var(--accent);stroke-width:2;stroke-dasharray:3 2}
+.ls-ghost text{fill:var(--accent-text)}
+.ls-handle{cursor:grab}
+.ls-handle circle{fill:var(--accent)}
+.ls-handle text{fill:var(--ink);font-weight:700;font-size:11px}
+.ls-handle:focus-visible{outline:none}
+.ls-handle:focus-visible circle{stroke:var(--ink);stroke-width:3}
+.ls-readouts{display:flex;flex-wrap:wrap;gap:18px;margin:14px 0 0;justify-content:center}
+.ls-readouts div{display:flex;flex-direction:column;align-items:center;gap:2px}
+.ls-readouts dt{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.ls-readouts dd{margin:0;font-family:var(--font-data);font-size:14px;font-weight:700;color:var(--ink)}
+.ls-read{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.ls-caption{font-size:15px;line-height:1.45;margin:0;color:var(--ink);max-width:78ch}
+.ls-arrived{font-size:13px;line-height:1.55;margin:10px 0 0;color:var(--teal);max-width:78ch}
+.ls-detail{font-size:13px;line-height:1.55;margin:10px 0 0;color:var(--muted);max-width:78ch}
+.ls-controls{display:flex;gap:8px;margin-top:16px}
+.ls-dial{margin-top:18px}

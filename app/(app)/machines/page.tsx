@@ -1,6 +1,7 @@
 "use client";
 
 import { Machines } from "@/components/Machine";
+import { Lessons } from "@/components/Lesson";
 
 /**
  * Machines: the systems in the plan, as things you can step through and break.
@@ -10,5 +11,5 @@ import { Machines } from "@/components/Machine";
  * thing actually move before being asked about it.
  */
 export default function MachinesPage() {
-  return <Machines />;
+  return <><Machines /><Lessons /></>;
 }
