@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { compRows, months, planRows, topicKey, tracks, verdictTier, type Row, type Syllabus } from "./shared";
+import { computeStreak } from "@/lib/motivation";
+import type { Progress } from "@/lib/market/insight";
 import { SyllabusView } from "./SyllabusView";
 
 /**
@@ -109,6 +111,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [statuses, setStatuses] = useState<Record<string, string>>({});
   const [progressSync, setProgressSync] = useState<ProgressSync>("loading");
   const [lastEventDay, setLastEventDay] = useState<string | null>(null);
+  const progressRef = useRef<Progress | null>(null);
 
   // A non-ok response must reject rather than resolve to null: swallowing it would mark the
   // sync settled and re-open writes against the un-hydrated baseline, which is the exact bug.
@@ -116,7 +119,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       // Newest dated event, taken while the same payload is already in hand.
       let newest: string | null = null;
       for (const event of data?.events || []) { const d = String(event.date || "").slice(0, 10); if (/^\d{4}-\d{2}-\d{2}$/.test(d) && (!newest || d > newest)) newest = d; }
-      setLastEventDay(newest); for (const event of data?.events || []) { const row = planRows.find((item) => String(item[2]).trim().toLowerCase() === String(event.topic).trim().toLowerCase()); if (row && !synced[topicKey(row)]) synced[topicKey(row)] = String(event.status).replace("_", " ").replace(/^\w/, (letter) => letter.toUpperCase()); } if (Object.keys(synced).length) { setStatuses((current) => { const merged = { ...current, ...synced }; localStorage.setItem("lumen-statuses", JSON.stringify(merged)); return merged; }); } setProgressSync("ready"); }).catch(() => setProgressSync("failed")); }, []);
+      setLastEventDay(newest);
+      // Kept, not discarded. `computeStreak` is pure and needs the events; the provider already
+      // pays for this fetch, and asking the network twice for one answer is how a page acquires
+      // two answers to one question.
+      progressRef.current = Array.isArray(data?.events) ? data : null;
+      for (const event of data?.events || []) { const row = planRows.find((item) => String(item[2]).trim().toLowerCase() === String(event.topic).trim().toLowerCase()); if (row && !synced[topicKey(row)]) synced[topicKey(row)] = String(event.status).replace("_", " ").replace(/^\w/, (letter) => letter.toUpperCase()); } if (Object.keys(synced).length) { setStatuses((current) => { const merged = { ...current, ...synced }; localStorage.setItem("lumen-statuses", JSON.stringify(merged)); return merged; }); } setProgressSync("ready"); }).catch(() => setProgressSync("failed")); }, []);
 
   // Every POST here is a permanent commit in the user's repo, so it has to be a deliberate
   // change: refuse while the sync is unsettled or failed (the select is disabled then, but a
@@ -267,7 +275,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         if (Array.isArray(data.items) && data.items.length) webItems = data.items;
       } catch { /* the answer still goes ahead, and says the search did not come back */ }
     }
-    try { const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, context: pageContext.current.context, topicIndex, history: messages, web: Boolean(opts.web), webItems, selection: opts.selection || undefined, statuses: statusesRef.current }) }); const data = await res.json(); setMessages((m) => [...m, { role: "assistant", content: data.answer || data.error || "Lumen could not answer right now.", reportUrl: data.reportUrl || undefined }]); } catch { setMessages((m) => [...m, { role: "assistant", content: "Lumen is unavailable. Add MINIMAX_API_KEY in Vercel project settings and try again." }]); } finally { setAsking(false); }
+    try { const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, context: pageContext.current.context, topicIndex, history: messages, web: Boolean(opts.web), webItems, selection: opts.selection || undefined, statuses: statusesRef.current, streak: progressRef.current ? computeStreak(progressRef.current, new Date()).statement : undefined }) }); const data = await res.json(); setMessages((m) => [...m, { role: "assistant", content: data.answer || data.error || "Lumen could not answer right now.", reportUrl: data.reportUrl || undefined }]); } catch { setMessages((m) => [...m, { role: "assistant", content: "Lumen is unavailable. Add MINIMAX_API_KEY in Vercel project settings and try again." }]); } finally { setAsking(false); }
   }, [askText, asking, askTopic, messages]);
 
   useEffect(() => {

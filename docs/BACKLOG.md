@@ -21,6 +21,12 @@ pass.
 | Papers | a three-hour capstone retained nothing. |
 | Book rule | Quaere would summarise chapters of books whose text is not in the repo. |
 | Who is asking | name, location, target role and pace sat in `data/profile.json` and reached no prompt. |
+| Recall detail | the whole schedule was fetched and reduced to "something is waiting". Now names topics and rungs, still without a count. |
+| Skill demand | 26 of 34 measured skills were dropped by a 10-line fill. All 34 ship, with the reachable share beside the market share. |
+| `insight.quaere` | the cron writes a reading **for this companion** and the companion never saw it. |
+| Study rhythm | `lib/motivation.ts` had 19,510 bytes of tests and reached no prompt. |
+| Prior answers | `reports/asks/` was write-only; Quaere re-answered questions with no record it already had. |
+| `context.ts` tests | the module building most of the prompt was the only one in its folder with no test. |
 
 ---
 
@@ -28,40 +34,25 @@ pass.
 
 Ordered by what a reader would notice.
 
-### 1. The review schedule is read over the network and then thrown away
-
-`recallContext` reduces the whole of `reports/review/state.json` to one of three sentences. Every
-rung, grade and topic in the ladder is fetched and discarded. Quaere cannot say *what* is due, only
-that something is.
-
-**Constraint that must survive:** the backlog **count** stays out of the prompt. Named topics and
-their rungs are fine; an integer is not, and `lib/review.ts` records why.
-
-### 2. Twenty-six of thirty-four measured skills never reach the prompt
-
-The coverage fill ships 10 lines and drops the rest, including RAG, MCP, Kubernetes and guardrails.
-`insight.reachability.skills` — the reachable-market share of all 34, which is the number the whole
-market model exists to produce — is absent entirely.
-
-### 3. `insight.quaere` is a stored reading written for the companion, and the companion never sees it
-
-The nightly cron writes an 80-word interpretation of the scan specifically for Quaere. The tab
-renders it. The prompt does not include it.
-
-### 4. The streak and pace layer
-
-`lib/motivation.ts` carries 19,510 bytes of tests and reaches no prompt. Two files claim `/api/ask`
-consumes it. Neither is true.
-
-### 5. Quaere's own saved answers are write-only
-
-Twenty-one answers in `reports/asks/`. It re-answers the same question with no memory that it
-already has, and no way to say "as I said on the 3rd".
-
-### 6. `library-sources.json` ships whole and uncapped
+### 1. `library-sources.json` ships whole and uncapped
 
 15,483 characters, roughly 40% indexing debris, with no key joining it to the plan. It is the
-single largest block in the system prompt and the least selective.
+single largest block in the system prompt and the least selective. Trimming it is the cheapest
+token win available and it is the last of the six ranked items.
+
+### 2. The bank's marking key per topic
+
+The three-outcome key the on-screen exam reveals never reaches a prompt, so Quaere marks written
+answers against its own idea of the topic rather than the plan's.
+
+### 3. Verbatim JD evidence
+
+34 job-description fragments, 5,272 characters, behind the coverage percentages. Quaere has the
+shares and none of the prose, so it paraphrases from its own priors what requisitions say.
+
+### 4. `benchmark.newSinceLastRun` and movement
+
+The daily delta the reader gets by email and Quaere cannot discuss.
 
 ---
 

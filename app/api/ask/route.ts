@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import library from "@/data/library-context.json";
 import { applyMemory, readMemory, recurring, writeMemory } from "@/lib/companion/memory";
-import { benchmarkGapsContext, evidenceContext, recallContext, workbookContext } from "@/lib/companion/context";
+import { benchmarkGapsContext, evidenceContext, marketDepthContext, recallContext, rhythmContext, workbookContext } from "@/lib/companion/context";
 import { readSessionSummary } from "@/lib/companion/session";
 import { papersContext, readPapers } from "@/lib/papers";
+import { readAskTitles } from "@/lib/companion/asks";
 import { PROFILE, PROGRAMME, weeklyPace } from "@/lib/profile";
 import { readArtifacts } from "@/lib/artifacts";
 import type { ReviewState } from "@/lib/review";
@@ -494,7 +495,7 @@ export async function POST(request: Request) {
   const apiKey = process.env.MINIMAX_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "MiniMax is not configured yet. Add MINIMAX_API_KEY in Vercel project settings." }, { status: 503 });
   try {
-    const body = await request.json() as { prompt?: string; context?: string; topicIndex?: number; web?: boolean; webItems?: { title?: unknown; url?: unknown; snippet?: unknown }[]; selection?: unknown; statuses?: unknown; history?: { role: "user" | "assistant"; content: string }[] };
+    const body = await request.json() as { prompt?: string; context?: string; topicIndex?: number; web?: boolean; webItems?: { title?: unknown; url?: unknown; snippet?: unknown }[]; selection?: unknown; statuses?: unknown; streak?: unknown; history?: { role: "user" | "assistant"; content: string }[] };
 
     /**
      * What the companion already knows about this reader.
@@ -531,11 +532,12 @@ export async function POST(request: Request) {
      * one of them failing degrades that block to "unknown" rather than failing the question -
      * `Promise.allSettled`, not `all`, for exactly that reason.
      */
-    const [artifactsR, sessionsR, reviewR, papersR] = await Promise.allSettled([
+    const [artifactsR, sessionsR, reviewR, papersR, asksR] = await Promise.allSettled([
       readArtifacts(),
       readSessionSummary(),
       readJson<ReviewState>("reports/review/state.json"),
       readPapers(),
+      readAskTitles(),
     ]);
     const artifacts = artifactsR.status === "fulfilled" ? artifactsR.value : { artifacts: [], unreadable: 0, synced: false, error: null };
     const sessions = sessionsR.status === "fulfilled" ? sessionsR.value : { count: 0, latest: null, synced: false };
@@ -634,6 +636,18 @@ export async function POST(request: Request) {
      */
     const who = `WHO YOU ARE TALKING TO: ${PROFILE.name}, based in ${PROFILE.location}, working toward ${PROFILE.targetRole}. This is ${PROGRAMME}: ${(PROFILE as { premise?: string }).premise ?? ""} The committed pace is ${weeklyPace()}, which is editable in the app, so use it rather than assuming a figure.`;
 
+    const askHistory = asksR.status === "fulfilled" ? asksR.value : [];
+    /*
+     * The streak, computed by the client from the progress events the provider already fetched.
+     *
+     * Server-side it would cost a directory listing plus a fetch per event inside the ~5s this
+     * route has before the model call, for a single sentence. `computeStreak` is pure, the browser
+     * holds the events, and the sentence it produces is the same one the Overview panel renders,
+     * so the two cannot disagree. Cleaned and capped like every caller-supplied string.
+     */
+    const streakLine = String(body.streak ?? "").replace(/\s+/g, " ").trim().slice(0, 400);
+    const streak = streakLine ? { statement: streakLine } : null;
+
     const extra = [
       who,
       selectionBlock,
@@ -641,7 +655,10 @@ export async function POST(request: Request) {
       workbookContext(),
       benchmarkGapsContext(benchmark),
       evidenceContext({ artifacts: artifacts.artifacts, synced: artifacts.synced }, sessions),
-      recallContext(review, new Date()),
+      // Card keys are plan row indices; the schedule stores them as strings.
+      recallContext(review, new Date(), (key) => String((workbook.Plan as PlanRow[])[Number(key) + 1]?.[2] ?? key)),
+      marketDepthContext(insight),
+      rhythmContext(streak, askHistory),
       papersContext(
         papersR.status === "fulfilled" ? papersR.value : { papers: [], synced: false },
         (row) => String((workbook.Plan as PlanRow[])[row + 1]?.[2] ?? `row ${row + 1}`),

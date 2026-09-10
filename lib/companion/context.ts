@@ -24,7 +24,7 @@
 import workbook from "@/data/workbook.json";
 import type { Benchmark } from "@/lib/market/benchmark";
 import type { StoredArtifact } from "@/lib/artifacts";
-import { isDue, type ReviewState } from "@/lib/review";
+import { LADDER, isDue, type ReviewState } from "@/lib/review";
 
 type Row = (string | number | null)[];
 
@@ -94,12 +94,45 @@ export function evidenceContext(artifacts: { artifacts: StoredArtifact[]; synced
  * not an empty one, and telling a returning learner nothing is due when the store simply could not
  * be read is the single most damaging sentence this companion could produce.
  */
-export function recallContext(review: { state: ReviewState; synced: boolean } | null, now: Date): string {
+export function recallContext(
+  review: { state: ReviewState; synced: boolean } | null,
+  now: Date,
+  topicName: (key: string) => string = (k) => k,
+): string {
   if (!review || !review.synced) return "RECALL: not known right now (the schedule could not be read). Do not claim anything is or is not due.";
-  const waiting = Object.values(review.state).some((card) => isDue(card, now));
-  return waiting
-    ? "RECALL: something is waiting in the spaced-repetition schedule. NEVER state how many cards are due - say that recall is waiting and name at most the topic. A backlog number is what makes people abandon a review system."
-    : "RECALL: nothing is due today.";
+
+  const due = Object.entries(review.state).filter(([, card]) => isDue(card, now));
+  if (!due.length) return "RECALL: nothing is due today.";
+
+  /*
+   * Named topics and their rungs, and still not a number.
+   *
+   * The whole schedule was read over the network and reduced to one sentence: something is
+   * waiting. The reader could not be told WHAT, so the companion could not say "the two you keep
+   * dropping are Kafka and TLS", which is the only advice a spaced-repetition system can give that
+   * changes what someone does next.
+   *
+   * The count stays out, and that rule is not negotiable - `lib/review.ts` and `app/recall.tsx`
+   * both record why ("'37 due', close it forever"). So this names topics, caps the list, and says
+   * "and more besides" rather than "and 34 more", because the overflow phrasing is the exact place
+   * a count would sneak back in.
+   */
+  const RECALL_NAMED = 6;
+  const named = due
+    .sort((a, b) => (a[1].rung - b[1].rung) || a[0].localeCompare(b[0]))
+    .slice(0, RECALL_NAMED)
+    .map(([key, card]) => {
+      const rung = `rung ${card.rung + 1} of ${LADDER.length}`;
+      const grade = card.lastGrade ? `, last graded ${card.lastGrade}` : "";
+      return `${topicName(key)} (${rung}${grade})`;
+    });
+
+  return [
+    "RECALL: something is waiting in the spaced-repetition schedule.",
+    `Waiting now, weakest rung first: ${named.join("; ")}${due.length > RECALL_NAMED ? "; and more besides" : ""}.`,
+    "A low rung means it has been dropped recently and the interval was pulled back; a high rung means it has survived several sittings.",
+    "NEVER state how many cards are due, and never total this list or say how many were withheld. Name topics. A backlog number is what makes people abandon a review system, and this learner has 23 months left.",
+  ].join("\n");
 }
 
 /**
@@ -121,6 +154,75 @@ export function benchmarkGapsContext(benchmark: Benchmark | null): string {
   if (Array.isArray(over) && over.length) {
     parts.push(`\nOVER-INVESTMENT - plan hours against measured requisition frequency:`);
     parts.push(cap(over.map((o) => `- ${o.statement ?? ""}`).filter(Boolean), 6, "tracks"));
+  }
+  return parts.join("\n");
+}
+
+/**
+ * The market at full width, and the reading the cron already wrote for this companion.
+ *
+ * Three things the prompt was dropping, all measured:
+ *
+ * **26 of 34 skills.** `marketContext` fills ten coverage lines and stops, so RAG, MCP, Kubernetes
+ * and guardrails were absent from a market model built to rank exactly those. The share is one
+ * short line per skill, so all 34 cost less than the ten long ones did.
+ *
+ * **The reachable share.** `insight.reachability.skills` carries `reachablePct` beside
+ * `marketPct`: what the market asks for, and what the slice you can actually take asks for. Those
+ * two numbers disagreeing is the single most useful fact the scan produces, and neither the gap
+ * nor the reachable figure had ever reached a prompt.
+ *
+ * **`insight.quaere`.** The nightly cron writes an 80-word reading of the scan explicitly for this
+ * companion. The Market tab renders it. The companion it was written for never saw it.
+ */
+export function marketDepthContext(insight: {
+  quaere?: string | null;
+  reachability?: { skills?: { label?: string; marketPct?: number; reachablePct?: number }[] } | null;
+} | null): string {
+  if (!insight) return "";
+  const parts: string[] = [];
+
+  const skills = (insight.reachability?.skills ?? []).filter((s) => s.label);
+  if (skills.length) {
+    parts.push("SKILL DEMAND, all measured skills. `market` is the share of every core requisition; `reachable` is the share of only those you could take from India. Where they disagree, the reachable figure is the one that decides what to study next:");
+    parts.push(cap(
+      [...skills]
+        .sort((a, b) => (b.marketPct ?? 0) - (a.marketPct ?? 0))
+        .map((s) => `- ${s.label}: market ${s.marketPct ?? 0}%, reachable ${s.reachablePct ?? 0}%`),
+      34,
+      "skills",
+    ));
+  }
+
+  if (insight.quaere) {
+    parts.push(`\nTHE SCAN'S OWN READING, written by the nightly cron for you specifically and stored with the numbers it describes. It is interpretation, not measurement, and it may be older than today:\n${insight.quaere}`);
+  }
+
+  return parts.join("\n");
+}
+
+/**
+ * Rhythm: what the study history says about pace, and what has been asked before.
+ *
+ * `lib/motivation.ts` carries 19,510 bytes of tests and reached no prompt, while two files claimed
+ * `/api/ask` consumed it. The streak is the answer to "am I being honest with myself about pace",
+ * which is a question the FAQ literally suggests and the companion could not answer.
+ *
+ * The rule the streak layer itself sets is carried through verbatim: a gap moves the rate and
+ * leaves the run standing. There is no chain to break, so the model must not invent one to praise
+ * or to warn about.
+ */
+export function rhythmContext(
+  streak: { statement?: string; days?: number; perWeek?: number } | null,
+  asks: { title: string; day: string }[],
+): string {
+  const parts: string[] = [];
+  if (streak?.statement) {
+    parts.push(`STUDY RHYTHM: ${streak.statement}`);
+    parts.push("There is no streak to protect and no chain to break: a gap moves the rate and leaves the run standing. Never frame a missed day as a broken run.");
+  }
+  if (asks.length) {
+    parts.push(`\nYOU HAVE ALREADY ANSWERED THESE, most recent first. If the question repeats one, say so and build on it rather than starting over:\n${cap(asks.slice(0, 8).map((a) => `- ${a.day}: ${a.title}`), 8, "saved answers")}`);
   }
   return parts.join("\n");
 }
