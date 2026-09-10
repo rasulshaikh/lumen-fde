@@ -119,16 +119,47 @@ The strip renders nothing at all when nothing is broken, and nothing server-side
 
 ---
 
-## Build 4 - Incident sim
+## Build 4 - Incident sim  (BUILT: first version)
 
-A customer's deploy is broken, logs stream, you have twenty minutes and a terminal. Reuses
-`/sandbox`, the real requisition wording in the market data, and Build 1's engine.
+A ticket arrives, you have a terminal, and nobody tells you the answer. Two incidents, on Practice
+rather than in a tenth tab, because that page is already "find out whether you actually know it".
 
-Inherits the unsolved question `TestRunner` already answered once with "you grade yourself": who
-says you got it right? A simulation can at least answer it honestly for a subset - either the
-service came back or it did not - and that is the part to build first.
+| Incident | Rows | The trap |
+|---|---|---|
+| The new version never came up | 7, 8 | The customer blames the deploy. The deploy is fine: a node cordoned nine days ago plus a memory request raised in the same PR. Neither alone would have stopped it. |
+| The assistant got worse and nobody deployed anything | 53 | Every span is 200, latency normal, nothing errored. The embedding provider rolled a version: same name, same dimensions, different weights. Valid arithmetic, no meaning. |
 
-Largest by a distance. A quarter, not a weekend.
+### How it grades, and what that costs
+
+It grades exactly one thing: **did the service come back.** That is a fact about the system, not a
+judgement about your reasoning, and it is the only honest thing a simulation can assert. No score,
+no rating of the path, no "3 of 5 optimal probes".
+
+A wrong fix is not rejected - it runs, and the sim reports what it really did. Rolling back serves
+the old version the customer already told you they tried. Deleting a pod to make room takes them
+from a stale version to no version at all. Raising top-k searches more of the wrong space. The
+consequence is the teaching.
+
+The cost, stated because it is real: you can fix an incident by guessing, six fixes and one works,
+and nothing stops you trying them in order. The alternative is grading reasoning, which is what
+`TestRunner` refused in writing. What the sim does instead is make guessing visibly unsatisfying.
+
+### What is asserted
+
+- Exactly one fix resolves. Two makes the outcome ambiguous, zero makes it a puzzle that hates you.
+- Every wrong fix reports a real consequence - substance, not "that did not work", which is marking
+  with extra steps.
+- **No probe prints the cause or names the working command.** The evidence is on screen and the
+  diagnosis is not, or the exercise is reading comprehension.
+- The evidence is spread across at least two commands, and not every command is decisive.
+- The ticket is what the customer said, not what is true - asserted per incident, so a future one
+  cannot be written as a tidy problem statement with the answer in it.
+
+### Still missing
+
+Not a terminal you type into: the commands are a fixed set you choose from. Real free-form input
+needs `/sandbox` and a parser, and is the obvious next increment. No timer, deliberately - a clock
+would turn a diagnosis into a race, and the interview it prepares for does not work like that.
 
 ---
 

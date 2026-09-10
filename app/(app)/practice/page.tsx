@@ -1,5 +1,6 @@
 "use client";
 
+import { Incidents } from "@/components/Incident";
 import { useRouter } from "next/navigation";
 import { Mocks } from "@/components/Mocks";
 import { Assessments } from "@/components/Assessments";
@@ -67,5 +68,6 @@ export default function PracticePage() {
     {/* A mock is a conversation, and the companion already holds the plan, the market and the
         syllabus. Handing it the pass bar verbatim is the closest a dashboard gets to running one. */}
     <Mocks ask={(prompt) => { setAskTopic(null); setAskText(prompt); setAskOpen(true); }} />
+    <Incidents />
   </>;
 }
