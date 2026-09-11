@@ -34,6 +34,11 @@ const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log("
     JSON.stringify(shorts.filter((t, i) => shorts.findIndex((o) => o.toLowerCase() === t.toLowerCase()) !== i)));
   const long = shorts.filter((t) => t.length > 18);
   ck("and short enough to sit on one line", long.length === 0, JSON.stringify(long));
+  // It is also the syllabus link text ("Step through and break it: <short>"), so it has to be a
+  // bare noun phrase. A comma or a full stop in here produces a run-on sentence there, which is
+  // exactly what the title-splitting heuristic it replaced was doing.
+  const punctuated = shorts.filter((t) => /[,.:;!?]/.test(t));
+  ck("and reads as a noun phrase wherever it is dropped in", punctuated.length === 0, JSON.stringify(punctuated));
 }
 
 console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };

@@ -250,13 +250,19 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
      * not: the only way to a machine was the Machines tab. That is defect class 2 - a document
      * asserting something the code does not do - and this is the code catching up rather than the
      * sentence being deleted.
+     *
+     * The label is `m.short`, not the title. `title.split(":")[0]` was written when three machines
+     * existed and all three had a colon; at twenty-three it produced "Step through Rebase is a
+     * replay, not a move and break it" - an ungrammatical run-on - for every machine whose title
+     * is not punctuated that way, which is twenty of them. The label goes last so any noun phrase
+     * reads correctly there regardless of its capitalisation.
      */
     const machines = machinesForTopic(idx);
     const lessons = lessonsForTopic(idx);
     const strip = machines.length || lessons.length ? (
       <p className="syllabus-machine">
         {machines.map((m) => (
-          <Link key={m.id} href={`/machines?m=${m.id}`}>Step through {m.title.split(":")[0]} and break it</Link>
+          <Link key={m.id} href={`/machines?m=${m.id}`}>Step through and break it: {m.short}</Link>
         ))}
         {lessons.map((l) => (
           <Link key={l.id} href={`/machines?l=${l.id}`}>Drag {l.title.split(",")[0].toLowerCase()}</Link>
