@@ -5,19 +5,22 @@
  * as a path through the syllabus and not as a demo reel.
  */
 import { admission } from "./admission";
+import { containerStart } from "./container-start";
 import { k8s } from "./k8s";
 import { mcpTools } from "./mcp-tools";
 import { oauthPkce } from "./oauth-pkce";
 import { rag } from "./rag";
 import { raft } from "./raft";
 import { samlSso } from "./saml-sso";
+import { secretRotation } from "./secret-rotation";
+import { supportBundle } from "./support-bundle";
 import { tcp } from "./tcp";
 import { terraformPlan } from "./terraform-plan";
 import { vpcPath } from "./vpc-path";
 import { iamEval } from "./iam-eval";
 import type { Machine } from "./types";
 
-export const MACHINES: Machine[] = [tcp, k8s, admission, terraformPlan, vpcPath, iamEval, oauthPkce, samlSso, raft, mcpTools, rag];
+export const MACHINES: Machine[] = [tcp, containerStart, k8s, admission, terraformPlan, vpcPath, iamEval, oauthPkce, samlSso, secretRotation, supportBundle, raft, mcpTools, rag];
 
 export const machineById = (id: string): Machine | null => MACHINES.find((m) => m.id === id) ?? null;
 
