@@ -17,6 +17,7 @@
  * the defect was ever visible.
  */
 import { JSDOM } from "jsdom";
+import { LESSONS } from "./lessons/index.ts";
 import { MACHINES } from "./machines/index.ts";
 import { MACHINE_STATE_KEY, toStorage, readUnfinished } from "./machines/unfinished.ts";
 
@@ -52,7 +53,8 @@ g.IS_REACT_ACT_ENVIRONMENT = true;
 const { createElement, StrictMode } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { act } = await import("react");
-const { Machines } = await import("../components/Machine.tsx");
+const { Machines, MachineView } = await import("../components/Machine.tsx");
+const { LessonView } = await import("../components/Lesson.tsx");
 
 const store = dom.window.localStorage;
 const mount = async (node: unknown) => {
@@ -91,6 +93,110 @@ console.log("visiting /machines does not destroy the bookmark it is supposed to 
 
   await unmount();
   ck("unmounting does not clear it either", store.getItem(MACHINE_STATE_KEY) === seed);
+}
+
+console.log("every machine survives the real renderer");
+{
+  // Twenty-three machines existed and exactly one of them had ever been through this component.
+  // `lib/machines.test.mts` proves scene() is pure and in-bounds, which is a claim about the data;
+  // it says nothing about whether the renderer can draw it. Every machine is mounted here at every
+  // step, with every fault on - the state that exercises the short-circuit branches, which are the
+  // ones most likely to return a node id no edge refers to.
+  let broken = 0;
+  for (const m of MACHINES) {
+    const allFaults = m.faults.map((f) => f.id);
+    for (const faults of [[], allFaults]) {
+      for (let step = 0; step < m.steps.length; step++) {
+        const { host, unmount } = await mount(createElement(MachineView, { machine: m, initial: { step, faults } }));
+        const svg = host.querySelector(".mx-stage");
+        const where = `${m.id} step ${step}${faults.length ? " all-faults" : ""}`;
+        if (!svg) { broken++; console.log(`  FAIL ${where}: no stage rendered`); }
+        else {
+          // A NaN coordinate is an invisible element rather than an error: nothing throws and
+          // nothing draws. Checked on ATTRIBUTES only, not on the markup as a whole - the
+          // training-loop machine legitimately prints the text "NaN" as a node note, because a
+          // weight that has become NaN is the thing it teaches. A guard broad enough to catch
+          // that is the "cap so tight the content is unreachable" defect wearing a test's clothes.
+          const bad: string[] = [];
+          for (const el of svg.querySelectorAll("*")) {
+            for (const a of Array.from(el.attributes)) {
+              if (/NaN|Infinity|undefined|null/.test(a.value)) bad.push(`${el.tagName}.${a.name}="${a.value}"`);
+            }
+          }
+          if (bad.length) { broken++; console.log(`  FAIL ${where}: ${bad.slice(0, 3).join(" ")}`); }
+        }
+        if (svg) {
+          const drawn = svg.querySelectorAll(".mx-node").length;
+          const expected = m.scene(step, 0.5, faults).nodes.length;
+          if (drawn !== expected) { broken++; console.log(`  FAIL ${where}: drew ${drawn} nodes, scene has ${expected}`); }
+        }
+        // The caption is the whole point of the step; an empty one is a blank screen.
+        const cap = host.querySelector(".mx-caption")?.textContent?.trim() ?? "";
+        if (cap.length < 10) { broken++; console.log(`  FAIL ${where}: caption is "${cap}"`); }
+        await unmount();
+      }
+    }
+  }
+  ck(`all ${MACHINES.length} machines render at every step, clean and broken`, broken === 0, `${broken} bad renders`);
+}
+
+console.log("every lesson survives the real renderer, at both ends of its range");
+{
+  // Same gap as the machines: twenty-one lessons and nothing had ever mounted one. The failure
+  // this is looking for has already happened once - bandwidth-delay and kv-cache put their whole
+  // subject inside about 1% of a linear axis, so the handle was unreachable by pointer. The pure
+  // suite caught the mechanical half of that (an orphaned handle) and could not see the rest.
+  // Driving to each extreme through the keyboard path is what exercises the clamping.
+  let broken = 0;
+  const badAttrs = (el: Element | null) => {
+    const out: string[] = [];
+    if (!el) return out;
+    for (const n of el.querySelectorAll("*")) {
+      for (const a of Array.from(n.attributes)) {
+        if (/NaN|Infinity|undefined|null/.test(a.value)) out.push(`${n.tagName}.${a.name}="${a.value}"`);
+      }
+    }
+    return out;
+  };
+
+  for (const l of LESSONS) {
+    const { host, unmount } = await mount(createElement(LessonView, { lesson: l }));
+    const handleParam = l.params.find((q) => q.id === l.handles[0]?.param);
+    const grip = host.querySelector('[role="slider"]') as HTMLElement | null;
+    if (!handleParam || !grip) {
+      broken++; console.log(`  FAIL ${l.id}: no draggable handle rendered`);
+      await unmount(); continue;
+    }
+    // PageUp/PageDown move by ten steps, so this is the press count that reaches either end.
+    const presses = Math.ceil((handleParam.max - handleParam.min) / (handleParam.step * 10)) + 2;
+    for (const [end, key] of [["rest", ""], ["min", "PageDown"], ["max", "PageUp"]] as const) {
+      if (key) {
+        await act(async () => {
+          for (let i = 0; i < (end === "max" ? presses * 2 : presses); i++) {
+            grip.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key, bubbles: true }));
+          }
+        });
+      }
+      const stage = host.querySelector(".ls-stage");
+      const where = `${l.id} at ${end}`;
+      const bad = badAttrs(stage);
+      if (!stage) { broken++; console.log(`  FAIL ${where}: no stage`); }
+      else if (bad.length) { broken++; console.log(`  FAIL ${where}: ${bad.slice(0, 3).join(" ")}`); }
+      // The handle is the entire interaction. If it stops being drawn at an extreme, the lesson
+      // is a picture at that end of its range.
+      if (!host.querySelector(".ls-handle circle")) { broken++; console.log(`  FAIL ${where}: handle not drawn`); }
+      const cap = host.querySelector(".ls-caption")?.textContent?.trim() ?? "";
+      if (cap.length < 10) { broken++; console.log(`  FAIL ${where}: caption is "${cap}"`); }
+      const readouts = host.querySelectorAll(".ls-readouts dd");
+      if (!readouts.length) { broken++; console.log(`  FAIL ${where}: no readouts`); }
+      for (const rd of readouts) {
+        const t = rd.textContent ?? "";
+        if (/NaN|Infinity|undefined/.test(t)) { broken++; console.log(`  FAIL ${where}: readout reads "${t}"`); }
+      }
+    }
+    await unmount();
+  }
+  ck(`all ${LESSONS.length} lessons render at rest and at both extremes`, broken === 0, `${broken} bad renders`);
 }
 
 console.log("a visit that changes nothing writes nothing");
