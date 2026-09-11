@@ -34,6 +34,7 @@ const EDGES = [
 export const k8s: Machine = {
   id: "k8s",
   title: "Kubernetes: scheduling a pod, and the two ways it never runs",
+  short: "Pod scheduling",
   subtitle: "Filter, score, bind, start, become Ready. Break a node or a probe and watch which of those five stops.",
   topicIndices: [7, 8],
   steps: ["Pod created", "Filter", "Score", "Bind", "Kubelet starts it", "Ready"],

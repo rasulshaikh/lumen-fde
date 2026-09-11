@@ -41,6 +41,7 @@ const EDGES = [
 export const mcpTools: Machine = {
   id: "mcp-tools",
   title: "A tool call, and where the trust boundary actually is",
+  short: "MCP tool call",
   subtitle: "Five arrows. Three of them carry text somebody else wrote into the same window as your instructions.",
   topicIndices: [51],
   steps: ["initialize", "tools/list", "The model chooses", "tools/call", "The result returns", "The model acts on it"],

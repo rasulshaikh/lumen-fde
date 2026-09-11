@@ -42,6 +42,7 @@ const EDGES = [
 export const secretRotation: Machine = {
   id: "secret-rotation",
   title: "Rotating a secret without an outage",
+  short: "Secret rotation",
   subtitle: "The whole design is an overlap window. Every failure is a way of not having one.",
   topicIndices: [67],
   steps: ["Issue the new secret", "Accept both", "Propagate", "Check the old one is idle", "Revoke the old", "Confirm"],

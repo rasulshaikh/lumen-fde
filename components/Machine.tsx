@@ -340,8 +340,8 @@ export function MachinePicker({ current, onPick }: { current: string; onPick: (i
     <nav className="mx-picker" aria-label="Machines">
       {MACHINES.map((m) => (
         <button key={m.id} type="button" className={`mx-pick${m.id === current ? " is-here" : ""}`} aria-current={m.id === current ? "page" : undefined} onClick={() => onPick(m.id)}>
-          <strong>{m.title.split(":")[0]}</strong>
-          <span>{m.steps.length} steps · {m.faults.length} faults</span>
+          <strong>{m.short}</strong>
+          <span>row {Math.min(...m.topicIndices) + 1}</span>
         </button>
       ))}
     </nav>

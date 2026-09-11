@@ -42,6 +42,7 @@ const EDGES = [
 export const samlSso: Machine = {
   id: "saml-sso",
   title: "SAML, and the three tickets it always generates",
+  short: "SAML SSO",
   subtitle: "Four arrows and one validation step. Everything that goes wrong goes wrong in the validation step.",
   topicIndices: [68],
   steps: ["AuthnRequest", "The user authenticates", "A signed assertion", "POST to the ACS", "Validate it", "Session and groups"],

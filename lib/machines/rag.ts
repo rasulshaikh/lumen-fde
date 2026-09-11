@@ -41,6 +41,7 @@ const EDGES = [
 export const rag: Machine = {
   id: "rag",
   title: "RAG: what reaches the model, and what quietly does not",
+  short: "RAG",
   subtitle: "Embed, retrieve, rerank, fit, answer. Break retrieval and watch the model answer anyway.",
   topicIndices: [53],
   steps: ["Embed the question", "Retrieve", "Rerank", "Fit the context", "Generate"],

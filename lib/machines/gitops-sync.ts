@@ -42,6 +42,7 @@ const EDGES = [
 export const gitopsSync: Machine = {
   id: "gitops-sync",
   title: "The reconcile loop, and what Healthy is claiming",
+  short: "ArgoCD reconcile",
   subtitle: "It never stops running. That is the difference from a pipeline, and it is where the surprises live.",
   topicIndices: [9],
   steps: ["Observe live state", "Render at the target revision", "Diff", "Sync in waves", "Assess health", "Loop again"],

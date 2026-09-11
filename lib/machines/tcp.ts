@@ -23,6 +23,7 @@ const LOST_AT = 0.45;
 export const tcp: Machine = {
   id: "tcp",
   title: "TCP: a connection, and a packet that never arrives",
+  short: "TCP",
   subtitle: "Three segments to open a connection. Then break one and watch what the client can and cannot know.",
   topicIndices: [2],
   steps: [

@@ -40,6 +40,7 @@ const EDGES = [
 export const expandContract: Machine = {
   id: "expand-contract",
   title: "Expand and contract, and where the rollback dies",
+  short: "Expand/contract",
   subtitle: "Five steps because old code and new code share one database. Across a fleet, that overlap is quarters, not minutes.",
   topicIndices: [78],
   steps: ["Add the column", "Dual-write", "Backfill", "Cut reads over", "Drop the old column", "Steady state"],

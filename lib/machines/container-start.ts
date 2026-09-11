@@ -42,6 +42,7 @@ const EDGES = [
 export const containerStart: Machine = {
   id: "container-start",
   title: "What docker run actually does",
+  short: "docker run",
   subtitle: "One ordinary process, lied to about what it can see and metered on what it can use. Those are two different features.",
   topicIndices: [5],
   steps: ["Pull the manifest", "Pull the layers", "Assemble the filesystem", "Unshare the namespaces", "Attach the cgroup", "exec the entrypoint"],

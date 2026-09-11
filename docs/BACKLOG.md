@@ -110,7 +110,7 @@ Stated plainly because a claim nobody checked is not a feature.
 
 ---
 
-## The four defect classes this repo actually produces
+## The five defect classes this repo actually produces
 
 Worth re-reading before adding anything, because all four have recurred.
 
@@ -128,8 +128,27 @@ Worth re-reading before adding anything, because all four have recurred.
    second paper reported itself recorded with no request ever made. The Plan's status dropdown died
    permanently on one failed fetch because `"failed"` had no way back. Each looked correct on screen.
 
+   Building twenty machines in one batch produced eight more instances of this class in a single
+   shape: a fault toggle that changes nothing, because something upstream in the same machine
+   already stopped the request. `lib/machines.test.mts` catches it structurally - every fault is
+   checked against every subset of the others - and the fix is never to suppress it quietly. A
+   setting that cannot matter because an earlier one already refused is itself the lesson, so the
+   machine names it: "the SCP would also refuse, and is not consulted."
+
    The largest single cause is a stale `useMemo`: `aim` was in the memo body and absent from its
    dependency array, so the provider's context object never recomputed and every visual consumer
    read an old snapshot. tsc, `next build` and fifteen suites cannot see that. `react-hooks/
    exhaustive-deps` can, and this repo had no lint configured at all - no eslint dependency, no
    config, no script. It is wired into CI as an error now, and on its first run it found two more.
+5. **A value derived from a field that was never specified to have that shape.** The machine picker
+   built its label as `title.split(":")[0].split(",")[0]`, which was correct for the three titles
+   that existed when it was written. At twenty-three it rendered "Driver", "Replay" and "Five
+   steps" - labels that identify nothing and cannot be told apart - because the new titles are
+   punctuated differently. Nothing failed; the heuristic simply stopped meaning anything. Machines
+   now declare a `short` label and the suite asserts it is unique and fits on a line.
+
+   The same batch produced the sibling of this: a layout sized for the number of items that existed
+   when it was written. The picker was a grid of 64px cards, which at twenty-three items put 1,656
+   pixels of buttons above the content on a phone. Neither of these is visible from a test, a build
+   or a type - both were found by rendering the real markup against the real stylesheet and looking
+   at it, which is the only method that works for this class.

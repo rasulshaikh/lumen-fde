@@ -42,6 +42,7 @@ const EDGES = [
 export const admission: Machine = {
   id: "admission",
   title: "The admission chain, and the control that fails open",
+  short: "Admission chain",
   subtitle: "Six stages before a pod object exists at all. One of them reports success when it stops working.",
   topicIndices: [10],
   steps: ["Authenticate", "Authorise (RBAC)", "Mutating webhooks", "Schema validation", "Validating webhooks + Pod Security", "Persist to etcd"],

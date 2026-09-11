@@ -172,7 +172,7 @@ export function Lessons() {
             <button key={l.id} type="button" className={`mx-pick${l.id === lesson.id ? " is-here" : ""}`}
               aria-current={l.id === lesson.id ? "page" : undefined} onClick={() => setId(l.id)}>
               <strong>{l.title.split(",")[0]}</strong>
-              <span>{l.params.length} things to move</span>
+              <span>row {Math.min(...l.topicIndices) + 1}</span>
             </button>
           ))}
         </nav>

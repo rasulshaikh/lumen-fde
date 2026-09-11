@@ -43,6 +43,7 @@ const EDGES = [
 export const terraformPlan: Machine = {
   id: "terraform-plan",
   title: "The three-way diff, which is the whole of Terraform",
+  short: "Terraform diff",
   subtitle: "Your config, the state file, and what is actually running. Every plan is an argument between two of the three.",
   topicIndices: [13],
   steps: ["Acquire the lock", "Refresh against reality", "Build the graph", "Three-way diff", "Plan", "Apply and write state"],

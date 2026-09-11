@@ -43,6 +43,7 @@ const EDGES = [
 export const iamEval: Machine = {
   id: "iam-eval",
   title: "How AWS decides, and the order nobody learned",
+  short: "IAM order",
   subtitle: "Six gates in a fixed order. Five can only refuse; one of them is the only thing that can grant across accounts.",
   topicIndices: [16],
   steps: ["Explicit deny", "Service control policy", "Resource policy", "Permission boundary", "Identity policy", "Decision"],

@@ -23,7 +23,20 @@ import { readUnfinished, unfinishedNote, toStorage } from "./machines/unfinished
 import type { Machine, Scene } from "./machines/types.ts";
 
 let fails = 0;
-const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
+const ck = (n: string, c: boolean, x = "") => { if (!c) { fails++; console.log("picker labels identify the machine");
+{
+  // "Driver" and "Replay" and "Five steps" all came out of a heuristic that split the title on its
+  // first colon or comma. A label nobody can tell apart from another is the same defect as a
+  // control that does nothing: it looks like it works until you have more than three of them.
+  const shorts = MACHINES.map((m) => m.short);
+  ck("every machine declares one", shorts.every((t) => typeof t === "string" && t.trim().length > 1), JSON.stringify(shorts.filter((t) => !t || t.trim().length < 2)));
+  ck("they are unique", new Set(shorts.map((t) => t.toLowerCase())).size === shorts.length,
+    JSON.stringify(shorts.filter((t, i) => shorts.findIndex((o) => o.toLowerCase() === t.toLowerCase()) !== i)));
+  const long = shorts.filter((t) => t.length > 18);
+  ck("and short enough to sit on one line", long.length === 0, JSON.stringify(long));
+}
+
+console.log(`  FAIL ${n} ${x}`); } else console.log(`  ok   ${n} ${x}`); };
 
 const PHASES = [0, 0.25, 0.5, 0.75, 1];
 const plan = workbook.Plan as unknown[][];

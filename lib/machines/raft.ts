@@ -47,6 +47,7 @@ const EDGES = [
 export const raft: Machine = {
   id: "raft",
   title: "Raft, and the leader who does not know",
+  short: "Raft",
   subtitle: "Five nodes. Cut the network and watch the minority side accept writes it can never commit.",
   topicIndices: [44],
   steps: ["Election timeout", "RequestVote", "A majority answers", "AppendEntries", "Commit index advances", "A read arrives"],

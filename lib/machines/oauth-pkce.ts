@@ -41,6 +41,7 @@ const EDGES = [
 export const oauthPkce: Machine = {
   id: "oauth-pkce",
   title: "Authorization code with PKCE, arrow by arrow",
+  short: "OAuth + PKCE",
   subtitle: "The code travels back through the browser, in a URL. Everything else in the flow is a consequence of that.",
   topicIndices: [29],
   steps: ["Redirect to /authorize", "You sign in", "Code comes back", "Exchange the code", "Validate the claims", "Call the API"],

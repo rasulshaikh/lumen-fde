@@ -41,6 +41,7 @@ const EDGES = [
 export const sseResume: Machine = {
   id: "sse-resume",
   title: "A stream that survives the connection dropping",
+  short: "SSE resume",
   subtitle: "Every event gets an id. On reconnect the browser sends the last one back. That is the entire mechanism.",
   topicIndices: [34],
   steps: ["Connect", "Events flow", "The connection drops", "Reconnect with Last-Event-ID", "Resume from the buffer", "Caught up"],

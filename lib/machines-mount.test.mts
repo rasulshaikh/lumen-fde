@@ -79,8 +79,14 @@ console.log("visiting /machines does not destroy the bookmark it is supposed to 
   // And the restore actually happened - the page opened the machine that was broken, not the first
   // one in the list.
   const text = host.textContent ?? "";
-  ck("the broken machine is the one on screen", /Kubernetes: scheduling a pod/.test(text), text.slice(0, 70));
-  ck("not the default first machine", !/TCP: a connection, and a packet/.test(text));
+  // The heading, not the page text. Every machine's title appears in the picker, so asking whether
+  // the document mentions a title answers a different question from which machine is open - and the
+  // check that used to live here passed because it happened to name a title the picker abbreviates.
+  const heading = host.querySelector(".mx-panel .panel-head h2")?.textContent ?? "";
+  ck("the broken machine is the one on screen", /Kubernetes: scheduling a pod/.test(heading), heading);
+  ck("not the default first machine", heading !== MACHINES[0].title, `${heading} vs ${MACHINES[0].title}`);
+  ck("and every machine is reachable from the picker", host.querySelectorAll(".mx-pick").length === MACHINES.length,
+    String(host.querySelectorAll(".mx-pick").length));
   ck("and the fault is shown as still set", /Broken: Cordon node-a/.test(text), "");
 
   await unmount();
@@ -100,7 +106,7 @@ console.log("breaking something still writes it");
   store.removeItem(MACHINE_STATE_KEY);
   const { host, unmount } = await mount(createElement(Machines));
 
-  // The first fault toggle on the default machine (TCP / drop the SYN-ACK).
+  // The first fault toggle on whichever machine the page opens by default.
   const toggle = host.querySelector(".mx-fault-toggle") as HTMLButtonElement | null;
   ck("there is a fault toggle to press", !!toggle);
   await act(async () => { toggle!.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
@@ -108,8 +114,8 @@ console.log("breaking something still writes it");
   const written = store.getItem(MACHINE_STATE_KEY);
   ck("pressing it records the break", written !== null, String(written));
   const found = readUnfinished(written, MACHINES);
-  ck("under the right machine", found?.machine.id === "tcp", found?.machine.id);
-  ck("with the fault that was pressed", found?.state.faults.includes("drop-synack") === true, JSON.stringify(found?.state.faults));
+  ck("under the right machine", found?.machine.id === MACHINES[0].id, `${found?.machine.id} vs ${MACHINES[0].id}`);
+  ck("with the fault that was pressed", found?.state.faults.includes(MACHINES[0].faults[0].id) === true, JSON.stringify(found?.state.faults));
 
   // And un-pressing it clears deliberately, which must still work now that mounts do not write.
   await act(async () => { toggle!.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });

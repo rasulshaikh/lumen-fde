@@ -39,6 +39,7 @@ const EDGES = [
 export const vpcPath: Machine = {
   id: "vpc-path",
   title: "A packet into a VPC, and the stateless rule that eats the reply",
+  short: "VPC packet path",
   subtitle: "Four things stand between the internet and your instance. Two of them remember the connection and two do not.",
   topicIndices: [14],
   steps: ["Arrives at the IGW", "Route table", "NACL inbound", "Security group inbound", "Server replies", "NACL outbound"],

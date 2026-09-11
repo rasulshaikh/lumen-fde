@@ -132,6 +132,15 @@ export const scrubTo = (x: number, width: number, steps: number): { step: number
 export type Machine = {
   id: string;
   title: string;
+  /**
+   * The picker label: two or three words, unique across the registry.
+   *
+   * Declared rather than derived. The picker used to take everything before the first colon or
+   * comma, which turned "Driver, executors, and where it slows down" into "Driver" and
+   * "Five steps, two orders, two different meanings" into "Five steps" - labels that name nothing
+   * and cannot be told apart. The suite asserts uniqueness and length.
+   */
+  short: string;
   subtitle: string;
   /**
    * The plan rows this explains, as 0-based topic indices - the same index space `askTopic` and
