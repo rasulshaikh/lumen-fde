@@ -6,15 +6,18 @@
  */
 import { admission } from "./admission";
 import { k8s } from "./k8s";
+import { mcpTools } from "./mcp-tools";
 import { oauthPkce } from "./oauth-pkce";
 import { rag } from "./rag";
+import { raft } from "./raft";
+import { samlSso } from "./saml-sso";
 import { tcp } from "./tcp";
 import { terraformPlan } from "./terraform-plan";
 import { vpcPath } from "./vpc-path";
 import { iamEval } from "./iam-eval";
 import type { Machine } from "./types";
 
-export const MACHINES: Machine[] = [tcp, k8s, admission, terraformPlan, vpcPath, iamEval, oauthPkce, rag];
+export const MACHINES: Machine[] = [tcp, k8s, admission, terraformPlan, vpcPath, iamEval, oauthPkce, samlSso, raft, mcpTools, rag];
 
 export const machineById = (id: string): Machine | null => MACHINES.find((m) => m.id === id) ?? null;
 
