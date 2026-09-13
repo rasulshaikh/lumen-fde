@@ -9,8 +9,8 @@
  *
  * The fault worth building the whole thing for is the network ACL. A security group is STATEFUL -
  * it remembers the inbound connection and lets the reply out without being asked. A network ACL is
- * STATELESS and does not, so the reply leaves on a high ephemeral port that the outbound rules were
- * never written for. The request arrives, the server answers, and the answer is dropped on the way
+ * STATELESS and does not, so the reply is addressed BACK to the high ephemeral port the client
+ * opened from, and the outbound rules were never written with that destination in mind. The request arrives, the server answers, and the answer is dropped on the way
  * out. From the client it looks identical to the server being down.
  */
 import { clamp01, dialValue, stepAt, type Machine, type Scene, type SceneNode } from "./types";
@@ -40,12 +40,12 @@ export const vpcPath: Machine = {
   id: "vpc-path",
   title: "A packet into a VPC, and the stateless rule that eats the reply",
   short: "VPC packet path",
-  subtitle: "Four things stand between the internet and your instance. Two of them remember the connection and two do not.",
+  subtitle: "Four things stand between the internet and your instance. Exactly one of them remembers the connection.",
   topicIndices: [14],
   steps: ["Arrives at the IGW", "Route table", "NACL inbound", "Security group inbound", "Server replies", "NACL outbound"],
   dials: [
-    { id: "ephemeralLow", label: "NACL outbound allows from port", min: 0, max: 49152, step: 1024, unit: "", value: 1024,
-      hint: "Linux picks reply source ports from 32768 upward. Set this above that and the reply has nowhere to go." },
+    { id: "ephemeralLow", label: "NACL outbound allows destination ports from", min: 0, max: 49152, step: 1024, unit: "", value: 1024,
+      hint: "The client opened the connection from its own ephemeral port and the reply is addressed back to it. Linux draws those from 32768 up, Windows from 49152, a NAT gateway from 1024 - which is why the standard outbound rule allows 1024-65535 rather than one OS's range. Set this above the client's port and the reply has nowhere to land." },
   ],
   faults: [
     { id: NO_ROUTE, label: "No route to the IGW", blurb: "The subnet's route table has no 0.0.0.0/0 entry. This is what makes a subnet private." },
@@ -60,7 +60,8 @@ export const vpcPath: Machine = {
     const narrow = faults.includes(NACL_EPHEMERAL);
     const noSg = faults.includes(SG_NO_RULE);
     const low = dialValue(vpcPath, dials, "ephemeralLow");
-    // Linux ephemeral range starts at 32768. A reply leaves from somewhere in there.
+    // The CLIENT's source port, drawn from its own ephemeral range. The reply is addressed back to
+    // it, so this is the number the outbound NACL rule is matched against.
     const replyPort = 43210;
     const replyBlocked = narrow || low > replyPort;
 
@@ -142,8 +143,8 @@ export const vpcPath: Machine = {
 
     if (s === 4) {
       return { ...base, nodes: all(undefined, undefined, undefined, undefined),
-        tokens: [{ id: "rep", from: "sg", to: "nacl", at: p, label: `reply from :${replyPort}`, tone: "normal" }],
-        caption: `The server answers. The reply leaves from ephemeral port ${replyPort}, not from 443.`,
+        tokens: [{ id: "rep", from: "sg", to: "nacl", at: p, label: `reply -> :${replyPort}`, tone: "normal" }],
+        caption: `The server answers from 443, addressed to the client's ephemeral port ${replyPort}.`,
         detail: "This is the part that catches people. The reply's SOURCE port is 443 and its DESTINATION is the client's ephemeral port - and on the way out, the thing checking it cares about the destination." };
     }
 
