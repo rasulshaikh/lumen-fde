@@ -46,7 +46,7 @@ export const rebase: Machine = {
   short: "Rebase",
   subtitle: "Git computes your diffs, resets the branch, and applies them as new commits. The originals never move anywhere.",
   topicIndices: [4],
-  steps: ["Find the merge base", "Build the patch series", "Reset onto upstream", "Apply each commit", "Move the ref", "Push"],
+  steps: ["Find the merge base", "Build the patch series", "Detach onto upstream", "Apply each commit", "Move the ref", "Push"],
   faults: [
     { id: CONFLICT, label: "A conflict on the second of four commits", blurb: "You are resolving against a tree that never existed as a commit on either branch: upstream plus one of your four." },
     { id: TAKE_THEIRS, label: "Resolve it by taking one side wholesale", blurb: "The rebase completes, the branch builds, the tests pass, and the commit's change is not in the tree. Nothing reports anything." },
@@ -79,27 +79,27 @@ export const rebase: Machine = {
     }
 
     if (s === 2) {
-      return { ...base, nodes: nodes({ branch: "reset to origin/main", upstream: "tip" }),
-        tokens: [{ id: "rs", from: "upstream", to: "branch", at: p, label: "reset --hard", tone: "slow" }],
-        caption: "Your branch is moved to the upstream tip. Your commits are, briefly, unreferenced.",
-        detail: "This is the moment that feels dangerous and is not: the original commits still exist as objects and the reflog still names where the branch was a second ago. `git reflog` and `git reset --hard HEAD@{1}` undo an entire rebase, which is worth practising deliberately once so it is available under stress." };
+      return { ...base, nodes: nodes({ branch: "unmoved", upstream: "HEAD detached here" }),
+        tokens: [{ id: "rs", from: "upstream", to: "branch", at: p, label: "checkout --detach", tone: "slow" }],
+        caption: "HEAD detaches to the upstream tip. Your branch ref has not moved at all.",
+        detail: "This is the moment that feels dangerous and is not, and the reason is more reassuring than it is usually told: the branch ref is still pointing at your original tip, so your commits are fully referenced the whole way through. Git detaches HEAD, replays there, and only moves the branch at the very end. `git reset --hard ORIG_HEAD` undoes a finished rebase - not `HEAD@{1}`, which is the last commit the replay created, because HEAD moved once per patch. Worth practising deliberately once so it is available under stress." };
     }
 
     if (s === 3) {
       if (theirs) {
         return { ...base, nodes: nodes({ series: "2 of 4 applied, one gutted", branch: "builds fine" }, ["series"]),
-          tokens: [{ id: "ap", from: "series", to: "branch", at: p, label: "resolved --theirs", tone: "fault" }],
+          tokens: [{ id: "ap", from: "series", to: "branch", at: p, label: "resolved --ours", tone: "fault" }],
           caption: conflict
             ? "The conflict on patch two is resolved by keeping upstream's version. Your change is now absent."
             : "The conflict is resolved by keeping upstream's version. Your change is now absent.",
-          detail: "The rebase completes without complaint, the branch compiles, and the commit still has its message and its author and its review approval - and the change it claims to make is not in the tree. Git cannot detect this because taking one side is a legitimate resolution; only you know what the commit was for. The defence is mechanical: diff the rebased range against the original with `git range-diff`, which shows exactly which patches changed during the replay and is the single most underused command in this whole area.",
+          detail: "Note which flag that is. During a rebase the sides are swapped from what everyone expects: Git is replaying your commits onto upstream, so `--ours` is upstream and `--theirs` is the commit of yours being applied. Reaching for `--theirs` to mean \"keep mine\" does the opposite. Either way the rebase completes without complaint, the branch compiles, and the commit still has its message and its author and its review approval - and the change it claims to make is not in the tree. Git cannot detect this because taking one side is a legitimate resolution; only you know what the commit was for. The defence is mechanical: diff the rebased range against the original with `git range-diff`, which shows exactly which patches changed during the replay and is the single most underused command in this whole area.",
           fault: "A commit that no longer does what it says." };
       }
       if (conflict) {
         return { ...base, nodes: nodes({ series: "conflict on 2 of 4" }, ["series"]),
           tokens: [{ id: "ap", from: "series", to: "branch", at: Math.min(p, 0.5), label: "patch 2 of 4", tone: "fault" }],
           caption: "Patch two will not apply. You are stopped in the middle of the series.",
-          detail: "The working tree here is upstream plus your first commit and nothing else - a state that has never existed as a commit on either branch and never will. That is why resolving feels disorienting: the surrounding code is not what you wrote against and not what upstream has. Resolve for this intermediate state rather than for the final one, and if the same conflict appears on several patches, `rerere` will remember the resolution. `git rebase --abort` returns everything to exactly where it started, at any point.",
+          detail: "The working tree here is upstream plus your first commit and nothing else - a state that existed as a commit on neither branch before you started, though it is HEAD right now and stays in your history afterwards. That is why resolving feels disorienting: the surrounding code is not what you wrote against and not what upstream has. Resolve for this intermediate state rather than for the final one, and if the same conflict appears on several patches, `rerere` will remember the resolution. `git rebase --abort` returns everything to exactly where it started, at any point.",
           fault: "Stopped mid-replay, in a tree that never existed." };
       }
       return { ...base, nodes: nodes({ series: "4 of 4 applied", branch: "new hashes" }),

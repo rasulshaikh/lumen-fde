@@ -49,7 +49,7 @@ export const systemdBoot: Machine = {
   steps: ["Firmware and bootloader", "Kernel and initramfs", "PID 1 takes over", "Units start in parallel", "Socket activation", "Ready"],
   faults: [
     { id: MISSING_AFTER, label: "No After= on the database", blurb: "Works on the machine it was written on, fails on a slower one. The difference is a race, and the file looks identical on both." },
-    { id: RESTART_STORM, label: "Restart=always with no delay", blurb: "systemd gives up permanently after five attempts in ten seconds, and the unit is left dead with no further retries." },
+    { id: RESTART_STORM, label: "Restart=always at the default 100ms", blurb: "systemd gives up permanently after five attempts in ten seconds, and the unit is left dead with no further retries." },
     { id: SOCKET_MASKS, label: "Socket activation over a dead service", blurb: "The connection is accepted because systemd owns the socket. The client waits instead of failing, which is worse." },
   ],
 
@@ -75,7 +75,7 @@ export const systemdBoot: Machine = {
       return { ...base, nodes: nodes({ kern: "initramfs, then pivot" }),
         tokens: [{ id: "k", from: "kern", to: "init", at: p, label: "exec /sbin/init", tone: "normal" }],
         caption: "A temporary root filesystem exists just long enough to mount the real one.",
-        detail: "The initramfs carries the drivers needed to reach the real root - LVM, encryption, a network block device - and then gets out of the way. This is the same pivot_root a container runtime performs, which is the first hint that a container is not a machine: it reuses the mechanisms a machine already had." };
+        detail: "The initramfs carries the drivers needed to reach the real root - LVM, encryption, a network block device - and then gets out of the way. A container does the same thing one syscall over: the kernel refuses pivot_root on the initial ramfs, so boot uses switch_root - empty the rootfs, overmount it with the real root, then exec the real init - while a container runtime calls pivot_root outright. Same mount machinery either way, which is the first hint that a container is not a machine: it reuses the mechanisms a machine already had." };
     }
 
     if (s === 2) {
@@ -97,7 +97,7 @@ export const systemdBoot: Machine = {
         return { ...base, nodes: nodes({ svc: "5 restarts in 10s, gave up" }, ["svc"]),
           tokens: [{ id: "st", from: "init", to: "svc", at: Math.min(p, 0.5), label: "start-limit-hit", tone: "fault" }],
           caption: "The service crashed, restarted instantly, and systemd stopped trying.",
-          detail: "Restart=always with no RestartSec restarts immediately, so five failures happen inside the default ten-second window and the start limit is hit. systemd then leaves the unit dead and does not try again - which is the correct behaviour for a crash loop and surprises everyone the first time, because the logs show five failures and then nothing at all, as though the problem stopped. Set RestartSec so the retries are spread out, and read `systemctl status` for start-limit-hit before concluding the service recovered.",
+          detail: "RestartSec defaults to 100ms, so Restart=always retries about ten times a second and five failures land well inside the default ten-second window, which is the start limit. systemd then leaves the unit in the failed state - `Active: failed (Result: start-limit-hit)` - and does not try again - which is the correct behaviour for a crash loop and surprises everyone the first time, because the logs show five failures and then nothing at all, as though the problem stopped. Raise RestartSec well above its 100ms default so the retries are spread out, and read `systemctl status` for start-limit-hit before concluding the service recovered.",
           fault: "Rate limited, then abandoned." };
       }
       return { ...base, nodes: nodes({ dep: "active", svc: "After=postgres.service" }),
@@ -123,6 +123,6 @@ export const systemdBoot: Machine = {
     return { ...base, nodes: nodes({ svc: "active (running)", dep: "active" }),
       tokens: [{ id: "up", from: "svc", to: "sock", at: p, label: "serving", tone: "normal" }],
       caption: "The service is serving. systemd now holds it and its children in a cgroup.",
-      detail: "Every unit gets a cgroup, which is how systemd can reliably stop a service that forks - it kills the cgroup rather than chasing PIDs - and it is the same kernel feature a container runtime uses for limits. `systemd-analyze blame` will tell you which units the boot actually waited on, and the answer is almost never the one people assume." };
+      detail: "Every unit that owns processes gets a cgroup - services, scopes, slices, sockets, mounts, swaps - which is how systemd can reliably stop a service that forks: it kills the cgroup rather than chasing PIDs, and it is the same kernel feature a container runtime uses for limits. To see what the boot actually waited on, use `systemd-analyze critical-chain`, which walks the ordering graph. `blame` only ranks units by how long each took to initialise, and its own manual warns that a unit can be slow precisely because it was waiting - so the top of `blame` is usually not the thing to fix." };
   },
 };

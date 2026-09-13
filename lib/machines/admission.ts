@@ -127,7 +127,7 @@ export const admission: Machine = {
         return { ...base, nodes: nodes({ validate: "timed out - admitted" }, ["validate"]),
           tokens: [{ id: "req", from: "schema", to: "validate", at: p, label: "unverified image", tone: "slow" }],
           caption: "The image policy webhook did not answer in time, so the pod was admitted.",
-          detail: "failurePolicy: Ignore means a webhook that cannot be reached is treated as consent. The webhook is installed, the ValidatingWebhookConfiguration is correct, the deployment is green, and every image in the cluster is now unchecked. The only signal is a latency metric nobody alerts on. Set failurePolicy: Fail for anything that is genuinely a control, and accept that a broken webhook then breaks deployments - which is the honest version of the same situation.",
+          detail: "failurePolicy: Ignore means a webhook that cannot be reached is treated as consent. The webhook is installed, the ValidatingWebhookConfiguration is correct, the deployment is green, and every image in the cluster is now unchecked. The signal exists and nobody is watching it: the API server increments apiserver_admission_webhook_fail_open_count for that webhook and stamps the audit event with a failed-open annotation, and neither is on anybody's default dashboard. Set failurePolicy: Fail for anything that is genuinely a control, and accept that a broken webhook then breaks deployments - which is the honest version of the same situation.",
           fault: "Admitted without verification. The control reports healthy." };
       }
       return { ...base, nodes: nodes({ validate: `${hookNote} · ${psaNote}` }),
