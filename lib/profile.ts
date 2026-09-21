@@ -35,15 +35,21 @@ import profile from "@/data/profile.json";
  * the thing does rather than what it is worth: "more than a degree" is a comparison the reader can
  * draw for themselves from 119 topics that each end in a deliverable.
  */
-export const PROGRAMME = String((profile as { programme?: string }).programme ?? "FDE Hands-on Program");
+export const PROGRAMME = String((profile as { programme?: string }).programme ?? "FDE Study System");
 export const PREMISE = String((profile as { premise?: string }).premise ?? "");
 export const PRODUCT = String((profile as { product?: string }).product ?? "Lumen");
 export const TITLE = `${PRODUCT} · ${PROGRAMME}`;
+export const LIGHT_AUDIT = String((profile as { audit?: string }).audit ?? "Light Audit");
+export const STUDY_SYSTEM = String((profile as { studySystem?: string }).studySystem ?? "Study System");
+export const MARKET_SYSTEM = String((profile as { marketSystem?: string }).marketSystem ?? "Market System");
 
 export type Profile = {
   product?: string;
   programme?: string;
   premise?: string;
+  audit?: string;
+  studySystem?: string;
+  marketSystem?: string;
   name: string;
   location: string;
   targetRole: string;

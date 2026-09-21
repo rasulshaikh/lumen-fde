@@ -10,7 +10,7 @@ Rasul, using a personal planning dashboard while preparing for senior Forward-De
 
 ## Product Purpose
 
-Turn the Senior FDE workbook into an actionable command center: see pace, choose the next topic, track mocks, open vetted resources, and keep compensation context close to the plan.
+Turn the Senior FDE workbook into an actionable command center: the Light Audit finds the gap, the Study System closes it, and the Market System holds the new level against live hiring demand.
 
 ## Brand Personality
 

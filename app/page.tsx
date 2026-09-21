@@ -2,11 +2,10 @@ import type { Metadata } from "next";
 import workbook from "@/data/workbook.json";
 import curriculum from "@/data/curriculum.json";
 import library from "@/data/library-context.json";
-import repositories from "@/data/repository-context.json";
 import sources from "@/data/market-sources.json";
 import { LADDER } from "@/lib/review";
 import { LogoMark } from "./brand";
-import { PROGRAMME, TITLE } from "@/lib/profile";
+import { LIGHT_AUDIT, MARKET_SYSTEM, PROGRAMME, STUDY_SYSTEM, TITLE } from "@/lib/profile";
 
 type Row = (string | number | null)[];
 type Topic = { subtopics?: unknown[]; interviewQuestions?: unknown[] };
@@ -14,7 +13,7 @@ type Topic = { subtopics?: unknown[]; interviewQuestions?: unknown[] };
 export const metadata: Metadata = {
   title: TITLE,
   description:
-    "The study system behind one 23-month Senior Forward Deployed Engineer plan: 117 topics, 2,236 syllabus parts, and a nightly scan of 27 job boards that ranks the plan by what is actually being asked for.",
+    "The study system that lifts your FDE ceiling: 117 topics, 2,236 syllabus parts, and a nightly scan of 27 job boards that ranks the plan by what is actually being asked for.",
 };
 
 /**
@@ -53,28 +52,99 @@ export default function LandingPage() {
     [String(boards), "job boards scanned"],
   ];
 
-  const what: [string, string][] = [
-    ["The plan", `${active.length} topics across ${tracks} tracks and ${months} months. Every row carries its hours, the month it belongs to, and one thing it expects you to ship.`],
-    ["The syllabus", `${parts.toLocaleString()} parts. Each part names what to learn and one public resource for it. Every topic also carries the ways it fails in production and the questions an interviewer would ask, ${questions.toLocaleString()} of them.`],
-    ["Recall and practice", `Spaced repetition runs over the topics actually started, on a ${LADDER.length}-rung ladder that widens from ${LADDER[0]} day to ${LADDER[LADDER.length - 1]}. Mock loops and written assessments sit on the same schedule.`],
-    ["The market benchmark", `${boards} job boards scanned and classified nightly, so the plan is ranked by measured requisition frequency, including the parts of it the market is not asking for.`],
+  const study: [string, string, string][] = [
+    ["01", "The plan", `${active.length} topics across ${tracks} tracks and ${months} months. Every row carries its hours, the month it belongs to, and one thing it expects you to ship.`],
+    ["02", "The syllabus", `${parts.toLocaleString()} parts. Each part names what to learn and one public resource for it. Every topic also carries the ways it fails in production and the questions an interviewer would ask, ${questions.toLocaleString()} of them.`],
+    ["03", "Recall and practice", `Spaced repetition runs over the topics actually started, on a ${LADDER.length}-rung ladder that widens from ${LADDER[0]} day to ${LADDER[LADDER.length - 1]}. Mock loops and written assessments sit on the same schedule.`],
   ];
+
+  const market: [string, string, string][] = [
+    ["04", "Nightly scan", `${boards} job boards classified every night so the plan is ranked by measured requisition frequency.`],
+    ["05", "The gap", "Includes the parts of the plan the market is not asking for, so you stop studying the wrong ceiling."],
+    ["06", LIGHT_AUDIT, "A ranked view of what is capping Senior FDE readiness, and what it costs in weeks at the declared pace."],
+  ];
+
+  const ticker = `[#${STUDY_SYSTEM.toUpperCase()}]&[#${MARKET_SYSTEM.toUpperCase()}]&[#${LIGHT_AUDIT.toUpperCase()}]// `;
 
   return (
     <main className="lp">
-      <header className="lp-top">
-        <div className="lp-brand"><LogoMark className="brand-mark" /><span>Lumen</span></div>
-        <a className="lp-signin" href="/login">Sign in →</a>
+      <header className="lp-bar-wrap">
+        <div className="lp-bar">
+          <div className="lp-brand"><LogoMark className="brand-mark" /><span>Lumen</span></div>
+          <nav className="lp-nav" aria-label="Systems">
+            <a href="#study">{STUDY_SYSTEM}</a>
+            <a href="#market">{MARKET_SYSTEM}</a>
+          </nav>
+          <a className="lp-cta" href="/login">Open a {LIGHT_AUDIT}</a>
+        </div>
       </header>
 
       <section className="lp-hero">
         <p className="lp-kicker">{PROGRAMME}</p>
-        <h1>Twenty-three months, hands on, measured against the market that hires for it.</h1>
-        <p className="lp-lede">
-          Lumen is the study system behind one Senior Forward Deployed Engineer plan. It holds the
-          curriculum, schedules the recall, records what gets shipped, and every night it reads the
-          job market and re-ranks the plan against it. It is honest about how much is left.
-        </p>
+        <div className="lp-hero-row">
+          <h1>We build the study system that lifts your FDE ceiling.</h1>
+          <div>
+            <p className="lp-lede">
+              A {months}-month Senior Forward Deployed Engineer plan, ranked every night against
+              the market that actually hires for it. Honest about how much is left.
+            </p>
+            <div className="lp-actions">
+              <a className="lp-cta" href="/login">Open a {LIGHT_AUDIT}</a>
+              <a className="lp-ghost" href="#method">See how it works</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="lp-pillars" id="study">
+        <h2 className="lp-h2">Two systems. One ceiling to lift.</h2>
+        <div className="lp-two">
+          <article className="lp-card">
+            <p className="lp-h2">Pillar 01</p>
+            <h3 className="lp-pillar">{STUDY_SYSTEM}</h3>
+            <ol className="lp-list">
+              {study.map(([num, title, body]) => (
+                <li key={num}>
+                  <span className="lp-num">{num}</span>
+                  <div><h4>{title}</h4><p>{body}</p></div>
+                </li>
+              ))}
+            </ol>
+          </article>
+          <article className="lp-card" id="market">
+            <p className="lp-h2">Pillar 02</p>
+            <h3 className="lp-pillar">{MARKET_SYSTEM}</h3>
+            <ol className="lp-list">
+              {market.map(([num, title, body]) => (
+                <li key={num}>
+                  <span className="lp-num">{num}</span>
+                  <div><h4>{title}</h4><p>{body}</p></div>
+                </li>
+              ))}
+            </ol>
+          </article>
+        </div>
+      </section>
+
+      <section className="lp-block" id="method">
+        <h2 className="lp-h2">Find the gap. Close it. Hold the level.</h2>
+        <div className="lp-steps">
+          <div>
+            <span className="lp-num">01</span>
+            <h3>Find the gap</h3>
+            <p>The {LIGHT_AUDIT} ranks what is constraining output against the live market. Yours to keep.</p>
+          </div>
+          <div>
+            <span className="lp-num">02</span>
+            <h3>Close it</h3>
+            <p>The {STUDY_SYSTEM} puts the next topic, the recall due, and the thing to ship on the same desk.</p>
+          </div>
+          <div>
+            <span className="lp-num">03</span>
+            <h3>Hold the level</h3>
+            <p>Nightly re-rank and a morning digest make the new pace the floor, not a week of enthusiasm.</p>
+          </div>
+        </div>
       </section>
 
       <section className="lp-scale">
@@ -84,18 +154,6 @@ export default function LandingPage() {
             <div key={label}><dt>{value}</dt><dd>{label}</dd></div>
           ))}
         </dl>
-      </section>
-
-      <section className="lp-block">
-        <h2 className="lp-h2">What it does</h2>
-        <ol className="lp-list">
-          {what.map(([title, body], i) => (
-            <li key={title}>
-              <span className="lp-num">{String(i + 1).padStart(2, "0")}</span>
-              <div><h3>{title}</h3><p>{body}</p></div>
-            </li>
-          ))}
-        </ol>
       </section>
 
       <section className="lp-block">
@@ -113,6 +171,13 @@ export default function LandingPage() {
           numbers an assistant quotes come from the same files.
         </p>
       </section>
+
+      <div className="lp-marquee" aria-hidden="true">
+        <div className="lp-marquee-track">
+          <span>{ticker.repeat(4)}</span>
+          <span>{ticker.repeat(4)}</span>
+        </div>
+      </div>
 
       <footer className="lp-foot">
         <span>lumenfde.com · a private workspace</span>

@@ -109,7 +109,7 @@ export function Backdrop() {
      * getComputedStyle forces a style resolve, and doing that 60 times a second for a value that
      * changes twice a day is the wrong trade.
      */
-    let rgb = "76,141,255";
+    let rgb = "184,148,53";
     const readColour = () => {
       const raw = getComputedStyle(canvas).getPropertyValue("--backdrop-rgb").trim();
       if (raw) rgb = raw;

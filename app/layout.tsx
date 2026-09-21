@@ -11,17 +11,14 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Archivo (display), Schibsted Grotesk (body/UI), JetBrains Mono
-            (data). This has to be a <link> and not the @import that globals.css used for
-            Geist: Next's CSS pipeline strips a remote @import out of the emitted chunk, so
-            Geist had never actually been downloading. Verified by the absence of any
-            fonts.googleapis.com request and by a measured advance width identical to a
-            nonexistent family. */}
+        {/* Archivo (dashboard display), Fraunces (landing display), Schibsted Grotesk
+            (body/UI), JetBrains Mono (data). This has to be a <link> and not an @import:
+            Next's CSS pipeline strips a remote @import out of the emitted chunk. */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link
           rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400..800&family=Schibsted+Grotesk:ital,wght@0,400..800;1,400..700&family=JetBrains+Mono:wght@400..700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400..800&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Schibsted+Grotesk:ital,wght@0,400..800;1,400..700&family=JetBrains+Mono:wght@400..700&display=swap"
         />
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
