@@ -21,6 +21,9 @@ export const NAV = [
   // Between the syllabus and the test: watch the system move before being asked about it.
   { label: "Machines", href: "/machines" },
   { label: "Practice", href: "/practice" },
+  // A second curriculum, not a view of the FDE plan. It sits with the other "do you know this"
+  // tabs. Market, next, measures requisitions; this one is a revenue-system path.
+  { label: "GTM", href: "/gtm" },
   { label: "Market", href: "/market" },
   // Paths sits immediately after Market because it is built out of it: the reach tiers on the
   // Market tab are the evidence, and this is the decision they feed. Reading it before the market

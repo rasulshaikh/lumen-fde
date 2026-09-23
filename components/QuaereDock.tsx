@@ -116,7 +116,14 @@ const ROUTE_CONTEXT: Record<string, string> = {
  * `{children}`, so its effect runs AFTER the page's, and writing a generic "/plan - a table of
  * topics" here would overwrite the filtered rows a fraction of a second after the page set them.
  */
-const PAGE_OWNED = new Set(["/plan"]);
+/**
+ * Routes whose own effect writes `body.context`, including which row or module is open.
+ *
+ * A static sentence in ROUTE_CONTEXT would overwrite that a moment later — this dock's effect
+ * runs after the page's — and on /gtm it would also drop the selected module, which is the
+ * fact the question is about.
+ */
+const PAGE_OWNED = new Set(["/plan", "/gtm"]);
 
 /** Longest selection carried into a question. A page is not a question. */
 const SELECTION_CAP = 2000;

@@ -12,7 +12,7 @@ Three surfaces, and they are not interchangeable:
 
 | surface | reach for it when |
 |---|---|
-| the dashboard, 9 tabs <!-- verify:tabs=9 --> | you are reading, filtering, marking status, or looking at the market |
+| the dashboard, 10 tabs <!-- verify:tabs=10 --> | you are reading, filtering, marking status, or looking at the market |
 | the MCP, 18 tools <!-- verify:mcp_tools=18 --> | Claude Code needs the plan in its context, or needs to write something durable |
 | the 2 crons <!-- verify:crons=2 --> | they reach for you - 03:00 and 03:30 UTC, unattended |
 
@@ -398,7 +398,7 @@ the case for adding.
 
 ---
 
-## 2. The 9 tabs
+## 2. The 10 tabs
 
 **Three former tabs now live inside another view.** Their panels are unchanged and every one still
 renders; only the address moved, and the old URLs redirect rather than 404:
@@ -434,6 +434,14 @@ the dropdown is fire-and-forget: a failed sync looks identical to a successful o
 syllabus per opened topic, so it never ships the 3.7 MB bundle.
 *It will not let you edit anything*, and what it renders is built output. Corrections go to
 `data/curriculum/NN.json` followed by `scripts/build-curriculum.py` (architecture.md §4.2).
+
+**GTM** - the revenue-system path, beside the FDE plan rather than inside it. The first module,
+Map the revenue system, is the work (ICP, lifecycle versus deal stage, MQL/SQL, handoffs, metrics
+with denominators, and the review question about marketing sending bad leads). The second,
+Build the HubSpot data contract, is an outline of the next module, not a schema and not a
+HubSpot connection. Marks stay in this browser. *It will not write plan progress,* and Quaere's
+context on this tab is the module on screen, not a catalog.
+`/gtm?m=hubspot-data-contract` opens the outline; a module id this path does not have opens the first.
 
 **Paths** - the four routes out of the plan (stay in India, the Gulf, the US market, your own
 thing), each joining the CompReality sheet's bands, sources and odds to the reach tiers the

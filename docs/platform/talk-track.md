@@ -17,7 +17,7 @@ usefully - which rows it does *not* discharge.
 ## 1. The sixty-second version
 
 A single-user study platform for one 23-month <!-- verify:months=23 --> Senior FDE plan. Three
-processes: a Next.js app on Vercel with 9 tabs <!-- verify:tabs=9 --> and
+processes: a Next.js app on Vercel with 10 tabs <!-- verify:tabs=10 --> and
 14 API routes <!-- verify:api_routes=14 -->; an MCP server on Render exposing
 18 tools <!-- verify:mcp_tools=18 --> so Claude Code reads the same plan the dashboard reads;
 and GitHub as the database, because every mutable artifact is a file in the repo. No database,
