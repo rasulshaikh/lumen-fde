@@ -17,7 +17,7 @@ from either doc.
 
 A single-user study platform for one 23-month Senior FDE plan. Three things run:
 
-1. **A Next.js app on Vercel** - the dashboard (9 tabs), 14 API routes, and 2 cron endpoints.
+1. **A Next.js app on Vercel** - the dashboard (10 tabs), 14 API routes, and 2 cron endpoints.
 2. **An MCP server on Render** - 18 tools, so Claude Code can read the same plan the dashboard
    reads, and write progress back to it.
 3. **GitHub, as the database** - every mutable artifact (progress events, review schedule,
@@ -131,11 +131,11 @@ If `LUMEN_PASSWORD` is unset the password gate is off and the rest of the app is
 `/api/cron/*` still 401s without `CRON_SECRET`, because that branch returns before the password
 check is reached. "Every route is public" was true before the cron prefix was gated and is not now.
 
-### 3.2 The 9 tabs
+### 3.2 The 10 tabs
 
 `components/Nav.tsx`, the `NAV` constant:
 
-`Overview` · `Plan` · `Curriculum` · `Practice` · `Market` · `Paths` · `Library` · `Sandbox`
+`Overview` · `Plan` · `Curriculum` · `Machines` · `Practice` · `GTM` · `Market` · `Paths` · `Library` · `Sandbox`
 
 Each is its own route under `app/(app)/`, and each page imports its section from `components/` -
 `Market` is `components/Market.tsx`, not a branch inside a shared file. Nine of the eleven pages
@@ -145,8 +145,8 @@ public landing page took that path; `/` now belongs to a signed-out visitor (§3
 `Sandbox` renders `Terminal` from `app/terminal.tsx`; the recall strip (`app/recall.tsx`) is
 mounted in `app/(app)/layout.tsx`, which is why it is present on every view.
 
-**10 app routes, 9 tabs - the difference is deliberate.** `/design` is a route under `app/(app)/`
-but is not in `NAV`. It is the living style guide: it renders the tokens the other ten views are
+**11 app routes, 10 tabs - the difference is deliberate.** `/design` is a route under `app/(app)/`
+but is not in `NAV`. It is the living style guide: it renders the tokens the other views are
 drawn with and measures the five contrast floors in the browser, which is how the light-theme
 ruling failure was caught. It is about the app rather than about the plan, and the tab bar is
 for the plan, so it is reachable by URL and unlisted. Do not "fix" the count by re-adding it.
@@ -165,6 +165,7 @@ Four tabs fetch; the rest render bundled JSON:
 | Sandbox | `POST /api/sandbox` (NDJSON stream) |
 | Market | `GET /api/market` on mount |
 | Paths | `GET /api/market` (reach tiers) + `GET /api/artifacts`, over the bundled `CompReality` sheet |
+| GTM | bundled module text in `lib/gtm/path.ts`. Completion, drafts, and acceptance self-marks stay in `localStorage` (`lumen-gtm-status`, `lumen-gtm-drafts`, `lumen-gtm-checks`) and are not plan progress |
 
 The Plan tab writes status to `localStorage` under `lumen-statuses` and mirrors it to
 `POST /api/progress`; on load it merges back whatever `GET /api/progress` returns.
@@ -819,7 +820,7 @@ standing fact. The market block at the bottom is all of the second kind.
 | boards configured / enabled | 32 <!-- verify:boards=32 --> / 27 <!-- verify:enabled_boards=27 --> | `data/market-sources.json` |
 | `BOARD_COUNT` | 27 | `lib/market/benchmark.ts` |
 | skills / gaps / over-invested | 34 <!-- verify:skills=34 --> / 13 <!-- verify:gaps=13 --> / 3 | `data/market-skill-map.json` |
-| tabs | 9 <!-- verify:tabs=9 --> | `components/Nav.tsx` `NAV` |
+| tabs | 10 <!-- verify:tabs=10 --> | `components/Nav.tsx` `NAV` |
 | API routes | 14 <!-- verify:api_routes=14 --> | `app/api/**/route.ts` |
 | crons | 2 <!-- verify:crons=2 --> (03:00, 03:30 UTC) | `vercel.json` |
 | MCP tools | 18 <!-- verify:mcp_tools=18 --> | `mcp/server.js` `tools` |
