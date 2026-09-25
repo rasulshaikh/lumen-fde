@@ -2,7 +2,11 @@
 
 ## Direction
 
-A field notebook under a desk lamp: warm near-black, yellow-ochre as the one marker, dense but calm information. Not Unkapped blue. Not dashboard theater.
+Two surfaces, one pigment.
+
+The public landing is a full-bleed poster: a viewport of burnt umber and lamp-ochre, glass pill nav, huge cream type, lede and CTAs in the bottom-right. Structure from Unkapped. Colour is Lumen. Never their electric blue, never an inset beige document.
+
+The dashboard is a field notebook under a desk lamp: warm near-black, yellow-ochre as the one marker, dense but calm information. Not dashboard theater.
 
 ## Naming
 
@@ -33,4 +37,4 @@ Archivo for dashboard display, Fraunces for the public landing headline, Schibst
 
 ## Components
 
-Landing borrows Unkapped's IA: sticky bar, two named pillars, numbered capabilities, three-step method, marquee. Dashboard stays a compact operator desk: top bar, tabs, metric rows, progress bars, tables.
+Landing borrows Unkapped's *poster*: full-viewport color field, floating glass bar, huge display, bottom-right lede and dual CTAs, then banded sections (paper / ink / ochre close), numbered capabilities, three-step method, marquee. Dashboard stays a compact operator desk: top bar, tabs, metric rows, progress bars, tables.

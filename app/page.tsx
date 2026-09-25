@@ -70,23 +70,32 @@ export default function LandingPage() {
     <main className="lp">
       <header className="lp-bar-wrap">
         <div className="lp-bar">
-          <div className="lp-brand"><LogoMark className="brand-mark" /><span>Lumen</span></div>
+          <a className="lp-brand" href="#top">
+            <LogoMark className="brand-mark" />
+            <span>Lumen</span>
+          </a>
           <nav className="lp-nav" aria-label="Systems">
             <a href="#study">{STUDY_SYSTEM}</a>
             <a href="#market">{MARKET_SYSTEM}</a>
           </nav>
-          <a className="lp-cta" href="/login">Open a {LIGHT_AUDIT}</a>
+          <a className="lp-cta lp-cta-nav" href="/login">Open a {LIGHT_AUDIT}</a>
         </div>
       </header>
 
-      <section className="lp-hero">
-        <p className="lp-kicker">{PROGRAMME}</p>
-        <div className="lp-hero-row">
-          <h1>We build the study system that lifts your FDE ceiling.</h1>
-          <div>
+      <section className="lp-hero" id="top">
+        <div className="lp-field" aria-hidden="true" />
+        <div className="lp-hero-stage">
+          <h1>
+            We build the
+            <br />
+            study system that
+            <br />
+            lifts your FDE ceiling.
+          </h1>
+          <div className="lp-hero-end">
             <p className="lp-lede">
-              A {months}-month Senior Forward Deployed Engineer plan, ranked every night against
-              the market that actually hires for it. Honest about how much is left.
+              A {months}-month Senior Forward Deployed Engineer plan, ranked every
+              night against the market that actually hires for it.
             </p>
             <div className="lp-actions">
               <a className="lp-cta" href="/login">Open a {LIGHT_AUDIT}</a>
@@ -96,80 +105,104 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section className="lp-pillars" id="study">
-        <h2 className="lp-h2">Two systems. One ceiling to lift.</h2>
-        <div className="lp-two">
-          <article className="lp-card">
-            <p className="lp-h2">Pillar 01</p>
-            <h3 className="lp-pillar">{STUDY_SYSTEM}</h3>
-            <ol className="lp-list">
-              {study.map(([num, title, body]) => (
-                <li key={num}>
-                  <span className="lp-num">{num}</span>
-                  <div><h4>{title}</h4><p>{body}</p></div>
-                </li>
-              ))}
-            </ol>
-          </article>
-          <article className="lp-card" id="market">
-            <p className="lp-h2">Pillar 02</p>
-            <h3 className="lp-pillar">{MARKET_SYSTEM}</h3>
-            <ol className="lp-list">
-              {market.map(([num, title, body]) => (
-                <li key={num}>
-                  <span className="lp-num">{num}</span>
-                  <div><h4>{title}</h4><p>{body}</p></div>
-                </li>
-              ))}
-            </ol>
-          </article>
-        </div>
-      </section>
-
-      <section className="lp-block" id="method">
-        <h2 className="lp-h2">Find the gap. Close it. Hold the level.</h2>
-        <div className="lp-steps">
-          <div>
-            <span className="lp-num">01</span>
-            <h3>Find the gap</h3>
-            <p>The {LIGHT_AUDIT} ranks what is constraining output against the live market. Yours to keep.</p>
-          </div>
-          <div>
-            <span className="lp-num">02</span>
-            <h3>Close it</h3>
-            <p>The {STUDY_SYSTEM} puts the next topic, the recall due, and the thing to ship on the same desk.</p>
-          </div>
-          <div>
-            <span className="lp-num">03</span>
-            <h3>Hold the level</h3>
-            <p>Nightly re-rank and a morning digest make the new pace the floor, not a week of enthusiasm.</p>
+      <section className="lp-band lp-band-paper" id="study">
+        <div className="lp-inner">
+          <p className="lp-kicker">{PROGRAMME}</p>
+          <h2 className="lp-display">Two systems. One ceiling to lift.</h2>
+          <div className="lp-two">
+            <article>
+              <p className="lp-meta">Pillar 01 · 3 capabilities</p>
+              <h3 className="lp-pillar">{STUDY_SYSTEM}</h3>
+              <ol className="lp-list">
+                {study.map(([num, title, body]) => (
+                  <li key={num}>
+                    <span className="lp-num">{num}</span>
+                    <div><h4>{title}</h4><p>{body}</p></div>
+                  </li>
+                ))}
+              </ol>
+            </article>
+            <article id="market">
+              <p className="lp-meta">Pillar 02 · 3 capabilities</p>
+              <h3 className="lp-pillar">{MARKET_SYSTEM}</h3>
+              <ol className="lp-list">
+                {market.map(([num, title, body]) => (
+                  <li key={num}>
+                    <span className="lp-num">{num}</span>
+                    <div><h4>{title}</h4><p>{body}</p></div>
+                  </li>
+                ))}
+              </ol>
+            </article>
           </div>
         </div>
       </section>
 
-      <section className="lp-scale">
-        <h2 className="lp-h2">The scale of it</h2>
-        <dl className="lp-stats">
-          {stats.map(([value, label]) => (
-            <div key={label}><dt>{value}</dt><dd>{label}</dd></div>
-          ))}
-        </dl>
+      <section className="lp-band lp-band-ink" id="method">
+        <div className="lp-inner">
+          <p className="lp-kicker">The method</p>
+          <h2 className="lp-display">Find the gap. Close it. Hold the level.</h2>
+          <div className="lp-steps">
+            <div>
+              <span className="lp-step-n">1</span>
+              <h3>Find the gap</h3>
+              <p>The {LIGHT_AUDIT} ranks what is constraining output against the live market. Yours to keep.</p>
+            </div>
+            <div>
+              <span className="lp-step-n">2</span>
+              <h3>Close it</h3>
+              <p>The {STUDY_SYSTEM} puts the next topic, the recall due, and the thing to ship on the same desk.</p>
+            </div>
+            <div>
+              <span className="lp-step-n">3</span>
+              <h3>Hold the level</h3>
+              <p>Nightly re-rank and a morning digest make the new pace the floor, not a week of enthusiasm.</p>
+            </div>
+          </div>
+        </div>
       </section>
 
-      <section className="lp-block">
-        <h2 className="lp-h2">How it is built</h2>
-        <p className="lp-body">
-          Lumen is a Next.js app on Vercel, with a Node MCP server on Render so an AI assistant
-          reads the same plan the dashboard does, and GitHub as the database: every mutable
-          artifact is a file in one repository, read and written whole, diffable, and readable by
-          a second process on a different host. There is no database, no queue and no object store.
-        </p>
-        <p className="lp-body">
-          Two scheduled jobs run it: one scans the {boards} boards, classifies the requisitions and
-          recomputes the benchmark; the other sends a morning digest with the day&apos;s topic, the
-          recall due, and an alert if the scan went stale. The numbers on the dashboard and the
-          numbers an assistant quotes come from the same files.
-        </p>
+      <section className="lp-band lp-band-paper">
+        <div className="lp-inner">
+          <p className="lp-kicker">The scale of it</p>
+          <dl className="lp-stats">
+            {stats.map(([value, label]) => (
+              <div key={label}><dt>{value}</dt><dd>{label}</dd></div>
+            ))}
+          </dl>
+        </div>
+      </section>
+
+      <section className="lp-band lp-band-ink">
+        <div className="lp-inner lp-built">
+          <p className="lp-kicker">How it is built</p>
+          <h2 className="lp-display">One repository. No database.</h2>
+          <p className="lp-body">
+            Lumen is a Next.js app on Vercel, with a Node MCP server on Render so an AI assistant
+            reads the same plan the dashboard does, and GitHub as the database: every mutable
+            artifact is a file in one repository, read and written whole, diffable, and readable by
+            a second process on a different host. There is no database, no queue and no object store.
+          </p>
+          <p className="lp-body">
+            Two scheduled jobs run it: one scans the {boards} boards, classifies the requisitions and
+            recomputes the benchmark; the other sends a morning digest with the day&apos;s topic, the
+            recall due, and an alert if the scan went stale. The numbers on the dashboard and the
+            numbers an assistant quotes come from the same files.
+          </p>
+        </div>
+      </section>
+
+      <section className="lp-band lp-band-close">
+        <div className="lp-inner">
+          <h2 className="lp-display">Let&apos;s find the gap.</h2>
+          <p className="lp-lede">
+            Thirty seconds to sign in. The {LIGHT_AUDIT} is the ranked view of what is capping
+            Senior FDE readiness, and what it costs in weeks at the declared pace.
+          </p>
+          <div className="lp-actions">
+            <a className="lp-cta" href="/login">Open a {LIGHT_AUDIT}</a>
+          </div>
+        </div>
       </section>
 
       <div className="lp-marquee" aria-hidden="true">
