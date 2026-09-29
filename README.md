@@ -1,8 +1,8 @@
 # Lumen FDE
 
-**Senior Forward Deployed Engineer command center** — plan, curriculum, practice, market scan, and Ask, wired for real GTM / RevOps delivery work.
+**Senior Forward Deployed Engineer command center**: plan, curriculum, practice, market scan, and Ask, wired for real GTM / RevOps delivery work.
 
-Live: **[rasul-senior-fde-dashboard.vercel.app](https://rasul-senior-fde-dashboard.vercel.app)**
+Live: **[lumen-fde.vercel.app](https://lumen-fde.vercel.app)**
 
 Built as the operating surface for a senior FDE track: what to learn, what to ship, how to prove it, and how to brief agents (Claude / Codex / MCP) from the same source of truth.
 
@@ -12,7 +12,7 @@ Built as the operating surface for a senior FDE track: what to learn, what to sh
 
 | Surface | Purpose |
 | --- | --- |
-| **Plan** | Senior FDE syllabus from the workbook — topics, outcomes, proof-of-work |
+| **Plan** | Senior FDE syllabus from the workbook: topics, outcomes, proof-of-work |
 | **Curriculum** | Deep per-topic syllabi (`data/curriculum/*.json`) with resources and failure modes |
 | **Ask Lumen** | Context-grounded answers over plan + library + repo maps (MiniMax-backed) |
 | **Market / Paths** | Market scan and GTM path views for FDE positioning |
@@ -62,8 +62,8 @@ See `PRODUCT.md` and `DESIGN.md` for product/design detail. Ops notes (cron, Sur
 
 ## Profile / proof
 
-- Dashboard: https://rasul-senior-fde-dashboard.vercel.app  
-- Author: [Rasul Shaikh](https://github.com/rasulshaikh) — Senior FDE · AI GTM systems  
+- Dashboard: https://lumen-fde.vercel.app  
+- Author: [Rasul Shaikh](https://github.com/rasulshaikh). Senior FDE · AI GTM systems  
 
 ---
 
