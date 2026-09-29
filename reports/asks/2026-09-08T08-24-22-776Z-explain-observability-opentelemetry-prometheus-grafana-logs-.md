@@ -31,7 +31,7 @@ Logs are arbitrary events with free-form context. They answer, "what exactly hap
 
 The most important rule is cardinality. A Prometheus time series costs memory for every unique label set. Putting `hubspot_contact_id` or `tenant_email` as a metric label explodes your memory bill. Those values belong on spans and logs, where they cost little.
 
-Practical example for the DefenderMate webhook path:
+Practical example for the Aegis webhook path:
 
 1. A HubSpot webhook hits FastAPI. You open a SERVER span called `POST /webhooks/hubspot`. The span gets a trace_id (16 bytes) and span_id (8 bytes), and you read the incoming `traceparent` header, or start a new root if there is none.
 
@@ -57,16 +57,16 @@ One concrete gotcha to remember: a load balancer or WAF that strips unknown head
 
 20-minute exercise:
 
-Goal: stand up metrics, one trace, and one log line for the DefenderMate webhook.
+Goal: stand up metrics, one trace, and one log line for the Aegis webhook.
 
 1. Minutes 0 to 3. Install the SDK.
    `pip install opentelemetry-sdk opentelemetry-exporter-otlp-proto-grpc prometheus-client`.
 
 2. Minutes 3 to 7. Wire the providers.
-   Create one `TracerProvider` with a `Resource` carrying `service.name=defendermate-api`, `service.version=0.1.0`, `deployment.environment=local`. Attach a `BatchSpanProcessor` with an `OTLPSpanExporter` pointing at `http://localhost:4317` and `insecure=True`. Call `trace.set_tracer_provider(provider)`. Start a Prometheus meter provider on port 9464.
+   Create one `TracerProvider` with a `Resource` carrying `service.name=aegis-api`, `service.version=0.1.0`, `deployment.environment=local`. Attach a `BatchSpanProcessor` with an `OTLPSpanExporter` pointing at `http://localhost:4317` and `insecure=True`. Call `trace.set_tracer_provider(provider)`. Start a Prometheus meter provider on port 9464.
 
 3. Minutes 7 to 11. Instrument the webhook handler.
-   Get a tracer with `trace.get_tracer("defendermate.webhook")`. Open a SERVER span named `POST /webhooks/hubspot`. Add a counter `webhook_requests_total` and a histogram `classifier_duration_seconds`. Wrap the classifier call in a `with tracer.start_as_current_span("classify_lead"):` block and observe the duration into the histogram on exit.
+   Get a tracer with `trace.get_tracer("aegis.webhook")`. Open a SERVER span named `POST /webhooks/hubspot`. Add a counter `webhook_requests_total` and a histogram `classifier_duration_seconds`. Wrap the classifier call in a `with tracer.start_as_current_span("classify_lead"):` block and observe the duration into the histogram on exit.
 
 4. Minutes 11 to 15. Test it.
    `docker compose up otel-collector prometheus grafana`. Start the API, send one curl webhook. Check `curl localhost:9464/metrics` for `webhook_requests_total 1`. If you wired Tempo or a logging exporter, confirm the span and log arrive.

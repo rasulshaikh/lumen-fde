@@ -6,7 +6,7 @@
  "hours": 11.5,
  "why": "When the system you deployed at a customer breaks at 02:00, the FDE is the person the customer's VP calls, the person who has to run the bridge with the customer's own platform team on it, and the person who has to send the written account the customer's CTO forwards to their board. Nobody on the vendor side has more context than you, so you are the de facto incident commander whether or not anyone gave you the title, and a sloppy incident (three people typing into production, no timeline, a status update that speculated about root cause and was wrong) costs more trust than the outage itself. The postmortem is the artifact that turns an outage into a renewal: a blameless, numbers-first document with dated action items is how a customer decides you are safe to keep in production.",
  "prerequisites": [
-  "SLIs, SLOs and error-budget burn alerts from 'SRE fundamentals' (topic 20): severity levels and paging rules only make sense against a defined SLO for DefenderMate.",
+  "SLIs, SLOs and error-budget burn alerts from 'SRE fundamentals' (topic 20): severity levels and paging rules only make sense against a defined SLO for Aegis.",
   "The ability to read a trace, a log stream and a Prometheus dashboard under pressure from 'Observability' (topic 21); during an incident you are consuming what you built there, not building it.",
   "The chaos notes on Kaupex and Temporal from 'Load testing and chaos' (topic 22): those experiments are the scenario bank for your Wheel of Misfortune sessions.",
   "Kubernetes production ops from topic 8: `kubectl rollout undo`, `kubectl get events`, probes, HPA, and how ArgoCD self-heal (topic 9) will fight a manual `kubectl` change.",
@@ -16,7 +16,7 @@
  "subtopics": [
   {
    "name": "Severity ladder and the declaration threshold",
-   "learn": "Write a SEV1 to SEV5 ladder for DefenderMate where each level is defined by customer-observable impact and a required response, not by which component broke: SEV1 = customer-facing outage or data loss, IC assigned, status page within 15 minutes, exec update every 30; SEV2 = degraded for a subset, IC assigned, no status page unless it lasts 60 minutes; SEV3 and below are business-hours tickets. Internalise PagerDuty's rule that if you are unsure whether it is a SEV1 or SEV2 you treat it as the higher one, and that declaring an incident is cheap while a late declaration is not. Know the difference between severity (impact) and priority (order of work) and why a SEV1 for one tenant may be a P2 for the platform.",
+   "learn": "Write a SEV1 to SEV5 ladder for Aegis where each level is defined by customer-observable impact and a required response, not by which component broke: SEV1 = customer-facing outage or data loss, IC assigned, status page within 15 minutes, exec update every 30; SEV2 = degraded for a subset, IC assigned, no status page unless it lasts 60 minutes; SEV3 and below are business-hours tickets. Internalise PagerDuty's rule that if you are unsure whether it is a SEV1 or SEV2 you treat it as the higher one, and that declaring an incident is cheap while a late declaration is not. Know the difference between severity (impact) and priority (order of work) and why a SEV1 for one tenant may be a P2 for the platform.",
    "minutes": 20,
    "resource": {
     "label": "PagerDuty Incident Response - Severity Levels",
@@ -43,7 +43,7 @@
   },
   {
    "name": "Scribing the timeline and annotating dashboards",
-   "learn": "Keep a single incident channel where every entry is `HH:MM UTC` plus one of OBSERVED / DECIDED / ACTION / RESULT, and paste raw evidence (the exact error line, the `kubectl rollout history` output, the alert payload) rather than paraphrase. Push the same timestamps into Grafana as annotations (`POST /api/annotations` with `time`, `tags: [\"incident\",\"INC-2026-014\"]`, `text`) on the DefenderMate SLO dashboard so the postmortem graphs show detection, mitigation and recovery as vertical lines against the burn rate. Configure the dashboard's annotation query to pull by tag so the lines survive dashboard edits. Export the channel history at the end; the timeline is the raw material for the postmortem and it degrades every hour it is not written down.",
+   "learn": "Keep a single incident channel where every entry is `HH:MM UTC` plus one of OBSERVED / DECIDED / ACTION / RESULT, and paste raw evidence (the exact error line, the `kubectl rollout history` output, the alert payload) rather than paraphrase. Push the same timestamps into Grafana as annotations (`POST /api/annotations` with `time`, `tags: [\"incident\",\"INC-2026-014\"]`, `text`) on the Aegis SLO dashboard so the postmortem graphs show detection, mitigation and recovery as vertical lines against the burn rate. Configure the dashboard's annotation query to pull by tag so the lines survive dashboard edits. Export the channel history at the end; the timeline is the raw material for the postmortem and it degrades every hour it is not written down.",
    "minutes": 20,
    "resource": {
     "label": "Grafana docs - Annotate visualizations (incl. annotations HTTP API)",
@@ -69,7 +69,7 @@
    }
   },
   {
-   "name": "Kubernetes mitigation moves for Dokeo and DefenderMate",
+   "name": "Kubernetes mitigation moves for Dokeo and Aegis",
    "learn": "Be able to execute each of these blind and know what it does and does not fix: `kubectl rollout history deploy/dokeo` then `kubectl rollout undo deploy/dokeo --to-revision=N`; `kubectl rollout pause` to freeze a bad progressive rollout; `kubectl scale --replicas=` and temporarily raising HPA `minReplicas`; `kubectl cordon` and `drain --ignore-daemonsets --delete-emptydir-data` for a bad node; `kubectl delete pod` on a single CrashLoopBackOff pod (useless if the image is broken, useful if it is a stuck init); `kubectl get events -A --sort-by=.lastTimestamp` as the first command every time. Know that ArgoCD with `selfHeal: true` will revert your manual `undo` within minutes, so the durable mitigation is `git revert` on the app-of-apps repo or `argocd app set --sync-policy none` first, and that `kubectl rollout undo` changes the pod-template-hash so your dashboards' version labels change too.",
    "minutes": 25,
    "resource": {
@@ -97,7 +97,7 @@
   },
   {
    "name": "Alert hygiene: symptoms not causes, grouping, inhibition, silences",
-   "learn": "Audit every DefenderMate alert against the rule that a page must be urgent, actionable, and about a user-visible symptom (SLO burn rate, error ratio, latency), with cause-based alerts (pod restarts, CPU) demoted to tickets or dashboards. In Alertmanager, configure `route.group_by` so one incident is one notification rather than 40, `group_wait` and `group_interval` to batch, `repeat_interval` long enough not to re-page during the incident, and `inhibit_rules` so a cluster-down alert suppresses every downstream service alert. Know `amtool silence add alertname=... --duration=2h --comment='INC-014'` and that silences during an incident are logged in the timeline, and put a `runbook_url` annotation on every paging rule so the responder lands on the mitigation steps, not a search box.",
+   "learn": "Audit every Aegis alert against the rule that a page must be urgent, actionable, and about a user-visible symptom (SLO burn rate, error ratio, latency), with cause-based alerts (pod restarts, CPU) demoted to tickets or dashboards. In Alertmanager, configure `route.group_by` so one incident is one notification rather than 40, `group_wait` and `group_interval` to batch, `repeat_interval` long enough not to re-page during the incident, and `inhibit_rules` so a cluster-down alert suppresses every downstream service alert. Know `amtool silence add alertname=... --duration=2h --comment='INC-014'` and that silences during an incident are logged in the timeline, and put a `runbook_url` annotation on every paging rule so the responder lands on the mitigation steps, not a search box.",
    "minutes": 20,
    "resource": {
     "label": "Prometheus docs - Alertmanager (grouping, inhibition, silences)",
@@ -169,7 +169,7 @@
   }
  ],
  "outcomes": [
-  "You can take a paging alert on DefenderMate and, within five minutes, have declared a severity, named yourself IC, opened the incident channel with a pinned state summary, and issued one timeboxed mitigation task to a named person, all recorded with UTC timestamps.",
+  "You can take a paging alert on Aegis and, within five minutes, have declared a severity, named yourself IC, opened the incident channel with a pinned state summary, and issued one timeboxed mitigation task to a named person, all recorded with UTC timestamps.",
   "You can run a 30-minute Wheel of Misfortune as IC with a friend as game master and be scored by them on the rubric (declaration time, mitigation before diagnosis, update cadence, no unassigned tasks) at or above the threshold you set in the playbook.",
   "You can execute the Kubernetes and Postgres mitigation menu from memory on your k3s cluster: `kubectl rollout undo` to a named revision with ArgoCD self-heal disabled first, HPA minReplicas raised, a blocking Postgres session found via `pg_blocking_pids` and terminated, each with the observed effect written to the timeline.",
   "You can diagnose a Kaupex incident where workflows are stuck on a poisoned activity using `temporal workflow describe` and `task-queue describe`, mitigate with a reset or terminate, and state the retry-policy change that prevents recurrence.",

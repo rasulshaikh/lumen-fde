@@ -16,7 +16,7 @@
  "subtopics": [
   {
    "name": "Frame the system: DFD, assets, trust boundaries",
-   "learn": "Draw DefenderMate as a level-1 data flow diagram with exactly four element types - external entity, process, data store, data flow - and then draw the trust boundaries as lines that cross flows, not as boxes around components. A boundary is any place where the authority of the caller changes: browser to BFF, BFF to API, API to Postgres, API to model provider, Temporal worker to tenant object storage, operator laptop to production. Name the assets in the customer's language (tenant documents, classification decisions, audit log, model API key, signing key) and record who is allowed to see each. Finish by writing the three sentences a reviewer actually reads: what the system does, what it must never do, and what you are explicitly assuming about the environment it runs in.",
+   "learn": "Draw Aegis as a level-1 data flow diagram with exactly four element types - external entity, process, data store, data flow - and then draw the trust boundaries as lines that cross flows, not as boxes around components. A boundary is any place where the authority of the caller changes: browser to BFF, BFF to API, API to Postgres, API to model provider, Temporal worker to tenant object storage, operator laptop to production. Name the assets in the customer's language (tenant documents, classification decisions, audit log, model API key, signing key) and record who is allowed to see each. Finish by writing the three sentences a reviewer actually reads: what the system does, what it must never do, and what you are explicitly assuming about the environment it runs in.",
    "minutes": 25,
    "resource": {
     "label": "OWASP Community - Threat Modeling",
@@ -178,7 +178,7 @@
   }
  ],
  "outcomes": [
-  "You can produce a level-1 DFD of DefenderMate with numbered trust boundaries and a STRIDE-per-interaction table in under 90 minutes, where every row carries an existing control, a gap, a severity with a written justification, an owner and a status.",
+  "You can produce a level-1 DFD of Aegis with numbered trust boundaries and a STRIDE-per-interaction table in under 90 minutes, where every row carries an existing control, a gap, a severity with a written justification, an owner and a status.",
   "You can list every secret in a running system from a repo scan plus an infrastructure scan, and state for each one its blast radius, its current TTL, who reads it, and how many minutes a rotation takes.",
   "You can rotate a live Postgres credential used by a running service under continuous load and show a request log with zero 5xx and zero authentication errors across the cutover.",
   "You can stand up Vault Kubernetes auth so that no static credential exists in any manifest, image or file, and demonstrate that deleting the pod's projected token immediately stops it from fetching secrets.",

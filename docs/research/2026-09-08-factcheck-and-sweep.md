@@ -559,7 +559,7 @@ Reproduction (observed on the live page): the Pace-map header renders `1588h · 
 ```js
 {roadmapRows.map((r, i) => <a className="resource-card" href={String(r[1])} target="_blank" rel="noreferrer" key={i}>
 ```
-Raw `<a>`, not the `Link` component at `app/page.tsx:31`, whose entire purpose is `if (!href.startsWith("http")) return <span className="resource-link no-link" title="No resource assigned">`. `data/workbook.json` Roadmaps row 12 is `["OneGTMLab FDE Skills Matrix (your upload)", null, "Ratings used to weight tracks J and K"]` - `String(null)` is `"null"`.
+Raw `<a>`, not the `Link` component at `app/page.tsx:31`, whose entire purpose is `if (!href.startsWith("http")) return <span className="resource-link no-link" title="No resource assigned">`. `data/workbook.json` Roadmaps row 12 is `["prior GTM lab FDE Skills Matrix (your upload)", null, "Ratings used to weight tracks J and K"]` - `String(null)` is `"null"`.
 
 Reproduction: open Roadmaps, run `[...document.querySelectorAll('.resource-card')].map(a=>({raw:a.getAttribute('href'),resolved:a.href}))`. Card 12 returns `{raw:"null", resolved:"http://localhost:3111/null"}`. `curl -o /dev/null -w "%{http_code}" http://localhost:3111/null` → **404**. With the gate on (`LUMEN_PASSWORD=testpw`, port 3112) `/null` → **307 → /login**, so in production the card opens a login page in a new tab. The other 15 cards are all valid `https://`.
 

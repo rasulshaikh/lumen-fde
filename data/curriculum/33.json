@@ -11,7 +11,7 @@
   "Docker Compose from topic 5 to run `redis:7` locally with a mounted `redis.conf`, and the ElastiCache basics from topic 14 (cluster mode on/off, reader endpoint, Multi-AZ failover) so the production section maps onto something you have already provisioned",
   "Python asyncio fluency (`async with`, task groups, `asyncio.gather`) and the ability to read redis-py source, since every code sample uses `redis.asyncio`",
   "Enough Lua to read a 30-line script: `local`, tables, `tonumber`, `math.min`, `redis.call` vs `redis.pcall`; 30 minutes with the EVAL introduction page covers it",
-  "Access to the DefenderMate webhook receiver code and a week of real numbers (events per minute per provider, p99 handler time, duplicate rate seen in Postgres) so limits and TTLs are sized from data rather than guessed"
+  "Access to the Aegis webhook receiver code and a week of real numbers (events per minute per provider, p99 handler time, duplicate rate seen in Postgres) so limits and TTLs are sized from data rather than guessed"
  ],
  "subtopics": [
   {
@@ -78,8 +78,8 @@
    }
   },
   {
-   "name": "Webhook dedup and at-least-once processing for the DefenderMate receiver",
-   "learn": "Providers (Stripe, GitHub, Slack, Twilio) deliver at least once and retry on any non-2xx or slow response, so the receiver must verify the HMAC signature (`Stripe-Signature` with timestamp tolerance, `X-Hub-Signature-256`) before touching Redis, then dedup on the provider's event id with `SET wh:{provider}:event_id <pod> NX EX 259200` (three days, longer than any provider's retry horizon); on NX failure return 200 immediately. Hand the event off with `XADD webhooks:{provider} MAXLEN ~ 100000 * ...` and return 200 within a second; never do the work inline. Find the crash window between the `SET NX` and the `XADD` (event marked seen, never enqueued) and close it by putting both in a MULTI or a single Lua script, or by enqueueing first and deduping in the consumer. Dedup again at the consumer with `INSERT ... ON CONFLICT (provider, event_id) DO NOTHING`, because Redis can lose the dedup key on failover. Handle out-of-order delivery by fetching current resource state from the provider API rather than trusting event sequence. Export `duplicates_dropped_total`, `signature_failures_total` and ack latency; the same draft standard tells you how DefenderMate's own outbound webhooks should let receivers dedup you.",
+   "name": "Webhook dedup and at-least-once processing for the Aegis receiver",
+   "learn": "Providers (Stripe, GitHub, Slack, Twilio) deliver at least once and retry on any non-2xx or slow response, so the receiver must verify the HMAC signature (`Stripe-Signature` with timestamp tolerance, `X-Hub-Signature-256`) before touching Redis, then dedup on the provider's event id with `SET wh:{provider}:event_id <pod> NX EX 259200` (three days, longer than any provider's retry horizon); on NX failure return 200 immediately. Hand the event off with `XADD webhooks:{provider} MAXLEN ~ 100000 * ...` and return 200 within a second; never do the work inline. Find the crash window between the `SET NX` and the `XADD` (event marked seen, never enqueued) and close it by putting both in a MULTI or a single Lua script, or by enqueueing first and deduping in the consumer. Dedup again at the consumer with `INSERT ... ON CONFLICT (provider, event_id) DO NOTHING`, because Redis can lose the dedup key on failover. Handle out-of-order delivery by fetching current resource state from the provider API rather than trusting event sequence. Export `duplicates_dropped_total`, `signature_failures_total` and ack latency; the same draft standard tells you how Aegis's own outbound webhooks should let receivers dedup you.",
    "minutes": 30,
    "resource": {
     "label": "IETF httpapi draft: The Idempotency-Key HTTP header field",

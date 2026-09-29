@@ -127,7 +127,7 @@ curl -L  "https://modelcontextprotocol.io/" -> 200
 
 ### 5. Roadmaps card 12 is a link to `/null`
 
-`app/page.tsx:617` renders roadmap cards with a raw `<a href={String(r[1])}>` instead of the guarded `Link` helper at `app/page.tsx:31` (which renders a non-link span when the href isn't `http`). `workbook.Roadmaps` row 12 ("OneGTMLab FDE Skills Matrix (your upload)") has `URL = null`.
+`app/page.tsx:617` renders roadmap cards with a raw `<a href={String(r[1])}>` instead of the guarded `Link` helper at `app/page.tsx:31` (which renders a non-link span when the href isn't `http`). `workbook.Roadmaps` row 12 ("prior GTM lab FDE Skills Matrix (your upload)") has `URL = null`.
 
 Observed in the live DOM: `href="null"` → resolves to `http://localhost:3411/null` → **404**. The card is visually indistinguishable from the 15 that work.
 

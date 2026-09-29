@@ -9,7 +9,7 @@
   "HTTP/1.1 request/response lifecycle, headers, and chunked transfer encoding (Track E HTTP and API design topic)",
   "TCP basics: send/receive buffers, keepalive, half-open connections, and what a proxy in the middle does to them (HPBN ch. 2 from the networking topic)",
   "Python asyncio: coroutines, tasks, asyncio.Queue, asyncio.gather, cancellation semantics (Track E async Python topic)",
-  "FastAPI/Starlette request handling and dependency injection, since DefenderMate's API is built on it",
+  "FastAPI/Starlette request handling and dependency injection, since Aegis's API is built on it",
   "Redis fundamentals: connection, key types, TTLs (Track E caching topic) - Streams and Pub/Sub are introduced here",
   "Claude Messages API non-streaming calls and the tool_use content block shape (Track F Claude API topic)"
  ],
@@ -205,5 +205,5 @@
   "You need to load test a streaming endpoint before a go-live. Which metrics do you define, how do you generate realistic load for SSE given k6 buffers HTTP bodies, and how do you decide the concurrency number you will commit to in the customer's SLA?",
   "EventSource cannot send an Authorization header. Give me two production-safe ways to authenticate an SSE connection for an enterprise customer with an SSO-issued JWT, and the security trade-off of each."
  ],
- "proofOfWork": "A short screen recording plus a written runbook, checked into the DefenderMate repo, showing a chaos-style resume drill: start a long Claude generation streaming over SSE through a local Nginx with default settings, observe the buffering, fix it with the documented header and config; then `kill -TERM` the uvicorn worker mid-stream and show the browser reconnecting onto a different worker and continuing from the exact missed token via the Redis Stream replay, with `resume_total{outcome=replayed}` incrementing in the Prometheus endpoint. The runbook lists the four proxy/LB timeouts in the path, the heartbeat interval chosen to stay under each, the close-code interpretation table for WebSocket, and the k6 knee-finding numbers (p95 TTFT and tokens/sec at 50/200/500 concurrent streams), so a customer platform team could reproduce the drill in their own environment."
+ "proofOfWork": "A short screen recording plus a written runbook, checked into the Aegis repo, showing a chaos-style resume drill: start a long Claude generation streaming over SSE through a local Nginx with default settings, observe the buffering, fix it with the documented header and config; then `kill -TERM` the uvicorn worker mid-stream and show the browser reconnecting onto a different worker and continuing from the exact missed token via the Redis Stream replay, with `resume_total{outcome=replayed}` incrementing in the Prometheus endpoint. The runbook lists the four proxy/LB timeouts in the path, the heartbeat interval chosen to stay under each, the close-code interpretation table for WebSocket, and the k6 knee-finding numbers (p95 TTFT and tokens/sec at 50/200/500 concurrent streams), so a customer platform team could reproduce the drill in their own environment."
 }
