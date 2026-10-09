@@ -44,7 +44,7 @@ export default function LoginPage() {
       <div className="login-orbit" />
       <div className="login-split">
         <section className="login-intro">
-          <div className="login-brand"><LogoMark className="brand-mark" /><span>Lumen</span></div>
+          <div className="login-brand"><LogoMark className="brand-mark" size={28} /><span>Lumen</span></div>
           <p className="login-kicker">{PROGRAMME}</p>
           <h1>Pick up where the work left off.</h1>
           <p className="login-copy">

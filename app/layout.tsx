@@ -3,22 +3,23 @@ import "./globals.css";
 import { Backdrop } from "@/components/Backdrop";
 import { PREMISE, TITLE } from "@/lib/profile";
 export const metadata: Metadata = { title: TITLE, description: PREMISE };
-// Runs before first paint. Without it the light palette renders, then React hydrates and
-// swaps to dark - a full-page flash on every load for anyone who prefers dark.
-const themeScript = `(function(){try{var s=localStorage.getItem('lumen-theme');var d=s==='dark'||(!s&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.theme=d?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}})()`;
+// Runs before first paint. Default is light (matches landing/login). Dark only when the
+// user explicitly chose it via the toggle (localStorage). Ignores prefers-color-scheme so
+// the app does not open on the old notebook umber for system-dark users.
+const themeScript = `(function(){try{var s=localStorage.getItem('lumen-theme');document.documentElement.dataset.theme=s==='dark'?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}})()`;
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Archivo (dashboard display), Fraunces (landing display), Schibsted Grotesk
-            (body/UI), JetBrains Mono (data). This has to be a <link> and not an @import:
-            Next's CSS pipeline strips a remote @import out of the emitted chunk. */}
+        {/* Host Grotesk (landing), Archivo (dashboard display), Schibsted Grotesk
+            (dashboard body), JetBrains Mono (data). Must be a <link>, not @import:
+            Next's CSS pipeline strips remote @import from the emitted chunk. */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
         <link
           rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400..800&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Schibsted+Grotesk:ital,wght@0,400..800;1,400..700&family=JetBrains+Mono:wght@400..700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400..800&family=Host+Grotesk:wght@300;400;500;600;700&family=Schibsted+Grotesk:ital,wght@0,400..800;1,400..700&family=JetBrains+Mono:wght@400..700&display=swap"
         />
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>

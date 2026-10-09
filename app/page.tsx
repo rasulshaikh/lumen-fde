@@ -85,22 +85,19 @@ export default function LandingPage() {
       <section className="lp-hero" id="top">
         <div className="lp-field" aria-hidden="true" />
         <div className="lp-hero-stage">
+          <p className="lp-wordmark">Lumen</p>
           <h1>
-            We build the
-            <br />
-            study system that
+            The study system that
             <br />
             lifts your FDE ceiling.
           </h1>
-          <div className="lp-hero-end">
-            <p className="lp-lede">
-              A {months}-month Senior Forward Deployed Engineer plan, ranked every
-              night against the market that actually hires for it.
-            </p>
-            <div className="lp-actions">
-              <a className="lp-cta" href="/login">Open a {LIGHT_AUDIT}</a>
-              <a className="lp-ghost" href="#method">See how it works</a>
-            </div>
+          <p className="lp-lede">
+            A {months}-month Senior Forward Deployed Engineer plan, ranked every
+            night against the market that actually hires for it.
+          </p>
+          <div className="lp-actions">
+            <a className="lp-cta" href="/login">Open a {LIGHT_AUDIT}</a>
+            <a className="lp-ghost" href="#method">See how it works</a>
           </div>
         </div>
       </section>
@@ -213,7 +210,7 @@ export default function LandingPage() {
       </div>
 
       <footer className="lp-foot">
-        <span>lumenfde.com · a private workspace</span>
+        <span>lumenlab.tech · a private workspace</span>
         <a href="/login">Sign in →</a>
       </footer>
     </main>

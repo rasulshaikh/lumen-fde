@@ -2,15 +2,15 @@
 
 ## Direction
 
-Two surfaces, one pigment.
+One product language across landing and the authenticated app.
 
-The public landing is a full-bleed poster: a viewport of burnt umber and lamp-ochre, glass pill nav, huge cream type, lede and CTAs in the bottom-right. Structure from Unkapped. Colour is Lumen. Never their electric blue, never an inset beige document.
+**Lumen = light** everywhere by default: near-white canvas (`#FAFAF8`), white surfaces, Vercel-grade sparseness (hairline chrome, generous air, sharp intentional type). Brand accent is teal / light green `#47be98` on landing, login, and app. Lamp ochre `#B89435` is reserved for optional earned marks (`--brass`) only — not the public site’s primary colour. Structure may reference Unkapped’s discipline — **never** Unkapped’s brand (no Basalt/Daylight clone).
 
-The dashboard is a field notebook under a desk lamp: warm near-black, yellow-ochre as the one marker, dense but calm information. Not dashboard theater.
+An optional dark field-notebook theme remains behind the theme toggle (`data-theme="dark"` / `localStorage lumen-theme=dark`). It is not the default post-login experience.
 
 ## Naming
 
-Unkapped structure, Lumen language.
+Unkapped structure (reference only), Lumen language.
 
 | Unkapped | Lumen |
 |---|---|
@@ -19,22 +19,35 @@ Unkapped structure, Lumen language.
 | AI Transformation | **Market System** |
 | Find the cap / Remove it / Hold the level | **Find the gap / Close it / Hold the level** |
 
-Product: **Lumen**. Programme: **FDE Study System**.
+Product: **Lumen**. Programme: **FDE Study System**. Site: **lumenlab.tech**.
 
 ## Palette
 
-Solved tokens from `docs/research/2026-09-08-palette-solve.md`. Neutral hue 64 (sepia). Accent hue 87 (yellow-ochre pigment). Do not retint toward blue.
+### Landing (light / luminous)
 
 ```css
---bg:#201810; --surface:#392f27; --ink:#f0e5dd;
---muted:#b4a9a0; --accent:#b89435; --accent-text:#cda640;
---teal:#47be98; --danger:#fc8b76;
+--lp-canvas:#FAFAF8; --lp-canvas-warm:#F5F3EE; --lp-ink:#0A0A0A;
+--lp-muted:#6B6B6B; --lp-paper:#FFFFFF;
+--lp-lamp:#47be98; --lp-lamp-deep:#3aaa87; --lp-lamp-soft:#1f8a6a;
+--lp-line:rgba(10,10,10,.08);
 ```
+
+Do not introduce Unkapped Basalt / Daylight. Accent is teal (light green) — same as login/app.
+
+### App (default light — shared with landing canvas)
+
+```css
+--bg:#FAFAF8; --surface:#FFFFFF; --surface-strong:#F5F3EE;
+--ink:#0A0A0A; --muted:#6B6B6B;
+--accent:#47be98; --accent-text:#0F766E; --brass:#B89435;
+```
+
+Optional dark notebook (toggle only): umber ground `#201810` with the same teal accent `#47be98` / `#6ee7b7` text (not ochre).
 
 ## Typography
 
-Archivo for dashboard display, Fraunces for the public landing headline, Schibsted Grotesk for body, JetBrains Mono for data.
+Host Grotesk for the public landing (one family; clean grotesque suitable for Vercel-like UI — not an Unkapped poster face). Archivo for dashboard display, Schibsted Grotesk for dashboard body, JetBrains Mono for data.
 
 ## Components
 
-Landing borrows Unkapped's *poster*: full-viewport color field, floating glass bar, huge display, bottom-right lede and dual CTAs, then banded sections (paper / ink / ochre close), numbered capabilities, three-step method, marquee. Dashboard stays a compact operator desk: top bar, tabs, metric rows, progress bars, tables.
+Landing: fixed hairline nav on light glass, full-viewport light hero with hero-level **Lumen** wordmark (soft lamp glow, no purple), left-stacked headline + lede + dual CTAs, paper / warm-canvas bands, lamp close band, numbered capabilities, three-step method, marquee. Footer: `lumenlab.tech`. Dashboard: top bar, tabs, metric rows, progress bars, tables.
