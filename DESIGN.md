@@ -42,7 +42,7 @@ Do not introduce Unkapped Basalt / Daylight. Accent is teal (light green) — sa
 --accent:#47be98; --accent-text:#0F766E; --brass:#B89435;
 ```
 
-Optional dark notebook (toggle only): umber ground `#201810` with the same teal accent `#47be98` / `#6ee7b7` text (not ochre).
+Optional dark (toggle only): cool neutral ground `#0A0A0A` / `#141414` surfaces — no sepia/umber yellow cast — with teal accent `#47be98` / `#6ee7b7`.
 
 ## Typography
 
