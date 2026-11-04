@@ -1,3 +1,7 @@
+"use client";
+
+import { useState } from "react";
+import { RecordArtifact } from "./RecordArtifact";
 import type { StoredArtifact } from "@/lib/artifacts";
 
 /**
@@ -26,7 +30,8 @@ export type ArtifactsFeed = {
 /** Newest few. The panel is a homepage block, not the archive; the rest are counted. */
 const SHOWN = 6;
 
-export function ShippedWall({ feed, planCount, nextRow, nextIndex, openPlan }: {
+export function ShippedWall({ feed, planCount, nextRow, nextIndex, openPlan, onSaved }: {
+  onSaved?: () => void;
   feed: ArtifactsFeed;
   /** Plan rows, from the workbook. Derived - no number describing the plan is ever typed. */
   planCount: number;
@@ -34,7 +39,9 @@ export function ShippedWall({ feed, planCount, nextRow, nextIndex, openPlan }: {
   nextIndex: number;
   openPlan: () => void;
 }) {
-  const { loading, artifacts, unreadable, synced, error } = feed;
+  const [recorded, setRecorded] = useState<StoredArtifact[]>([]);
+  const { loading, unreadable, synced, error } = feed;
+  const artifacts = [...recorded.filter((item) => !feed.artifacts.some((stored) => stored.path === item.path)), ...feed.artifacts];
   // Distinct rows, not artifacts: two write-ups for one row is one row evidenced.
   const rows = new Set(artifacts.map((a) => a.row)).size;
   const deliverable = nextRow ? String(nextRow[14] ?? "").trim() : "";
@@ -45,8 +52,10 @@ export function ShippedWall({ feed, planCount, nextRow, nextIndex, openPlan }: {
       <span className="panel-meta">{artifacts.length ? `${rows} of ${planCount} rows evidenced` : `${planCount} deliverables in the plan`}</span>
     </div>
 
+    {!loading && synced && <RecordArtifact initialRow={nextIndex + 1} onSaved={(artifact) => { setRecorded((items) => [artifact, ...items]); onSaved?.(); }} />}
+
     {loading
-      ? <p className="home-sub">Reading reports/artifacts…</p>
+      ? <p className="home-sub">Loading your shipped work…</p>
       : !synced
         ? <div className="home-block">
             <p className="home-line">This list could not be read.</p>
@@ -61,17 +70,7 @@ export function ShippedWall({ feed, planCount, nextRow, nextIndex, openPlan }: {
                   not that its absence is forgivable. */}
               <p className="home-line">{planCount} deliverables exist in the plan. None are recorded.</p>
               <p className="home-sub">Every plan row names one thing to ship, and this is the only place that says it exists. Nothing here is inferred from progress: a row marked done is study, an artifact is a URL somebody else can open.</p>
-              <ol className="home-steps">
-                <li>
-                  <strong>Build the one you are on.</strong>
-                  {nextRow
-                    ? <span>Row {nextIndex + 1} · {String(nextRow[2])}{deliverable ? `, ships “${deliverable}”.` : "."}</span>
-                    : <span>Every topic is done or skipped.</span>}
-                </li>
-                <li><strong>Put it somewhere with a URL.</strong><span>A repo, a write-up or a demo. The URL is what makes it evidence.</span></li>
-                <li><strong>Record it.</strong><span>POST <code className="home-code">/api/artifacts</code> with <code className="home-code">{"{ row, title, url }"}</code>.</span></li>
-              </ol>
-              <p className="home-note">The plan row is the join key and it is checked against the workbook, so a row that does not exist cannot be written. There is no edit and no delete: an artifact records that something happened on a date.</p>
+              <p className="home-sub">{nextRow ? `Current topic: ${String(nextRow[2])}. ${deliverable ? `Build: ${deliverable}` : "Add a link when your work is ready."}` : "Choose any topic in the form to record your work."}</p>
               <button className="text-button" onClick={openPlan}>Open the plan →</button>
             </div>
           : <>
