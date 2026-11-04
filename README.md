@@ -68,3 +68,16 @@ See `PRODUCT.md` and `DESIGN.md` for product/design detail. Ops notes (cron, Sur
 ---
 
 MIT-style personal project unless otherwise noted in `LICENSE`.
+
+## Report updates and builds
+
+Runtime state under `reports/` is read directly from GitHub, so report-only pushes skip
+GitHub Actions and Vercel builds. Pull requests still run the full CI checks. Vercel compares against `VERCEL_GIT_PREVIOUS_SHA`,
+not the preceding commit, to retain any application changes that have not deployed.
+Missing history and same-commit redeploys build normally. Set `VERCEL_FORCE_BUILD=1`
+to override the skip for an explicit build. Changes to `data/`, code, dependencies,
+and configuration still build.
+
+Market reads have a ten-second GitHub deadline. Partial failures keep available data
+and expose the failure to the dashboard; the page offers retry and warns when the
+last completed benchmark is more than 26 hours old.

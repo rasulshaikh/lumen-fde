@@ -829,7 +829,7 @@ standing fact. The market block at the bottom is all of the second kind.
 | session TTL | 14 days | `lib/auth.ts` |
 | login rate limit | 8 per 10 min | `lib/auth.ts` |
 | MCP rate limit / body cap | 30 per 60 s / 128 KB | `mcp/server.js` |
-| test files / npm test scripts | 4 / 4 - 3 under `lib/market/` <!-- verify:market_tests=3 --> plus `lib/review.test.mts` | `lib/**/*.test.mts`, `package.json` |
+| test files / npm test scripts | 5 / 5 - 4 under `lib/market/` <!-- verify:market_tests=4 --> plus `lib/review.test.mts` | `lib/**/*.test.mts`, `package.json` |
 
 The rest is the 2026-09-08 scan, held to the same rule as §5.7: dated, not anchored, and
 superseded by the next 03:00 UTC run. Read the report file before quoting any of it.

@@ -14,7 +14,7 @@ import { planRows } from "./shared";
 // `insight` is null on one state the other two never reach: a scan that ran before the insight
 // computation shipped wrote benchmark.json and no insight.json. So it is optional as well as
 // nullable, and every personal block below guards on it independently of `benchmark`.
-type MarketFeed = { benchmark: Benchmark | null; trend: TrendPoint[] | null; insight?: Insight | null; synced: boolean };
+type MarketFeed = { benchmark: Benchmark | null; trend: TrendPoint[] | null; insight?: Insight | null; synced: boolean; error?: string | null };
 
 /** Readiness moves and reachable-slice deltas are signed points; an unsigned "14" reads as a level. */
 const signed = (n: number) => `${n > 0 ? "+" : ""}${n}`;
@@ -98,17 +98,22 @@ function Sparkline({ points }: { points: TrendPoint[] }) {
  */
 export function Market({ statuses, openPlanRow }: { statuses: Record<string, string>; openPlanRow: (row: number) => void }) {
   const [feed, setFeed] = useState<MarketFeed | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
 
   // Fetched on mount, which means once per visit to the tab rather than once per session. The
   // scan cron rewrites benchmark.json daily, and a cached copy would render a stale computedAt
   // as current - the one thing the timestamp exists to prevent.
   useEffect(() => {
-    fetch("/api/market")
+    const controller = new AbortController();
+    let active = true;
+    setState("loading");
+    fetch("/api/market", { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) })
       .then((res) => res.ok ? res.json() : Promise.reject(new Error(String(res.status))))
-      .then((data: MarketFeed) => { setFeed(data); setState("ready"); })
-      .catch(() => setState("error"));
-  }, []);
+      .then((data: MarketFeed) => { if (active) { setFeed(data); setState("ready"); } })
+      .catch(() => { if (active) setState("error"); });
+    return () => { active = false; controller.abort(); };
+  }, [attempt]);
 
   /**
    * Rule 2, in one place. The live status wins over the baseline the scan committed, and the
@@ -161,7 +166,7 @@ export function Market({ statuses, openPlanRow }: { statuses: Record<string, str
   </section>;
 
   if (state === "loading") return panel("Reading the last scan…", <p className="mkt-note">Loading the benchmark.</p>);
-  if (state === "error") return panel("Unavailable", <p className="mkt-note">The benchmark could not be loaded. Everything on this tab is computed by the nightly scan, so refreshing is safe.</p>);
+  if (state === "error") return panel("Unavailable", <p className="mkt-note">The benchmark could not be loaded. Everything on this tab is computed by the nightly scan, so refreshing is safe. <button className="ghost-button" onClick={() => setAttempt((n) => n + 1)}>Try again</button></p>);
 
   const b = feed?.benchmark ?? null;
   const insight = feed?.insight ?? null;
@@ -225,15 +230,16 @@ export function Market({ statuses, openPlanRow }: { statuses: Record<string, str
 
   return panel(meta, <>
     <div className="mkt-summary">
+      {feed?.synced === false && <p className="mkt-body-line mkt-warn" role="status">Some market data could not be read. Figures may be incomplete. <button className="ghost-button" onClick={() => setAttempt((n) => n + 1)}>Try again</button></p>}
+      {b && (!Number.isFinite(Date.parse(b.computedAt)) || Date.now() - Date.parse(b.computedAt) > 26 * 60 * 60 * 1000) && <p className="mkt-body-line mkt-warn" role="status">This benchmark is overdue for a refresh. Use the scan date above when interpreting these figures.</p>}
       {b ? <>
         <p className="mkt-head-line">{b.coreStatement}</p>
         <p className="mkt-body-line">{b.adjacentStatement}</p>
         {b.baselineStatement && <p className="mkt-body-line">{b.baselineStatement}</p>}
         {b.movement.statement && <p className={b.movement.suppressed ? "mkt-body-line mkt-warn" : "mkt-head-line"}>{b.movement.statement}</p>}
       </> : <>
-        <p className="mkt-head-line">No scan has completed a full cycle, so there is nothing to benchmark against yet.</p>
+        <p className="mkt-head-line">{feed?.synced === false ? "The benchmark is unavailable; scan status is unknown." : "No scan has completed a full cycle, so there is nothing to benchmark against yet."}</p>
         <p className="mkt-body-line">The scan runs nightly and establishes a baseline on its first complete pass. The three zones below keep their headings so the shape of the tab is the same before and after that run; each one says what it is waiting for.</p>
-        {feed?.synced === false && <p className="mkt-body-line mkt-warn">The benchmark store is unreachable, so this is “not known”, not “not scanned”. Check GITHUB_TOKEN.</p>}
       </>}
     </div>
 
