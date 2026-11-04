@@ -31,7 +31,7 @@ export type ArtifactsFeed = {
 const SHOWN = 6;
 
 export function ShippedWall({ feed, planCount, nextRow, nextIndex, openPlan, onSaved }: {
-  onSaved?: () => void;
+  onSaved?: (artifact: StoredArtifact) => void;
   feed: ArtifactsFeed;
   /** Plan rows, from the workbook. Derived - no number describing the plan is ever typed. */
   planCount: number;
@@ -52,7 +52,7 @@ export function ShippedWall({ feed, planCount, nextRow, nextIndex, openPlan, onS
       <span className="panel-meta">{artifacts.length ? `${rows} of ${planCount} rows evidenced` : `${planCount} deliverables in the plan`}</span>
     </div>
 
-    {!loading && synced && <RecordArtifact initialRow={nextIndex + 1} onSaved={(artifact) => { setRecorded((items) => [artifact, ...items]); onSaved?.(); }} />}
+    {!loading && synced && <RecordArtifact initialRow={nextIndex + 1} onSaved={(artifact) => { setRecorded((items) => [artifact, ...items]); onSaved?.(artifact); }} />}
 
     {loading
       ? <p className="home-sub">Loading your shipped work…</p>

@@ -285,7 +285,10 @@ export default function OverviewPage() {
   return <>
     <Unfinished />
     <Overview
-    onArtifactSaved={() => { loading = null; }}
+    onArtifactSaved={(artifact) => {
+      loading = null;
+      setFeed((current) => ({ ...current, artifacts: { ...current.artifacts, artifacts: [artifact, ...current.artifacts.artifacts.filter((item) => item.path !== artifact.path)] } }));
+    }}
     recall={<details className="workspace-recall"><summary>Practice from memory <span>Open a recall question when you are ready</span></summary><RecallStrip startedTopics={state.startedTopics} /></details>}
     done={state.done}
     activeRows={state.activeRows}

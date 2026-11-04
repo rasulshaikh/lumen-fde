@@ -3,6 +3,7 @@ import { Link, mockRows, pct, planRows, tracks, type Row } from "./shared";
 import { ShippedWall, type ArtifactsFeed } from "./ShippedWall";
 import { BriefPanel } from "./Brief";
 import { PathsRail } from "./Paths";
+import type { StoredArtifact } from "@/lib/artifacts";
 import type { Brief } from "@/lib/companion/brief";
 
 /**
@@ -164,7 +165,7 @@ function StandingPanel({ streak, loading, openPlan }: { streak: Streak | null; l
 
 export function Overview({ done, activeRows, skipped, hours, doneHours, skippedHours, weeklyHours, setWeekly, monthHours, maxMonthHours, peakMonth, nextRow, nextIndex, setView, trackTotals, setTrack, marketTiers, feed, brief, readingUrl, setFocusStatus, openMonth, aim, recall, onArtifactSaved }: {
   recall?: React.ReactNode;
-  onArtifactSaved?: () => void;
+  onArtifactSaved?: (artifact: StoredArtifact) => void;
   done: number;
   activeRows: Row[];
   skipped: number;
