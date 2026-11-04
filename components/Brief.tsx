@@ -27,9 +27,13 @@ export function BriefPanel({ brief, onOpenPlan, readingUrl, setStatus }: { brief
           <p className="eyebrow">Today</p>
           <h2>{focus ? focus.topic : "The plan is complete"}</h2>
         </div>
-        {focus && <span className="panel-meta">Row {focus.row} · month {focus.month} · {focus.hours}h</span>}
+        {focus && <span className="panel-meta">Row {focus.row} · month {focus.month} · {focus.hours}h for the whole topic</span>}
       </div>
 
+      {focus && <SessionLoop row={focus.row} topic={focus.topic} status={focus.status} setStatus={setStatus} />}
+
+      <details className="brief-details">
+        <summary>Topic outline and study context</summary>
       <p className="brief-opening">{opening(brief)}</p>
 
       {focus && <p className="brief-what">{focus.description}</p>}
@@ -63,9 +67,10 @@ export function BriefPanel({ brief, onOpenPlan, readingUrl, setStatus }: { brief
 
       {brief.buys && <p className="brief-buys">{brief.buys}</p>}
 
-      {focus && <SessionLoop row={focus.row} topic={focus.topic} status={focus.status} setStatus={setStatus} />}
 
-      <div className="brief-actions">
+      </details>
+
+      <div className="brief-actions" style={{ marginTop: 16 }}>
         <button className="primary-button" onClick={onOpenPlan}>Open the plan <span>→</span></button>
         {readingUrl && <Link className="text-button" href={readingUrl} target="_blank" rel="noreferrer">Open reading ↗</Link>}
       </div>

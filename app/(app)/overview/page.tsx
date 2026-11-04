@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Overview, type HomeFeed } from "@/components/Overview";
+import { RecallStrip } from "@/app/recall";
 import { NAV } from "@/components/Nav";
 import { useAppState } from "@/components/AppState";
 import { planRows } from "@/components/shared";
@@ -284,6 +285,8 @@ export default function OverviewPage() {
   return <>
     <Unfinished />
     <Overview
+    onArtifactSaved={() => { loading = null; }}
+    recall={<details className="workspace-recall"><summary>Practice from memory <span>Open a recall question when you are ready</span></summary><RecallStrip startedTopics={state.startedTopics} /></details>}
     done={state.done}
     activeRows={state.activeRows}
     skipped={state.skipped}
