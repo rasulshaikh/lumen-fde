@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import type { StoredArtifact } from "@/lib/artifacts";
 import { planRows } from "./shared";
 
@@ -15,6 +15,8 @@ export function RecordArtifact({ initialRow, onSaved }: { initialRow: number; on
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const busy = useRef(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (saved) trigger.current?.focus(); }, [saved]);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (busy.current) return;
@@ -36,7 +38,7 @@ export function RecordArtifact({ initialRow, onSaved }: { initialRow: number; on
   };
 
   return <div className="artifact-recorder">
-    <button className="primary-button" aria-expanded={open} aria-controls={`${id}-form`} onClick={() => { setOpen(!open); setSaved(false); }} disabled={saving}>{open ? "Close form" : "Record proof"}</button>
+    <button ref={trigger} className="primary-button" aria-expanded={open} aria-controls={`${id}-form`} onClick={() => { setOpen(!open); setSaved(false); }} disabled={saving}>{open ? "Close form" : "Record proof"}</button>
     {saved && <p className="artifact-result" role="status">Proof recorded. It is now part of your shipped work.</p>}
     {open && <form id={`${id}-form`} className="artifact-form" onSubmit={submit} aria-busy={saving}>
       <p className="home-sub">Add a repository, demo, or write-up that shows what you built. This records evidence without changing a topic’s study status.</p>

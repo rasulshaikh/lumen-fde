@@ -70,6 +70,7 @@ try {
   assert.equal(invalidations, 1, "successful save invalidates the home cache");
   assert.ok(container.querySelector('a[href="https://example.test/proof"]'), "saved proof appears immediately");
   assert.match(container.querySelector('[role="status"]')!.textContent!, /Proof recorded/);
+  assert.equal(document.activeElement?.textContent, "Record proof", "focus returns to the trigger after saving");
   await click("Record proof"); await click("Cancel");
   assert.equal(calls, 2, "cancel never writes");
 
