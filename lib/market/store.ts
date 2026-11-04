@@ -135,7 +135,7 @@ function headers() {
 export async function readJson<T>(path: string): Promise<{ data: T | null; sha: string | null; synced: boolean; error: string | null }> {
   if (!process.env.GITHUB_TOKEN) return { data: null, sha: null, synced: false, error: null };
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/contents/${path}?ref=${branch}`, { headers: headers(), cache: "no-store" });
+    const response = await fetch(`https://api.github.com/repos/${repo}/contents/${path}?ref=${branch}`, { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(10_000) });
     if (response.status === 404) return { data: null, sha: null, synced: true, error: null };
     const body = await response.json();
     if (!response.ok) throw new Error(body.message || `GitHub returned ${response.status}`);
@@ -171,6 +171,7 @@ export async function writeJson(path: string, data: unknown, sha: string | null,
     if (sha) payload.sha = sha;
     const response = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
       method: "PUT",
+      signal: AbortSignal.timeout(10_000),
       headers: { ...headers(), "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
@@ -216,7 +217,7 @@ export type ProgressEntry = { topic: string; status: string; date: string };
 export async function readProgress(): Promise<{ events: ProgressEntry[] } | null> {
   if (!process.env.GITHUB_TOKEN) return null;
   try {
-    const listing = await fetch(`https://api.github.com/repos/${repo}/contents/${PROGRESS_DIR}?ref=${branch}`, { headers: headers(), cache: "no-store" });
+    const listing = await fetch(`https://api.github.com/repos/${repo}/contents/${PROGRESS_DIR}?ref=${branch}`, { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(10_000) });
     // 404 is a history that has not started yet, which is genuinely empty rather than unknown.
     if (listing.status === 404) return { events: [] };
     const files = await listing.json();
@@ -230,7 +231,7 @@ export async function readProgress(): Promise<{ events: ProgressEntry[] } | null
 
     const events = await Promise.all(
       newest.map(async (file) => {
-        const response = await fetch(`https://api.github.com/repos/${repo}/contents/${file.path}?ref=${branch}`, { headers: headers(), cache: "no-store" });
+        const response = await fetch(`https://api.github.com/repos/${repo}/contents/${file.path}?ref=${branch}`, { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(10_000) });
         const item = await response.json();
         if (!response.ok) throw new Error(item.message || `GitHub returned ${response.status}`);
         const body = Buffer.from(item.content ?? "", "base64").toString("utf8");
