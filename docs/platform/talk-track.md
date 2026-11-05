@@ -18,7 +18,7 @@ usefully - which rows it does *not* discharge.
 
 A single-user study platform for one 23-month <!-- verify:months=23 --> Senior FDE plan. Three
 processes: a Next.js app on Vercel with 10 tabs <!-- verify:tabs=10 --> and
-14 API routes <!-- verify:api_routes=14 -->; an MCP server on Render exposing
+15 API routes <!-- verify:api_routes=15 -->; an MCP server on Render exposing
 18 tools <!-- verify:mcp_tools=18 --> so Claude Code reads the same plan the dashboard reads;
 and GitHub as the database, because every mutable artifact is a file in the repo. No database,
 no queue, no object store (`architecture.md` §1).
@@ -444,7 +444,7 @@ glosses in §2 are abbreviations of these.
 | 34 | M8 | Redis: caching, rate limiting, idempotency, streams | the login limiter and the MCP limiter - see the caveat in §5 |
 | 35 | M8 | Real-time transports: SSE, WebSockets, streaming at scale | the sandbox's NDJSON stream - partial, see §5 |
 | 38 | M9 | Entity resolution and record linkage: blocking, fuzzy and probabilistic matching, survivorship | `dedupeKey` and clone groups; 750 stored records → 189 core on the 2026-09-08 scan (§2.3, §3.6) |
-| 40 | M10 | Testing and contracts: pytest, property tests, OpenAPI contract tests | 4 test files, 3 <!-- verify:market_tests=3 --> of them under `lib/market/`, all four run by CI; the 400-day scheduler simulation (§2.8) |
+| 40 | M10 | Testing and contracts: pytest, property tests, OpenAPI contract tests | 5 test files in the market and scheduler group, 4 <!-- verify:market_tests=4 --> of them under `lib/market/`, all five run by CI; the 400-day scheduler simulation (§2.8) |
 | 44 | M10 | Designing Data-Intensive Applications and Kleppmann's lectures | read-whole/write-whole with a sha; lost updates; `synced:false` ≠ empty (§2.5) |
 | 51 | M12 | Prompt engineering as code: versioning, regression sets, structured outputs | the digit post-check, written as characterization tests (§3.4) |
 | 52 | M12 | Tool use, structured outputs and MCP servers | `mcp/server.js` - 18 tools, bearer auth, narrow schemas, audit trail (§2.7); the `get_syllabus` base error (§3.7) |

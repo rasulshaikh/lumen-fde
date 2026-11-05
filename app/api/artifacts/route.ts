@@ -46,10 +46,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Request body must be JSON." }, { status: 400 });
   }
 
+  const requestKey = request.headers.get("Idempotency-Key") || undefined;
+  if (requestKey && (!/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(requestKey)
+      || !body || typeof body !== "object" || typeof (body as Record<string, unknown>).date !== "string")) {
+    return NextResponse.json({ error: "A valid save key and date are required for a retryable save." }, { status: 400 });
+  }
   const checked = validateArtifact((body ?? {}) as Record<string, unknown>);
   if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 });
 
-  const result = await writeArtifact(checked.value);
+  const result = await writeArtifact(checked.value, new Date(), requestKey);
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
 
   // The stored record is echoed back, including the workbook-derived topic the caller did not

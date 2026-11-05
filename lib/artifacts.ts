@@ -1,3 +1,4 @@
+import { githubFetch } from "@/lib/github";
 /**
  * The shipped-artifact store: the record that something was actually BUILT.
  *
@@ -259,7 +260,7 @@ export type ArtifactsRead = {
 export async function readArtifacts(): Promise<ArtifactsRead> {
   if (!process.env.GITHUB_TOKEN) return { artifacts: [], unreadable: 0, synced: false, error: null };
   try {
-    const listing = await fetch(`https://api.github.com/repos/${repo}/contents/${ARTIFACTS_DIR}?ref=${branch}`, {
+    const listing = await githubFetch(`https://api.github.com/repos/${repo}/contents/${ARTIFACTS_DIR}?ref=${branch}`, {
       headers: headers(),
       cache: "no-store",
     });
@@ -273,7 +274,7 @@ export async function readArtifacts(): Promise<ArtifactsRead> {
       .slice(0, MAX_ARTIFACTS);
 
     const parsed = await mapPool(newest, 8, async (file) => {
-      const response = await fetch(`https://api.github.com/repos/${repo}/contents/${file.path}?ref=${branch}`, {
+      const response = await githubFetch(`https://api.github.com/repos/${repo}/contents/${file.path}?ref=${branch}`, {
         headers: headers(),
         cache: "no-store",
       });
@@ -297,13 +298,15 @@ export async function readArtifacts(): Promise<ArtifactsRead> {
 export async function writeArtifact(
   record: ArtifactRecord,
   at: Date = new Date(),
+  requestKey?: string,
 ): Promise<{ ok: boolean; path: string; url: string | null; synced: boolean; error: string | null }> {
-  const path = artifactPath(record, at);
+  if (requestKey && !/^[0-9TtZz-]{24}--[0-9a-f-]{36}$/.test(requestKey)) throw new Error("Invalid save key.");
+  const path = requestKey ? `${ARTIFACTS_DIR}/${requestKey}.md` : artifactPath(record, at);
   if (!process.env.GITHUB_TOKEN) {
     return { ok: false, path, url: null, synced: false, error: "GitHub artifact sync is not configured." };
   }
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+    const response = await githubFetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
       method: "PUT",
       headers: { ...headers(), "Content-Type": "application/json" },
       body: JSON.stringify({

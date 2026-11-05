@@ -40,14 +40,16 @@ export async function GET() {
    * `insight` is null on one more state than the other two: the cycles between the benchmark
    * shipping and the insight computation shipping, where benchmark.json exists and
    * insight.json does not. That is a normal state, not an error, so a missing insight never
-   * touches `synced` and never sets `error` - the impersonal blocks must keep rendering while
+   * touches `synced` and never sets `error`. A failed read does set both; available
+   * files still render while the dashboard exposes the incomplete read. The impersonal
+   * blocks must keep rendering while
    * the personal ones say they arrive with the next scan.
    */
   return NextResponse.json({
     benchmark: benchmark.data ?? null,
     trend: trend.data ?? [],
     insight: insight.data ?? null,
-    synced: benchmark.synced,
-    error: benchmark.error ?? trend.error,
-  });
+    synced: benchmark.synced && trend.synced && insight.synced,
+    error: benchmark.error ?? trend.error ?? insight.error,
+  }, { headers: { "Cache-Control": "private, no-store" } });
 }

@@ -1,4 +1,4 @@
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14;
+const SESSION_TTL_SECONDS = 60 * 60 * 12;
 
 function toBase64Url(value: string) { return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, ""); }
 function fromBase64Url(value: string) { return atob(value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - value.length % 4) % 4)); }
@@ -26,12 +26,35 @@ async function signature(value: string, secret: string) {
   const bytes = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
   return toBase64Url(String.fromCharCode(...new Uint8Array(bytes)));
 }
-export async function createSession(username: string, password: string) { const expires = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS; const payload = `${username}.${expires}`; return `${toBase64Url(payload)}.${await signature(payload, password)}`; }
+export function authenticationConfigured() {
+  return !!process.env.LUMEN_PASSWORD && (process.env.NODE_ENV !== "production" || (process.env.LUMEN_SESSION_SECRET?.length ?? 0) >= 32);
+}
+function sessionKey(password: string) {
+  const secret = process.env.LUMEN_SESSION_SECRET;
+  if (process.env.NODE_ENV === "production" && (!secret || secret.length < 32)) throw new Error("Session signing is not configured.");
+  // Both rotations revoke old cookies. The independent secret prevents offline password
+  // guessing from a captured signed cookie.
+  return `${secret || "local-development-only"}\0${password}`;
+}
+export async function createSession(username: string, password: string) {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = JSON.stringify({ v: 1, u: username, iat: now, exp: now + SESSION_TTL_SECONDS });
+  const encoded = toBase64Url(String.fromCharCode(...new TextEncoder().encode(payload)));
+  return `${encoded}.${await signature(encoded, sessionKey(password))}`;
+}
 export async function isValidSession(token: string | undefined, username: string, password: string) {
-  if (!token || !password) return false;
-  const [encoded, provided] = token.split(".");
-  if (!encoded || !provided) return false;
-  try { const payload = fromBase64Url(encoded); const [tokenUser, expires] = payload.split("."); if (tokenUser !== username || Number(expires) < Math.floor(Date.now() / 1000)) return false; return timingSafeEqual(provided, await signature(payload, password)); } catch { return false; }
+  if (!token || !password || token.length > 2048) return false;
+  const parts = token.split(".");
+  if (parts.length !== 2 || !/^[A-Za-z0-9_-]+$/.test(parts[0]) || !/^[A-Za-z0-9_-]{43}$/.test(parts[1])) return false;
+  const [encoded, provided] = parts;
+  try {
+    if (!timingSafeEqual(provided, await signature(encoded, sessionKey(password)))) return false;
+    const decoded = fromBase64Url(encoded);
+    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(decoded, (c) => c.charCodeAt(0))));
+    const now = Math.floor(Date.now() / 1000);
+    return payload.v === 1 && payload.u === username && Number.isInteger(payload.iat) && Number.isInteger(payload.exp)
+      && payload.iat <= now + 30 && payload.exp > now && payload.exp - payload.iat === SESSION_TTL_SECONDS;
+  } catch { return false; }
 }
 export const sessionCookie = "lumen_session";
 export const sessionTtl = SESSION_TTL_SECONDS;
@@ -44,5 +67,5 @@ const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 const loginAttempts = new Map<string, number[]>();
 function recentAttempts(key: string) { const now = Date.now(); const recent = (loginAttempts.get(key) || []).filter((at) => now - at < LOGIN_WINDOW_MS); if (recent.length) loginAttempts.set(key, recent); else loginAttempts.delete(key); return recent; }
 export function loginBlockedFor(key: string) { const recent = recentAttempts(key); return recent.length < LOGIN_LIMIT ? 0 : Math.max(1, Math.ceil((LOGIN_WINDOW_MS - (Date.now() - recent[0])) / 1000)); }
-export function recordLoginFailure(key: string) { const recent = recentAttempts(key); recent.push(Date.now()); loginAttempts.set(key, recent); }
+export function recordLoginFailure(key: string) { const recent = recentAttempts(key); recent.push(Date.now()); if (loginAttempts.size >= 2000 && !loginAttempts.has(key)) { const oldest = loginAttempts.keys().next().value; if (oldest) loginAttempts.delete(oldest); } loginAttempts.set(key, recent); }
 export function clearLoginFailures(key: string) { loginAttempts.delete(key); }

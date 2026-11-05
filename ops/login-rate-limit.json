@@ -1,0 +1,7 @@
+{
+  "name": "Lumen owner login throttle",
+  "description": "Private owner sign-in only. Start by logging excess traffic, review before enforcing 429 responses.",
+  "active": true,
+  "conditionGroup": [{ "conditions": [{ "type": "path", "op": "eq", "value": "/api/auth/login" }, { "type": "method", "op": "eq", "value": "POST" }] }],
+  "action": { "mitigate": { "action": "rate_limit", "rateLimit": { "algo": "fixed_window", "window": 600, "limit": 20, "keys": ["ip"], "action": "log" } } }
+}

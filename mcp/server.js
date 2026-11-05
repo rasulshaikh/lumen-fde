@@ -60,7 +60,7 @@ function repoConfig() { return { repo: process.env.GITHUB_REPO || "rasulshaikh/l
 async function github(pathname, options = {}) {
   const { token } = repoConfig();
   if (!token) throw new Error("GITHUB_TOKEN is not configured");
-  const response = await fetch(`https://api.github.com/repos/${repoConfig().repo}/contents/${pathname}`, { ...options, headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "lumen-mcp", ...(options.headers || {}) } });
+  const response = await fetch(`https://api.github.com/repos/${repoConfig().repo}/contents/${pathname}${!options.method || options.method === "GET" ? `?ref=${encodeURIComponent(repoConfig().branch)}` : ""}`, { ...options, signal: AbortSignal.timeout(10_000), headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "lumen-mcp", ...(options.headers || {}) } });
   const data = await response.json();
   if (!response.ok) throw new Error(data.message || `GitHub request failed with ${response.status}`);
   return data;
@@ -88,8 +88,8 @@ function cleanAnswer(value) { return String(value || "").replace(/<think>[\s\S]*
 const MARKET_CAP = 7000;
 const COVERAGE_LINES = 10;
 const MARGINAL_LINES = 5;
-/** Bounded for the same reason the route bounds it: `github()` passes no signal to fetch, and
- *  the MiniMax call downstream already claims 25 s. A hung GitHub costs the market block only. */
+/** Bounded for the same reason the route bounds it: the GitHub transport has a 10 s budget and
+ *  the model call has its own deadline. A hung GitHub costs the market block only. */
 const MARKET_READ_MS = 4000;
 const MCP_MODEL_TIMEOUT_MS = 50_000;
 const MCP_PROXY_TIMEOUT_MS = 58_000;
@@ -505,7 +505,7 @@ const server = http.createServer(async (request, response) => {
     if (body.method === "notifications/initialized") { response.writeHead(202); return response.end(); }
     // Echo the version the client asked for when it named one; replying with a hardcoded version
     // regardless of the request is how a client and server end up disagreeing about the wire.
-    if (body.method === "initialize") return send(response, body.id, { protocolVersion: typeof body.params?.protocolVersion === "string" ? body.params.protocolVersion : PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "lumen-mcp", version: "1.2.0" } });
+    if (body.method === "initialize") return send(response, body.id, { protocolVersion: typeof body.params?.protocolVersion === "string" ? body.params.protocolVersion : PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "lumen-mcp", version: require("./package.json").version } });
     if (body.method === "tools/list") return send(response, body.id, { tools });
     if (body.method === "tools/call") {
       const name = body.params?.name || "unknown";

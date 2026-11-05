@@ -1,3 +1,4 @@
+import { recordDigestDelivery } from "@/lib/operations";
 import { NextResponse } from "next/server";
 import { weeklyPace, weeksAtPace } from "@/lib/profile";
 import workbook from "@/data/workbook.json";
@@ -512,13 +513,16 @@ ${row("Pace", esc(pace))}
       method: "POST",
       headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ from, to: [to], subject: `Lumen · ${topic}`, text, html }),
+      signal: AbortSignal.timeout(10_000),
     });
     if (!emailResponse.ok) {
       const err = await emailResponse.text().catch(() => "");
       console.error("[cron/daily-digest] Resend rejected", { status: emailResponse.status, err: err.slice(0, 200) });
       return NextResponse.json({ ok: false, error: "Email delivery failed." }, { status: 502 });
     }
-    return NextResponse.json({ ok: true, sentTo: to, topic, framing: Boolean(framing), newCoreReqs: market.total, chars: text.length });
+    const heartbeat = await recordDigestDelivery();
+    if (!heartbeat) console.error("[cron/daily-digest] delivery accepted but heartbeat persistence failed");
+    return NextResponse.json({ ok: true, heartbeat, sentTo: to, topic, framing: Boolean(framing), newCoreReqs: market.total, chars: text.length });
   } catch (error) {
     console.error("[cron/daily-digest] failed", { error: String(error) });
     return NextResponse.json({ ok: false, error: "Digest generation failed." }, { status: 500 });

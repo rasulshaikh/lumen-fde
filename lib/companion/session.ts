@@ -1,3 +1,4 @@
+import { githubFetch } from "@/lib/github";
 /**
  * The record that a study session happened.
  *
@@ -149,7 +150,7 @@ export async function writeSession(
     return { ok: false, path, url: null, synced: false, error: "GitHub sync is not configured." };
   }
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+    const response = await githubFetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
       method: "PUT",
       headers: { ...headers(), "Content-Type": "application/json" },
       // No `sha`. Without it the contents API refuses to overwrite an existing path, which is
@@ -181,7 +182,7 @@ export async function writeSession(
 export async function readSessionSummary(): Promise<{ count: number; latest: string | null; synced: boolean }> {
   if (!process.env.GITHUB_TOKEN) return { count: 0, latest: null, synced: false };
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/contents/${SESSIONS_DIR}?ref=${branch}`, {
+    const response = await githubFetch(`https://api.github.com/repos/${repo}/contents/${SESSIONS_DIR}?ref=${branch}`, {
       headers: headers(), cache: "no-store",
     });
     // A directory that does not exist yet is a real, known answer: no session has been recorded.

@@ -19,10 +19,15 @@ const container = document.getElementById("root")!;
 const root = createRoot(container);
 const realFetch = globalThis.fetch;
 let calls = 0;
+let saveIdentity: string | null = null;
 let invalidations = 0;
 let resolveRequest: (value: Response) => void = () => {};
 globalThis.fetch = async (_input, init) => {
   calls++;
+  const key = new Headers(init?.headers).get("Idempotency-Key");
+  assert.ok(key);
+  if (saveIdentity) assert.equal(key, saveIdentity, "retry retains save identity");
+  saveIdentity = key;
   assert.equal(init?.method, "POST");
   const payload = JSON.parse(String(init?.body));
   assert.equal(payload.row, 1);

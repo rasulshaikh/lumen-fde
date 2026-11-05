@@ -17,7 +17,7 @@ from either doc.
 
 A single-user study platform for one 23-month Senior FDE plan. Three things run:
 
-1. **A Next.js app on Vercel** - the dashboard (10 tabs), 14 API routes, and 2 cron endpoints.
+1. **A Next.js app on Vercel** - the dashboard (10 tabs), 15 API routes, and 2 cron endpoints.
 2. **An MCP server on Render** - 18 tools, so Claude Code can read the same plan the dashboard
    reads, and write progress back to it.
 3. **GitHub, as the database** - every mutable artifact (progress events, review schedule,
@@ -91,12 +91,11 @@ Two edges are worth naming because they are the ones that surprise people:
 ### 3.1 The password gate
 
 `proxy.ts` (Next's proxy/middleware entry point) is the only auth in front of the app. It
-exempts, in this order: no `LUMEN_PASSWORD` set at all, **`/` (the public landing page)**,
-`/login`, `/api/auth/*`, `/_next/*`,
+exempts **`/` (the public landing page)**, `/login`, `/healthz`, the exact login and logout APIs, `/_next/static` and `/_next/image`,
 the branding assets matched by its `publicAsset` regex (favicon, `icon*.svg|png|ico`,
 `apple-icon*.png`, `(opengraph|twitter)-image*`, `manifest.webmanifest`, `robots.txt`,
 `sitemap.xml`). **`/api/cron/` is NOT in that list - it is GATED, not exempted**, and the check
-runs FIRST, before the `LUMEN_PASSWORD` fall-through: a request without a valid
+runs first, before owner session validation: a request without a valid
 `Bearer $CRON_SECRET` gets 401 whatever the password gate is doing. The trailing slash is
 load-bearing (`/api/crontab` must not match). Gating at the prefix rather than exempting it means
 a third cron route is protected the day it is created, instead of on the day someone remembers to
@@ -119,17 +118,19 @@ that needs `statuses` to compute does not belong on that page.
 `/api/ask` has one extra bypass: a matching `x-lumen-internal-key` header when
 `LUMEN_INTERNAL_API_KEY` is set. That is the Render MCP server's service-to-service path.
 
-Everything else needs a session cookie. `lib/auth.ts` issues `lumen_session` as
-`base64url(user.expiry).HMAC-SHA256(payload, password)` with a 14-day TTL - the password *is*
-the signing key, so changing it invalidates every session. `POST /api/auth/login` rate-limits
-failures at 8 per 10 minutes per client IP, in a `Map` in one serverless instance's memory
-(best-effort by construction; it resets on cold start).
+Everything else needs a session cookie. `lib/auth.ts` signs a versioned, UTF-8 JSON payload
+with HMAC-SHA256 using both the independent `LUMEN_SESSION_SECRET` and password. The TTL is
+12 hours; rotating either secret revokes existing cookies. Sign out expires the cookie.
+The production signing secret must contain at least 32 characters.
 
-Unauthenticated `/api/*` gets 401 JSON; anything else gets a 307 to `/login`.
+Missing owner authentication fails closed with 503 on private pages and APIs, including
+preview deployments. With authentication configured, anonymous APIs return 401 JSON and
+private pages redirect to `/login`. The cron prefix remains separately protected by its bearer key.
 
-If `LUMEN_PASSWORD` is unset the password gate is off and the rest of the app is public - but
-`/api/cron/*` still 401s without `CRON_SECRET`, because that branch returns before the password
-check is reached. "Every route is public" was true before the cron prefix was gated and is not now.
+Browser writes require same-origin JSON and at most 128 KiB. Private responses are no-store.
+Nonce-bearing dynamic HTML receives a strict script CSP. The login failure Map allows eight
+failures per ten minutes per client IP in one instance only; native firewall enforcement is a
+separate release gate. See [production readiness](../production-readiness.md).
 
 ### 3.2 The 10 tabs
 
@@ -170,14 +171,14 @@ Four tabs fetch; the rest render bundled JSON:
 The Plan tab writes status to `localStorage` under `lumen-statuses` and mirrors it to
 `POST /api/progress`; on load it merges back whatever `GET /api/progress` returns.
 
-### 3.3 The 14 API routes
+### 3.3 The 15 API routes
 
 | route | methods | what it does | degrades to |
 |---|---|---|---|
 | `app/api/ask/route.ts` | POST | Quaere/Lumen answer. Builds the full plan (all 119 rows) server-side, optional per-topic syllabus, optional market block; calls MiniMax-M3 with a 55 s timeout; saves the answer to `reports/asks/`. `maxDuration = 60`. | 503 without `MINIMAX_API_KEY`; no `reportUrl` without `GITHUB_TOKEN` |
 | `app/api/curriculum/route.ts` | GET | `?summary=1` → parts+minutes per topic; `?i=N` → one syllabus. Never serves the 3.7 MB bundle whole. | 400 with neither param, 404 for an unknown index |
 | `app/api/market/route.ts` | GET | Three fixed reads: benchmark, trend, insight. No model runs on this path. | `{benchmark:null, trend:[], insight:null, synced:false}` |
-| `app/api/progress/route.ts` | GET, POST | Append-only study history as one markdown file per event; GET lists and re-reads the newest 100. | 502 without `GITHUB_TOKEN` |
+| `app/api/progress/route.ts` | GET, POST | Append-only study history as one markdown file per event; GET reads all events with concurrency eight and fails explicitly at the 1,000-file directory ceiling. | 502 without `GITHUB_TOKEN` |
 | `app/api/recall/route.ts` | GET | `?topics=1,2` → only those topics' prompts out of the 600 KB bank. Cached 1 h. | `{meta:{},prompts:[]}` with no topics |
 | `app/api/review/route.ts` | GET, PUT | The whole review schedule as one file, `reports/review/state.json`, written with its sha. | `{state:{},sha:null,synced:false}` - the strip runs local-only |
 | `app/api/sandbox/route.ts` | POST | `run` / `stop` against the named Vercel Sandbox. | SDK error text plus an OIDC hint |
@@ -185,6 +186,7 @@ The Plan tab writes status to `localStorage` under `lumen-statuses` and mirrors 
 | `app/api/session/route.ts` | POST | Records that a study session happened, under `reports/companion/sessions`, and updates the companion digest. Same row-validated, topic-derived, append-only discipline as artifacts. **It never writes progress** - marking a row goes through `/api/progress`, which owns that validation and the hydration write-guard. | 400 on an invalid row; 502 when the write fails, leaving the session open to retry |
 | `app/api/external-brief/route.ts` | GET, POST | The one thing Lumen shows that is not a file in the repo. GET returns the stored brief and refreshes it when it is a day old, writing a dated file plus `latest.json` under `reports/external`; POST runs one live search for one question and stores nothing. `maxDuration = 60`, and both budgets are subtraction from it. | 503 without SurfSense config; a failed refresh returns the brief already stored, honestly dated |
 | `app/api/papers/route.ts` | GET, POST | The exam history. POST records one sitting of the Practice test runner under `reports/papers/`, append-only by protocol (no `sha`); GET returns the most recent four. **It does not touch `reports/review/state.json`** - the spaced-repetition ladder is moved one card at a time by the recall strip, and a practice paper advancing twenty scheduled cards is what would make that schedule untrustworthy. | 400 on an invalid paper; 502 when the write fails; `synced:false` on GET means unknown, never none |
+| `app/api/auth/logout/route.ts` | POST | Expires the owner session cookie. | Same-origin JSON required |
 | `app/api/auth/login/route.ts` | POST | Issues the session cookie. | 503 without `LUMEN_PASSWORD` |
 | `app/api/cron/market-scan/route.ts` | GET | Section 5. | 401 without a matching `CRON_SECRET` |
 | `app/api/cron/daily-digest/route.ts` | GET | Section 6. | 401 without `CRON_SECRET`; 503 without Resend config |
@@ -725,7 +727,8 @@ noted.
 
 | variable | where | absent ⇒ |
 |---|---|---|
-| `LUMEN_PASSWORD` | `proxy.ts`, `/api/auth/login`, `lib/auth.ts` | the password gate is off and pages are public; `/api/cron/*` still 401s on `CRON_SECRET`. Login returns 503. |
+| `LUMEN_SESSION_SECRET` | `lib/auth.ts` | production private access fails closed unless it contains at least 32 characters. |
+| `LUMEN_PASSWORD` | `proxy.ts`, `/api/auth/login`, `lib/auth.ts` | private routes and login fail closed with 503; cron routes still require `CRON_SECRET`. |
 | `LUMEN_USERNAME` | `proxy.ts`, `/api/auth/login` | defaults to `rasul` |
 | `LUMEN_INTERNAL_API_KEY` | `proxy.ts`, `mcp/server.js` | the MCP server cannot bypass the gate for `/api/ask`; `ask_lumen` falls back to calling MiniMax directly |
 | `LUMEN_ASK_URL` | `mcp/server.js` | same fallback - the direct path, which is why `marketContext()` is duplicated there |
@@ -821,15 +824,15 @@ standing fact. The market block at the bottom is all of the second kind.
 | `BOARD_COUNT` | 27 | `lib/market/benchmark.ts` |
 | skills / gaps / over-invested | 34 <!-- verify:skills=34 --> / 13 <!-- verify:gaps=13 --> / 3 | `data/market-skill-map.json` |
 | tabs | 10 <!-- verify:tabs=10 --> | `components/Nav.tsx` `NAV` |
-| API routes | 14 <!-- verify:api_routes=14 --> | `app/api/**/route.ts` |
+| API routes | 15 <!-- verify:api_routes=15 --> | `app/api/**/route.ts` |
 | crons | 2 <!-- verify:crons=2 --> (03:00, 03:30 UTC) | `vercel.json` |
 | MCP tools | 18 <!-- verify:mcp_tools=18 --> | `mcp/server.js` `tools` |
 | review ladder | `[1, 7, 21, 60, 150, 240, 330]` - 7 rungs <!-- verify:ladder_rungs=7 --> | `lib/review.ts` |
 | daily cap / new per day / per topic | 5 / 2 / 3 | `lib/review.ts` |
-| session TTL | 14 days | `lib/auth.ts` |
+| session TTL | 12 hours | `lib/auth.ts` |
 | login rate limit | 8 per 10 min | `lib/auth.ts` |
 | MCP rate limit / body cap | 30 per 60 s / 128 KB | `mcp/server.js` |
-| test files / npm test scripts | 4 / 4 - 3 under `lib/market/` <!-- verify:market_tests=3 --> plus `lib/review.test.mts` | `lib/**/*.test.mts`, `package.json` |
+| test files / npm test scripts | 5 / 5 - 4 under `lib/market/` <!-- verify:market_tests=4 --> plus `lib/review.test.mts` | `lib/**/*.test.mts`, `package.json` |
 
 The rest is the 2026-09-08 scan, held to the same rule as §5.7: dated, not anchored, and
 superseded by the next 03:00 UTC run. Read the report file before quoting any of it.

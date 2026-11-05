@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  poweredByHeader: false,
+  experimental: { proxyClientMaxBodySize: 128 * 1024 + 1 },
 
   /**
    * The four tabs that merged into three still resolve.
