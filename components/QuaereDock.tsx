@@ -295,7 +295,12 @@ export function QuaereDock() {
     if (byKeyboard || window.matchMedia("(pointer:fine)").matches) focusInput(inputRef.current);
     return () => {
       const target = opener.current;
-      requestAnimationFrame(() => { if (target?.isConnected) target.focus(); else document.querySelector<HTMLButtonElement>('.ask-trigger')?.focus(); });
+      requestAnimationFrame(() => {
+        if (target?.isConnected && target.matches("button,a[href],input,textarea,select,summary,[tabindex]") && target.getClientRects().length) { target.focus(); return; }
+        // The floating opener unmounts while open; the header opener is hidden in landscape.
+        Array.from(document.querySelectorAll<HTMLButtonElement>('.ask-trigger,.ask-fab'))
+          .find((button) => button.getClientRects().length > 0)?.focus();
+      });
     };
   }, [askOpen]);
 
