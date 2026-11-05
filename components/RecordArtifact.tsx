@@ -15,6 +15,7 @@ export function RecordArtifact({ initialRow, onSaved }: { initialRow: number; on
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const busy = useRef(false);
+  const retry = useRef<{ payload: string; key: string; date: string } | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   useEffect(() => { if (saved) trigger.current?.focus(); }, [saved]);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -23,14 +24,20 @@ export function RecordArtifact({ initialRow, onSaved }: { initialRow: number; on
     busy.current = true;
     setSaving(true); setError(null); setSaved(false);
     try {
+      const payload = JSON.stringify({ row, title: title.trim(), url: url.trim(), notes: notes.trim() });
+      if (!retry.current || retry.current.payload !== payload) {
+        const date = new Date().toISOString();
+        retry.current = { payload, date, key: `${date.replace(/[:.]/g, "-")}--${crypto.randomUUID()}` };
+      }
       const response = await fetch("/api/artifacts", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ row, title: title.trim(), url: url.trim(), notes: notes.trim() }),
+        method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": retry.current.key },
+        body: JSON.stringify({ ...JSON.parse(payload), date: retry.current.date }),
         signal: AbortSignal.timeout(20_000),
       });
       const body = await response.json();
       if (!response.ok || !body.saved || !body.artifact || !body.path) throw new Error(body.error || "The save could not be confirmed. Check your recorded proof before trying again.");
       onSaved({ ...body.artifact, path: body.path, fileUrl: body.url ?? null });
+      retry.current = null;
       setTitle(""); setUrl(""); setNotes(""); setOpen(false); setSaved(true);
     } catch (reason) {
       setError(reason instanceof Error && reason.name !== "TimeoutError" && reason.name !== "TypeError" ? reason.message : "The save could not be confirmed. Your entries are kept here. Check your recorded proof before trying again.");

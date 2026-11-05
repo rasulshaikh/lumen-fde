@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import type { Metadata } from "next";
 import "./globals.css";
 import { Backdrop } from "@/components/Backdrop";
@@ -8,7 +9,8 @@ export const metadata: Metadata = { title: TITLE, description: PREMISE };
 // the app does not open on the old notebook umber for system-dark users.
 const themeScript = `(function(){try{var s=localStorage.getItem('lumen-theme');document.documentElement.dataset.theme=s==='dark'?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}})()`;
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -21,7 +23,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=Archivo:wght@400..800&family=Host+Grotesk:wght@300;400;500;600;700&family=Schibsted+Grotesk:ital,wght@0,400..800;1,400..700&family=JetBrains+Mono:wght@400..700&display=swap"
         />
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body><Backdrop />{children}</body>
     </html>

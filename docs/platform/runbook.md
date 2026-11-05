@@ -586,13 +586,12 @@ block is simply absent from the answer.
 
 ### 4.6 The gate is off, or the MCP server refuses everything
 
-Two absences that fail in **opposite** directions. Do not read them as one class:
+Both owner login and MCP authentication fail closed when their configuration is missing:
 
-- **`LUMEN_PASSWORD` unset → fails open.** `proxy.ts` passes every request through. The whole app
-  is public, including all 10 tabs and all 14 API routes.
-  <!-- verify:tabs=10 --> <!-- verify:api_routes=14 -->
-  **Observable:** nothing is logged. `curl -I https://<app>/` returning 200 instead of a 307 to
-  `/login` is the check.
+- **`LUMEN_PASSWORD` or production `LUMEN_SESSION_SECRET` missing:** private routes return 503.
+  All 10 tabs and all 15 API routes remain private. <!-- verify:tabs=10 --> <!-- verify:api_routes=15 -->
+  Check `/api/progress`, not the intentionally public landing page or `/healthz`.
+  Restore configuration through owner access in Vercel, then redeploy and sign in again.
 - **`MCP_API_KEY` unset → fails closed.** `authError()` in `mcp/server.js` refuses by default:
   no key configured means **503 `MCP_API_KEY is not configured` on every JSON-RPC request**, so
   all 18 tools go dark at once. <!-- verify:mcp_tools=18 --> This is the opposite of what it used

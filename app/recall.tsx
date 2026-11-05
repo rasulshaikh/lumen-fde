@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { grade, nextDue, retention, eligible, type Grade, type ReviewState } from "@/lib/review";
+
+import { mergeReview, validReviewState } from "@/lib/review-sync";
 
 type Prompt = { i: number; k: string; kind: string; p: string };
 type Meta = { topic: string; track: string; outcomes: string[] };
@@ -48,32 +50,34 @@ export function RecallStrip({ startedTopics }: { startedTopics: number[] }) {
   const [revealed, setRevealed] = useState(false);
   const [doneToday, setDoneToday] = useState(0);
 
+  const [localDurable, setLocalDurable] = useState(true);
+  const persist = (value: ReviewState) => {
+    try { localStorage.setItem(LOCAL, JSON.stringify(value)); setLocalDurable(true); }
+    catch { setLocalDurable(false); }
+  };
+  const [sync, setSync] = useState<"loading" | "saved" | "saving" | "failed">("loading");
+  const syncBusy = useRef(false);
   const key = startedTopics.join(",");
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LOCAL);
-      if (raw) setState(JSON.parse(raw));
+      if (raw && validReviewState(JSON.parse(raw))) setState(JSON.parse(raw));
     } catch { /* a corrupt local copy should not take the strip down */ }
-    fetch("/api/review")
+    fetch("/api/review", { signal: AbortSignal.timeout(15_000) })
       .then((r) => r.json())
       .then((d) => {
         setSha(d.sha ?? null);
+        setSync(d.synced ? "saved" : "failed");
         // GitHub is the durable copy across devices; merge rather than overwrite so an
         // offline session is not silently discarded.
-        if (d.state && Object.keys(d.state).length) {
+        if (validReviewState(d.state) && Object.keys(d.state).length) {
           setState((local) => {
-            const merged: ReviewState = { ...d.state, ...local };
-            for (const k of Object.keys(merged)) {
-              const a = local[k];
-              const b = d.state[k];
-              if (a && b) merged[k] = (a.seen ?? 0) >= (b.seen ?? 0) ? a : b;
-            }
-            return merged;
+            return mergeReview(local, d.state);
           });
         }
       })
-      .catch(() => { /* local-only is a valid mode */ });
+      .catch(() => setSync("failed"));
   }, []);
 
   useEffect(() => {
@@ -87,18 +91,36 @@ export function RecallStrip({ startedTopics }: { startedTopics: number[] }) {
   const meta = card && bank ? bank.meta[String(card.i)] : null;
   const stats = useMemo(() => (bank ? retention(eligible(bank.prompts), state) : { seen: 0, total: 0, matured: 0 }), [bank, state]);
 
+  const saveReview = async (next: ReviewState, retry = false) => {
+    if (syncBusy.current) return;
+    syncBusy.current = true; setSync("saving");
+    try {
+      let expectedSha = sha;
+      if (retry) {
+        const read = await fetch("/api/review", { cache: "no-store", signal: AbortSignal.timeout(15_000) });
+        const latest = await read.json();
+        if (!read.ok || !latest.synced || !validReviewState(latest.state)) throw new Error("Sync unavailable");
+        next = mergeReview(next, latest.state); expectedSha = latest.sha;
+        setState(next); persist(next);
+      }
+      const response = await fetch("/api/review", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: next, sha: expectedSha }), signal: AbortSignal.timeout(15_000) });
+      const result = await response.json();
+      if (!response.ok || !result.saved) throw new Error("Sync unavailable");
+      setSha(result.sha); setSync("saved");
+    } catch { setSync("failed"); }
+    finally { syncBusy.current = false; }
+  };
+  const syncStatus = <p className="home-note" role="status">{sync === "failed" ? <>Cloud sync unavailable. {localDurable ? "Reviews are kept on this device." : "Device storage is unavailable; keep this page open and retry sync."} <button className="text-button" onClick={() => void saveReview(state, true)}>Retry sync</button></> : sync === "saving" ? "Saving review…" : sync === "loading" ? "Loading review sync…" : "Review sync connected"}</p>;
+
   const record = (g: Grade) => {
-    if (!card) return;
+    if (!card || syncBusy.current || sync === "loading") return;
     const next = { ...state, [card.k]: grade(state[card.k], g, now) };
     setState(next);
     setAnswer("");
     setRevealed(false);
     setDoneToday((n) => n + 1);
-    try { localStorage.setItem(LOCAL, JSON.stringify(next)); } catch { /* quota */ }
-    fetch("/api/review", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ state: next, sha }) })
-      .then((r) => r.json())
-      .then((d) => { if (d.sha) setSha(d.sha); })
-      .catch(() => { /* stays local */ });
+    persist(next);
+    void saveReview(next);
   };
 
   if (!startedTopics.length) {
@@ -109,6 +131,7 @@ export function RecallStrip({ startedTopics }: { startedTopics: number[] }) {
           <strong>Nothing to review yet</strong>
           <span>Set a topic to In progress or Done and its questions enter the review schedule.</span>
         </div>
+        {syncStatus}
       </section>
     );
   }
@@ -121,6 +144,7 @@ export function RecallStrip({ startedTopics }: { startedTopics: number[] }) {
           <strong>{doneToday ? `${doneToday} reviewed, done for today` : "Nothing due today"}</strong>
           <span>{stats.seen} of {stats.total} prompts in the schedule · {stats.matured} held at 60 days or longer</span>
         </div>
+        {syncStatus}
       </section>
     );
   }
@@ -169,12 +193,13 @@ export function RecallStrip({ startedTopics }: { startedTopics: number[] }) {
           </div>
           <div className="recall-actions">
             <span className="recall-ask">How did that go?</span>
-            <button className="quiz-option" onClick={() => record("gone")}>Gone</button>
-            <button className="quiz-option" onClick={() => record("halting")}>Halting</button>
-            <button className="quiz-action" onClick={() => record("fluent")}>Fluent</button>
+            <button className="quiz-option" disabled={sync === "saving" || sync === "loading"} onClick={() => record("gone")}>Gone</button>
+            <button className="quiz-option" disabled={sync === "saving" || sync === "loading"} onClick={() => record("halting")}>Halting</button>
+            <button className="quiz-action" disabled={sync === "saving" || sync === "loading"} onClick={() => record("fluent")}>Fluent</button>
           </div>
         </>
       )}
+      {syncStatus}
     </section>
   );
 }

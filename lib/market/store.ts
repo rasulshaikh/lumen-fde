@@ -1,3 +1,4 @@
+import { mapPool, githubFetch } from "@/lib/github";
 /**
  * Persistence for the job-market benchmark: five files in the repo, each read whole and
  * written whole with its sha, exactly as `app/api/review/route.ts` does it.
@@ -135,7 +136,7 @@ function headers() {
 export async function readJson<T>(path: string): Promise<{ data: T | null; sha: string | null; synced: boolean; error: string | null }> {
   if (!process.env.GITHUB_TOKEN) return { data: null, sha: null, synced: false, error: null };
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/contents/${path}?ref=${branch}`, { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(10_000) });
+    const response = await githubFetch(`https://api.github.com/repos/${repo}/contents/${path}?ref=${branch}`, { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(10_000) });
     if (response.status === 404) return { data: null, sha: null, synced: true, error: null };
     const body = await response.json();
     if (!response.ok) throw new Error(body.message || `GitHub returned ${response.status}`);
@@ -169,7 +170,7 @@ export async function writeJson(path: string, data: unknown, sha: string | null,
     // is how two runs silently clobber each other. History files are new every day and
     // correctly pass null.
     if (sha) payload.sha = sha;
-    const response = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+    const response = await githubFetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
       method: "PUT",
       signal: AbortSignal.timeout(10_000),
       headers: { ...headers(), "Content-Type": "application/json" },
@@ -217,21 +218,20 @@ export type ProgressEntry = { topic: string; status: string; date: string };
 export async function readProgress(): Promise<{ events: ProgressEntry[] } | null> {
   if (!process.env.GITHUB_TOKEN) return null;
   try {
-    const listing = await fetch(`https://api.github.com/repos/${repo}/contents/${PROGRESS_DIR}?ref=${branch}`, { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(10_000) });
+    const listing = await githubFetch(`https://api.github.com/repos/${repo}/contents/${PROGRESS_DIR}?ref=${branch}`, { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(10_000) });
     // 404 is a history that has not started yet, which is genuinely empty rather than unknown.
     if (listing.status === 404) return { events: [] };
     const files = await listing.json();
     if (!listing.ok) throw new Error(files.message || `GitHub returned ${listing.status}`);
 
-    // Filenames start with an ISO stamp, so name order is chronological.
+    if (!Array.isArray(files) || files.length >= 1000) throw new Error("Progress history capacity requires compaction.");
+    // Preserve current status for topics with older events as well.
     const newest = (files as { name: string; path: string }[])
       .filter((file) => file?.name?.endsWith(".md"))
-      .sort((a, b) => b.name.localeCompare(a.name))
-      .slice(0, 100);
+      .sort((a, b) => b.name.localeCompare(a.name));
 
-    const events = await Promise.all(
-      newest.map(async (file) => {
-        const response = await fetch(`https://api.github.com/repos/${repo}/contents/${file.path}?ref=${branch}`, { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(10_000) });
+    const events = await mapPool(newest, 8, async (file) => {
+        const response = await githubFetch(`https://api.github.com/repos/${repo}/contents/${file.path}?ref=${branch}`, { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(10_000) });
         const item = await response.json();
         if (!response.ok) throw new Error(item.message || `GitHub returned ${response.status}`);
         const body = Buffer.from(item.content ?? "", "base64").toString("utf8");
@@ -242,8 +242,7 @@ export async function readProgress(): Promise<{ events: ProgressEntry[] } | null
           status: body.match(/^Status:\s*(.+)$/m)?.[1] || "Not started",
           date: body.match(/^Date:\s*(.+)$/m)?.[1] || "",
         };
-      }),
-    );
+      });
     return { events };
   } catch {
     return null;

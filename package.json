@@ -1,6 +1,6 @@
 {
   "name": "lumen-fde",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -28,23 +28,32 @@
     "test:mount": "npx tsx lib/machines-mount.test.mts && tsx lib/workspace.test.mts",
     "test:lessons": "npx tsx lib/lessons.test.mts",
     "test:gtm": "npx tsx lib/gtm/path.test.mts",
-    "test:operations": "node --test scripts/ignore-report-build.test.mjs && tsx lib/market/feed.test.mts"
+    "test:operations": "node --test scripts/ignore-report-build.test.mjs && tsx lib/market/feed.test.mts",
+    "test:security": "tsx lib/security.test.mts && tsx lib/persistence.test.mts && tsx lib/review-sync.test.mts && node --test scripts/monitor-production.test.mjs"
   },
   "dependencies": {
-    "@vercel/sandbox": "^3.2.1",
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest"
+    "@vercel/sandbox": "3.2.1",
+    "next": "16.4.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@types/node": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "eslint": "^9.39.5",
-    "eslint-plugin-react-hooks": "^5.2.0",
-    "jsdom": "^30.0.1",
-    "tsx": "latest",
-    "typescript": "latest",
-    "typescript-eslint": "^8.70.0"
+    "@types/node": "26.4.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "eslint": "9.39.5",
+    "eslint-plugin-react-hooks": "5.2.0",
+    "jsdom": "30.0.1",
+    "tsx": "4.23.13",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1"
+  },
+  "engines": {
+    "node": ">=22.22.2"
+  },
+  "overrides": {
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.4"
+    }
   }
 }

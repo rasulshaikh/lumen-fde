@@ -1,3 +1,4 @@
+import { githubFetch } from "@/lib/github";
 /**
  * The record that a paper was sat.
  *
@@ -182,7 +183,7 @@ export async function writePaper(paper: Paper): Promise<{ ok: boolean; path: str
   const path = paperPath(paper);
   if (!process.env.GITHUB_TOKEN) return { ok: false, path, url: null, error: "GitHub sync is not configured." };
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+    const response = await githubFetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
       method: "PUT",
       headers: { ...headers(), "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -211,7 +212,7 @@ export async function writePaper(paper: Paper): Promise<{ ok: boolean; path: str
 export async function readPapers(limit = 4): Promise<{ papers: Paper[]; synced: boolean }> {
   if (!process.env.GITHUB_TOKEN) return { papers: [], synced: false };
   try {
-    const listing = await fetch(`https://api.github.com/repos/${repo}/contents/${PAPERS_DIR}?ref=${branch}`, { headers: headers(), cache: "no-store" });
+    const listing = await githubFetch(`https://api.github.com/repos/${repo}/contents/${PAPERS_DIR}?ref=${branch}`, { headers: headers(), cache: "no-store" });
     // A directory that does not exist yet is a real, known answer: no paper has been sat.
     if (listing.status === 404) return { papers: [], synced: true };
     if (!listing.ok) throw new Error(`GitHub returned ${listing.status}`);
@@ -219,7 +220,7 @@ export async function readPapers(limit = 4): Promise<{ papers: Paper[]; synced: 
       .filter((f) => f.type === "file" && f.name.endsWith(".json"))
       .sort((a, b) => b.name.localeCompare(a.name))
       .slice(0, limit);
-    const loaded = await Promise.allSettled(files.map((f) => fetch(f.download_url, { cache: "no-store" }).then((r) => {
+    const loaded = await Promise.allSettled(files.map((f) => githubFetch(f.download_url, { cache: "no-store" }).then((r) => {
       if (!r.ok) throw new Error(`GitHub returned ${r.status}`);
       return r.json();
     })));

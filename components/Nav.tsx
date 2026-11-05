@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 
 /**
@@ -83,6 +83,16 @@ const TOOLS = [
 
 export function Nav() {
   const pathname = usePathname();
+  const [signingOut, setSigningOut] = useState(false);
+  const [error, setError] = useState("");
+  const signOut = async () => {
+    setSigningOut(true); setError("");
+    try {
+      const response = await fetch("/api/auth/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      if (!response.ok) throw new Error("Sign out failed. Try again.");
+      window.location.replace("/login");
+    } catch { setError("Sign out failed. Try again."); setSigningOut(false); }
+  };
   const menu = useRef<HTMLDetailsElement>(null);
   useEffect(() => { if (menu.current) menu.current.open = false; }, [pathname]);
   const tool = TOOLS.find((item) => item.href === pathname);
@@ -95,6 +105,8 @@ export function Nav() {
       <div className="workspace-tools-menu">
         <p className="eyebrow">Tools & resources</p>
         {TOOLS.map((item) => <Link key={item.href} href={item.href} aria-current={pathname === item.href ? "page" : undefined} onClick={() => { if (menu.current) menu.current.open = false; }}><strong>{item.label}</strong><span>{item.detail}</span></Link>)}
+        <button className="ghost-button" disabled={signingOut} onClick={signOut}>{signingOut ? "Signing out…" : "Sign out"}</button>
+        {error && <p role="alert">{error}</p>}
       </div>
     </details>
   </nav>;

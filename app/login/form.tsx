@@ -1,10 +1,8 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
 
 export function LoginForm() {
-  const router = useRouter();
   const [username, setUsername] = useState("rasul");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -18,8 +16,7 @@ export function LoginForm() {
       const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
       const data = await response.json();
       if (!response.ok) { setError(data.error || "Could not sign in."); return; }
-      router.replace("/");
-      router.refresh();
+      window.location.replace("/overview");
     } catch {
       setError("The sign-in service is unavailable. Try again.");
     } finally {
