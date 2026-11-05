@@ -51,3 +51,16 @@ Host Grotesk for the public landing (one family; clean grotesque suitable for Ve
 ## Components
 
 Landing: fixed hairline nav on light glass, full-viewport light hero with hero-level **Lumen** wordmark (soft lamp glow, no purple), left-stacked headline + lede + dual CTAs, paper / warm-canvas bands, lamp close band, numbered capabilities, three-step method, marquee. Footer: `lumenlab.tech`. Dashboard: top bar, tabs, metric rows, progress bars, tables.
+
+## Workspace interaction
+
+The signed-in shell uses a compact route heading. Today, Study, Practice, and Market
+are primary navigation; More retains Curriculum, Machines, Career paths, GTM, Library,
+and Sandbox. Existing URLs and workbook labels stay valid. The mobile navigation fits
+without horizontal scrolling.
+
+Today leads with the existing session loop, followed by optional recall and plan metrics.
+Topic context is expandable; planned topic hours are labelled separately from session time.
+Proof is recorded with a labelled form, with validation, retry, and explicit confirmation.
+On phones the plan table becomes topic blocks with named fields; desktop retains the table.
+Use visible keyboard focus and dark text on the teal primary action in both themes.

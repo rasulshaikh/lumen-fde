@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 
 /**
@@ -65,14 +66,36 @@ export const NAV = [
  * Anything counting "views" counts NAV, which is the nav, not the route table.
  */
 
+const PRIMARY = [
+  { label: "Today", href: "/overview", routes: ["/overview"] },
+  { label: "Study", href: "/plan", routes: ["/plan", "/curriculum"] },
+  { label: "Practice", href: "/practice", routes: ["/practice", "/machines"] },
+  { label: "Market", href: "/market", routes: ["/market", "/paths"] },
+];
+const TOOLS = [
+  { label: "Curriculum", href: "/curriculum", detail: "Explore topic syllabuses" },
+  { label: "Machines", href: "/machines", detail: "Debug interactive systems" },
+  { label: "Career paths", href: "/paths", detail: "Compare your target markets" },
+  { label: "GTM", href: "/gtm", detail: "Practice revenue systems" },
+  { label: "Library", href: "/library", detail: "Find books and references" },
+  { label: "Sandbox", href: "/sandbox", detail: "Run hands-on exercises" },
+];
+
 export function Nav() {
   const pathname = usePathname();
-  return <nav className="tabs" aria-label="Workbook views">{NAV.map((item) => {
-    const active = pathname === item.href;
-    // `.tab` was written for a <button>, which is where its colour, weight and the
-    // `.tab.active:after` underline come from - all of that applies to an <a> unchanged. The
-    // one thing a link brings that a button does not is the default underline, and it is
-    // killed here rather than in globals.css so the rule sits next to the element it applies to rather than in a stylesheet three other agents were editing.
-    return <Link key={item.href} href={item.href} className={active ? "tab active" : "tab"} style={{ textDecoration: "none" }} aria-current={active ? "page" : undefined}>{item.label}</Link>;
-  })}</nav>;
+  const menu = useRef<HTMLDetailsElement>(null);
+  useEffect(() => { if (menu.current) menu.current.open = false; }, [pathname]);
+  const tool = TOOLS.find((item) => item.href === pathname);
+  return <nav className="workspace-nav" aria-label="Main navigation">
+    {PRIMARY.map((item) => <Link key={item.href} href={item.href} className={`workspace-nav-link${item.routes.includes(pathname) ? " active" : ""}`} aria-current={pathname === item.href ? "page" : undefined}>{item.label}</Link>)}
+    <details ref={menu} className="workspace-tools" onKeyDown={(event) => {
+      if (event.key === "Escape" && menu.current) { menu.current.open = false; menu.current.querySelector("summary")?.focus(); }
+    }}>
+      <summary className={`workspace-nav-link${tool ? " active" : ""}`}>More <span aria-hidden="true">⌄</span></summary>
+      <div className="workspace-tools-menu">
+        <p className="eyebrow">Tools & resources</p>
+        {TOOLS.map((item) => <Link key={item.href} href={item.href} aria-current={pathname === item.href ? "page" : undefined} onClick={() => { if (menu.current) menu.current.open = false; }}><strong>{item.label}</strong><span>{item.detail}</span></Link>)}
+      </div>
+    </details>
+  </nav>;
 }

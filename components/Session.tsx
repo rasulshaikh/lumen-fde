@@ -132,7 +132,7 @@ export function SessionLoop({ row, topic, status, setStatus }: {
           <input
             value={intention}
             onChange={(event) => setIntention(event.target.value)}
-            placeholder={`What will you do on ${topic}?`}
+            placeholder="One small outcome, e.g. write and test a cleanup trap"
             aria-label="What will you do this session?"
           />
           <button className="primary-button" onClick={start}>Start session</button>
