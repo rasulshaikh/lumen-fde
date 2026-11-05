@@ -170,7 +170,8 @@ async function askLumen(prompt, context = "") {
     const response = await fetch(process.env.LUMEN_ASK_URL, { method: "POST", headers: { "Content-Type": "application/json", "x-lumen-internal-key": process.env.LUMEN_INTERNAL_API_KEY }, body: JSON.stringify({ prompt, context }), signal: AbortSignal.timeout(MCP_PROXY_TIMEOUT_MS) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.answer) throw new Error(data.error || `Lumen Ask request failed with ${response.status}`);
-    return data.answer;
+    const sources = Array.isArray(data.sources) ? data.sources.filter((source) => source && typeof source.label === "string" && typeof source.title === "string" && typeof source.url === "string").slice(0, 16) : [];
+    return data.answer + (sources.length ? `\n\nSources:\n${sources.map((source) => `[${source.label}] ${source.title}: ${source.url.startsWith("/") ? new URL(source.url, process.env.LUMEN_ASK_URL).href : source.url}`).join("\n")}` : "");
   }
   if (!process.env.MINIMAX_API_KEY) throw new Error("MINIMAX_API_KEY is not configured on Render");
   const learning = { books: readJson("data/library-context.json"), repositories: readJson("data/repository-context.json"), lesson: readJson("data/lesson-context.json"), plan: readJson("data/workbook.json").Plan.slice(1).map((r) => ({ track: r[0], month: r[1], topic: r[2], hours: r[13] })) };

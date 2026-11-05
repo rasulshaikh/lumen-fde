@@ -385,7 +385,7 @@ export function Market({ statuses, openPlanRow }: { statuses: Record<string, str
         the numbers: everything above is measured, this alone is not, and the separation is the
         only thing keeping a model's sentence from borrowing the authority of the audited ones. */}
     {insight?.quaere && <section className="mkt-quaere">
-      <p className="eyebrow">Quaere&rsquo;s reading: interpretation, not measurement</p>
+      <p className="eyebrow">Lumen&rsquo;s reading: interpretation, not measurement</p>
       <p>{insight.quaere}</p>
       <p className="mkt-quaere-foot">Written by the nightly scan from the numbers above, then stored. It contains no figure of its own: any digit drops the paragraph.</p>
     </section>}

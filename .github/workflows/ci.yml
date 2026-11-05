@@ -26,6 +26,7 @@ jobs:
       - run: npm ci
       - run: npm audit --audit-level=moderate
       - run: npm run test:security
+      - run: npm run test:rag
 
       # Two rules, and they are here because the absence of them already shipped a bug. `aim` was
       # added to the provider's useMemo body and not to its dependency array, so the context object

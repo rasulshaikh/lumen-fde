@@ -1,3 +1,7 @@
+import { workspaceCorpus } from "@/lib/rag/corpus";
+import { answerWithRetrieval, type ModelMessage, type ModelTurn } from "@/lib/rag/agent";
+import { searchRecordedWork } from "@/lib/rag/records";
+import type { Passage } from "@/lib/rag/types";
 import { NextResponse } from "next/server";
 import library from "@/data/library-context.json";
 import { applyMemory, readMemory, recurring, writeMemory } from "@/lib/companion/memory";
@@ -298,7 +302,8 @@ const BOOKKEEPING_TIMEOUT_MS = 1500;
 const MODEL_TIMEOUT_MS = 50000;
 
 function deadline<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-  return Promise.race([promise, new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))]);
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([promise, new Promise<T>((resolve) => { timer = setTimeout(() => resolve(fallback), ms); })]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -494,11 +499,16 @@ async function saveAskReport(prompt: string, context: string, answer: string) {
 }
 
 export async function POST(request: Request) {
+  const requestBudget = AbortSignal.any([request.signal, AbortSignal.timeout(55_000)]);
   const apiKey = process.env.MINIMAX_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "MiniMax is not configured yet. Add MINIMAX_API_KEY in Vercel project settings." }, { status: 503 });
   try {
     const body = await request.json() as { prompt?: string; context?: string; topicIndex?: number; web?: boolean; webItems?: { title?: unknown; url?: unknown; snippet?: unknown }[]; selection?: unknown; statuses?: unknown; streak?: unknown; aim?: unknown; history?: { role: "user" | "assistant"; content: string }[] };
 
+    if (!body || typeof body.prompt !== "string" || !body.prompt.trim() || body.prompt.length > 4000) return NextResponse.json({ error: "Ask a question of up to 4,000 characters." }, { status: 400 });
+    body.context = typeof body.context === "string" ? body.context.slice(0, 12000) : "";
+    if (!Number.isInteger(body.topicIndex) || Number(body.topicIndex) < 0 || Number(body.topicIndex) >= workbook.Plan.length - 1) body.topicIndex = undefined;
+    body.history = Array.isArray(body.history) ? body.history.filter((message) => message && ["user", "assistant"].includes(message.role) && typeof message.content === "string").slice(-8).map((message) => ({ role: message.role, content: message.content.slice(0, 6000) })) : [];
     /**
      * What the companion already knows about this reader.
      *
@@ -511,10 +521,21 @@ export async function POST(request: Request) {
      * Best-effort and never fatal: an unreadable digest costs continuity for one answer, and
      * failing the question over it would be a far larger loss than the memory itself.
      */
+    // Start independent reads together so follow-up retrieval has room inside the 60s route.
+    const memoryRead = deadline(readMemory(), BOOKKEEPING_TIMEOUT_MS, null);
+    const evidenceReads = Promise.allSettled([
+      deadline(readArtifacts(), 3500, { artifacts: [], unreadable: 0, synced: false, error: "Evidence read timed out." }),
+      deadline(readSessionSummary(), 3500, { count: 0, latest: null, synced: false }),
+      deadline(readJson<ReviewState>("reports/review/state.json"), 3500, { data: null, sha: null, synced: false, error: "Review read timed out." }),
+      deadline(readPapers(), 3500, { papers: [], synced: false }),
+      deadline(readAskTitles(), 3500, []),
+    ]);
+    const marketRead = Promise.all([readMarket<Benchmark>(BENCHMARK_PATH), readMarket<Insight>(INSIGHT_PATH)]);
+    const briefRead = deadline(readLatestBrief().then((result) => result.brief).catch(() => null), MARKET_READ_MS, null);
     let memoryBlock = "";
     let memoryState: Awaited<ReturnType<typeof readMemory>> | null = null;
     try {
-      memoryState = await deadline(readMemory(), BOOKKEEPING_TIMEOUT_MS, null);
+      memoryState = await memoryRead;
       if (memoryState?.synced) {
         const explained = memoryState.memory.explained.slice(0, 8).map((n) => n.key);
         const repeats = recurring(memoryState.memory).slice(0, 5).map((n) => `${n.key} (asked ${n.count} times)`);
@@ -534,13 +555,7 @@ export async function POST(request: Request) {
      * one of them failing degrades that block to "unknown" rather than failing the question -
      * `Promise.allSettled`, not `all`, for exactly that reason.
      */
-    const [artifactsR, sessionsR, reviewR, papersR, asksR] = await Promise.allSettled([
-      readArtifacts(),
-      readSessionSummary(),
-      readJson<ReviewState>("reports/review/state.json"),
-      readPapers(),
-      readAskTitles(),
-    ]);
+    const [artifactsR, sessionsR, reviewR, papersR, asksR] = await evidenceReads;
     const artifacts = artifactsR.status === "fulfilled" ? artifactsR.value : { artifacts: [], unreadable: 0, synced: false, error: null };
     const sessions = sessionsR.status === "fulfilled" ? sessionsR.value : { count: 0, latest: null, synced: false };
     const review = reviewR.status === "fulfilled"
@@ -551,7 +566,7 @@ export async function POST(request: Request) {
     // Two reads, one budget. Neither can fail the request: `readMarket` resolves null on every
     // path, and `marketContext` returns "" for a pair of nulls, which leaves the prompt exactly
     // as it was before the market existed.
-    const [benchmark, insight] = await Promise.all([readMarket<Benchmark>(BENCHMARK_PATH), readMarket<Insight>(INSIGHT_PATH)]);
+    const [benchmark, insight] = await marketRead;
     const market = marketContext(benchmark, insight);
     /**
      * Outside context, in two forms, and both of them cited.
@@ -571,10 +586,7 @@ export async function POST(request: Request) {
       // whole function. It was added here unbounded, which put an unbounded GitHub read inside the
       // ~5s this route has before the 55s model call - a slow contents API would have cost the
       // ANSWER, not just the brief. Losing the brief is cheap; losing the answer is the failure.
-      const brief = await Promise.race([
-        readLatestBrief().then((r) => r.brief),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), MARKET_READ_MS)),
-      ]);
+      const brief = await briefRead;
       outside = externalContext(brief, new Date());
     } catch { /* no brief is the pre-existing state, not an error worth failing on */ }
 
@@ -592,12 +604,14 @@ export async function POST(request: Request) {
      * not, because "only one person can reach it" is a property of today's deployment and this
      * is a property of the code.
      */
-    if (Array.isArray(body.webItems) && body.webItems.length) {
+    const liveWebSources: Passage[] = [];
+    if (body.web === true && Array.isArray(body.webItems) && body.webItems.length) {
       const clean = (v: unknown, max: number) => String(v ?? "").replace(/\s+/g, " ").trim().slice(0, max);
       const live = body.webItems
         .slice(0, WEB_ITEM_CAP)
         .map((i) => ({ title: clean(i?.title, 200), url: clean(i?.url, 500), snippet: clean(i?.snippet, 320) }))
         .filter((i) => i.title && /^https?:\/\//i.test(i.url));
+      live.forEach((item, index) => liveWebSources.push({ id: `web:${index}`, title: item.title, url: item.url, kind: "web", text: `Search snippet supplied for this question: ${item.snippet}`, date: new Date().toISOString().slice(0, 10) }));
       if (live.length) {
         outside += `${outside ? "\n\n" : ""}LIVE WEB RESULTS, fetched just now for this question. Cite the URL for anything you take from them, and say that you searched the web:\n` +
           live.map((i) => `- ${i.title} - ${i.url}${i.snippet ? `\n  ${i.snippet}` : ""}`).join("\n") +
@@ -677,7 +691,7 @@ export async function POST(request: Request) {
     ].filter(Boolean).join("\n\n");
 
     const messages = [
-      { role: "system", content: `You are Quaere, the study guide inside Lumen. Lumen is the dashboard; you are the guide within it. Explain every idea in fifth-grade reading language while keeping the technical meaning exact. Use short sentences, define jargon immediately, give one concrete technical example, connect it to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. The user message contains the COMPLETE plan - every topic across every track. Never tell the learner a subject is missing from the plan without checking that full list first. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. NEVER state how many recall cards are due, even if you can infer it: say whether recall is waiting. A backlog number is what makes people abandon a spaced-repetition system, and this learner has 23 months left.\n\n${libraryContext(library, sourceCatalog.sources)}\n\nBOOKS RULE: you have titles, page counts and chapter names for these books. You do NOT have their text. Nothing in this repository holds a single page of any of them; the files live on the learner's own machine. Never quote, summarise or paraphrase a passage as though you had read their copy, and never attribute a claim to a specific page. Name the book and the chapter and say what to look for in it. This is the same rule the market numbers follow: cite what is in a file, invent nothing.\n\nThe public repository map is:\n${JSON.stringify(repositories)}${market ? MARKET_RULE : ""}${memoryBlock}` },
+      { role: "system", content: `You are Lumen, the private workspace study guide. Explain every idea in fifth-grade reading language while keeping the technical meaning exact. Use short sentences, define jargon immediately, give one concrete technical example, connect it to production systems and FDE interviews, and finish with one practical next step. Use the plan, library map, and repository map as supporting context; do not invent progress. The user message contains the COMPLETE plan - every topic across every track. Never tell the learner a subject is missing from the plan without checking that full list first. Never emit hidden reasoning, <think> tags, asterisks, or em dashes. NEVER state how many recall cards are due, even if you can infer it: say whether recall is waiting. A backlog number is what makes people abandon a spaced-repetition system, and this learner has 23 months left.\n\n${libraryContext(library, sourceCatalog.sources)}\n\nBOOKS RULE: you have titles, page counts and chapter names for these books. You do NOT have their text. Nothing in this repository holds a single page of any of them; the files live on the learner's own machine. Never quote, summarise or paraphrase a passage as though you had read their copy, and never attribute a claim to a specific page. Name the book and the chapter and say what to look for in it. This is the same rule the market numbers follow: cite what is in a file, invent nothing.\n\nThe public repository map is:\n${JSON.stringify(repositories)}${market ? MARKET_RULE : ""}${memoryBlock}` },
       // Picked field by field, not spread. The client stores an assistant turn as
       // `{role, content, reportUrl?}`, and forwarding a turn that saved a report shipped a
       // `reportUrl` key into an OpenAI-shaped messages array. The declared type hid it from
@@ -688,11 +702,27 @@ export async function POST(request: Request) {
       ...(body.history || []).slice(-8).map((m) => ({ role: m.role, content: m.content })),
       { role: "user", content: `${planMap(liveStatuses(body.statuses))}\n\nCurrently visible in the dashboard:\n${body.context || "No topic filter is active."}${deep ? `\n\n${deep}` : ""}${market ? `\n\n${market}` : ""}${extra ? `\n\n${extra}` : ""}\n\nQuestion:\n${body.prompt}` },
     ];
-    const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, messages, temperature: 0.4, max_completion_tokens: MAX_ANSWER_TOKENS, stream: false }), signal: AbortSignal.timeout(MODEL_TIMEOUT_MS) });
-    const raw = await response.text();
-    let data: { choices?: { message?: { content?: string }; finish_reason?: string }[]; base_resp?: { status_msg?: string } } = {};
-    try { data = JSON.parse(raw); } catch { console.error("[api/ask] MiniMax returned non-JSON", { status: response.status }); }
-    if (!response.ok) { console.error("[api/ask] MiniMax rejected request", { status: response.status, message: data.base_resp?.status_msg }); return NextResponse.json({ error: "The learning guide is temporarily unavailable. Try again in a moment." }, { status: 502 }); }
+    const dynamic: Passage[] = [
+      market && { id: "market:current", title: `Market benchmark ${benchmark?.day ?? "date unavailable"}`, url: "/market", kind: "market", text: market, date: benchmark?.day },
+      benchmark && { id: "market:gaps", title: "Audited market gaps", url: "/market", kind: "market", text: benchmarkGapsContext(benchmark), date: benchmark.day },
+      insight && { id: "market:skills", title: "Measured skill demand and reachability", url: "/market", kind: "market", text: marketDepthContext(insight), date: benchmark?.day },
+      { id: "records:evidence", title: "Recorded proof and study sessions", url: "/overview", kind: "records", text: evidenceContext({ artifacts: artifacts.artifacts, synced: artifacts.synced }, sessions) },
+      ...Array.from(liveStatuses(body.statuses)).flatMap(([topic, status]): Passage[] => {
+        const index = workbook.Plan.slice(1).findIndex((row) => String(row[2]).trim().toLowerCase() === topic);
+        return index < 0 ? [] : [{ id: `records:progress:${index + 1}`, title: `${workbook.Plan[index + 1][2]}: dashboard status`, url: `/plan?row=${index + 1}`, kind: "records", text: `Client-reported status for plan row ${index + 1}, ${workbook.Plan[index + 1][2]}: ${status}. This is the dashboard state supplied with the question, not independently verified evidence of completed work.` }];
+      }),
+      { id: "records:papers", title: "Recorded practice papers", url: "/practice", kind: "records", text: papersContext(papersR.status === "fulfilled" ? papersR.value : { papers: [], synced: false }, (row) => String((workbook.Plan as PlanRow[])[row + 1]?.[2] ?? `row ${row + 1}`)) },
+    ].filter((passage): passage is Passage => !!passage);
+    const grounded = await answerWithRetrieval({
+      messages: messages as ModelMessage[], query: `${body.prompt}${body.topicIndex === undefined ? "" : ` ${workbook.Plan[body.topicIndex + 1][2]}`}`, passages: [...workspaceCorpus(), ...dynamic, ...liveWebSources], signal: requestBudget,
+      recorded: (query) => searchRecordedWork(query, AbortSignal.any([requestBudget, AbortSignal.timeout(2500)])),
+      complete: async (conversation, tools) => {
+        const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, messages: conversation, temperature: 0.4, max_completion_tokens: MAX_ANSWER_TOKENS, stream: false, ...(tools ? { tools, tool_choice: "auto" } : {}) }), signal: AbortSignal.any([requestBudget, AbortSignal.timeout(MODEL_TIMEOUT_MS)]) });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data) throw new Error("ModelUnavailable");
+        return data as ModelTurn;
+      },
+    });
     /*
      * `finish_reason: "length"` means the cap stopped it, not the model. Nothing read this before,
      * so a truncated answer was returned to the reader and committed to reports/asks/ as though it
@@ -702,14 +732,14 @@ export async function POST(request: Request) {
      * whole request. It is labelled instead, so the reader knows to ask for the rest rather than
      * assuming the guide had nothing more to say.
      */
-    const cut = data.choices?.[0]?.finish_reason === "length";
-    let answer = cleanAnswer(data.choices?.[0]?.message?.content || "");
+    const cut = grounded.finishReason === "length";
+    let answer = cleanAnswer(grounded.answer);
     if (answer && cut) {
       answer += "\n\n---\n\n**This answer hit the length limit and stops here.** Ask me to continue from where it broke off and I will pick up from that point.";
     }
-    if (!answer) { console.error("[api/ask] MiniMax returned an empty answer", { status: response.status }); return NextResponse.json({ error: "The learning guide returned an empty answer. Try asking again." }, { status: 502 }); }
+    if (!answer) { console.error("[api/ask] MiniMax returned an empty answer", { reason: "No final response" }); return NextResponse.json({ error: "The learning guide returned an empty answer. Try asking again." }, { status: 502 }); }
     let reportUrl: string | null = null;
-    try { reportUrl = await saveAskReport(body.prompt, body.context || "", answer); } catch (error) { console.error("[api/ask] GitHub report save exception", { error: String(error) }); }
+    try { reportUrl = await saveAskReport(body.prompt, body.context || "", answer + (grounded.sources.length ? `\n\n## Sources\n${grounded.sources.map((source) => `[${source.label}] ${source.title} - ${source.url}\n${source.text.slice(0, 500)}`).join("\n\n")}` : "")); } catch (error) { console.error("[api/ask] GitHub report save exception", { error: String(error) }); }
     /**
      * Remember the exchange - only now, and only because it succeeded.
      *
@@ -734,6 +764,6 @@ export async function POST(request: Request) {
       } catch { /* the answer matters more than the bookkeeping */ }
     }
 
-    return NextResponse.json({ answer, reportUrl });
-  } catch (error) { const message = String(error); console.error("[api/ask] request failed", { error: message }); if (message.includes("TimeoutError") || message.includes("timed out")) return NextResponse.json({ error: "Lumen is taking longer than expected. Try the question again with a shorter prompt." }, { status: 504 }); return NextResponse.json({ error: "Lumen could not reach the learning guide. Try again in a moment." }, { status: 500 }); }
+    return NextResponse.json({ answer, reportUrl, sources: grounded.sources, retrieval: grounded.retrieval });
+  } catch (error) { const message = String(error); console.error("[api/ask] request failed", { error: message }); if (message.includes("ModelUnavailable")) return NextResponse.json({ error: "The learning guide is temporarily unavailable. Try again in a moment." }, { status: 502 }); if (message.includes("TimeoutError") || message.includes("timed out")) return NextResponse.json({ error: "Lumen is taking longer than expected. Try the question again with a shorter prompt." }, { status: 504 }); return NextResponse.json({ error: "Lumen could not reach the learning guide. Try again in a moment." }, { status: 500 }); }
 }

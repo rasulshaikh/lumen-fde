@@ -8,11 +8,12 @@ import { AppStateProvider, useAppState } from "@/components/AppState";
 import { NAV, Nav } from "@/components/Nav";
 import { AskDock } from "./dock";
 import { PROGRAMME, TITLE } from "@/lib/profile";
+import { WorkspaceProvider } from "@/components/WorkspaceState";
 import "./workspace.css";
 
 // Keep the provider mounted across routes: sessions and progress must survive navigation.
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  return <AppStateProvider><Chrome>{children}</Chrome></AppStateProvider>;
+  return <WorkspaceProvider><AppStateProvider><Chrome>{children}</Chrome></AppStateProvider></WorkspaceProvider>;
 }
 
 function Chrome({ children }: { children: React.ReactNode }) {

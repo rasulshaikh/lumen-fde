@@ -1,3 +1,5 @@
+import { mockStorageKey } from "@/lib/workspace-state";
+import { useWorkspace } from "./WorkspaceState";
 import type { Evidence, Streak } from "@/lib/motivation";
 import { Link, mockRows, pct, planRows, tracks, type Row } from "./shared";
 import { ShippedWall, type ArtifactsFeed } from "./ShippedWall";
@@ -200,6 +202,7 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
   /** The focus row's Read link, passed through so the brief does not reach into the workbook. */
   readingUrl: string | null;
 }) {
+  const workspace = useWorkspace();
   return <>
       {/*
         TWO FLOWING COLUMNS, not a stack of two-column rows.
@@ -227,7 +230,7 @@ export function Overview({ done, activeRows, skipped, hours, doneHours, skippedH
 
       {recall}
 
-      <section className="metric-grid"><Metric label="Plan progress" value={`${pct(done, activeRows.length)}%`} detail={`${done} of ${activeRows.length} active${skipped ? ` · ${skipped} of ${planRows.length} skipped` : ""}`} tone="rose" /><Metric label="Hours remaining" value={`${Math.max(hours - doneHours, 0)}`} detail={`of ${hours} active hours${skippedHours ? ` · ${skippedHours}h skipped` : ""}`} tone="teal" /><div className="metric brass"><span className="metric-label">Weekly commitment</span><strong><input className="weekly-input" type="number" min={1} max={80} value={weeklyHours} aria-label="Hours you study each week" onChange={(e) => setWeekly(Number(e.target.value))} />h</strong><span className="metric-detail">{(hours / weeklyHours).toFixed(1)} weeks · {(hours / weeklyHours / 4.333).toFixed(1)} months</span></div><Metric label="Mocks" value={`${mockRows.reduce((n, r) => n + Number(r[6] || 0), 0)} / ${mockRows.reduce((n, r) => n + Number(r[1] || 0), 0)}`} detail="completed / target" tone="ink" /></section>
+      <section className="metric-grid"><Metric label="Plan progress" value={`${pct(done, activeRows.length)}%`} detail={`${done} of ${activeRows.length} active${skipped ? ` · ${skipped} of ${planRows.length} skipped` : ""}`} tone="rose" /><Metric label="Hours remaining" value={`${Math.max(hours - doneHours, 0)}`} detail={`of ${hours} active hours${skippedHours ? ` · ${skippedHours}h skipped` : ""}`} tone="teal" /><div className="metric brass"><span className="metric-label">Weekly commitment</span><strong><input className="weekly-input" type="number" min={1} max={80} value={weeklyHours} aria-label="Hours you study each week" onChange={(e) => setWeekly(Number(e.target.value))} />h</strong><span className="metric-detail">{(hours / weeklyHours).toFixed(1)} weeks · {(hours / weeklyHours / 4.333).toFixed(1)} months</span></div><Metric label="Mocks" value={workspace.status === "loading" || workspace.status === "error" ? "—" : `${mockRows.reduce((n, r) => n + Number(workspace.entries[mockStorageKey(String(r[0]))]?.value ?? r[6] ?? 0), 0)} / ${mockRows.reduce((n, r) => n + Number(r[1] || 0), 0)}`} detail="completed / target" tone="ink" /></section>
 
       <div className="home-cols">
         <div className="home-main">
