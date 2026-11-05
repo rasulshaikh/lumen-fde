@@ -17,7 +17,7 @@ from either doc.
 
 A single-user study platform for one 23-month Senior FDE plan. Three things run:
 
-1. **A Next.js app on Vercel** - the dashboard (10 tabs), 15 API routes, and 2 cron endpoints.
+1. **A Next.js app on Vercel** - the dashboard (10 tabs), 16 API routes, and 2 cron endpoints.
 2. **An MCP server on Render** - 18 tools, so Claude Code can read the same plan the dashboard
    reads, and write progress back to it.
 3. **GitHub, as the database** - every mutable artifact (progress events, review schedule,
@@ -171,7 +171,7 @@ Four tabs fetch; the rest render bundled JSON:
 The Plan tab writes status to `localStorage` under `lumen-statuses` and mirrors it to
 `POST /api/progress`; on load it merges back whatever `GET /api/progress` returns.
 
-### 3.3 The 15 API routes
+### 3.3 The 16 API routes
 
 | route | methods | what it does | degrades to |
 |---|---|---|---|
@@ -186,6 +186,7 @@ The Plan tab writes status to `localStorage` under `lumen-statuses` and mirrors 
 | `app/api/session/route.ts` | POST | Records that a study session happened, under `reports/companion/sessions`, and updates the companion digest. Same row-validated, topic-derived, append-only discipline as artifacts. **It never writes progress** - marking a row goes through `/api/progress`, which owns that validation and the hydration write-guard. | 400 on an invalid row; 502 when the write fails, leaving the session open to retry |
 | `app/api/external-brief/route.ts` | GET, POST | The one thing Lumen shows that is not a file in the repo. GET returns the stored brief and refreshes it when it is a day old, writing a dated file plus `latest.json` under `reports/external`; POST runs one live search for one question and stores nothing. `maxDuration = 60`, and both budgets are subtraction from it. | 503 without SurfSense config; a failed refresh returns the brief already stored, honestly dated |
 | `app/api/papers/route.ts` | GET, POST | The exam history. POST records one sitting of the Practice test runner under `reports/papers/`, append-only by protocol (no `sha`); GET returns the most recent four. **It does not touch `reports/review/state.json`** - the spaced-repetition ladder is moved one card at a time by the recall strip, and a practice paper advancing twenty scheduled cards is what would make that schedule untrustworthy. | 400 on an invalid paper; 502 when the write fails; `synced:false` on GET means unknown, never none |
+| `app/api/workspace/route.ts` | GET, PUT | Shared preferences, mock counts and saved GTM modules with per-key revisions. | 409 on stale edits, 503 when sync is unavailable |
 | `app/api/auth/logout/route.ts` | POST | Expires the owner session cookie. | Same-origin JSON required |
 | `app/api/auth/login/route.ts` | POST | Issues the session cookie. | 503 without `LUMEN_PASSWORD` |
 | `app/api/cron/market-scan/route.ts` | GET | Section 5. | 401 without a matching `CRON_SECRET` |
@@ -824,7 +825,7 @@ standing fact. The market block at the bottom is all of the second kind.
 | `BOARD_COUNT` | 27 | `lib/market/benchmark.ts` |
 | skills / gaps / over-invested | 34 <!-- verify:skills=34 --> / 13 <!-- verify:gaps=13 --> / 3 | `data/market-skill-map.json` |
 | tabs | 10 <!-- verify:tabs=10 --> | `components/Nav.tsx` `NAV` |
-| API routes | 15 <!-- verify:api_routes=15 --> | `app/api/**/route.ts` |
+| API routes | 16 <!-- verify:api_routes=16 --> | `app/api/**/route.ts` |
 | crons | 2 <!-- verify:crons=2 --> (03:00, 03:30 UTC) | `vercel.json` |
 | MCP tools | 18 <!-- verify:mcp_tools=18 --> | `mcp/server.js` `tools` |
 | review ladder | `[1, 7, 21, 60, 150, 240, 330]` - 7 rungs <!-- verify:ladder_rungs=7 --> | `lib/review.ts` |
@@ -852,3 +853,5 @@ superseded by the next 03:00 UTC run. Read the report file before quoting any of
 | segments | 5 | `reports/market/insight.json` |
 | over-investment | 335h, 3 tracks, 26 rows, 21% | `reports/market/benchmark.json` `overInvestedTotal` |
 | trend points recorded | 2 | `reports/market/trend.json` |
+
+The Ask Lumen retrieval loop and shared-state protocol are documented in [agentic retrieval](../agentic-rag.md).

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0 - source-backed Ask Lumen and usable workspace flows
+
+- Add bounded, model-directed private-source retrieval with validated citations and inspectable excerpts. Keep web search opt-in and clearly identify book maps rather than PDF text.
+- Paginate the plan, add a current-topic shortcut, fix narrow Market overflow, enlarge phone controls and restore assistant keyboard focus.
+- Add conditional cloud sync for preferences, editable mock repetition counts and saved GTM modules, with retries and conflict handling.
+- Complete the HubSpot data-contract exercise and retain unsaved device drafts when a different cloud copy exists.
+- Add a shared large-display preference for more readable type and controls.
+
+
 ## 1.1.0 - private workspace hardening
 
 - Fail closed when owner authentication or production session signing is missing. Use independently signed 12-hour sessions, same-origin JSON writes, body limits, private cache headers and a nonce-based script policy.

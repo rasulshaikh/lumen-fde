@@ -589,7 +589,7 @@ block is simply absent from the answer.
 Both owner login and MCP authentication fail closed when their configuration is missing:
 
 - **`LUMEN_PASSWORD` or production `LUMEN_SESSION_SECRET` missing:** private routes return 503.
-  All 10 tabs and all 15 API routes remain private. <!-- verify:tabs=10 --> <!-- verify:api_routes=15 -->
+  All 10 tabs and all 16 API routes remain private. <!-- verify:tabs=10 --> <!-- verify:api_routes=16 -->
   Check `/api/progress`, not the intentionally public landing page or `/healthz`.
   Restore configuration through owner access in Vercel, then redeploy and sign in again.
 - **`MCP_API_KEY` unset → fails closed.** `authError()` in `mcp/server.js` refuses by default:

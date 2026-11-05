@@ -1,3 +1,4 @@
+import { githubFetch } from "@/lib/github";
 /**
  * What Quaere has already answered.
  *
@@ -27,7 +28,7 @@ export function parseAskName(name: string): AskTitle | null {
 export async function readAskTitles(limit = 8): Promise<AskTitle[]> {
   if (!process.env.GITHUB_TOKEN) return [];
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/contents/${ASKS_DIR}?ref=${branch}`, {
+    const response = await githubFetch(`https://api.github.com/repos/${repo}/contents/${ASKS_DIR}?ref=${branch}`, {
       headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, Accept: "application/vnd.github+json" },
       cache: "no-store",
     });

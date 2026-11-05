@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useWorkspace } from "./WorkspaceState";
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 
@@ -83,6 +84,25 @@ const TOOLS = [
 
 export function Nav() {
   const pathname = usePathname();
+  const cloud = useWorkspace();
+  const displayRevision = useRef<string | null | undefined>(undefined);
+  const [largeDisplay, setLargeDisplay] = useState(false);
+  useEffect(() => {
+    if (cloud.status !== "ready" && cloud.status !== "loading") return;
+    const entry = cloud.entries["settings.display"];
+    if (displayRevision.current === (entry?.revision ?? null)) return;
+    displayRevision.current = entry?.revision ?? null;
+    const value = entry?.value;
+    let local = false; try { local = localStorage.getItem("lumen-display") === "large"; } catch {}
+    const large = value === "large" || (!value && local);
+    setLargeDisplay(large); document.documentElement.dataset.display = large ? "large" : "standard";
+  }, [cloud.entries, cloud.status]);
+  const toggleDisplay = () => {
+    const large = !largeDisplay; setLargeDisplay(large);
+    document.documentElement.dataset.display = large ? "large" : "standard";
+    try { localStorage.setItem("lumen-display", large ? "large" : "standard"); } catch {}
+    cloud.update("settings.display", large ? "large" : "standard");
+  };
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState("");
   const signOut = async () => {
@@ -105,6 +125,7 @@ export function Nav() {
       <div className="workspace-tools-menu">
         <p className="eyebrow">Tools & resources</p>
         {TOOLS.map((item) => <Link key={item.href} href={item.href} aria-current={pathname === item.href ? "page" : undefined} onClick={() => { if (menu.current) menu.current.open = false; }}><strong>{item.label}</strong><span>{item.detail}</span></Link>)}
+        <button className="ghost-button" aria-pressed={largeDisplay} onClick={toggleDisplay}>{largeDisplay ? "Use standard display" : "Use large display"}</button>
         <button className="ghost-button" disabled={signingOut} onClick={signOut}>{signingOut ? "Signing out…" : "Sign out"}</button>
         {error && <p role="alert">{error}</p>}
       </div>

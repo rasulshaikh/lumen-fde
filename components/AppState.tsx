@@ -24,7 +24,11 @@ import { SyllabusView } from "./SyllabusView";
  */
 
 export type ProgressSync = "loading" | "ready" | "failed";
-type Message = { role: "user" | "assistant"; content: string; reportUrl?: string };
+import { useWorkspace } from "./WorkspaceState";
+
+import type { CitedSource, RetrievalSummary } from "@/lib/rag/types";
+
+type Message = { role: "user" | "assistant"; content: string; reportUrl?: string; sources?: CitedSource[]; retrieval?: RetrievalSummary };
 
 type AppState = {
   // progress
@@ -110,6 +114,9 @@ export function useAppState() {
 }
 
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
+  const cloud = useWorkspace();
+  const updateWorkspace = cloud.update;
+  const settingsRevisions = useRef<Record<string, string>>({});
   // statuses starts empty and hydrates asynchronously below, so between first paint and
   // hydration every select shows the workbook baseline ("Not started" on 117 rows) rather
   // than recorded state. Touching one in that window used to POST a durable commit that
@@ -183,7 +190,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // neither tracked reality. One source of truth, editable, persisted like statuses.
   const [weeklyHours, setWeeklyHours] = useState(16);
   useEffect(() => { const v = Number(localStorage.getItem("lumen-weekly-hours")); if (v >= 1 && v <= 80) setWeeklyHours(v); }, []);
-  const setWeekly = useCallback((value: number) => { const v = Math.min(80, Math.max(1, Math.round(value) || 1)); setWeeklyHours(v); localStorage.setItem("lumen-weekly-hours", String(v)); }, []);
+  const setWeekly = useCallback((value: number) => { const v = Math.min(80, Math.max(1, Math.round(value) || 1)); setWeeklyHours(v); try { localStorage.setItem("lumen-weekly-hours", String(v)); } catch {} updateWorkspace("settings.weeklyHours", v); }, [updateWorkspace]);
 
   // The applied theme is set by an inline script in layout.tsx before first paint, so this
   // only mirrors it into React state for the button label - reading it here rather than
@@ -191,15 +198,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // per-route copy would re-read the DOM on every navigation for no gain.
   const [theme, setTheme] = useState<"light" | "dark">("light");
   useEffect(() => { setTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light"); }, []);
-  const toggleTheme = useCallback(() => setTheme((current) => {
-    const next = current === "dark" ? "light" : "dark";
-    const root = document.documentElement;
-    root.classList.add("theme-switching");
-    root.dataset.theme = next;
-    localStorage.setItem("lumen-theme", next);
-    requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("theme-switching")));
-    return next;
-  }), []);
+  const toggleTheme = useCallback(() => {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next); document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("lumen-theme", next); } catch {}
+    updateWorkspace("settings.theme", next);
+  }, [theme, updateWorkspace]);
 
   // The merged syllabus is ~3.7MB, so never fetch it whole: pull a tiny summary to label
   // collapsed rows, then one topic at a time as it is opened. Both caches are provider state
@@ -315,7 +319,18 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const setAim = useCallback((id: string | null) => {
     setAimState(id);
     try { id ? localStorage.setItem("lumen-path", id) : localStorage.removeItem("lumen-path"); } catch { /* nothing to do */ }
-  }, []);
+    updateWorkspace("settings.aim", id);
+  }, [updateWorkspace]);
+
+  useEffect(() => {
+    if (cloud.status !== "ready") return;
+    const hoursEntry = cloud.entries["settings.weeklyHours"];
+    const themeEntry = cloud.entries["settings.theme"];
+    const aimEntry = cloud.entries["settings.aim"];
+    if (hoursEntry && settingsRevisions.current.hours !== hoursEntry.revision) { settingsRevisions.current.hours = hoursEntry.revision; setWeeklyHours(Number(hoursEntry.value)); try { localStorage.setItem("lumen-weekly-hours", String(hoursEntry.value)); } catch {} }
+    if (themeEntry && settingsRevisions.current.theme !== themeEntry.revision) { settingsRevisions.current.theme = themeEntry.revision; const value = themeEntry.value as "light" | "dark"; setTheme(value); document.documentElement.dataset.theme = value; try { localStorage.setItem("lumen-theme", value); } catch {} }
+    if (aimEntry && settingsRevisions.current.aim !== aimEntry.revision) { settingsRevisions.current.aim = aimEntry.revision; setAimState(aimEntry.value as string | null); try { aimEntry.value ? localStorage.setItem("lumen-path", String(aimEntry.value)) : localStorage.removeItem("lumen-path"); } catch {} }
+  }, [cloud.entries, cloud.status]);
 
   const statusesRef = useRef<Record<string, string>>({});
   // A ref so askLumen does not need `aim` in its dependency array and go stale.
@@ -342,7 +357,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         if (Array.isArray(data.items) && data.items.length) webItems = data.items;
       } catch { /* the answer still goes ahead, and says the search did not come back */ }
     }
-    try { const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, context: pageContext.current.context, topicIndex, history: messages, web: Boolean(opts.web), webItems, selection: opts.selection || undefined, statuses: statusesRef.current, streak: progressRef.current ? computeStreak(progressRef.current, new Date()).statement : undefined, aim: aimRef.current }) }); const data = await res.json(); setMessages((m) => [...m, { role: "assistant", content: data.answer || data.error || "Lumen could not answer right now.", reportUrl: data.reportUrl || undefined }]); } catch { setMessages((m) => [...m, { role: "assistant", content: "Lumen is unavailable. Add MINIMAX_API_KEY in Vercel project settings and try again." }]); } finally { setAsking(false); }
+    try { const res = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, context: pageContext.current.context, topicIndex, history: messages.slice(-8).map(({ role, content, sources }) => ({ role, content: (content.slice(0, 4500) + (sources?.length ? `\nPrior answer references (not current source labels):\n${sources.slice(0, 6).map((source) => `${source.label}: ${source.title} - ${source.url}`).join("\n")}` : "")).slice(0, 6000) })), web: Boolean(opts.web), webItems, selection: opts.selection || undefined, statuses: statusesRef.current, streak: progressRef.current ? computeStreak(progressRef.current, new Date()).statement : undefined, aim: aimRef.current }) }); const data = await res.json(); setMessages((m) => [...m, { role: "assistant", content: data.answer || data.error || "Lumen could not answer right now.", reportUrl: data.reportUrl || undefined, sources: data.sources, retrieval: data.retrieval }]); } catch { setMessages((m) => [...m, { role: "assistant", content: "Lumen is unavailable. Add MINIMAX_API_KEY in Vercel project settings and try again." }]); } finally { setAsking(false); }
   }, [askText, asking, askTopic, messages]);
 
   useEffect(() => {

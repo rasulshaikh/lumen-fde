@@ -21,14 +21,14 @@ const ck = (name: string, condition: boolean, extra = "") => {
 };
 
 const ready = GTM_MODULES[0];
-const outline = GTM_MODULES[1];
+const contract = GTM_MODULES[1];
 
-console.log("the path is one written module and one outline");
+console.log("the path is two complete practical modules");
 {
   ck("two modules", GTM_MODULES.length === 2);
   ck("first is Map the revenue system, and it is ready", ready?.kind === "ready" && ready.title === "Map the revenue system");
-  ck("second is the HubSpot contract, and it is an outline", outline?.kind === "outline" && outline.title === "Build the HubSpot data contract");
-  ck("the outline names the module it follows", outline?.kind === "outline" && outline.follows === "Map the revenue system");
+  ck("second is the HubSpot contract, and it is ready", contract?.kind === "ready" && contract.title === "Build the HubSpot data contract");
+  ck("the contract defines all three objects", contract?.kind === "ready" && contract.contract?.length === 3);
   if (ready?.kind === "ready") {
     ck("three acceptance checks", ready.acceptance.length === 3);
     ck("the review question is the bad-leads question", /bad leads/.test(ready.reviewQuestion));
@@ -45,7 +45,7 @@ console.log("stored marks that are not this path are dropped");
   ck("non-string drafts dropped", !("map-the-revenue-system" in parseGtmDrafts('{"map-the-revenue-system":12}')));
   ck("a real draft is kept", parseGtmDrafts('{"map-the-revenue-system":"measure first"}')["map-the-revenue-system"] === "measure first");
   ck("checks of the wrong length are dropped", !("map-the-revenue-system" in parseGtmChecks('{"map-the-revenue-system":[true]}')));
-  ck("checks for an outline module are dropped", !("hubspot-data-contract" in parseGtmChecks('{"hubspot-data-contract":[true]}')));
+  ck("checks of the wrong contract length are dropped", !("hubspot-data-contract" in parseGtmChecks('{"hubspot-data-contract":[true]}')));
   ck("three booleans are kept", parseGtmChecks('{"map-the-revenue-system":[true,false,true]}')["map-the-revenue-system"]?.join(",") === "true,false,true");
 }
 
@@ -62,13 +62,13 @@ console.log("Ask context names the tab and the selected module, and nothing that
   ck("acceptance checks are in the context", ready.kind === "ready" && ready.acceptance.every((check) => none.includes(check)));
 
   const done = gtmPageContext({
-    moduleId: outline.id,
+    moduleId: contract.id,
     statuses: { "map-the-revenue-system": "Done" },
     marksKnown: true,
   });
   ck("a finished module is named", done.includes("Learner-marked complete: Map the revenue system."));
-  ck("the outline says it is an outline", done.includes("outline only"));
-  ck("the outline does not carry the previous module's review question", ready.kind === "ready" && !done.includes(ready.reviewQuestion));
+  ck("the contract provides a written module", done.includes("written module on screen"));
+  ck("the contract does not carry the previous module's review question", ready.kind === "ready" && !done.includes(ready.reviewQuestion));
 
   const unknown = gtmPageContext({ moduleId: "not-a-module", statuses: {}, marksKnown: true });
   ck("an unknown id is said to be unknown", unknown.includes("Selected module: none."));

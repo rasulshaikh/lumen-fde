@@ -36,6 +36,7 @@ export type GtmReadyModule = GtmModuleBase & {
   acceptance: string[];
   /** The measurement the review question is training, shown on the page. */
   example: string;
+  contract?: { object: string; key: string; writer: string; properties: string[]; rule: string }[];
 };
 
 export type GtmOutlineModule = GtmModuleBase & {
@@ -89,19 +90,140 @@ export const GTM_MODULES: GtmModule[] = [
     example: "Pull the last 90 days and count four things: leads sent, leads accepted as SQL, leads rejected, and closed-won regardless of acceptance. Lead-to-SQL uses every lead sent in the window as its denominator. SQL-to-close uses SQLs created in the window, not every lead. Mixing those two denominators inflates the win rate, and the sales team will trust that number less than they trust the leads. Measure first. The tool is not the measurement.",
   },
   {
-    id: "hubspot-data-contract",
-    kind: "outline",
-    title: "Build the HubSpot data contract",
-    blurb: "Turn the company, contact, and deal keys from the revenue map into a schema an integration could follow.",
-    follows: "Map the revenue system",
-    steps: [
-      "Name three objects only: Company, Contact, and Deal. One primary key each.",
-      "Say which properties marketing may write, and which only sales may write.",
-      "Put lifecycle stage on the contact and deal stage on the deal. Do not add a property that tries to be both.",
-      "Require a rejection reason, who rejected the lead, and the route back, on every contact sales returns.",
-      "State the associations: a deal points at one primary contact and one company. A contact may exist with no open deal.",
+    "id": "hubspot-data-contract",
+    "kind": "ready",
+    "title": "Build the HubSpot data contract",
+    "blurb": "Design a Company, Contact and Deal contract with stable keys, clear writers and replay-safe handoffs.",
+    "promise": "A versioned practice contract and fixtures that an integration could validate before writing to a CRM. These are exercise field names, not a claim that a live HubSpot connection exists.",
+    "company": "OrbitDesk",
+    "terms": [
+      {
+        "term": "Primary key",
+        "meaning": "The stable identifier for one object. A name or changing email address is not a durable integration key."
+      },
+      {
+        "term": "Association",
+        "meaning": "A link between two records, kept separate from either record’s properties."
+      },
+      {
+        "term": "Source of truth",
+        "meaning": "The system or team allowed to decide one field’s value. Another system can copy it without becoming its owner."
+      },
+      {
+        "term": "Idempotency",
+        "meaning": "Replaying the same event does not create a duplicate record or move a stage twice."
+      },
+      {
+        "term": "Quarantine",
+        "meaning": "Hold an invalid event for review with its reason, instead of silently discarding it or corrupting the CRM."
+      }
     ],
-  },
+    "lifecycle": [
+      "Subscriber",
+      "Lead",
+      "MQL",
+      "SQL",
+      "Customer"
+    ],
+    "dealStages": [
+      "Qualified",
+      "Proposal",
+      "Closed-won",
+      "Closed-lost"
+    ],
+    "handoffs": [
+      "Marketing owns lifecycle qualification through MQL. Sales alone accepts SQL or rejects a handoff with a reason.",
+      "An accepted handoff includes event_id, occurred_at, contact_id, owner_id and contract_version. Retries reuse event_id.",
+      "A rejection records reason, rejecting owner and return queue. Missing values send the event to quarantine.",
+      "A closed-won deal and a customer lifecycle change are linked, but remain two distinct updates. Retry either safely."
+    ],
+    "contract": [
+      {
+        "object": "Company",
+        "key": "company_id",
+        "writer": "RevOps owns identity; enrichment may propose non-key attributes.",
+        "properties": [
+          "company_id",
+          "legal_name",
+          "domain",
+          "owner_id"
+        ],
+        "rule": "Require an immutable company_id. Domain is a matching hint; mergers and domain changes need explicit review."
+      },
+      {
+        "object": "Contact",
+        "key": "contact_id",
+        "writer": "Marketing owns lifecycle through MQL; sales owns SQL acceptance and rejection.",
+        "properties": [
+          "contact_id",
+          "company_id",
+          "email",
+          "lifecycle_stage",
+          "rejection_reason",
+          "rejected_by",
+          "return_queue"
+        ],
+        "rule": "Keep lifecycle separate from deal stage. A rejected handoff requires all three rejection fields. A contact can exist with no deal."
+      },
+      {
+        "object": "Deal",
+        "key": "deal_id",
+        "writer": "Sales owns opportunity stage, amount and expected close date.",
+        "properties": [
+          "deal_id",
+          "company_id",
+          "primary_contact_id",
+          "deal_stage",
+          "amount",
+          "currency",
+          "close_date"
+        ],
+        "rule": "Require associated records to exist before advancing. Preserve a mapping between these exercise keys and CRM-generated object IDs."
+      }
+    ],
+    "artifacts": [
+      {
+        "file": "crm-contract.v1.json",
+        "holds": "Objects, field types, required values, allowed writers and association rules."
+      },
+      {
+        "file": "handoff-events.jsonl",
+        "holds": "One valid event, a replay of it, a rejected lead and an invalid association fixture."
+      },
+      {
+        "file": "contract-checks.md",
+        "holds": "Expected outcome for every fixture, migration rules and the quarantine owner."
+      }
+    ],
+    "metrics": [
+      {
+        "name": "Valid handoffs",
+        "numerator": "Events passing contract validation",
+        "denominator": "All handoff events received",
+        "window": "7 days"
+      },
+      {
+        "name": "Replay safety",
+        "numerator": "Repeated event IDs that cause no second effect",
+        "denominator": "All repeated event IDs received",
+        "window": "7 days"
+      },
+      {
+        "name": "Owned quarantine",
+        "numerator": "Invalid events assigned to a named reviewer",
+        "denominator": "All quarantined events",
+        "window": "7 days"
+      }
+    ],
+    "reviewQuestion": "A contact changes email, a handoff is delivered twice, and its deal references a missing company. Show the keys, write permissions and event outcomes that keep the CRM consistent.",
+    "acceptance": [
+      "Company, Contact and Deal each have one immutable integration key and an explicit CRM ID mapping.",
+      "The repeated event produces one effect, and a changed email does not create a second contact.",
+      "The missing association goes to an owned quarantine; a rejected lead has a reason, rejecting owner and return queue.",
+      "The contract distinguishes lifecycle from deal stage and defines how a version change is rolled out."
+    ],
+    "example": "Event evt-42 targets contact c-17 and company co-9. The contact’s new email updates c-17; it is not a new identity. Store the accepted event ID with the outcome, so a replay returns that outcome. If co-9 is absent, hold the event with reason missing_company and an assigned RevOps owner. Do not create an unowned company from an arbitrary string. Test this with fixtures before translating the exercise fields into the CRM API."
+  }
 ];
 
 const STATUS_SET = new Set<string>(GTM_STATUSES);
@@ -196,7 +318,7 @@ export function gtmPageContext(input: {
       ? `Selected module: ${module.title} (${module.id}). ${module.kind === "ready" ? "This is the written module on screen." : "This module is an outline only. It is not a finished lesson."}`
       : `Selected module: none. "${input.moduleId}" is not a module on this path.`,
     input.marksKnown
-      ? `Learner-marked complete: ${done.length ? done.join("; ") : "none"}. These marks live in this browser only and are not plan progress.`
+      ? `Learner-marked complete: ${done.length ? done.join("; ") : "none"}. These are self-marks, separate from plan progress. The module page shows whether its workspace copy has been saved.`
       : "Learner-marked complete: not read yet. Marks on this device load after the page mounts, so none means unknown here, not unfinished.",
   ];
 

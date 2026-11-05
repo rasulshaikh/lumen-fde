@@ -638,7 +638,7 @@ export function DesignGuide() {
             <button className="primary-button" style={{ width: "auto" }}>Open the plan <span aria-hidden="true">→</span></button>
             <button className="quiz-action">Reveal</button>
             <button className="quiz-action" disabled>Reveal (disabled)</button>
-            <button className="ask-trigger">Quaere</button>
+            <button className="ask-trigger">Ask Lumen</button>
             <button className="ghost-button">↗ Share</button>
             <button className="text-button">See all rows</button>
             <button className="theme-toggle" aria-label="Theme toggle specimen">☾</button>
@@ -726,7 +726,7 @@ export function DesignGuide() {
             <a className="resource-link" href="/plan">Read<span aria-hidden="true">↗</span></a>
             <span className="resource-link no-link">Watch</span>
             <button className="mkt-rowlink">R 59 <span>retrieval evaluation</span></button>
-            <button className="ask-row">Quaere</button>
+            <button className="ask-row">Ask Lumen</button>
           </div>
           <div className="wall-list" style={{ marginTop: 14 }}>
             <div className="wall-row"><span className="wall-num">R 12</span><span className="wall-main"><strong>Eval harness for a RAG pipeline</strong><span className="wall-topic">Retrieval-augmented generation</span></span><span className="wall-date">2026-08-14</span></div>
@@ -753,7 +753,7 @@ export function DesignGuide() {
             layout - it is fixed to the viewport, which is why it never tiles against an edge.
           </p>
           <div className="mkt-quaere">
-            <p className="eyebrow">Quaere&apos;s reading</p>
+            <p className="eyebrow">Lumen&apos;s reading</p>
             <p>The one tinted block in the system, and the one block that is not a measurement. A reader skimming should be able to tell that before reading a word of it.</p>
             <p className="mkt-quaere-foot">Generated from your plan · never a promise</p>
           </div>
