@@ -23,8 +23,8 @@ import {
 /**
  * /gtm — the revenue-system path.
  *
- * Completion stays in localStorage, the same way a path aim or a weekly target does, and it is
- * deliberately not posted to /api/progress. That route appends a plan-topic event in the repo.
+ * Unsaved drafts stay on this device; explicit module saves use /api/workspace. GTM marks
+ * are deliberately not posted to /api/progress, which appends plan-topic events in the repo.
  * These modules are not plan rows, and a topic string that is not in the workbook is how that
  * store grows a file nothing else can match.
  */
