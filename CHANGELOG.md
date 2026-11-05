@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1 - phone interaction fixes
+
+- Keep Ask Lumen above navigation so its Close button works in phone landscape.
+- Restore focus to a visible assistant opener after closing the panel.
+- Give machine sliders and the sandbox command field a 44-pixel interaction height.
+
 ## 1.2.0 - source-backed Ask Lumen and usable workspace flows
 
 - Add bounded, model-directed private-source retrieval with validated citations and inspectable excerpts. Keep web search opt-in and clearly identify book maps rather than PDF text.
