@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0 - visual study flow and pipeline reliability
+
+- Add a linked study-loop illustration, staged entry motion, navigation feedback and a source-search loading state; honor reduced-motion preferences.
+- Format assistant headings, lists, tables and code safely, with working source citations and escaped raw HTML.
+- Cache retrieval token indexes while invalidating changed passages; add a 13-query topic retrieval evaluation and disclose bounded note-search coverage.
+- Prevent malformed MCP traffic from crashing the process, validate tool arguments and origins, negotiate supported protocol versions, reject unmatched progress topics and return readable transport failures.
+- Preserve RAG warnings through MCP and expose the deployed revision, version and configured answer mode in MCP health checks.
+
 ## 1.2.1 - phone interaction fixes
 
 - Keep Ask Lumen above navigation so its Close button works in phone landscape.

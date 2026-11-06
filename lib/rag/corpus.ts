@@ -35,14 +35,12 @@ function build(): Passage[] {
 let corpus: Passage[] | undefined;
 export const workspaceCorpus = () => corpus ??= build();
 
-/** BM25 with title weighting and small query expansions. The model can reformulate and
- * search again; no embeddings service or private-content upload is needed to index. */
-export function searchPassages(query: string, docs: Passage[], kind?: SourceKind, limit = 6): Passage[] {
-  const base = [...new Set(tokens(query))].slice(0, 36);
-  const terms = [...new Set(base.flatMap((word) => [word, ...(ALIASES[word] ?? [])]))];
-  if (!terms.length) return [];
-  const selected = kind ? docs.filter((doc) => doc.kind === kind) : docs;
-  const candidates = selected.flatMap((doc) => {
+type IndexedPassage = { doc: Passage; length: number; counts: Map<string, number> };
+const tokenIndex = new WeakMap<Passage, { source: Passage; rows: IndexedPassage[] }>();
+function indexPassage(doc: Passage): IndexedPassage[] {
+  const cached = tokenIndex.get(doc);
+  if (cached && (["id", "title", "text", "url", "kind", "date"] as const).every((key) => doc[key] === cached.source[key])) return cached.rows;
+  const candidates = (() => {
     if (doc.text.length <= 1600) return [doc];
     const chunks: string[] = []; let chunk = "";
     for (const unit of doc.text.split(/\n+|(?<=[.!?])\s+/)) {
@@ -54,18 +52,35 @@ export function searchPassages(query: string, docs: Passage[], kind?: SourceKind
     }
     if (chunk) chunks.push(chunk);
     return chunks.map((text, index) => ({ ...doc, id: `${doc.id}:chunk:${index}`, title: `${doc.title} (part ${index + 1})`, text }));
+  })();
+
+  const rows = candidates.map((doc) => {
+    const words = tokens(`${doc.title} ${doc.title} ${doc.text}`), counts = new Map<string, number>();
+    for (const word of words) counts.set(word, (counts.get(word) || 0) + 1);
+    return { doc, length: words.length, counts };
   });
-  const indexed = candidates.map((doc) => ({ doc, words: tokens(`${doc.title} ${doc.title} ${doc.text}`) }));
-  const average = indexed.reduce((n, d) => n + d.words.length, 0) / (indexed.length || 1);
-  const frequencies = new Map(terms.map((term) => [term, indexed.filter((d) => d.words.includes(term)).length]));
-  return indexed.map(({ doc, words }) => {
+  tokenIndex.set(doc, { source: { ...doc }, rows });
+  return rows;
+}
+
+/** BM25 with title weighting and small query expansions. The model can reformulate and
+ * search again; no embeddings service or private-content upload is needed to index. */
+export function searchPassages(query: string, docs: Passage[], kind?: SourceKind, limit = 6): Passage[] {
+  const base = [...new Set(tokens(query))].slice(0, 36);
+  const terms = [...new Set(base.flatMap((word) => [word, ...(ALIASES[word] ?? [])]))];
+  if (!terms.length) return [];
+  const selected = kind ? docs.filter((doc) => doc.kind === kind) : docs;
+  const indexed = selected.flatMap(indexPassage);
+  const average = indexed.reduce((n, d) => n + d.length, 0) / (indexed.length || 1);
+  const frequencies = new Map(terms.map((term) => [term, indexed.filter((d) => d.counts.has(term)).length]));
+  return indexed.map(({ doc, length, counts }) => {
     let score = 0;
     for (const term of terms) {
-      const frequency = words.filter((word) => word === term).length;
+      const frequency = counts.get(term) || 0;
       if (!frequency) continue;
       const df = frequencies.get(term)!;
       const idf = Math.log(1 + (indexed.length - df + .5) / (df + .5));
-      score += idf * frequency * 2.2 / (frequency + 1.2 * (.25 + .75 * words.length / (average || 1)));
+      score += idf * frequency * 2.2 / (frequency + 1.2 * (.25 + .75 * length / (average || 1)));
     }
     if (doc.id.includes(":question:") && !/interview|quiz|question|test/i.test(query)) score *= .65;
     if (doc.id.includes(":part:")) score *= 1.1;
