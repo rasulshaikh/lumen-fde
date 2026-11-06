@@ -175,9 +175,16 @@
 .study-flow-node rect{fill:var(--surface);stroke:var(--line-strong);stroke-width:1.5}.study-flow-node path{stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.study-flow-node text{fill:var(--muted);font-size:11px;font-family:var(--font-mono)}
 .study-flow-links{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin-top:-12px}.study-flow-links :is(a,button){display:flex;min-height:52px;flex-direction:column;align-items:center;justify-content:center;gap:5px;text-decoration:none;color:var(--ink);padding:6px 2px;border:0;background:transparent;border-radius:5px;cursor:pointer;font:inherit}.study-flow-links strong{font-size:14px}.study-flow-links span{font-size:12px;color:var(--muted);text-align:center}.study-flow-links :is(a,button):hover{background:var(--surface)}
 .study-flow-caption{font-size:12px!important;line-height:1.5;color:var(--muted);margin:18px 0 0}
-
-@media(max-width:720px){.brief-workspace{gap:20px}.study-flow{padding:16px}.study-flow-links span{font-size:12px}}
 .answer-content{font-size:14px;line-height:1.65;overflow-wrap:anywhere}.answer-content p{white-space:normal;margin:10px 0!important}.answer-content h3{font-size:17px;line-height:1.35;letter-spacing:-.02em;margin:22px 0 10px}.answer-content h3:first-child{margin-top:8px}.answer-content :is(ul,ol){padding-left:22px;margin:10px 0}.answer-content li{margin:7px 0}.answer-content strong{font-weight:650}.answer-content code{font-family:var(--font-mono);font-size:.9em;background:var(--surface-strong);padding:2px 5px;border-radius:4px}.answer-content pre{max-width:100%;overflow:auto;padding:14px;background:var(--surface-strong);border:1px solid var(--line);border-radius:7px;white-space:pre;line-height:1.5}.answer-content pre code{background:none;padding:0}.answer-content a{color:var(--accent-text)}.answer-table{max-width:100%;overflow:auto}.answer-table table{width:100%;min-width:320px;border-collapse:collapse}.answer-table :is(th,td){padding:9px;text-align:left;border-bottom:1px solid var(--line);font-size:13px;white-space:normal}.answer-content hr{border:0;border-top:1px solid var(--line);margin:18px 0}
 .ask-searching{display:flex;align-items:center;gap:5px}.ask-searching i{width:5px;height:5px;flex-shrink:0;border-radius:50%;background:var(--accent-text)}.ask-searching p{margin-left:7px!important}
-
-@media(max-width:720px){.answer-content{font-size:15px}}
+@media(prefers-reduced-motion:no-preference){
+ .study-flow-node{animation:study-node-enter 600ms ease-out both;transform-box:fill-box;transform-origin:center}.study-flow-node.node-1{animation-delay:90ms}.study-flow-node.node-2{animation-delay:180ms}.study-flow-node.node-3{animation-delay:270ms}
+ .workspace-nav-link.active:after{animation:nav-confirm 220ms ease-out both;transform-origin:left}
+ .workspace-shell :is(.primary-button,.ghost-button,.study-flow-links a,.study-flow-links button){transition:transform 160ms ease-out,opacity 160ms ease-out}.workspace-shell :is(.primary-button,.ghost-button):active{transform:translateY(1px)}
+ .ask-panel{animation:ask-enter 240ms ease-out both}.ask-searching i{animation:source-search 600ms ease-in-out infinite alternate}.ask-searching i:nth-child(2){animation-delay:120ms}.ask-searching i:nth-child(3){animation-delay:240ms}
+}
+@keyframes study-node-enter{from{opacity:0;transform:translateY(8px) scale(.94)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes nav-confirm{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes ask-enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes source-search{from{opacity:.25;transform:translateY(0)}to{opacity:1;transform:translateY(-3px)}}
+@media(max-width:720px){.brief-workspace{gap:20px}.study-flow{padding:16px}.study-flow-links span{font-size:12px}.answer-content{font-size:15px}}
