@@ -4,7 +4,7 @@ Ask Lumen can search private workspace passages, choose a follow-up query and ci
 
 ## Sources and limits
 
-The server indexes 4,323 base passages from plan rows, detailed syllabus parts, failure modes, interview questions, proof briefs, book reference maps, repository maps and the two GTM modules. Long passages are chunked for retrieval. A local BM25 scorer, title weighting and small query expansions provide the initial search. The model can reformulate the query and call `search_workspace` when more evidence is needed.
+The server indexes 4,323 base passages from plan rows, detailed syllabus parts, failure modes, interview questions, proof briefs, book reference maps, repository maps and the two GTM modules. Long passages are chunked for retrieval. A cached local token index, BM25 scorer, title weighting and small query expansions provide the initial search. The model can reformulate the query and call `search_workspace` when more evidence is needed.
 
 Book maps contain titles, topics and chapter names, **not PDF text**. Lumen cannot honestly quote a book page or claim to have read the private PDFs. Repository maps are curated references, not cloned source code.
 
@@ -45,3 +45,17 @@ This is a private workspace, not real-time collaborative editing. Another device
 `npm run test:rag` covers corpus relevance, follow-up tools, citation validation, unknown tools, injection boundaries, cancellation, loop limits, conditional workspace writes, retries, conflicts, pagination and shared mock counts. Existing test scripts, lint, build and documentation checks remain release gates.
 
 Browser verification uses a local production build with isolated GitHub and model fixtures, so no fake production learning records are created. Live MiniMax behavior must also be checked in the approved deployed environment: the connected environment tools do not expose the model credential for an isolated local live-provider test. Do not describe a fixture response as live provider validation.
+
+## Visual and transport verification in 1.3.0
+
+The dashboard now includes a linked Learn / Build / Test / Ship diagram. The graphic and transition effects use opacity and transform, are brief, and honor reduced-motion preferences. Assistant replies render a restricted Markdown subset with escaped raw HTML, safe links, code, tables and validated citation targets.
+
+Retrieval indexes are reused for unchanged passages and invalidated when passage content or metadata changes. A local nine-query comparison measured mean warm retrieval at 360 ms before indexing and 39 ms after; the three compared query rankings were identical. This is a local microbenchmark, not an end-to-end provider latency promise. The 13-query evaluation finds each expected topic in the top five, including shell, Kubernetes, IAM, SQL, RAG, ACLs, inference and SSO.
+
+Recorded searches report how many candidates were listed and files inspected, and disclose record truncation. The tool never claims a bounded search proves that no work exists. This reduces a source of misleading absence claims; citation-label validation still does not establish factual entailment for every generated sentence.
+
+MCP uses stateless JSON responses with an explicit set of supported protocol versions, byte-based request limits and tool-schema validation. It handles malformed JSON, null bodies, unsupported methods, notifications, ping and legacy batches capped at four concurrent messages without crashing. Standalone GET/SSE returns 405. Browser origins are limited to `MCP_ALLOWED_ORIGINS` (default lumenfde.com and lumen-fde.vercel.app); native clients with no Origin still require the bearer credential. The health endpoint exposes version, revision and configured answer mode, not secrets. Unmatched progress topics are rejected before writing. A partially configured Ask proxy fails clearly, and a direct-model fallback is labelled context-only.
+
+Transport rules were checked against the [MCP transport specification](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports). The server advertises support through 2025-11-25; it does not pretend to support newer revisions by echoing an arbitrary requested version.
+
+`npm run test:pipelines` covers real MCP read tools, a local HTTP Ask proxy, source and warning preservation, malformed requests, argument checks, origin rejection and UTF-8 body limits, plus answer-rendering safety. All mutations remain isolated in test fixtures. Full authenticated live MCP calls require an existing configured MCP credential; a health check and unauthenticated 401 alone do not verify them.

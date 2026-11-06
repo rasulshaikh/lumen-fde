@@ -1,11 +1,9 @@
-const http = require("node:http");
+const { createTransport } = require("./transport");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 
 const root = path.resolve(__dirname, "..");
-const MAX_BODY = 128 * 1024;
-const PROTOCOL_VERSION = "2025-03-26";
 const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = 30;
 const rateBuckets = new Map();
@@ -39,11 +37,11 @@ const tools = [
   { name: "get_plan", description: "Read Rasul's Senior FDE plan: 119 rows over 23 months, 1588 active hours, with the read/watch/do resources and hours of each. Returns 30 rows per call unless you raise limit; pass row, month, track or query to narrow. The `status` field is the frozen workbook baseline (Not started on 117 rows, Skipped on 2) and never advances - for what is actually done use get_progress_analytics, and for what to do next use get_market_priorities.", inputSchema: { type: "object", properties: { query: { type: "string", description: "Case-insensitive substring of the topic." }, month: { type: "number", description: "Plan month, 1-23." }, track: { type: "string", description: "Case-insensitive substring of the track, e.g. \"Backend\"." }, row: { type: "integer", minimum: 1, maximum: 119, description: "One 1-based plan row, as market statements cite it." }, limit: { type: "integer", minimum: 1, maximum: 119, description: "Rows to return. Default 30; the whole plan is roughly 131 KB." } } } },
   { name: "get_learning_context", description: "Read the indexed books, the repository references, and the one hardcoded lesson context. The lesson is currently Shell Mastery and Scripting and is not selectable - there is one lesson file, not one per topic.", inputSchema: { type: "object", properties: {} } },
   { name: "get_syllabus", description: "Read the deep syllabus for a plan topic: prerequisites, 12-20 parts with what to learn and a public resource each, outcomes, production failure modes, interview questions, and proof of work. Pass row (1-based plan row, the number market statements cite) or index (row minus 1, the key the syllabus is stored under); query matches a topic or track substring; no args lists every topic that has one.", inputSchema: { type: "object", properties: { index: { type: "number", description: "0-based syllabus index. Equals plan row minus 1." }, row: { type: "integer", minimum: 1, maximum: 119, description: "1-based plan row. Preferred when you got the number from a market statement." }, query: { type: "string" } } } },
-  { name: "ask_lumen", description: "Ask Lumen for a fifth-grade-language technical explanation using the full indexed Senior FDE context. Prose only: it is handed a 7000-character digest of the market scan, so for measured market numbers call get_market_priorities, get_market_reach, get_market_skill or get_market_plan_risk instead, which return the stored sentences unchanged.", inputSchema: { type: "object", required: ["prompt"], properties: { prompt: { type: "string" }, context: { type: "string" } } } },
+  { name: "ask_lumen", description: "Ask Lumen for a fifth-grade-language technical explanation using the full indexed Senior FDE context. Prose only: it is handed a 7000-character digest of the market scan, so for measured market numbers call get_market_priorities, get_market_reach, get_market_skill or get_market_plan_risk instead, which return the stored sentences unchanged.", inputSchema: { type: "object", required: ["prompt"], properties: { prompt: { type: "string", maxLength: 4000 }, context: { type: "string", maxLength: 12000 } } } },
   { name: "list_ask_reports", description: "List Markdown Ask Lumen reports saved in GitHub.", inputSchema: { type: "object", properties: { limit: { type: "number" } } } },
   { name: "read_ask_report", description: "Read one saved Ask Lumen report from GitHub by path.", inputSchema: { type: "object", required: ["path"], properties: { path: { type: "string" } } } },
   { name: "save_study_note", description: "Write a durable study note to reports/notes in GitHub. Use only when the user explicitly asks to save it.", inputSchema: { type: "object", required: ["title", "body"], properties: { title: { type: "string" }, body: { type: "string" } } } },
-  { name: "record_progress", description: "Record a durable study-progress event in GitHub when the user explicitly says they completed or updated a topic. `topic` must be the verbatim plan topic string: readiness matches events to plan rows by exact topic, so a near-miss saves a file that counts toward nothing. The response reports which row it matched, or that it matched none.", inputSchema: { type: "object", required: ["topic", "status"], properties: { topic: { type: "string", description: "The plan topic, verbatim. Confirm it with get_plan first." }, status: { type: "string", enum: ["not_started", "in_progress", "done", "skipped"] }, notes: { type: "string" } } } },
+  { name: "record_progress", description: "Record a durable study-progress event in GitHub when the user explicitly says they completed or updated a topic. `topic` must be the verbatim plan topic string: readiness matches events to plan rows by exact topic, so a near-miss saves a file that counts toward nothing. Unmatched topics are rejected before any write.", inputSchema: { type: "object", required: ["topic", "status"], properties: { topic: { type: "string", description: "The plan topic, verbatim. Confirm it with get_plan first." }, status: { type: "string", enum: ["not_started", "in_progress", "done", "skipped"] }, notes: { type: "string" } } } },
   { name: "get_progress_history", description: "List durable study-progress events saved in GitHub, newest first, with the topic, status and plan row parsed out of each filename.", inputSchema: { type: "object", properties: { limit: { type: "number" } } } },
   { name: "get_progress_analytics", description: "Summarize progress from GitHub history: hours done against the 1588 active plan hours, per-topic status counts (the newest event per topic, not one count per event), the recent events, and any event whose topic matches no plan row and therefore counts toward nothing.", inputSchema: { type: "object", properties: {} } },
   { name: "score_assessment", description: "Score a rubric-based weekly, monthly or quarterly self-assessment (one 0-4 rating per criterion) and explain the result. weekly and monthly share one 4-criterion rubric; quarterly has 5. quick_check is retired - the four-question static quiz it graded was replaced by the recall strip, so that branch refuses rather than grading against a key with no questions.", inputSchema: { type: "object", required: ["assessment", "answers"], properties: { assessment: { type: "string", enum: ["quick_check", "weekly", "monthly", "quarterly"] }, answers: { type: "array", description: "One rating per rubric criterion: 4 for weekly/monthly, 5 for quarterly.", items: { type: "number", minimum: 0, maximum: 4 } } } } },
@@ -166,12 +164,15 @@ const MARKET_RULE =
   ` rounded whole numbers over a stated denominator, so quote the denominator with them.`;
 
 async function askLumen(prompt, context = "") {
+  if (!!process.env.LUMEN_ASK_URL !== !!process.env.LUMEN_INTERNAL_API_KEY) throw new Error("Configure both LUMEN_ASK_URL and LUMEN_INTERNAL_API_KEY for workspace RAG.");
   if (process.env.LUMEN_ASK_URL && process.env.LUMEN_INTERNAL_API_KEY) {
     const response = await fetch(process.env.LUMEN_ASK_URL, { method: "POST", headers: { "Content-Type": "application/json", "x-lumen-internal-key": process.env.LUMEN_INTERNAL_API_KEY }, body: JSON.stringify({ prompt, context }), signal: AbortSignal.timeout(MCP_PROXY_TIMEOUT_MS) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.answer) throw new Error(data.error || `Lumen Ask request failed with ${response.status}`);
     const sources = Array.isArray(data.sources) ? data.sources.filter((source) => source && typeof source.label === "string" && typeof source.title === "string" && typeof source.url === "string").slice(0, 16) : [];
-    return data.answer + (sources.length ? `\n\nSources:\n${sources.map((source) => `[${source.label}] ${source.title}: ${source.url.startsWith("/") ? new URL(source.url, process.env.LUMEN_ASK_URL).href : source.url}`).join("\n")}` : "");
+    const warnings = Array.isArray(data.retrieval?.warnings) ? data.retrieval.warnings.filter((item) => typeof item === "string").slice(0, 5) : [];
+    const scope = data.retrieval ? `\n\nEvidence: ${sources.length} cited sources${data.retrieval.limited ? "; search limit reached" : ""}.${warnings.length ? " " + warnings.join(" ") : ""}` : "";
+    return data.answer + scope + (sources.length ? `\n\nSources:\n${sources.map((source) => `[${source.label}] ${source.title}: ${source.url.startsWith("/") ? new URL(source.url, process.env.LUMEN_ASK_URL).href : source.url}`).join("\n")}` : "");
   }
   if (!process.env.MINIMAX_API_KEY) throw new Error("MINIMAX_API_KEY is not configured on Render");
   const learning = { books: readJson("data/library-context.json"), repositories: readJson("data/repository-context.json"), lesson: readJson("data/lesson-context.json"), plan: readJson("data/workbook.json").Plan.slice(1).map((r) => ({ track: r[0], month: r[1], topic: r[2], hours: r[13] })) };
@@ -179,13 +180,13 @@ async function askLumen(prompt, context = "") {
   // `marketContext` returns "" for a pair of nulls, leaving this prompt as it was before.
   const [benchmark, insight] = await Promise.all([readMarketReport("reports/market/benchmark.json"), readMarketReport("reports/market/insight.json")]);
   const market = marketContext(benchmark, insight);
-  const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${process.env.MINIMAX_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, temperature: 0.4, max_completion_tokens: MAX_ANSWER_TOKENS, stream: false, messages: [{ role: "system", content: `You are Lumen, a Senior FDE learning guide. Explain in fifth-grade reading language while keeping technical meaning exact. Use short sentences, define jargon immediately, give one technical example, connect it to production and FDE interviews, and finish with one practical next step. Never emit hidden reasoning, <think> tags, or em dashes. Plan the answer to fit within about ${MAX_ANSWER_TOKENS} tokens; cover fewer things completely rather than ending on an empty heading. Indexed context:\n${JSON.stringify(learning)}${market ? MARKET_RULE : ""}` }, { role: "user", content: `Active plan context:\n${context || "No active topic filter."}${market ? `\n\n${market}` : ""}\n\nQuestion:\n${prompt}` }] }), signal: AbortSignal.timeout(MCP_MODEL_TIMEOUT_MS) });
+  const response = await fetch("https://api.minimax.io/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${process.env.MINIMAX_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "MiniMax-M3", thinking: { type: "disabled" }, temperature: 0.4, max_completion_tokens: MAX_ANSWER_TOKENS, stream: false, messages: [{ role: "system", content: `You are Lumen, a Senior FDE learning guide. Explain in fifth-grade reading language while keeping technical meaning exact. Use short sentences, define jargon immediately, give one technical example, connect it to production and FDE interviews, and finish with one practical next step. Never emit hidden reasoning, <think> tags, or em dashes. Book context is metadata, not PDF text; never quote pages or claim to have read private books. Plan the answer to fit within about ${MAX_ANSWER_TOKENS} tokens; cover fewer things completely rather than ending on an empty heading. Indexed context:\n${JSON.stringify(learning)}${market ? MARKET_RULE : ""}` }, { role: "user", content: `Active plan context:\n${context || "No active topic filter."}${market ? `\n\n${market}` : ""}\n\nQuestion:\n${prompt}` }] }), signal: AbortSignal.timeout(MCP_MODEL_TIMEOUT_MS) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.base_resp?.status_msg || `MiniMax request failed with ${response.status}`);
   let answer = cleanAnswer(data.choices?.[0]?.message?.content);
   if (!answer) throw new Error("MiniMax returned an empty answer");
   if (data.choices?.[0]?.finish_reason === "length") answer += "\n\n---\n\nThis answer hit the length limit and stops here. Ask me to continue from where it broke off.";
-  return answer;
+  return "Context-only fallback: private-source retrieval is not configured for this connection.\n\n" + answer;
 }
 /**
  * The `/api/v1` prefix is not optional and was missing.
@@ -206,7 +207,7 @@ async function surfSenseSearch(query, limit, countryCode) {
 }
 /** `result.json()` alone returned GitHub's `{"message":"Bad credentials"}` as the search result,
  *  and the caller audited it as a success - a failure presented to the model as data. */
-async function githubSearch(query, limit) { const result = await fetch(`https://api.github.com/search/code?q=${encodeURIComponent(`${query} repo:${repoConfig().repo}`)}&per_page=${Math.min(Number(limit) || 5, 10)}`, { headers: { Authorization: `Bearer ${repoConfig().token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "lumen-mcp" } }); const data = await result.json().catch(() => ({})); if (!result.ok) throw new Error(data.message || `GitHub code search failed with ${result.status}`); return data; }
+async function githubSearch(query, limit) { const result = await fetch(`https://api.github.com/search/code?q=${encodeURIComponent(`${query} repo:${repoConfig().repo}`)}&per_page=${Math.min(Number(limit) || 5, 10)}`, { signal: AbortSignal.timeout(10_000), headers: { Authorization: `Bearer ${repoConfig().token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "lumen-mcp" } }); const data = await result.json().catch(() => ({})); if (!result.ok) throw new Error(data.message || `GitHub code search failed with ${result.status}`); return data; }
 /**
  * Rubric weights. `weekly` used to fall through to the monthly weights by accident while the
  * description advertised three rubrics; there are two, and now both the code and the description
@@ -357,14 +358,11 @@ async function callTool(name, args = {}) {
     // undefined" into a durable file that no consumer can read back as a status.
     if (!["not_started", "in_progress", "done", "skipped"].includes(status)) throw new Error(`status must be one of not_started, in_progress, done, skipped (received ${JSON.stringify(args.status)})`);
     const row = rowForTopic(topic);
+    if (!row) throw new Error("Topic matches no plan row. Use get_plan to choose the verbatim topic before recording progress.");
     const stampIso = new Date().toISOString(); const stamp = stampIso.replace(/[:.]/g, "-"); const progressPath = `reports/progress/${stamp}-${slug(topic, "topic")}-${slug(status, "status")}.md`; const markdown = `# Progress update\n\nTopic: ${topic}\nStatus: ${status}\nDate: ${stampIso}\n\n${args.notes ? `Notes:\n${args.notes}\n` : ""}`;
     const result = await github(progressPath, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: `study: record ${status} progress`, content: Buffer.from(markdown).toString("base64"), branch: repoConfig().branch }) });
     audit("record_progress", true, `${topic} -> ${status}${row ? ` (row ${row})` : " (no plan row)"}`); await durableAudit("record_progress", { topic, status, row });
-    // Readiness matches events to plan rows by exact topic string. A near-miss used to save
-    // cleanly, report {saved:true}, and contribute nothing to readiness with no signal anywhere -
-    // the one failure that looks exactly like success. Saved either way, said out loud either way.
-    const near = row ? [] : planRows().slice(1).map((entry) => entry[2]).filter((value) => { const a = String(value).toLowerCase(); const b = topic.toLowerCase(); return a.includes(b) || b.includes(a); }).slice(0, 5);
-    return text({ saved: true, path: progressPath, url: result.content?.html_url, matchedPlanRow: row, syllabus_index: row ? row - 1 : null, ...(row ? {} : { warning: "This topic matches no plan row, so readiness and get_progress_analytics will not count it. Re-record with the verbatim plan topic to make it count.", didYouMean: near }) });
+    return text({ saved: true, path: progressPath, url: result.content?.html_url, matchedPlanRow: row, syllabus_index: row - 1 });
   }
   if (name === "get_progress_history") { const items = await listProgress(); return text(items.slice(0, Math.min(Number(args.limit) || 30, 100)).map((item) => { const parsed = parseProgressName(item.name); return { name: item.name, path: item.path, url: item.html_url, date: parsed?.date ?? null, topic: parsed?.topic ?? parsed?.topicSlug ?? null, status: parsed?.status ?? null, row: parsed?.row ?? null, matchedPlanRow: Boolean(parsed?.row) }; })); }
   if (name === "get_progress_analytics") {
@@ -488,43 +486,7 @@ function authError(request) {
   return null;
 }
 function rateLimited(request) { const key = request.headers.authorization || request.socket.remoteAddress || "anonymous"; const now = Date.now(); const values = (rateBuckets.get(key) || []).filter((time) => now - time < RATE_WINDOW_MS); values.push(now); rateBuckets.set(key, values); for (const [bucket, times] of rateBuckets) if (times.every((time) => now - time >= RATE_WINDOW_MS)) rateBuckets.delete(bucket); return values.length > RATE_LIMIT; }
-function send(response, id, result, error) { response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store", "Mcp-Protocol-Version": PROTOCOL_VERSION, "Access-Control-Allow-Origin": "*" }); response.end(JSON.stringify({ jsonrpc: "2.0", id, ...(error ? { error: { code: -32000, message: error } } : { result }) })); }
-const server = http.createServer(async (request, response) => {
-  if (request.method === "GET" && request.url === "/healthz") { response.writeHead(200, { "Content-Type": "application/json" }); return response.end(JSON.stringify({ ok: true, service: "lumen-mcp" })); }
-  if (request.method === "OPTIONS" && request.url === "/mcp") { response.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Authorization, Content-Type, Mcp-Session-Id, Mcp-Protocol-Version", "Access-Control-Allow-Methods": "POST, OPTIONS" }); return response.end(); }
-  if (request.method !== "POST" || request.url !== "/mcp") { response.writeHead(404); return response.end("Not found"); }
-  const denied = authError(request);
-  if (denied) { audit("auth", false, denied.message); response.writeHead(denied.status); return response.end(denied.message); }
-  if (rateLimited(request)) { audit("rate_limit", false, "request window exceeded"); response.writeHead(429, { "Retry-After": "60" }); return response.end("Rate limit exceeded"); }
-  let raw = ""; let overflowed = false;
-  // destroy() reset the socket, so an oversized body reached the client as a transport failure
-  // with nothing to read. Answer it, then stop reading.
-  request.on("data", (chunk) => { if (overflowed) return; raw += chunk; if (raw.length > MAX_BODY) { overflowed = true; send(response, null, null, `Request body exceeds ${MAX_BODY} bytes`); request.destroy(); } });
-  request.on("end", async () => {
-    if (overflowed) return;
-    let body; try { body = JSON.parse(raw); } catch { return send(response, null, null, "Invalid JSON"); }
-    if (body.method === "notifications/initialized") { response.writeHead(202); return response.end(); }
-    // Echo the version the client asked for when it named one; replying with a hardcoded version
-    // regardless of the request is how a client and server end up disagreeing about the wire.
-    if (body.method === "initialize") return send(response, body.id, { protocolVersion: typeof body.params?.protocolVersion === "string" ? body.params.protocolVersion : PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: "lumen-mcp", version: require("./package.json").version } });
-    if (body.method === "tools/list") return send(response, body.id, { tools });
-    if (body.method === "tools/call") {
-      const name = body.params?.name || "unknown";
-      try {
-        // Only five of the tools audited themselves, so "recent MCP actions" could not see a
-        // single read. Handlers that logged their own line with detail are left alone.
-        const before = auditEvents.length;
-        const result = await callTool(name, body.params?.arguments);
-        if (auditEvents.length === before) audit(name, true);
-        return send(response, body.id, result);
-      } catch (error) {
-        audit(name, false, error.message);
-        // A tool that fails is a result, not a protocol fault: -32000 arrives as a transport error
-        // the model cannot read, so "GITHUB_TOKEN is not configured" never reaches it as text.
-        return send(response, body.id, { ...text(`Tool ${name} failed: ${String(error.message || error)}`), isError: true });
-      }
-    }
-    return send(response, body.id, null, `Unsupported method: ${body.method}`);
-  });
-});
-server.listen(Number(process.env.PORT) || 10000, "0.0.0.0", () => console.log("lumen-mcp listening"));
+const askMode = () => process.env.LUMEN_ASK_URL && process.env.LUMEN_INTERNAL_API_KEY ? "workspace-rag" : process.env.MINIMAX_API_KEY ? "context-only" : "unavailable";
+const server = createTransport({ tools, callTool, authError, rateLimited, audit, version: require("./package.json").version, revision: process.env.RENDER_GIT_COMMIT, askMode });
+if (require.main === module) server.listen(process.env.PORT === undefined ? 10000 : Number(process.env.PORT), "0.0.0.0", () => console.log(`lumen-mcp listening on ${server.address().port}`));
+module.exports = { server };
