@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { Brief } from "@/lib/companion/brief";
 import { opening } from "@/lib/companion/brief";
 import { SessionLoop } from "./Session";
+import { StudyFlow } from "./StudyFlow";
 
 /**
  * The daily brief, at the top of the home page.
@@ -30,6 +31,7 @@ export function BriefPanel({ brief, onOpenPlan, readingUrl, setStatus }: { brief
         {focus && <span className="panel-meta">Row {focus.row} · month {focus.month} · {focus.hours}h for the whole topic</span>}
       </div>
 
+      <div className="brief-workspace"><div className="brief-main">
       {focus && <SessionLoop row={focus.row} topic={focus.topic} status={focus.status} setStatus={setStatus} />}
 
       <details className="brief-details">
@@ -74,6 +76,7 @@ export function BriefPanel({ brief, onOpenPlan, readingUrl, setStatus }: { brief
         <button className="primary-button" onClick={onOpenPlan}>Open the plan <span>→</span></button>
         {readingUrl && <Link className="text-button" href={readingUrl} target="_blank" rel="noreferrer">Open reading ↗</Link>}
       </div>
+      </div>{focus && <StudyFlow row={focus.row} status={focus.status} />}</div>
     </section>
   );
 }

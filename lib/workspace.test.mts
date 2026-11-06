@@ -3,7 +3,7 @@ import { JSDOM } from "jsdom";
 
 const dom = new JSDOM("<div id='root'></div>", { url: "https://lumen.test/overview" });
 const globals = globalThis as unknown as Record<string, unknown>;
-globals.window = dom.window; globals.document = dom.window.document;
+globals.window = dom.window; globals.self = dom.window; globals.document = dom.window.document;
 globals.localStorage = dom.window.localStorage;
 globals.IS_REACT_ACT_ENVIRONMENT = true;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });

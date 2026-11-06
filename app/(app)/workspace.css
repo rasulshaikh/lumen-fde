@@ -165,3 +165,15 @@
 .workspace-shell .ask-panel{z-index:80}
 .workspace-shell .mx-dial input[type=range],.workspace-shell .shell-in input{min-height:44px}
 .workspace-shell .shell-in input{font-size:16px}
+
+/* The daily workspace pairs an action surface with a map of the study loop. */
+.brief-workspace{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:28px;align-items:center}
+.brief-main{min-width:0}.study-flow{min-width:0;background:var(--surface-strong);padding:24px;border-radius:12px;border:1px solid var(--line)}
+.study-flow-heading{display:flex;gap:12px;flex-wrap:wrap;justify-content:space-between;align-items:center}.study-flow-heading .eyebrow{margin:0}.study-flow-status{font-size:12px;color:var(--muted)}
+.study-flow-diagram{display:block;width:100%;height:auto;overflow:visible;margin:14px 0 0;color:var(--accent-text)}
+.study-flow-rail{stroke:var(--line-strong);stroke-width:1.5;stroke-dasharray:4 5}.study-flow-arrow{stroke:var(--accent-text);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.study-flow-node rect{fill:var(--surface);stroke:var(--line-strong);stroke-width:1.5}.study-flow-node path{stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.study-flow-node text{fill:var(--muted);font-size:11px;font-family:var(--font-mono)}
+.study-flow-links{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin-top:-12px}.study-flow-links :is(a,button){display:flex;min-height:52px;flex-direction:column;align-items:center;justify-content:center;gap:5px;text-decoration:none;color:var(--ink);padding:6px 2px;border:0;background:transparent;border-radius:5px;cursor:pointer;font:inherit}.study-flow-links strong{font-size:14px}.study-flow-links span{font-size:12px;color:var(--muted);text-align:center}.study-flow-links :is(a,button):hover{background:var(--surface)}
+.study-flow-caption{font-size:12px!important;line-height:1.5;color:var(--muted);margin:18px 0 0}
+
+@media(max-width:720px){.brief-workspace{gap:20px}.study-flow{padding:16px}.study-flow-links span{font-size:12px}}
