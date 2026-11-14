@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { Market } from "@/components/Market";
 import { CompReality } from "@/components/CompReality";
+import { BroadMarketCard } from "@/components/BroadMarketCard";
 import { planRows } from "@/components/shared";
 import { useAppState } from "@/components/AppState";
 
@@ -19,6 +20,7 @@ export default function MarketPage() {
   // how a salary number becomes a promise instead of a calibration.
   return <>
     <Market statuses={statuses} openPlanRow={openPlanRow} />
+    <BroadMarketCard />
     <CompReality />
   </>;
 }
