@@ -3,7 +3,7 @@ import sources from "@/data/market-sources.json";
 import skillMap from "@/data/market-skill-map.json";
 import workbook from "@/data/workbook.json";
 import { classify, dedupeKey, type RoleClass } from "@/lib/market/classify";
-import { fetchBoard, fetchJd, type Posting, type Source } from "@/lib/market/fetch";
+import { fetchBoard, fetchBroadFeed, fetchJd, summarizeBroad, type Posting, type Source } from "@/lib/market/fetch";
 import { htmlToText, matchSkills, stripBoilerplate } from "@/lib/market/skills";
 import { computeBenchmark, type Benchmark, type Workbook } from "@/lib/market/benchmark";
 import { computeInsight } from "@/lib/market/insight";
@@ -647,6 +647,14 @@ export async function GET(request: Request) {
       }
     }
 
+    /**
+     * Broad market feed, off unless MARKET_BROAD_FEED=on. Read only after the index and
+     * benchmark are persisted, so it cannot delay or change them, and reported as counts only:
+     * the feed lives in a private location and none of it is written to this public repo.
+     */
+    const broad = summarizeBroad(await fetchBroadFeed());
+    if (broad.enabled && !broad.ok) console.error("[cron/market-scan] broad feed unavailable", { error: broad.error });
+
     return NextResponse.json({
       ok: true,
       day: today,
@@ -660,6 +668,7 @@ export async function GET(request: Request) {
       boardsOk: index.boardsOk,
       reqs: Object.keys(index.reqs).length,
       ...summary,
+      broad,
     });
   } catch (error) {
     console.error("[cron/market-scan] failed", { error: String(error) });

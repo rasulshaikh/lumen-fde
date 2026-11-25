@@ -316,3 +316,212 @@ function fromLever(payload: unknown, source: Source): Posting[] {
   }
   return out;
 }
+
+/* ------------------------------------------------------------------------------------------ *
+ * Broad market feed (external source, off by default).
+ *
+ * A second, wider view of the market produced outside this app: a daily JSON file written
+ * by Rasul's own n8n jobs suite (about 600 ATS boards plus a niche board radar) into a
+ * PRIVATE location. This repo is public, so the feed is read at request time with its own
+ * token and is never written back here: not to reports/, not to data/, not to a commit.
+ *
+ * It is deliberately separate from the 27-board benchmark above. Nothing in this section is
+ * used by `fetchBoard`, `fetchJd`, classify.ts or benchmark.ts, and the benchmark numbers
+ * must not move when the flag is turned on.
+ *
+ * Contract (`lumen_broad_feed/v1`): metadata only. Company, title, lane, location, region,
+ * ATS, board, url and posted date. No JD text, no pay text, no contact data. Unknown keys
+ * are dropped on read, so a producer that starts shipping a `text` field cannot leak it
+ * through this module.
+ * ------------------------------------------------------------------------------------------ */
+
+export const BROAD_FEED_SCHEMA = "lumen_broad_feed/v1";
+/** Upper bounds that keep one bad producer run from blowing the function's heap or the UI. */
+export const BROAD_FEED_MAX_ROWS = 20_000;
+export const BROAD_FEED_MAX_AGE_DAYS = 3;
+const BROAD_FEED_TIMEOUT_MS = 15_000;
+const BROAD_TEXT_MAX = 200;
+
+export type BroadRegion = "india" | "worldwide" | "unstated" | "check" | "no";
+
+export type BroadRow = {
+  /** Producer dedupe key, for example `ats:ashby:exa:<job id>`. */
+  id: string;
+  company: string;
+  title: string;
+  /** Producer lane: fde, gtm_engineer, revops, applied_ai, founding, or another short tag. */
+  lane: string;
+  location: string | null;
+  remote: boolean;
+  region: BroadRegion;
+  /** ATS vendor or feed family: ashby, greenhouse, lever, workable, hn, niche and so on. */
+  ats: string;
+  board: string;
+  url: string;
+  /** YYYY-MM-DD or null when the board ships no date. */
+  postedAt: string | null;
+};
+
+export type BroadSourceStatus = { source: string; ok: boolean; postings: number; matched: number; error: string | null };
+
+export type BroadFeed = {
+  schema: typeof BROAD_FEED_SCHEMA;
+  generatedAt: string;
+  day: string;
+  /** True only on hand-made fixtures. A live read that says `example: true` is rejected. */
+  example: boolean;
+  sources: BroadSourceStatus[];
+  rows: BroadRow[];
+  /** Rows dropped on read for failing the contract. Non-zero is worth a look, not an outage. */
+  dropped: number;
+};
+
+export type BroadFeedResult =
+  | { enabled: false; ok: false; feed: null; error: null }
+  | { enabled: true; ok: boolean; feed: BroadFeed | null; error: string | null };
+
+export type BroadFeedConfig = { flag: string | undefined; repo: string | undefined; path: string; branch: string; token: string | undefined };
+
+/** Read config from the environment. The flag must be exactly `on`; anything else is off. */
+export function broadFeedConfig(env: Record<string, string | undefined> = process.env): BroadFeedConfig {
+  return {
+    flag: env.MARKET_BROAD_FEED,
+    repo: env.MARKET_BROAD_FEED_REPO,
+    path: env.MARKET_BROAD_FEED_PATH || "broad/latest.json",
+    branch: env.MARKET_BROAD_FEED_BRANCH || "main",
+    token: env.MARKET_BROAD_FEED_TOKEN,
+  };
+}
+
+export const broadFeedEnabled = (config: BroadFeedConfig) => config.flag === "on";
+
+const REGIONS = new Set<BroadRegion>(["india", "worldwide", "unstated", "check", "no"]);
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const short = (value: unknown, max = BROAD_TEXT_MAX): string | null => {
+  const s = str(value);
+  return s ? s.slice(0, max) : null;
+};
+const tag = (value: unknown): string | null => {
+  const s = str(value)?.toLowerCase().replace(/[^a-z0-9_:.-]/g, "_").slice(0, 60);
+  return s || null;
+};
+
+/** One row in, one whitelisted row out, or null. Nothing outside the contract survives. */
+function broadRow(raw: unknown): BroadRow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Json;
+  const id = short(r.id, 300);
+  const company = short(r.company);
+  const title = short(r.title);
+  const url = str(r.url);
+  const ats = tag(r.ats);
+  if (!id || !company || !title || !url || !ats) return null;
+  // Only absolute https links reach a human. Anything else is a producer bug, not a row.
+  if (!/^https:\/\/[^\s]+$/i.test(url) || url.length > 1000) return null;
+  const region = (str(r.region)?.toLowerCase() ?? "unstated") as BroadRegion;
+  const posted = str(r.posted_at ?? r.postedAt);
+  return {
+    id,
+    company,
+    title,
+    lane: tag(r.lane) ?? "other",
+    location: short(r.location),
+    remote: r.remote === true,
+    region: REGIONS.has(region) ? region : "unstated",
+    ats,
+    board: tag(r.board) ?? ats,
+    url,
+    postedAt: posted && DAY.test(posted.slice(0, 10)) ? posted.slice(0, 10) : null,
+  };
+}
+
+/**
+ * Validate and normalise a parsed feed. Pure, so the contract is testable without a network.
+ * `now` is injectable for the staleness check.
+ */
+export function parseBroadFeed(payload: unknown, now = new Date(), allowExample = false): { feed: BroadFeed | null; error: string | null } {
+  if (!payload || typeof payload !== "object") return { feed: null, error: "feed is not an object" };
+  const p = payload as Json;
+  if (p.schema !== BROAD_FEED_SCHEMA) return { feed: null, error: `unexpected schema: ${String(p.schema).slice(0, 40)}` };
+  const day = str(p.day);
+  if (!day || !DAY.test(day)) return { feed: null, error: "feed has no valid day" };
+  if (p.example === true && !allowExample) return { feed: null, error: "example feed refused outside tests" };
+  const ageDays = Math.floor((now.getTime() - Date.parse(`${day}T00:00:00Z`)) / 86_400_000);
+  if (!Number.isFinite(ageDays) || ageDays > BROAD_FEED_MAX_AGE_DAYS) return { feed: null, error: `feed is stale: ${day}` };
+  const rawRows = Array.isArray(p.rows) ? p.rows : null;
+  if (!rawRows) return { feed: null, error: "feed has no rows array" };
+  if (rawRows.length > BROAD_FEED_MAX_ROWS) return { feed: null, error: `feed too large: ${rawRows.length} rows` };
+
+  const seen = new Set<string>();
+  const kept: BroadRow[] = [];
+  let dropped = 0;
+  for (const raw of rawRows) {
+    const row = broadRow(raw);
+    if (!row || seen.has(row.id)) { dropped += 1; continue; }
+    seen.add(row.id);
+    kept.push(row);
+  }
+  const count = (value: unknown) => (Number.isFinite(Number(value)) ? Math.max(0, Math.floor(Number(value))) : 0);
+  const sources: BroadSourceStatus[] = rows(p.sources).map((s) => ({
+    source: tag(s.source) ?? "unknown",
+    ok: s.ok === true,
+    postings: count(s.postings),
+    matched: count(s.matched),
+    error: short(s.error),
+  }));
+  return {
+    feed: { schema: BROAD_FEED_SCHEMA, generatedAt: str(p.generated_at ?? p.generatedAt) ?? `${day}T00:00:00Z`, day, example: p.example === true, sources, rows: kept, dropped },
+    error: null,
+  };
+}
+
+/**
+ * Fetch the daily feed. Never throws. With the flag off this makes no request at all and
+ * reports `enabled: false`, which is the default for every environment.
+ *
+ * Reads through the GitHub contents API with the raw media type (the base64 JSON form stops
+ * at 1 MB; a full day is around 1 MB). The token is its own variable, scoped read-only to the
+ * private feed repo, never the GITHUB_TOKEN that writes this public repo's reports.
+ */
+export async function fetchBroadFeed(config: BroadFeedConfig = broadFeedConfig(), now = new Date()): Promise<BroadFeedResult> {
+  if (!broadFeedEnabled(config)) return { enabled: false, ok: false, feed: null, error: null };
+  if (!config.repo || !config.token) return { enabled: true, ok: false, feed: null, error: "broad feed is on but MARKET_BROAD_FEED_REPO or MARKET_BROAD_FEED_TOKEN is missing" };
+  if (!/^[\w.-]+\/[\w.-]+$/.test(config.repo)) return { enabled: true, ok: false, feed: null, error: "MARKET_BROAD_FEED_REPO must be owner/name" };
+  try {
+    const url = `https://api.github.com/repos/${config.repo}/contents/${config.path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(config.branch)}`;
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(BROAD_FEED_TIMEOUT_MS),
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${config.token}`, Accept: "application/vnd.github.raw+json", "User-Agent": "lumen-dashboard", "X-GitHub-Api-Version": "2022-11-28" },
+    });
+    if (!response.ok) return { enabled: true, ok: false, feed: null, error: `HTTP ${response.status}` };
+    const { feed, error } = parseBroadFeed(JSON.parse(await response.text()) as unknown, now);
+    return { enabled: true, ok: Boolean(feed), feed, error };
+  } catch (error) {
+    return { enabled: true, ok: false, feed: null, error: describe(error, BROAD_FEED_TIMEOUT_MS) };
+  }
+}
+
+/** Counts only. Safe to log or return from the cron: no company names, titles or links. */
+export function summarizeBroad(result: BroadFeedResult) {
+  const feed = result.feed;
+  const count = (key: "lane" | "ats" | "region") => {
+    const out: Record<string, number> = {};
+    for (const row of feed?.rows ?? []) out[row[key]] = (out[row[key]] ?? 0) + 1;
+    return out;
+  };
+  return {
+    enabled: result.enabled,
+    ok: result.ok,
+    error: result.error,
+    day: feed?.day ?? null,
+    rows: feed?.rows.length ?? 0,
+    dropped: feed?.dropped ?? 0,
+    sources: feed?.sources.length ?? 0,
+    sourcesOk: feed?.sources.filter((s) => s.ok).length ?? 0,
+    companies: new Set(feed?.rows.map((r) => r.company.toLowerCase()) ?? []).size,
+    byLane: count("lane"),
+    byAts: count("ats"),
+    byRegion: count("region"),
+  };
+}
